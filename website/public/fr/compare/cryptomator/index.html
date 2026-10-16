@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alternative à Cryptomator : Varsto et Cryptomator comparés</title>
+<meta name="description" content="Vous cherchez une alternative à Cryptomator qui synchronise en plus de chiffrer, sur votre propre stockage (S3, NAS, disques, rclone) ? À quoi sert Cryptomator, comment il fonctionne et comment il se compare à Varsto.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/compare/cryptomator/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alternative à Cryptomator : Varsto et Cryptomator comparés">
+<meta property="og:description" content="Vous cherchez une alternative à Cryptomator qui synchronise en plus de chiffrer, sur votre propre stockage (S3, NAS, disques, rclone) ? À quoi sert Cryptomator, comment il fonctionne et comment il se compare à Varsto.">
+<meta property="og:url" content="https://varsto.net/fr/compare/cryptomator/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/cryptomator/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/cryptomator/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/cryptomator/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/cryptomator/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/cryptomator/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=e9308487f1">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../fr/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/cryptomator/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/cryptomator/" hreflang="fi" lang="fi">Suomi</a> <a href="../../../sv/compare/cryptomator/" hreflang="sv" lang="sv">Svenska</a> <a href="../../../fr/compare/cryptomator/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../fr/">Projet</a>
+      <a href="../../../fr/features/">Fonctionnalités</a>
+      <a href="../../../fr/use-cases/">Cas d'usage</a>
+      <a href="../../../fr/compare/" aria-current="page">Comparaison</a>
+      <a href="../../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../../fr/screenshots/">Captures d'écran</a>
+      <a href="../../../docs/">Documentation (en)</a>
+      <a href="../../../fr/downloads/">Téléchargements</a>
+      <a href="../../../blog/">Blog (en)</a>
+      <a href="../../../forum/">Forum (en)</a>
+      <a href="../../../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Toutes les comparaisons</a></p>
+    <h1>Varsto et Cryptomator</h1>
+    <p class="lead">Cryptomator chiffre un dossier, le coffre, afin qu’il puisse être conservé dans n’importe quel cloud sans que le fournisseur puisse le lire. Il est gratuit et open source, dispose d’applications de bureau et mobiles, et ne fait qu’une chose : le coffre. Acheminer le coffre vers un autre appareil est laissé au client du fournisseur de cloud.</p>
+
+    <h2>Comment fonctionne Cryptomator</h2>
+    <p>Un coffre est un dossier de fichiers et de répertoires chiffrés, avec à sa racine un fichier de configuration <code>vault.cryptomator</code>. Sur le bureau, le coffre apparaît comme un lecteur virtuel : les fichiers sont chiffrés et déchiffrés de façon transparente pendant que vous les utilisez, et il n’existe aucune copie non chiffrée sur le disque. Les noms de fichiers sont chiffrés eux aussi. Le contenu est chiffré avec AES (la combinaison <code>SIV_GCM</code> ou <code>SIV_CTRMAC</code>), et les clés maîtresses sont protégées par un mot de passe via scrypt et l’encapsulation de clé AES. Cryptomator ne déplace le coffre nulle part : vous le placez dans un dossier que Dropbox, Google Drive, OneDrive ou un autre client synchronise, et c’est ce client qui transporte les fichiers chiffrés entre les appareils. Il n’y a aucun registre des appareils ou des stockages qui détiennent une copie, aucun mécanisme de partage propre (quiconque possède le dossier du coffre et son mot de passe l’ouvre ; un produit distinct, Hub, gère l’accès pour les organisations) et aucune règle sur le nombre de copies requises.</p>
+
+    <h2>Côte à côte</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Cryptomator</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Où vivent vos fichiers</th><td>Dans un dossier de coffre sur votre appareil, et partout où le client cloud que vous utilisez copie ce dossier.</td><td>Sur vos propres appareils et sur les stockages que vous choisissez : buckets compatibles S3, n’importe quelle destination rclone, dossiers locaux ou réseau, et pools de disques amovibles.</td></tr>
+      <tr><th scope="row">Compte ou serveur central</th><td>Aucun pour Cryptomator lui-même ; le cloud où vous conservez le coffre a son propre compte.</td><td>Aucun. Il n’y a pas de serveur Varsto ; les appareils se trouvent via vos stockages et sur le réseau local.</td></tr>
+      <tr><th scope="row">Chiffrement</th><td>Côté client, avant que le client cloud ne voie les fichiers : chiffrement du contenu en AES, noms de fichiers chiffrés, clés maîtresses protégées par mot de passe. Mature et largement relu.</td><td>De bout en bout, côté client, avant que quoi que ce soit ne quitte l’appareil ; hybride post-quantique (ML-KEM pour les clés de partage, signatures Ed25519 + ML-DSA-65). Pas encore audité de façon indépendante.</td></tr>
+      <tr><th scope="row">Synchronisation entre appareils</th><td>Aucune en propre : c’est le client du fournisseur de cloud qui synchronise le dossier du coffre.</td><td>Oui : les appareils se synchronisent via vos stockages, et directement en pair à pair lorsqu’ils peuvent se joindre.</td></tr>
+      <tr><th scope="row">Sait où se trouve chaque copie</th><td>Non : Cryptomator ne voit que le dossier du coffre sur cet appareil.</td><td>Oui : un registre signé enregistre quel stockage et quel appareil détient chaque bloc ; des politiques de durabilité (par défaut 1 copie n’importe où, 1 externe, 1 sur vos propres appareils ou disques, vérifiée par un autre appareil sous 30 jours) avertissent lorsqu’une règle n’est pas respectée.</td></tr>
+      <tr><th scope="row">Partage avec d’autres personnes</th><td>Aucun mécanisme de partage propre : un coffre est ouvert par quiconque possède le dossier et le mot de passe.</td><td>Oui : un dossier est partagé avec un autre utilisateur par une clé scellée, les membres peuvent être retirés, et un membre peut être en lecture seule.</td></tr>
+      <tr><th scope="row">Disques amovibles et hors ligne</th><td>Un coffre peut être conservé sur n’importe quel disque, mais rien ne suit les disques absents.</td><td>Oui : les pools de disques sont remplis, vérifiés et reconnus à leur retour ; les fichiers situés sur un disque absent demandent ce disque.</td></tr>
+      <tr><th scope="row">Sauvegardes</th><td>Aucune en propre ; la gestion des versions du fournisseur de cloud, s’il y en a une, s’applique aux fichiers chiffrés.</td><td>Oui : choisissez un dossier sur n’importe quel appareil et Varsto en conserve des instantanés chiffrés en lecture seule sur vos stockages externes uniquement, jamais sur vos appareils, pendant le nombre de jours que vous choisissez (90 par défaut), puis supprime ceux qui ont expiré. Restaurez n’importe quel instantané dans un dossier que vous nommez, depuis l’application ou la ligne de commande.</td></tr>
+      <tr><th scope="row">Licence et prix</th><td>Open source (GPL-3.0), gratuit ; une licence commerciale est proposée aux éditeurs de logiciels.</td><td>Code source disponible (PolyForm Shield 1.0.0), gratuit ; vous ne payez que votre fournisseur de stockage.</td></tr>
+      <tr><th scope="row">Maturité</th><td>Projet mature et ancien.</td><td>Alpha : pas pour des données de production, les formats peuvent encore changer.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Lequel choisir</h2>
+    <div class="grid two">
+      <div class="card"><h3>Cryptomator</h3><p>Choisissez Cryptomator quand vous utilisez déjà un client cloud qui vous convient et que vous voulez en chiffrer le dossier avec un outil mature et open source, sans avoir besoin de savoir où se trouvent les copies ni de partager avec d’autres.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choisissez Varsto quand le chiffrement doit venir avec la synchronisation elle-même, à travers des buckets, des partages NAS et des disques amovibles, avec un registre de l’emplacement de chaque copie, des politiques qui avertissent quand une copie manque, et le partage avec d’autres personnes.</p></div>
+    </div>
+    <p class="note">Varsto est un logiciel alpha : ne lui confiez pas de données dont vous n’avez aucune autre copie, et sa cryptographie n’a pas été auditée de façon indépendante. Les autres produits présentés ici sont matures. Les faits les concernant ont été vérifiés dans leur propre documentation en octobre 2026 ; les prix et les offres changent souvent, consultez donc leurs pages pour les chiffres actuels. Les corrections sont les bienvenues sur le <a href="../../../forum/">forum</a> ou sur GitHub.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://cryptomator.org/">Site web de Cryptomator</a></li>
+      <li><a href="https://docs.cryptomator.org/">Documentation de Cryptomator</a></li>
+      <li><a href="https://docs.cryptomator.org/security/architecture/">Architecture de sécurité (format du coffre, chiffrements, protection des clés)</a></li>
+      <li><a href="https://github.com/cryptomator/cryptomator">Dépôt du code source (licence : GPL-3.0)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../../docs/licence.html">Licence</a> · <a href="../../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>

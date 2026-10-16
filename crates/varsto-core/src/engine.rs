@@ -57,6 +57,7 @@ mod drain;
 mod fetch;
 mod folder_rules;
 mod folder_safety;
+mod forward;
 mod guide;
 mod help;
 mod history;
@@ -70,6 +71,7 @@ mod notes;
 mod org_ops;
 mod pack_upkeep;
 mod placement;
+mod protection;
 mod quotas;
 mod repair;
 mod restic_mirror;
@@ -77,10 +79,12 @@ mod scrub;
 mod share_ops;
 mod share_roles;
 mod staged_moves;
+mod storage_directory;
 mod strongroom_ops;
 mod trash;
 mod verify;
 mod view;
+mod viz;
 mod where_data;
 pub use access_sync::AccessExchangeReport;
 pub use backups::{
@@ -101,6 +105,10 @@ pub use folder_rules::IgnoreInfo;
 pub use folder_safety::{
     paused_error, ChangeKind, DiscardReport, FolderChanges, FolderPaused, HeldDeletions,
     HeldSummary, PauseKind, RevertReport, FOLDER_MARKER,
+};
+pub use forward::{
+    ForwardFolder, ForwardOptions, ForwardReport, ForwardSettings, ForwardStatus, LEASE_SLOT_SECS,
+    LEASE_WORK_SECS,
 };
 pub use help::{help_without_vault, HelpObserved};
 pub use history::{
@@ -128,6 +136,7 @@ pub use org_ops::{
     LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
     UnlistedDevice,
 };
+pub use protection::{ClassCoverage, Protection};
 pub use quotas::QuotaStatus;
 pub use repair::{
     Damage, DamageKind, RepairOptions, RepairReport, RepairStatus, RepairedCopy, Unrepairable,
@@ -137,6 +146,7 @@ pub use scrub::ScrubOptions;
 pub use share_ops::{ShareMember, ShareMembers, ShareRevokeReport};
 pub use share_roles::{ShareRoleReport, KEPT_ASIDE_DIR};
 pub use staged_moves::{JobRunLimits, MoveJobRequest, MoveJobRun, SERVICE_RUN_GROUPS};
+pub use storage_directory::KnownStorage;
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
 pub use trash::{
     restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
@@ -179,6 +189,10 @@ struct FolderState {
     /// ffmpeg was not found) were let go, so that they are tried again.
     #[serde(default)]
     thumbs_rev: u32,
+    /// Storages that were given every thumbnail already stored elsewhere (a
+    /// storage added later would otherwise only get thumbnails made after it).
+    #[serde(default)]
+    thumbs_replicated: BTreeSet<String>,
     /// Varsto's own "last accessed" record per path (seconds since the Unix
     /// epoch): updated when a file is fetched, opened or read through Varsto
     /// (interface, CLI, MCP) and from the filesystem access time seen at scan.
@@ -385,11 +399,15 @@ pub struct FolderStatus {
     pub path: Option<PathBuf>,
     pub files: u64,
     pub bytes: u64,
+    /// Newest modification time of a current file (UTC seconds), if any.
+    pub last_change_utc: Option<i64>,
     pub chunks: u64,
     /// Chunks of current files that no storage claims to hold.
     pub chunks_without_storage_copy: u64,
     /// Chunks that at least one device other than the writer has verified on a storage.
     pub chunks_verified_elsewhere: u64,
+    /// How well the folder is protected (see `Engine::protection`).
+    pub protection: Protection,
     pub published_seq: u64,
     pub shared: bool,
     /// Shared with this device read-only (a viewer): nothing is published.
@@ -750,6 +768,16 @@ type OpenedStorages = HashMap<String, (StorageSpec, std::sync::Arc<dyn Storage>)
 
 /// Threads that write objects during a push, and how many encrypted
 /// blocks may wait for them.
+/// The thumbnail pass of one sync stops after this many pictures or this
+/// much time, whichever comes first; the next sync continues (the made ones
+/// are remembered in the folder state). A folder added with thousands of
+/// pictures then neither holds the service nor the UI for minutes.
+const THUMBS_PER_PASS: usize = 200;
+const THUMBS_PASS_TIME: std::time::Duration = std::time::Duration::from_secs(20);
+/// The early pass, before the upload of a big folder: a first screenful.
+const THUMBS_EARLY_PER_PASS: usize = 48;
+const THUMBS_EARLY_TIME: std::time::Duration = std::time::Duration::from_secs(8);
+
 const UPLOADERS: usize = 8;
 const UPLOAD_QUEUE: usize = 16;
 /// At least this much encrypted data may wait for or be with the uploaders
@@ -1011,11 +1039,7 @@ impl Engine {
         })?;
         let meta: VaultMeta = serde_json::from_slice(&meta_bytes)?;
         if meta.format_version != crate::FORMAT_VERSION {
-            bail!(
-                "vault format version {} is not readable by this version ({})",
-                meta.format_version,
-                crate::FORMAT_VERSION
-            );
+            bail!("{}", crate::format_mismatch(meta.format_version));
         }
         let master = SecretKey::from_hex(vault_key_hex)?;
         let epochs = membership::discover_epochs(backend.as_ref(), &meta.vault_id, &master)?;
@@ -1424,10 +1448,7 @@ impl Engine {
         let vault: LocalVault = util::read_json(&home.join("vault.json"))
             .with_context(|| format!("no vault in {}", home.display()))?;
         if vault.format_version != crate::FORMAT_VERSION {
-            bail!(
-                "local vault format {} is not readable by this version",
-                vault.format_version
-            );
+            bail!("{}", crate::format_mismatch(vault.format_version));
         }
         util::private_home(home)?;
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
@@ -1881,13 +1902,22 @@ impl Engine {
         secret: Option<String>,
     ) -> Result<()> {
         self.org_allows(|p| p.members_may_add_storages, "add storages")?;
-        self.add_storage_internal(spec, secret)
+        self.add_storage_checked(spec, secret, true)
     }
 
     /// `add_storage_with_secret` without the organization's policy check:
     /// for joining, where the storages come from the device that approved
     /// or paired this one.
     fn add_storage_internal(&mut self, spec: StorageSpec, secret: Option<String>) -> Result<()> {
+        self.add_storage_checked(spec, secret, false)
+    }
+
+    fn add_storage_checked(
+        &mut self,
+        spec: StorageSpec,
+        secret: Option<String>,
+        refuse_duplicates: bool,
+    ) -> Result<()> {
         if self.config.storages.iter().any(|s| s.name() == spec.name()) {
             bail!("a storage named {} already exists", spec.name());
         }
@@ -1911,6 +1941,7 @@ impl Engine {
             self.config.save(&self.home)?;
             return Ok(());
         }
+        let mut stored_secret: Option<String> = None;
         if let Some(secret) = secret {
             let reference = match &spec {
                 StorageSpec::S3 {
@@ -1919,6 +1950,7 @@ impl Engine {
                 _ => spec.name().to_string(),
             };
             let mut store = self.secret_store()?;
+            stored_secret = Some(reference.clone());
             store.secrets.insert(reference, secret);
             self.forget_storages();
             store.save(
@@ -1929,6 +1961,22 @@ impl Engine {
             )?;
         }
         let backend = self.open_spec(&spec)?;
+        if refuse_duplicates {
+            if let Err(e) = self.refuse_duplicate_storage(&spec, backend.as_ref()) {
+                self.forget_storages();
+                // The credentials given with it are not kept.
+                if let (Some(r), Ok(mut store)) = (stored_secret, self.secret_store()) {
+                    store.secrets.remove(&r);
+                    let _ = store.save(
+                        &self.home,
+                        &self.keys,
+                        &self.vault.vault_id,
+                        &self.vault.device_id,
+                    );
+                }
+                return Err(e);
+            }
+        }
         let meta = VaultMeta {
             format_version: crate::FORMAT_VERSION,
             vault_id: self.vault.vault_id.clone(),
@@ -1945,6 +1993,8 @@ impl Engine {
         self.config.storages.push(spec);
         self.config.save(&self.home)?;
         self.publish_registry()?;
+        // The other devices list this storage too (not configured there).
+        self.publish_storage_names();
         Ok(())
     }
 
@@ -3830,8 +3880,18 @@ impl Engine {
             self.notify_peers_changed();
             log::debug!("push {}: file list published before the upload", rec.name);
         }
+        // A folder added with many pictures shows its first thumbnails
+        // before the (possibly hours long) upload, not only after it.
+        report.thumbnails = self.make_thumbnails(
+            &rec,
+            &root,
+            &mut state,
+            THUMBS_EARLY_PER_PASS,
+            THUMBS_EARLY_TIME,
+        )?;
         self.upload_missing(&rec, &root, &state, &mut report)?;
-        report.thumbnails = self.make_thumbnails(&rec, &root, &mut state)?;
+        report.thumbnails +=
+            self.make_thumbnails(&rec, &root, &mut state, THUMBS_PER_PASS, THUMBS_PASS_TIME)?;
         if let Some(seq) = self.publish_manifest(&rec, &mut state)? {
             report.manifest_seq = Some(seq);
         }
@@ -4168,11 +4228,17 @@ impl Engine {
     }
 
     /// Encrypted thumbnails for image and video files that have none yet (F-046).
+    ///
+    /// Bounded: at most `limit` pictures and `budget` of time per call (a
+    /// low-priority background pass; the rest follows on the next sync). With
+    /// no storage to put them on nothing is made and nothing is marked done.
     fn make_thumbnails(
         &mut self,
         rec: &FolderRecord,
         root: &Path,
         state: &mut FolderState,
+        limit: usize,
+        budget: std::time::Duration,
     ) -> Result<u64> {
         if state.thumbs_rev < 2 {
             let videos: Vec<String> = state
@@ -4186,6 +4252,15 @@ impl Engine {
             }
             state.thumbs_rev = 2;
         }
+        let storages: Vec<(StorageSpec, Box<dyn Storage>)> = self
+            .metadata_storages(false)?
+            .into_iter()
+            .filter(|(s, _)| !s.is_carrier())
+            .collect();
+        if storages.is_empty() {
+            return Ok(0);
+        }
+        self.replicate_thumbnails(rec, state, &storages);
         let videos_here = thumbs::video_tool_available();
         let candidates: Vec<(String, String)> = state
             .files
@@ -4201,16 +4276,16 @@ impl Engine {
         if candidates.is_empty() {
             return Ok(0);
         }
-        let storages: Vec<(StorageSpec, Box<dyn Storage>)> = self
-            .metadata_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
         let fk = self.folder_keys(rec)?;
         let meta = fk.meta.clone();
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         let mut made = 0u64;
+        let started = std::time::Instant::now();
+        let mut attempts = 0usize;
         for (path, hash) in candidates {
+            if attempts >= limit || started.elapsed() >= budget {
+                break;
+            }
             // Without a tool for videos (a phone, a computer without ffmpeg)
             // they wait: the app around the service may hand in a frame
             // (`store_thumbnail`), or ffmpeg is installed later.
@@ -4235,6 +4310,16 @@ impl Engine {
                 if !state.local_index.contains_key(&path) {
                     continue;
                 }
+                // Blocks evicted from the cache: try again when they are back,
+                // do not give the picture up for good.
+                let cached = state.files.get(&path).is_some_and(|f| {
+                    f.chunks
+                        .iter()
+                        .all(|c| self.cached_object(&c.object).is_some())
+                });
+                if !cached {
+                    continue;
+                }
                 self.thumbnail_from_cache(&fk, state, &path)
             } else {
                 let disk = self.disk_of(root, state, &path);
@@ -4243,6 +4328,7 @@ impl Engine {
                 }
                 thumbs::make_with(&disk, &path, &self.config.thumbnails)
             };
+            attempts += 1;
             let Some(bytes) = made_here else {
                 state.thumbs_done.insert(hash); // cannot make one; do not retry every time
                 continue;
@@ -4255,6 +4341,65 @@ impl Engine {
             made += 1;
         }
         Ok(made)
+    }
+
+    /// Copy the thumbnails other storages hold to a storage that was added
+    /// later: the encrypted blob is the same everywhere. A device that only
+    /// reaches the new storage (a phone with a bucket) sees no previews
+    /// otherwise. Best effort: a storage that cannot be reached now is tried
+    /// again at the next sync.
+    fn replicate_thumbnails(
+        &self,
+        rec: &FolderRecord,
+        state: &mut FolderState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+    ) {
+        if storages.len() < 2 {
+            for (spec, _) in storages {
+                state.thumbs_replicated.insert(spec.name().to_string());
+            }
+            return;
+        }
+        let hashes: BTreeSet<String> = state
+            .files
+            .values()
+            .filter(|f| {
+                !f.deleted
+                    && !f.content_hash.is_empty()
+                    && (thumbs::is_image(&f.path) || thumbs::is_video(&f.path))
+            })
+            .map(|f| f.content_hash.clone())
+            .collect();
+        for (spec, backend) in storages {
+            if state.thumbs_replicated.contains(spec.name()) {
+                continue;
+            }
+            let mut complete = true;
+            for h in &hashes {
+                let key = thumbs::storage_key(&rec.folder_id, h);
+                match backend.exists(&key) {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(_) => {
+                        complete = false;
+                        break;
+                    }
+                }
+                let blob = storages
+                    .iter()
+                    .filter(|(s, _)| s.name() != spec.name())
+                    .find_map(|(_, b)| b.get(&key).ok().flatten());
+                if let Some(blob) = blob {
+                    if backend.put_if_absent(&key, &blob).is_err() {
+                        complete = false;
+                        break;
+                    }
+                }
+            }
+            if complete {
+                state.thumbs_replicated.insert(spec.name().to_string());
+            }
+        }
     }
 
     /// Videos in plain folders on this device that have no thumbnail yet,
@@ -4325,27 +4470,34 @@ impl Engine {
         }
         let key = thumbs::storage_key(&rec.folder_id, &file.content_hash);
         let metas = self.folder_keys(&rec)?.meta_keys();
+        // One unreachable or damaged storage must not hide a thumbnail another has.
+        let mut last_err = None;
         for (_, backend) in self.metadata_storages(false)? {
-            if let Some(blob) = backend.get(&key)? {
-                let mut last = None;
-                for meta in &metas {
-                    match thumbs::open(
-                        &blob,
-                        &self.vault.vault_id,
-                        &rec.folder_id,
-                        &file.content_hash,
-                        meta,
-                    ) {
-                        Ok(t) => return Ok(Some(t)),
-                        Err(e) => last = Some(e),
-                    }
+            let blob = match backend.get(&key) {
+                Ok(Some(b)) => b,
+                Ok(None) => continue,
+                Err(e) => {
+                    last_err = Some(e);
+                    continue;
                 }
-                if let Some(e) = last {
-                    return Err(e);
+            };
+            for meta in &metas {
+                match thumbs::open(
+                    &blob,
+                    &self.vault.vault_id,
+                    &rec.folder_id,
+                    &file.content_hash,
+                    meta,
+                ) {
+                    Ok(t) => return Ok(Some(t)),
+                    Err(e) => last_err = Some(e),
                 }
             }
         }
-        Ok(None)
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(None),
+        }
     }
 
     /// Storages added after a manifest was published get the latest manifest.
@@ -5292,12 +5444,16 @@ impl Engine {
                 progress.advance(plain.len() as u64);
                 report.chunks_downloaded += 1;
                 report.bytes_downloaded += plain.len() as u64;
-                self.pending.push(Event::ChunkVerified {
-                    folder: rec.folder_id.clone(),
-                    chunk: cref.chunk.clone(),
-                    object: cref.object.clone(),
-                    storage: storage_name,
-                });
+                // A block that came from a peer says nothing about a storage: "peer:<id>"
+                // is not one (it would show up as a storage holding the block).
+                if !storage_name.starts_with("peer:") {
+                    self.pending.push(Event::ChunkVerified {
+                        folder: rec.folder_id.clone(),
+                        chunk: cref.chunk.clone(),
+                        object: cref.object.clone(),
+                        storage: storage_name,
+                    });
+                }
                 if !rec.is_backup() {
                     self.pending.push(Event::ChunkOnDevice {
                         folder: rec.folder_id.clone(),
@@ -5652,8 +5808,12 @@ impl Engine {
         state.local_index.remove(path);
         state.pinned.remove(path);
         self.save_state(&rec.folder_id, &state)?;
-        // A freed file turns a folder selective.
-        if !self.mount_is_selective(&rec.folder_id) {
+        // A freed file turns a folder selective, except in a send-only
+        // folder (camera upload frees each file it has uploaded): it never
+        // applies other devices' files, so what is kept here is not a choice.
+        if !self.mount_is_selective(&rec.folder_id)
+            && self.mount_mode(&rec.folder_id) != crate::vault::FolderMode::SendOnly
+        {
             self.set_selective(folder, true)?;
         }
         Ok(())
@@ -5726,13 +5886,28 @@ impl Engine {
 
     fn policy_check_at_inner(&self, now_utc: i64) -> Result<Vec<PolicyReport>> {
         let view = self.view()?;
+        self.policy_reports(&view, now_utc, |id| {
+            self.load_state(id).map(std::borrow::Cow::Owned)
+        })
+    }
+
+    /// The policy check on a view and folder states the caller has.
+    fn policy_reports<'s, F>(
+        &self,
+        view: &LedgerView,
+        now_utc: i64,
+        state_of: F,
+    ) -> Result<Vec<PolicyReport>>
+    where
+        F: Fn(&FolderId) -> Result<std::borrow::Cow<'s, FolderState>>,
+    {
         let mut ctx = self.policy_ctx();
         let mut reports = Vec::new();
         for (rec, _) in self.folders() {
             let Some(policy) = rec.effective_policy() else {
                 continue;
             };
-            let state = self.load_state(&rec.folder_id)?;
+            let state = state_of(&rec.folder_id)?;
             let mut seen = BTreeSet::new();
             let mut facts = Vec::new();
             for file in state.files.values().filter(|f| !f.deleted) {
@@ -5740,7 +5915,7 @@ impl Engine {
                     if !seen.insert(cr.chunk.clone()) {
                         continue;
                     }
-                    facts.push(self.chunk_facts(&mut ctx, &view, &rec.folder_id, &cr.chunk));
+                    facts.push(self.chunk_facts(&mut ctx, view, &rec.folder_id, &cr.chunk));
                 }
             }
             let mut report = crate::policy::evaluate(
@@ -5751,11 +5926,11 @@ impl Engine {
                 &ctx.unknown,
                 now_utc,
             );
-            self.disk_group_findings(&rec, &state, &view, &ctx.pools, &mut report);
+            self.disk_group_findings(&rec, &state, view, &ctx.pools, &mut report);
             reports.push(report);
         }
         // Why a policy may not be met: a storage at its quota or leaving.
-        let notes = self.storage_notes(&view);
+        let notes = self.storage_notes(view);
         for r in reports.iter_mut().filter(|r| {
             matches!(
                 r.state,
@@ -5820,10 +5995,15 @@ impl Engine {
         chunk: &ChunkId,
     ) -> crate::policy::ChunkFacts {
         let mut copies = Vec::new();
+        let mut stored_utc = 0i64;
         if let Some(record) = view.locate(folder, chunk) {
             for (name, loc) in &record.storages {
                 if loc.claimed_by.is_empty() || ctx.carriers.contains(name) {
                     continue;
+                }
+                // When the block was first stored: the earliest claim.
+                if loc.claimed_utc > 0 && (stored_utc == 0 || loc.claimed_utc < stored_utc) {
+                    stored_utc = loc.claimed_utc;
                 }
                 let place = if name.starts_with("replica:") {
                     "replica".to_string()
@@ -5854,7 +6034,7 @@ impl Engine {
                 copies.push((name.clone(), place, verified, verified_utc));
             }
         }
-        crate::policy::ChunkFacts { copies }
+        crate::policy::ChunkFacts { copies, stored_utc }
     }
 
     /// The vault key (hex) for the recovery kit. Only an unlocked owner
@@ -6785,10 +6965,26 @@ impl Engine {
     // ----- reporting ----------------------------------------------------------
 
     pub fn status(&self) -> Result<StatusReport> {
+        // One view and one read of each folder's state for the whole report
+        // (the protection and the policy check below use them too): on a big
+        // vault each costs a good part of a second.
         let view = self.view()?;
+        let mut states: BTreeMap<FolderId, FolderState> = BTreeMap::new();
+        for (rec, _) in self.folders() {
+            let st = self.load_state(&rec.folder_id)?;
+            states.insert(rec.folder_id.clone(), st);
+        }
+        let state_of = |id: &FolderId| -> Result<std::borrow::Cow<'_, FolderState>> {
+            Ok(match states.get(id) {
+                Some(s) => std::borrow::Cow::Borrowed(s),
+                None => std::borrow::Cow::Owned(self.load_state(id)?),
+            })
+        };
+        let reports = self.policy_reports(&view, util::now_utc(), state_of).ok();
+        let mut protection = self.protection_with(&view, reports.as_deref(), state_of)?;
         let mut folders = Vec::new();
         for (rec, mount) in self.folders() {
-            let state = self.load_state(&rec.folder_id)?;
+            let state = state_of(&rec.folder_id)?;
             let mut chunks = BTreeSet::new();
             let mut bytes = 0u64;
             let mut files = 0u64;
@@ -6875,9 +7071,18 @@ impl Engine {
                 path: mount.clone(),
                 files,
                 bytes,
+                last_change_utc: state
+                    .files
+                    .values()
+                    .filter(|f| !f.deleted && f.mtime > 0)
+                    .map(|f| f.mtime / 1_000_000_000)
+                    .max(),
                 chunks: chunks.len() as u64,
                 chunks_without_storage_copy: without,
                 chunks_verified_elsewhere: verified,
+                protection: protection
+                    .remove(&rec.folder_id.to_string())
+                    .unwrap_or_else(Protection::empty),
                 published_seq: state.published_seq,
                 shared: rec.shared,
                 read_only: self.share_read_only(&rec),

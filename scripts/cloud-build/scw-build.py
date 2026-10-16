@@ -190,13 +190,20 @@ def local_pubkeys():
     return "\n".join(keys)
 
 
+def windows_transport_zip(out):
+    """The cross-compiled Windows programs (dist/windows/app, staged by
+    website/build-release.sh) as one file for scp. Transport only, not a download."""
+    app = ARTIFACTS / "windows-app" if ARTIFACTS else ROOT / "dist" / "windows" / "app"
+    if not (app / "varsto.exe").is_file():
+        raise SystemExit(f"no varsto.exe in {app}: run website/build-release.sh first")
+    base = out / "varsto-windows"
+    return pathlib.Path(shutil.make_archive(str(base), "zip", app))
+
+
 def build_windows(args):
     out = ROOT / "dist" / "cloud" / "windows"
     out.mkdir(parents=True, exist_ok=True)
-    zips = sorted(artifacts_dir().glob("varsto-*-x86_64-pc-windows-gnu.zip"))
-    if not zips:
-        raise SystemExit(f"no Windows zip in {artifacts_dir()}: run website/build-release.sh first")
-    zip_path = zips[-1]
+    zip_path = windows_transport_zip(out)
     ud = ROOT / "dist" / "cloud" / "windows-userdata.ps1"
     ud.write_text(WINDOWS_USERDATA.replace("__PUBKEYS__", local_pubkeys()))
     name = f"{TAG}-windows-{int(time.time())}"
@@ -304,9 +311,9 @@ def integration(args):
     out = ROOT / "dist" / "cloud" / "integration"
     out.mkdir(parents=True, exist_ok=True)
     linux_tars = sorted(artifacts_dir().glob("varsto-*-x86_64-unknown-linux-musl.tar.gz"))
-    win_zips = sorted(artifacts_dir().glob("varsto-*-x86_64-pc-windows-gnu.zip"))
-    if not linux_tars or not win_zips:
-        raise SystemExit(f"need the Linux tarball and the Windows zip in {artifacts_dir()}")
+    if not linux_tars:
+        raise SystemExit(f"need the Linux tarball in {artifacts_dir()}")
+    win_zip = windows_transport_zip(out)
     env, access, secret = scw_s3_env()
     bucket = f"varsto-it-{int(time.time())}"
     subprocess.run(["rclone", "mkdir", f"scw:{bucket}"], env=env, check=True)
@@ -336,7 +343,7 @@ def integration(args):
 
         wip = ensure_windows_ssh(win["id"], out)
         run_ssh("Administrator", wip, "powershell -Command \"New-Item -ItemType Directory -Force C:\\it | Out-Null\"")
-        scp(str(win_zips[-1]), f"Administrator@{wip}:C:/it/varsto-windows.zip")
+        scp(str(win_zip), f"Administrator@{wip}:C:/it/varsto-windows.zip")
         scp(str(ROOT / "scripts/cloud-build/it-windows.ps1"), f"Administrator@{wip}:C:/it/it.ps1")
         run_ssh("Administrator", wip, f"powershell -ExecutionPolicy Bypass -File C:\\it\\it.ps1 -VaultKey {vault_key} -S3Endpoint {s3['S3_ENDPOINT']} -S3Region fr-par -S3Bucket {bucket} -S3Key {access} -S3Secret {secret} -PublicIp {wip}")
         result["windows_join_and_sync_via_s3"] = "ok"

@@ -21,6 +21,7 @@ pub mod chunk_seal;
 pub mod chunking;
 pub mod crypto;
 pub mod diskconf;
+pub mod diskformat;
 pub mod disksuggest;
 pub mod engine;
 pub mod events;
@@ -36,6 +37,7 @@ pub mod logging;
 pub mod manifest;
 pub mod media;
 pub mod names;
+pub mod netif;
 pub mod org;
 pub mod p2p;
 pub mod pack;
@@ -66,9 +68,29 @@ pub mod strongroom;
 pub mod thumbs;
 pub mod util;
 pub mod vault;
+pub mod viz;
 
 /// Storage format version written into every object header. See
 /// `docs/spec/format-versions.md`.
-pub const FORMAT_VERSION: u16 = 1;
+pub const FORMAT_VERSION: u16 = 2;
+
+/// Why a vault of storage format `found` cannot be opened by this build, in
+/// words a person can act on: an older vault (0.0.1-alpha.14 and earlier
+/// wrote format 1: block objects of their own, no packs) is not read and has
+/// to be created again; a newer one needs a newer Varsto.
+pub fn format_mismatch(found: u16) -> String {
+    if found < FORMAT_VERSION {
+        format!(
+            "this vault uses storage format {found}, which this version of Varsto ({FORMAT_VERSION}) does not read \
+             (0.0.1-alpha.14 and earlier wrote format 1). Recreate the vault: \
+             run `varsto reset --yes` on this device, then `varsto init`, and sync your files into the new vault"
+        )
+    } else {
+        format!(
+            "this vault uses storage format {found}, which is newer than this version of Varsto reads ({FORMAT_VERSION}). \
+             Update Varsto on this device"
+        )
+    }
+}
 
 pub use engine::{Engine, FsckReport, PullReport, PushReport, StatusReport};

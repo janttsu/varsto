@@ -897,6 +897,11 @@ body[data-mobile="1"] .sel-count { font-size: 14px; }
 .modal-text .strong { font-weight: 600; }
 
 /* Progress of this device's long tasks, under the top bar. */
+.connnote { flex: none; padding: 6px 32px; font-size: 13px; background: var(--surface-2); color: var(--text-2); border-bottom: 1px solid var(--border); }
+.connnote[data-kind="down"] { color: var(--text); }
+body[data-mobile="1"] .connnote { padding: 6px 16px; font-size: 12px; }
+.files-more td { text-align: center; padding: 12px; }
+.files-more .muted { margin-left: 8px; }
 .taskbar { position: sticky; top: 64px; z-index: 4; flex: none; background: var(--surface); border-bottom: 1px solid var(--border); padding: 6px 32px 0; font-size: 13px; }
 .tb-line { display: flex; gap: 4px 12px; align-items: baseline; min-width: 0; }
 .tb-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1061,3 +1066,98 @@ body:not([data-view="setup"]):not([data-view="unlock"]) #prehelp { display: none
 @media (prefers-reduced-motion: reduce) { .help-flash { animation: none; outline: 3px solid var(--accent); } }
 body[data-mobile="1"] .help-step { padding: 12px; gap: 10px; }
 body[data-mobile="1"] .help-actions button { flex: 1 1 auto; }
+
+/* ---- Folder safety indicator, folder overview and list density (folders.js) ---- */
+/* Okabe-Ito based hues; every state also has its own icon and wording. */
+:root {
+  --prot-cloud-bg: #dcf3ea; --prot-cloud-fg: #005f46; --prot-cloud-bd: #009e73;
+  --prot-disks-bg: #dcebf7; --prot-disks-fg: #004e7d; --prot-disks-bd: #0072b2;
+  --prot-partial-bg: #fdf0cf; --prot-partial-fg: #6f4500; --prot-partial-bd: #e69f00;
+  --prot-device-bg: #fbe3d4; --prot-device-fg: #8a3500; --prot-device-bd: #d55e00;
+  --prot-empty-bg: var(--grey-bg); --prot-empty-fg: var(--grey-text); --prot-empty-bd: var(--border-strong);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --prot-cloud-bg: rgba(0, 158, 115, .2); --prot-cloud-fg: #66dcb6; --prot-cloud-bd: #1fb58c;
+    --prot-disks-bg: rgba(86, 180, 233, .18); --prot-disks-fg: #8fcdf2; --prot-disks-bd: #56b4e9;
+    --prot-partial-bg: rgba(230, 159, 0, .2); --prot-partial-fg: #f5c45a; --prot-partial-bd: #e69f00;
+    --prot-device-bg: rgba(213, 94, 0, .24); --prot-device-fg: #ffa877; --prot-device-bd: #e8771f;
+  }
+}
+:root[data-theme="dark"] {
+  --prot-cloud-bg: rgba(0, 158, 115, .2); --prot-cloud-fg: #66dcb6; --prot-cloud-bd: #1fb58c;
+  --prot-disks-bg: rgba(86, 180, 233, .18); --prot-disks-fg: #8fcdf2; --prot-disks-bd: #56b4e9;
+  --prot-partial-bg: rgba(230, 159, 0, .2); --prot-partial-fg: #f5c45a; --prot-partial-bd: #e69f00;
+  --prot-device-bg: rgba(213, 94, 0, .24); --prot-device-fg: #ffa877; --prot-device-bd: #e8771f;
+}
+.prot { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--prot-empty-bd); background: var(--prot-empty-bg); color: var(--prot-empty-fg); border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1; padding: 3px 8px 3px 6px; white-space: nowrap; flex: none; cursor: default; }
+.prot-ico { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.prot-ico .ring-bg { opacity: .3; }
+.prot-ico .ring-fg { stroke-width: 2.4; stroke-linecap: butt; }
+.prot-cloud { background: var(--prot-cloud-bg); color: var(--prot-cloud-fg); border-color: var(--prot-cloud-bd); }
+.prot-disks { background: var(--prot-disks-bg); color: var(--prot-disks-fg); border-color: var(--prot-disks-bd); }
+.prot-mixed { background: var(--prot-disks-bg); color: var(--prot-disks-fg); border-color: var(--prot-disks-bd); border-style: dashed; }
+.prot-partial { background: var(--prot-partial-bg); color: var(--prot-partial-fg); border-color: var(--prot-partial-bd); }
+.prot-device { background: var(--prot-device-bg); color: var(--prot-device-fg); border-color: var(--prot-device-bd); }
+.prot:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.prot-short { margin-left: auto; padding: 2px 6px 2px 4px; font-size: 11px; }
+.prot-short .prot-ico { width: 12px; height: 12px; }
+.tree-item .prot-short + .tree-dot { margin-left: 4px; }
+.fc-title .prot { font-size: 11.5px; flex: 0 1 auto; white-space: normal; line-height: 1.25; max-width: 100%; }
+.files-safety { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 6px 0 0 6px; font-size: 12.5px; color: var(--muted); }
+.files-safety.hidden { display: none; }
+.prot-policy { font-weight: 600; color: var(--text-2); }
+.prot-tip { position: fixed; z-index: 100; display: none; max-width: 340px; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: 0 6px 24px rgba(0, 0, 0, .22); padding: 10px 12px; font-size: 12.5px; pointer-events: none; }
+.prot-head { font-weight: 700; margin-bottom: 6px; }
+.prot-row { display: flex; justify-content: space-between; gap: 14px; padding: 2px 0; }
+.prot-k { color: var(--text-2); }
+.prot-v { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.prot-sub { font-weight: 400; color: var(--muted); }
+.prot-warn .prot-k, .prot-warn .prot-v { color: var(--prot-device-fg); }
+.prot-note { margin-top: 6px; color: var(--muted); font-size: 11.5px; }
+
+/* The folder overview on the Files page. Phones have the folder cards instead. */
+.folder-overview { margin-bottom: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.fo-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.fo-toggle { height: 26px; padding: 0 10px; font-size: 12.5px; }
+.folder-overview.collapsed .fo-wrap, .folder-overview.collapsed .fo-hint { display: none; }
+.fo-wrap { max-height: 320px; overflow-y: auto; }
+.fo-table th { padding: 2px 8px; max-width: none; white-space: nowrap; }
+.fo-sort { all: unset; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
+.fo-sort:hover, .fo-sort:focus-visible { color: var(--text); }
+.fo-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fo-arrow { font-size: 9px; }
+.fo-row { cursor: pointer; }
+.fo-row:hover { background: var(--hover); }
+.fo-row.current { background: var(--selected); }
+.fo-row.detached .fo-name { color: var(--muted); }
+.fo-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fo-table td { padding: 6px 8px; white-space: nowrap; }
+.fo-table td:first-child { font-weight: 400; }
+.fo-table td.fo-name { font-weight: 600; white-space: normal; }
+.fo-table td .pill { margin-left: 6px; }
+.fo-table td:last-child { text-align: left; }
+.fo-hint { margin: 6px 0 0; }
+body[data-mobile="1"] .folder-overview { display: none; }
+
+/* Density: compact by default (html[data-density]), comfortable is the older look. */
+html[data-density="compact"] #files th, html[data-density="compact"] #files td { padding: 4px 8px; }
+html[data-density="compact"] #files td { font-size: 13px; }
+html[data-density="compact"] #files td .muted, html[data-density="compact"] #files td.muted { font-size: 12px; }
+html[data-density="compact"] #files img.thumb, html[data-density="compact"] #files .file-icon { width: 26px; height: 26px; margin-right: 8px; }
+html[data-density="compact"] #files .file-icon .icon { width: 15px; height: 15px; }
+html[data-density="compact"] #files td button, html[data-density="compact"] #files td a.button { height: 26px; padding: 0 8px; font-size: 12.5px; }
+html[data-density="compact"] #files .pill { padding: 3px 7px; font-size: 11.5px; }
+html[data-density="compact"] .fo-table td { padding: 4px 8px; }
+html[data-density="compact"] .files-head { margin-bottom: 10px; }
+html[data-density="compact"] .recent-changes li, html[data-density="compact"] .compact-list li { padding: 5px 0; }
+/* Phone: tighter, but rows stay at least 48 px tall for touch. */
+html[data-density="compact"] body[data-mobile="1"] #files.compact tbody tr.mrow td { padding: 0; }
+html[data-density="compact"] .mrow-in { min-height: 48px; padding: 3px 2px; gap: 10px; }
+html[data-density="compact"] .mrow-thumb { flex-basis: 34px; width: 34px; height: 34px; }
+html[data-density="compact"] .mrow-name { font-size: 14.5px; }
+html[data-density="compact"] .mrow-sub { font-size: 12px; }
+html[data-density="compact"] body[data-mobile="1"] .folder-card { padding-top: 8px; padding-bottom: 8px; min-height: 52px; }
+html[data-density="compact"] body[data-mobile="1"] .folder-card .li-icon { width: 34px; height: 34px; }
+#density-toggle[aria-pressed="true"] { background: var(--selected); color: var(--accent); }
+html[data-density="compact"] body:not([data-mobile="1"]) #files tbody tr, html[data-density="compact"] body:not([data-mobile="1"]) .fo-table tbody tr { height: 36px; }

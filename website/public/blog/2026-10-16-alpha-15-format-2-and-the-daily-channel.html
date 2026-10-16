@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.15: storage format 2, a Windows installer and a daily channel: Varsto</title>
+<meta name="description" content="A new storage format that fixes two findings of the security review, so existing vaults must be recreated; Windows gets a setup program, a native window and automatic updates; and a signed daily build channel.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.15: storage format 2, a Windows installer and a daily channel: Varsto">
+<meta property="og:description" content="A new storage format that fixes two findings of the security review, so existing vaults must be recreated; Windows gets a setup program, a native window and automatic updates; and a signed daily build channel.">
+<meta property="og:url" content="https://varsto.net/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.15: storage format 2, a Windows installer and a daily channel","description":"A new storage format that fixes two findings of the security review, so existing vaults must be recreated; Windows gets a setup program, a native window and automatic updates; and a signed daily build channel.","datePublished":"2026-10-16","url":"https://varsto.net/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html","inLanguage":"en","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=e9308487f1">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.15: storage format 2, a Windows installer and a daily channel</h1><p class="note"><time datetime="2026-10-16">2026-10-16</time></p>
+<p>Alpha.15 changes the storage format. That is the main thing to know before updating: vaults made by alpha.14 or earlier cannot be opened by this version and have to be recreated. The rest of the release is a long list of fixes and interface work, a proper Windows installation, and a daily build channel for people who want to test the newest code.</p>
+<h2 id="format-2-and-what-it-means">Format 2 and what it means</h2>
+<p>The security review behind alpha.14 found two problems in how blocks were stored that could not be fixed without changing the format. Format 2 fixes them:</p>
+<ul>
+<li>The nonce of an encrypted block is now derived from the exact bytes that are encrypted (after compression), not from the plaintext. Before, the nonce depended on a compression result that was not guaranteed to be the same across zstd versions.</li>
+<li>The chunker is keyed per folder. Cut points used to be a public function of the file content, so a storage that knew a file could recognise it from the sizes of its blocks. Now the same file in two folders is cut at different places.</li>
+<li>Every block is stored in a pack (64 MiB, 256 MiB on cold storages) and no block is an object of its own, so a storage sees pack sizes and not the sizes or number of blocks inside them. Packs have encrypted indexes, and deleted blocks are tracked per folder and rewritten away.</li>
+<li>Compression is zstd level 3 after a quick probe: text compresses almost as well as before and is several times faster to write.</li>
+</ul>
+<p>What format 2 does not fix: file lists and share epochs are still accepted on the folder key alone, because closing that needs signed manifests and share epochs, which belong to the records layer of the next format. Until that exists, a holder of a folder's key can still change what that folder shows, and untrusted replicas and shared folders should be treated that way. Both critical findings remain open in alpha.15.</p>
+<p><strong>Recreating a vault.</strong> There is no migration. Alpha.15 refuses an older vault when it opens it or when a device joins through its storage, and the message says what to do. Keep your files where they are, then:</p>
+<ol type="1">
+<li>Keep the alpha.14 binary around if you may need to read the old vault.</li>
+<li><code>varsto reset --yes</code> on the device, then <code>varsto init</code>.</li>
+<li>Add the storages again and sync the folders.</li>
+</ol>
+<p>Alpha.14 refuses a format 2 vault in the same way, so the two versions cannot share a vault in either direction.</p>
+<h2 id="windows-the-installer-a-native-window-and-automatic-updates">Windows: the installer, a native window and automatic updates</h2>
+<p>The portable zip is gone. Windows now has one download, <code>Varsto-&lt;version&gt;-setup.exe</code>: it upgrades in place, can repair an installation, and its uninstaller keeps your data folder. The interface opens in a native window (WebView2) with its size and position remembered, one window per user, and the tray starts it. Copies installed by the setup program check for updates once a day, verify the signed setup program and install it silently. If you still run an unzipped portable copy, <code>varsto update</code> tells you to run the installer once; updates continue by themselves after that.</p>
+<h2 id="everything-else-since-alpha14">Everything else since alpha.14</h2>
+<ul>
+<li>A folder overview with a safety indicator per folder: 100 % in external storage, 100 % on your own disks only, partly protected, or only on devices.</li>
+<li>A live visualization of devices, storages, disks and the cloud with animated flows, and real full screen in the browser and in the Android, macOS and Windows shells (Esc leaves it).</li>
+<li>Forwarding: a device attached to a folder, even with selective sync, can carry other devices' blocks to the storages it can write, so a phone's photos reach a bucket that only the laptop has credentials for. The attach dialog now asks for full or selective sync and the direction.</li>
+<li>Pairing offers every usable local address, best first, and joining falls back across them and a search of the local network, with visible progress and an error that names what was tried.</li>
+<li>New data gets a grace period before verification reports a violation: blocks stored within the larger of the verification window and 24 hours show as "verification pending".</li>
+<li>The interface stays usable during long syncs: reads are answered from the last kept answer when the service is busy, lists are drawn incrementally, and the page is never reloaded.</li>
+<li>Fixes: draining and placement now refuse contradictory choices, thumbnails for storages added later, phones accept S3 and rclone storages only, photos and videos already on a phone are backed up newest first, printing the recovery package, the macOS Dock icon, Android Back and the keyboard, <code>reset</code> and service restarts, and drive initialisation with a modern GPT layout.</li>
+<li>An unsigned iOS <code>.ipa</code> for AltStore, SideStore and Sideloadly.</li>
+<li>The website has a French translation, and the Finnish and Swedish pages show screenshots of the interface in their own language.</li>
+</ul>
+<h2 id="the-daily-channel">The daily channel</h2>
+<p><code>varsto update --daily</code> installs the newest daily build of the main line. Daily builds are made for all platforms whenever the main branch moves and are published at varsto.net/daily/. The checksum list is signed with a daily key that is separate from the release key: the updater trusts each key for its own channel only, so a daily signature never validates a release, and the other way round. It also refuses lists that are stale, from the future, or older than the build you run. The background updater and the interface stay on releases; the daily channel is only ever started by hand.</p>
+<p>Daily builds are development builds. They are not for production data, and a daily build can carry a storage format change before any release does.</p>
+<h2 id="compatibility">Compatibility</h2>
+<p>Every device of a vault must run alpha.15. Alpha.14 cannot read an alpha.15 vault and alpha.15 cannot read an alpha.14 vault, and neither reads the other's packs or tombstone lists. Update all devices together and recreate the vault as described above.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

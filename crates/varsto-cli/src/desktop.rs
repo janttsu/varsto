@@ -22,6 +22,7 @@ use varsto_core::Engine;
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
+const FOLDERS_JS: &str = include_str!("../ui/folders.js");
 const I18N_JS: &str = include_str!("../ui/i18n.js");
 const I18N_FI: &str = include_str!("../ui/i18n/fi.json");
 const I18N_SV: &str = include_str!("../ui/i18n/sv.json");
@@ -36,6 +37,8 @@ pub fn ui_language(home: &std::path::Path) -> String {
         .unwrap_or_else(|| "en".to_string())
 }
 const APP_CSS: &str = include_str!("../ui/app.css");
+const VIZ_JS: &str = include_str!("../ui/viz.js");
+const VIZ_CSS: &str = include_str!("../ui/viz.css");
 /// Largest single upload through /api/upload (a phone video, not a disk image).
 /// The body is streamed to disk (or encrypted into the block cache as it
 /// arrives), never held in memory as a whole.
@@ -72,12 +75,12 @@ fn random_hex() -> String {
 /// A new one-time code that `POST /api/session` exchanges for the session
 /// token within a minute.
 pub fn mint_boot_code() -> String {
-    mint_boot_code_at(std::time::Instant::now())
+    mint_boot_code_in(&GRANTS, std::time::Instant::now())
 }
 
-fn mint_boot_code_at(now: std::time::Instant) -> String {
+fn mint_boot_code_in(grants: &Mutex<Grants>, now: std::time::Instant) -> String {
     let code = random_hex();
-    let mut g = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut g = grants.lock().unwrap_or_else(|e| e.into_inner());
     g.boot.retain(|_, t| *t > now);
     while g.boot.len() >= GRANTS_MAX {
         let Some(k) = g.boot.keys().next().cloned() else {
@@ -90,8 +93,8 @@ fn mint_boot_code_at(now: std::time::Instant) -> String {
 }
 
 /// Use a bootstrap code: true once, and only before it expires.
-fn redeem_boot_code_at(code: &str, now: std::time::Instant) -> bool {
-    let mut g = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+fn redeem_boot_code_in(grants: &Mutex<Grants>, code: &str, now: std::time::Instant) -> bool {
+    let mut g = grants.lock().unwrap_or_else(|e| e.into_inner());
     g.boot.retain(|_, t| *t > now);
     g.boot.remove(code).is_some()
 }
@@ -185,8 +188,11 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
             bound: st.bound.clone(),
             token: st.token.clone(),
             traffic: st.traffic.clone(),
+            state: state.clone(),
+            reads: Arc::default(),
         }
     };
+    let reads = fixed.reads.clone();
     let (tx, rx) = std::sync::mpsc::channel::<Request>();
     let worker = std::thread::Builder::new()
         .name("http-api".into())
@@ -204,6 +210,11 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
                     log::error!(method = method, path = url; "api handler panicked");
                     Err(anyhow::anyhow!("handler panicked"))
                 });
+                let path = url.split('?').next().unwrap_or("");
+                if method != "GET" && crate::readcache::drops_answers(path) {
+                    // Reads computed while it ran may predate the change.
+                    reads.lock().unwrap_or_else(|e| e.into_inner()).invalidate();
+                }
                 let status = STATUS.with(|s| s.get());
                 match result {
                     Ok(()) => log::debug!(method = method, path = url, status = status, ms = t.ms(); "api request"),
@@ -220,11 +231,123 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
         match handle_unlocked(&fixed, request) {
             Ok(None) => {}
             Ok(Some(request)) => {
+                let Some(request) = read_elsewhere(&fixed, request) else {
+                    continue;
+                };
+                // A change is coming: no cached answer from before it (a
+                // sync or a check keeps them until it has been answered).
+                let change = *request.method() != Method::Get
+                    && crate::readcache::drops_answers(
+                        request.url().split('?').next().unwrap_or(""),
+                    );
+                if change {
+                    fixed
+                        .reads
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .invalidate();
+                }
                 if tx.send(request).is_err() {
                     break;
                 }
             }
             Err(e) => log::warn!("request failed: {e:#}"),
+        }
+    }
+}
+
+/// Reads answered on threads of their own, at most this many at a time.
+const MAX_READERS: usize = 32;
+static READERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A GET of a route that only reads (`readcache::ROUTES`), with the session
+/// token: answered on a thread of its own, so that it neither waits behind
+/// the changes queued for the worker nor, while a sync holds the state, for
+/// the sync (the last answer is sent, marked stale). Anything else is handed
+/// back for the worker.
+fn read_elsewhere(fixed: &Fixed, request: Request) -> Option<Request> {
+    use std::sync::atomic::Ordering;
+    let path = request.url().split('?').next().unwrap_or("");
+    if *request.method() != Method::Get
+        || !crate::readcache::cacheable(path)
+        || !header_token_ok(&request, &fixed.token)
+    {
+        return Some(request);
+    }
+    if READERS.fetch_add(1, Ordering::SeqCst) >= MAX_READERS {
+        READERS.fetch_sub(1, Ordering::SeqCst);
+        return Some(request);
+    }
+    let (state, reads) = (fixed.state.clone(), fixed.reads.clone());
+    let spawned = std::thread::Builder::new()
+        .name("http-read".into())
+        .spawn(move || {
+            struct Done;
+            impl Drop for Done {
+                fn drop(&mut self) {
+                    READERS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _done = Done;
+            let url = loggable_url(request.url());
+            let t = varsto_core::logging::Timer::start();
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                serve_read(&state, &reads, request)
+            }));
+            match r {
+                Ok(Ok(how)) => log::debug!(method = "GET", path = url, answer = how, ms = t.ms(); "api request"),
+                Ok(Err(e)) => log::warn!(method = "GET", path = url, ms = t.ms(); "api request failed: {e:#}"),
+                Err(_) => log::error!(method = "GET", path = url; "api read handler panicked"),
+            }
+        });
+    if spawned.is_err() {
+        READERS.fetch_sub(1, Ordering::SeqCst);
+        log::warn!("cannot start a reader thread");
+    }
+    None
+}
+
+/// Answer a read: fresh when the state is free within
+/// `readcache::FRESH_WAIT`, else the last answer of the same address.
+fn serve_read(
+    state: &Shared,
+    reads: &Mutex<crate::readcache::ReadCache>,
+    request: Request,
+) -> Result<&'static str> {
+    use crate::readcache::{self, Got};
+    let url = request.url().to_string();
+    let (path, query) = url.split_once('?').unwrap_or((url.as_str(), ""));
+    // The address without the token parameters (none are accepted anyway).
+    let key = loggable_url(&url);
+    match readcache::lock_or_cached(state, reads, &key, readcache::FRESH_WAIT) {
+        Got::Fresh(mut st) => {
+            let generation = reads.lock().unwrap_or_else(|e| e.into_inner()).generation();
+            let result = api(&mut st, Method::Get, path, query, &json!({}));
+            drop(st);
+            match result {
+                Ok(v) => {
+                    let body = Arc::new(v.to_string());
+                    reads.lock().unwrap_or_else(|e| e.into_inner()).store(
+                        &key,
+                        generation,
+                        body.clone(),
+                        std::time::Instant::now(),
+                    );
+                    request.respond(json_text(200, body.as_str()))?;
+                }
+                Err(e) => {
+                    request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?
+                }
+            }
+            Ok("fresh")
+        }
+        Got::Cached(age, body) => {
+            request.respond(
+                json_text(200, &readcache::mark_stale(&body, age))
+                    .with_header(header("X-Varsto-Stale", "1"))
+                    .with_header(header("X-Varsto-Age-Ms", &age.as_millis().to_string())),
+            )?;
+            Ok("cached")
         }
     }
 }
@@ -261,6 +384,9 @@ struct Fixed {
     bound: String,
     token: String,
     traffic: Arc<varsto_core::p2p::Traffic>,
+    state: Shared,
+    /// The last answers of the reads (`readcache`), emptied by every change.
+    reads: Arc<Mutex<crate::readcache::ReadCache>>,
 }
 
 /// Answer a request that needs no state, or hand it back for the worker.
@@ -320,7 +446,7 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
             .ok()
             .and_then(|_| serde_json::from_str::<Value>(&body).ok())
             .and_then(|v| v["boot"].as_str().map(str::to_string));
-        let ok = code.is_some_and(|c| redeem_boot_code_at(&c, std::time::Instant::now()));
+        let ok = code.is_some_and(|c| redeem_boot_code_in(&GRANTS, &c, std::time::Instant::now()));
         if ok {
             request.respond(json_response(200, &json!({"token": fixed.token})))?;
         } else {
@@ -388,13 +514,49 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         crate::sse::serve(request, &query, fixed.traffic.clone());
         return Ok(None);
     }
+    if let Some((bytes, ctype)) = crate::viz::asset(&path) {
+        // The visualization's sprites: static, no token.
+        request.respond(
+            Response::from_data(bytes)
+                .with_header(header("Content-Type", ctype))
+                .with_header(header("Cache-Control", "private, max-age=300")),
+        )?;
+        return Ok(None);
+    }
     match path.as_str() {
         "/" => request.respond(html(INDEX_HTML))?,
         "/app.js" => request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?,
+        "/folders.js" => request.respond(text(FOLDERS_JS, "text/javascript; charset=utf-8"))?,
         "/i18n.js" => request.respond(text(I18N_JS, "text/javascript; charset=utf-8"))?,
         "/i18n/fi.json" => request.respond(text(I18N_FI, "application/json; charset=utf-8"))?,
         "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
+        "/viz.js" => request.respond(text(VIZ_JS, "text/javascript; charset=utf-8"))?,
+        "/viz.css" => request.respond(text(VIZ_CSS, "text/css; charset=utf-8"))?,
+        "/api/viz" => {
+            if !header_token_ok(&request, &fixed.token) {
+                request.respond(json_response(
+                    401,
+                    &json!({"error": "missing or wrong token; reopen the start URL"}),
+                ))?;
+            } else {
+                // The ledger passes behind it take a while on a big vault:
+                // not on this thread, which answers the page's assets.
+                let (state, traffic) = (fixed.state.clone(), fixed.traffic.clone());
+                let spawned =
+                    std::thread::Builder::new()
+                        .name("http-viz".into())
+                        .spawn(move || {
+                            let v = crate::viz::snapshot(&state, &traffic);
+                            if let Err(e) = request.respond(json_response(200, &v)) {
+                                log::debug!("viz answer not sent: {e}");
+                            }
+                        });
+                if spawned.is_err() {
+                    log::warn!("cannot start the viz thread");
+                }
+            }
+        }
         "/api/p2p/traffic" | "/api/progress" | "/api/activity" => {
             let token_ok = header_token_ok(&request, &fixed.token);
             if !token_ok {
@@ -516,8 +678,13 @@ fn api_plain(status: u16, msg: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 fn json_response(status: u16, value: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
+    json_text(status, &value.to_string())
+}
+
+/// A JSON answer already serialized.
+fn json_text(status: u16, body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     STATUS.with(|s| s.set(status));
-    Response::from_string(value.to_string())
+    Response::from_string(body)
         .with_status_code(status)
         .with_header(header("Content-Type", "application/json"))
         .with_header(header("Cache-Control", "no-store"))
@@ -548,6 +715,9 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         (Method::Get, "/") => return Ok(request.respond(html(INDEX_HTML))?),
         (Method::Get, "/app.js") => {
             return Ok(request.respond(text(APP_JS, "text/javascript; charset=utf-8"))?)
+        }
+        (Method::Get, "/folders.js") => {
+            return Ok(request.respond(text(FOLDERS_JS, "text/javascript; charset=utf-8"))?)
         }
         (Method::Get, "/app.css") => {
             return Ok(request.respond(text(APP_CSS, "text/css; charset=utf-8"))?)
@@ -776,10 +946,19 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         // Pairing talks to the other device for up to ~25 seconds; do that
         // without holding the state, then join under it.
         let result = pair_join(state, &input);
+        set_join_step(json!({"active": false}));
         return match result {
             Ok(v) => Ok(request.respond(json_response(200, &v))?),
-            Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+            Err(e) => Ok(request.respond(json_response(400, &pair_join_error(&e)))?),
         };
+    }
+    if method == Method::Get && path == "/api/pair/join-status" {
+        let v = JOIN_STEP
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_else(|| json!({"active": false}));
+        return Ok(request.respond(json_response(200, &v))?);
     }
     if method == Method::Post && path == "/api/quit" {
         request.respond(json_response(200, &json!({"ok": true})))?;
@@ -954,6 +1133,39 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
     Ok(json!({"ok": true, "folder": folder, "path": path, "bytes": body.read, "push": push}))
 }
 
+/// What `pair_join` is doing now, for `GET /api/pair/join-status`.
+static JOIN_STEP: Mutex<Option<Value>> = Mutex::new(None);
+
+fn set_join_step(v: Value) {
+    *JOIN_STEP.lock().unwrap_or_else(|e| e.into_inner()) = Some(v);
+}
+
+/// Nothing answered: the message plus what the page lists in its language.
+#[derive(Debug)]
+struct PairJoinFailed {
+    message: String,
+    tried: Value,
+    found: usize,
+}
+
+impl std::fmt::Display for PairJoinFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PairJoinFailed {}
+
+/// The JSON body of a failed `/api/pair/join`.
+fn pair_join_error(e: &anyhow::Error) -> Value {
+    let mut v = json!({"error": format!("{e:#}")});
+    if let Some(f) = e.downcast_ref::<PairJoinFailed>() {
+        v["tried"] = f.tried.clone();
+        v["found"] = json!(f.found);
+    }
+    v
+}
+
 fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     let (name, passphrase, code) = (
         s(input, "name")?,
@@ -972,7 +1184,44 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     {
         bail!("this device already holds a vault");
     }
-    let bundle = varsto_core::pair::receive(&code, &name, opt(input, "address").as_deref())?;
+    // The typed address first, then the addresses of the scanned link, then
+    // a search of the network; the page polls /api/pair/join-status.
+    let offered = str_list(input, "addresses");
+    set_join_step(json!({"active": true, "step": "start", "tried": []}));
+    let mut tried: Vec<String> = Vec::new();
+    let result = varsto_core::pair::receive_with_progress(
+        &code,
+        &name,
+        opt(input, "address").as_deref(),
+        &offered,
+        &mut |step| match step {
+            varsto_core::pair::Step::Trying(a) => {
+                tried.push(a.to_string());
+                set_join_step(
+                    json!({"active": true, "step": "trying", "address": a.to_string(), "tried": tried}),
+                );
+            }
+            varsto_core::pair::Step::Looking => {
+                set_join_step(json!({"active": true, "step": "looking", "tried": tried}));
+            }
+        },
+    );
+    set_join_step(json!({"active": false}));
+    let bundle = match result {
+        Ok(b) => b,
+        Err(e) => {
+            // The page lists what was tried in its own language.
+            if let Some(nf) = e.downcast_ref::<varsto_core::pair::NotFound>() {
+                return Err(PairJoinFailed {
+                    message: e.to_string(),
+                    tried: serde_json::to_value(&nf.tried)?,
+                    found: nf.found,
+                }
+                .into());
+            }
+            return Err(e);
+        }
+    };
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle)?;
     st.engine = Some(e);
@@ -1267,8 +1516,59 @@ fn storage_from_input(
     ))
 }
 
+/// Phones keep their vault in cloud storage only: a local directory, a
+/// disk pool or a transferrer (a removable disk) makes no sense on a phone.
+fn storage_kind_allowed(kind: &str, on_phone: bool) -> Result<()> {
+    if on_phone && !matches!(kind, "s3" | "rclone") {
+        bail!("this device can only add S3-compatible buckets and rclone remotes as storages");
+    }
+    Ok(())
+}
+
 fn mobile() -> bool {
     std::env::var_os("VARSTO_MOBILE").is_some()
+}
+
+/// `POST /api/folder/attach`: attach a folder of the vault here, kept in
+/// full or selective (`selective`), plain or encrypted on a phone (`plain`),
+/// both ways, send-only or receive-only (`mode`; section 70). The mode is
+/// checked before anything is attached, so a refused one leaves nothing.
+fn attach_request(engine: &mut Engine, input: &Value) -> Result<varsto_core::ids::FolderId> {
+    let selective = input
+        .get("selective")
+        .and_then(|c| c.as_bool())
+        .unwrap_or(false);
+    let name_or_id = s(input, "name_or_id")?;
+    let plain = wants_plain(input);
+    let mode: Option<varsto_core::vault::FolderMode> = opt(input, "mode")
+        .filter(|m| !m.trim().is_empty())
+        .map(|m| m.parse())
+        .transpose()?;
+    if mode == Some(varsto_core::vault::FolderMode::ReceiveOnly) && !plain {
+        bail!("receive-only is for folders with plain files; this folder would be kept encrypted on this device");
+    }
+    let path = match opt(input, "path").filter(|p| !p.trim().is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => {
+            let name = engine
+                .folders()
+                .into_iter()
+                .find(|(r, _)| {
+                    r.name == name_or_id || r.folder_id.as_str().starts_with(&name_or_id)
+                })
+                .map(|(r, _)| r.name.clone())
+                .unwrap_or_else(|| name_or_id.clone());
+            default_folder_path(engine.home(), &name, plain)?
+        }
+    };
+    let id = engine.attach_folder(&name_or_id, &path, selective)?;
+    if !plain {
+        engine.set_encrypted_here(&name_or_id, true)?;
+    }
+    if let Some(mode) = mode.filter(|m| !m.is_normal()) {
+        engine.set_folder_mode(&name_or_id, mode)?;
+    }
+    Ok(id)
 }
 
 /// The `plain` flag of a folder request: plain files unless the request says
@@ -1407,10 +1707,20 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             let c = crate::update::check()?;
             let policy = crate::update::Policy::new(&st.home, false);
             let message = crate::update::apply(&c, &policy)?;
-            if c.available {
+            // The Windows setup program restarts Varsto itself.
+            if c.available && !c.installer() {
                 st.service.restart_requested = true;
             }
             Ok(json!({"ok": true, "updated": c.available, "message": message}))
+        }
+        (Method::Get, "/api/update/settings") => Ok(json!({
+            "auto": crate::update::auto_update_enabled(&st.home),
+            "installs": crate::update::can_install_by_itself(),
+        })),
+        (Method::Post, "/api/update/settings") => {
+            let on = input.get("auto").and_then(|b| b.as_bool()).unwrap_or(true);
+            crate::update::set_auto_update(&st.home, on)?;
+            Ok(json!({"ok": true, "auto": on}))
         }
         // Phones make video frames with their own media framework.
         (Method::Get, "/api/thumbnails/wanted") => {
@@ -1703,6 +2013,13 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 .engine
                 .as_mut()
                 .ok_or_else(|| anyhow!("vault is locked"))?;
+            // One name per device id everywhere: the traffic view learns the vault's names
+            // whenever the interface asks for devices or where the data is.
+            if matches!(path, "/api/devices" | "/api/data/locations") {
+                let names = engine.known_device_names();
+                st.traffic
+                    .learn_names(names.iter().map(|(d, n)| (d, n.as_str())));
+            }
             api_unlocked(engine, service, method2, path, query, input)
         }
     }
@@ -2036,7 +2353,9 @@ fn api_unlocked(
                 .get("carrier")
                 .and_then(|c| c.as_bool())
                 .unwrap_or(false);
-            match opt(input, "kind").as_deref().unwrap_or("local-dir") {
+            let kind = opt(input, "kind").unwrap_or_else(|| "local-dir".into());
+            storage_kind_allowed(&kind, mobile())?;
+            match kind.as_str() {
                 "s3" => {
                     let class = opt(input, "storage_class").filter(|c| !c.trim().is_empty());
                     let cold = cold
@@ -2120,6 +2439,10 @@ fn api_unlocked(
             if !plain {
                 engine.set_encrypted_here(&name, true)?;
             }
+            // E.g. camera upload: a folder that sends and never applies others' changes.
+            if let Some(mode) = opt(input, "mode").filter(|m| !m.trim().is_empty()) {
+                engine.set_folder_mode(&name, mode.parse()?)?;
+            }
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
@@ -2170,28 +2493,7 @@ fn api_unlocked(
             Ok(json!({"ok": true, "objects_deleted": deleted}))
         }
         (Method::Post, "/api/folder/attach") => {
-            let selective = input
-                .get("selective")
-                .and_then(|c| c.as_bool())
-                .unwrap_or(false);
-            let name_or_id = s(input, "name_or_id")?;
-            let plain = wants_plain(input);
-            let path = match opt(input, "path").filter(|p| !p.trim().is_empty()) {
-                Some(p) => PathBuf::from(p),
-                None => {
-                    let name = engine
-                        .folders()
-                        .into_iter()
-                        .find(|(r, _)| r.name == name_or_id || r.folder_id.as_str().starts_with(&name_or_id))
-                        .map(|(r, _)| r.name.clone())
-                        .unwrap_or_else(|| name_or_id.clone());
-                    default_folder_path(engine.home(), &name, plain)?
-                }
-            };
-            let id = engine.attach_folder(&name_or_id, &path, selective)?;
-            if !plain {
-                engine.set_encrypted_here(&name_or_id, true)?;
-            }
+            let id = attach_request(engine, input)?;
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
@@ -2906,6 +3208,10 @@ fn api_unlocked(
             Ok(serde_json::to_value(engine.disk_groups()?)?)
         }
         (Method::Get, "/api/data/locations") => Ok(serde_json::to_value(engine.data_locations()?)?),
+        // Every storage of the vault: configured here or only known from other devices.
+        (Method::Get, "/api/storage/known") => {
+            Ok(serde_json::to_value(engine.storage_directory()?)?)
+        }
         (Method::Get, "/api/storage/costs") => Ok(serde_json::to_value(engine.storage_estimates()?)?),
         (Method::Post, "/api/storage/price") => {
             let name = s(input, "name")?;
@@ -2926,6 +3232,20 @@ fn api_unlocked(
                 )?;
             }
             Ok(json!({"ok": true, "price": engine.storage_price(&name)}))
+        }
+        // Forwarding other devices' blocks to this device's storages (section 70).
+        (Method::Get, "/api/forward") => Ok(serde_json::to_value(engine.forward_status())?),
+        (Method::Post, "/api/forward") => {
+            if let Some(on) = input.get("enabled").and_then(|v| v.as_bool()) {
+                engine.set_forwarding(on)?;
+            }
+            service.forward = Some(engine.forward_status());
+            Ok(serde_json::to_value(engine.forward_status())?)
+        }
+        (Method::Post, "/api/forward/run") => {
+            let r = engine.forward(&varsto_core::engine::ForwardOptions::manual())?;
+            service.forward = Some(engine.forward_status());
+            Ok(serde_json::to_value(r)?)
         }
         (Method::Get, "/api/verify") => Ok(serde_json::to_value(engine.verify_status())?),
         (Method::Post, "/api/verify") => {
@@ -3172,10 +3492,78 @@ fn api_unlocked(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn phones_accept_only_s3_and_rclone_storages() {
+        for k in ["s3", "rclone"] {
+            assert!(super::storage_kind_allowed(k, true).is_ok());
+        }
+        for k in ["local-dir", "pool", "anything"] {
+            assert!(super::storage_kind_allowed(k, true).is_err(), "{k}");
+            assert!(super::storage_kind_allowed(k, false).is_ok(), "{k}");
+        }
+    }
+
     use super::*;
+
+    /// The attach dialog's choices reach the mount: selective sync and the
+    /// direction; a receive-only folder kept encrypted is refused before
+    /// anything is attached.
+    #[test]
+    fn attaching_takes_selective_sync_and_the_direction() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path();
+        let storage = StorageSpec::LocalDir {
+            name: "box".into(),
+            path: t.join("box"),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+            min_free: None,
+        };
+        std::fs::create_dir_all(t.join("box")).unwrap();
+        let pass = "correct horse battery staple";
+        let (mut a, key) = Engine::init(&t.join("a"), "phone", pass).unwrap();
+        a.add_storage(storage.clone()).unwrap();
+        a.add_folder("camera", &t.join("a-camera")).unwrap();
+        a.add_folder("notes", &t.join("a-notes")).unwrap();
+        a.sync(None).unwrap();
+        let mut b = Engine::join(&t.join("b"), "laptop", pass, &key, storage).unwrap();
+
+        let refused = attach_request(
+            &mut b,
+            &json!({"name_or_id": "notes", "path": t.join("b-notes"), "plain": false, "mode": "receive-only"}),
+        );
+        assert!(refused.is_err());
+        assert!(
+            attach_request(&mut b, &json!({"name_or_id": "notes", "mode": "sideways"})).is_err()
+        );
+
+        attach_request(
+            &mut b,
+            &json!({"name_or_id": "camera", "path": t.join("b-camera"), "plain": true, "selective": true, "mode": "send-only"}),
+        )
+        .unwrap();
+        attach_request(
+            &mut b,
+            &json!({"name_or_id": "notes", "path": t.join("b-notes"), "plain": true}),
+        )
+        .unwrap();
+        let st = b.status().unwrap();
+        let of = |n: &str| st.folders.iter().find(|f| f.name == n).unwrap();
+        assert!(of("camera").selective);
+        assert_eq!(of("camera").mode, varsto_core::vault::FolderMode::SendOnly);
+        assert!(!of("notes").selective);
+        assert_eq!(of("notes").mode, varsto_core::vault::FolderMode::Normal);
+    }
 
     /// A real server on a free port with a locked (engine-less) state.
     fn test_server() -> (u16, String, tempfile::TempDir) {
+        let (port, token, tmp, _) = test_server_state();
+        (port, token, tmp)
+    }
+
+    /// [`test_server`] and its state, for a test that holds it.
+    fn test_server_state() -> (u16, String, tempfile::TempDir, Shared) {
         let tmp = tempfile::tempdir().unwrap();
         let (server, bound) = bind(0).unwrap();
         let token = random_hex();
@@ -3190,12 +3578,108 @@ mod tests {
             link: None,
         }));
         let server = Arc::new(server);
+        let kept = state.clone();
         std::thread::spawn(move || serve_arc(server, state));
         (
             bound.rsplit(':').next().unwrap().parse().unwrap(),
             token,
             tmp,
+            kept,
         )
+    }
+
+    #[test]
+    fn reads_are_answered_while_a_long_operation_holds_the_state() {
+        let (port, token, _tmp, state) = test_server_state();
+        let h = [("X-Varsto-Token", token.as_str())];
+        // Once answered fresh, the service summary is kept.
+        let (st, head, fresh) = raw(port, "GET", "/api/service", &h, "");
+        assert_eq!(st, 200);
+        assert!(!head.contains("x-varsto-stale"));
+        // A sync (here: the test) holds the state for two seconds.
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let holder = {
+            let state = state.clone();
+            std::thread::spawn(move || {
+                let _g = state.lock().unwrap();
+                held_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            })
+        };
+        held_rx.recv().unwrap();
+        let t = std::time::Instant::now();
+        let (st, head, body) = raw(port, "GET", "/api/service", &h, "");
+        let took = t.elapsed();
+        assert_eq!(st, 200);
+        assert!(
+            took < std::time::Duration::from_millis(1000),
+            "took {took:?}"
+        );
+        assert!(head.contains("x-varsto-stale: 1"), "{head}");
+        assert!(head.contains("x-varsto-age-ms:"));
+        let v: Value = serde_json::from_str(&body).unwrap();
+        let f: Value = serde_json::from_str(&fresh).unwrap();
+        assert_eq!(v["stale"], true);
+        assert!(v["stale_ms"].as_u64().is_some());
+        assert_eq!(v["running"], f["running"]);
+        // Several reads at once do not queue behind each other either.
+        let many: Vec<_> = (0..4)
+            .map(|_| {
+                let token = token.clone();
+                std::thread::spawn(move || {
+                    let t = std::time::Instant::now();
+                    let h = [("X-Varsto-Token", token.as_str())];
+                    let st = raw(port, "GET", "/api/service", &h, "").0;
+                    (st, t.elapsed())
+                })
+            })
+            .collect();
+        for m in many {
+            let (st, took) = m.join().unwrap();
+            assert_eq!(st, 200);
+            assert!(
+                took < std::time::Duration::from_millis(1000),
+                "took {took:?}"
+            );
+        }
+        // The page's assets and the activity are not held up meanwhile.
+        let t = std::time::Instant::now();
+        assert_eq!(raw(port, "GET", "/app.js", &[], "").0, 200);
+        assert_eq!(raw(port, "GET", "/api/activity?mine=1", &h, "").0, 200);
+        assert!(t.elapsed() < std::time::Duration::from_millis(1000));
+        holder.join().unwrap();
+        // Free again: fresh.
+        let (st, head, _) = raw(port, "GET", "/api/service", &h, "");
+        assert_eq!(st, 200);
+        assert!(!head.contains("x-varsto-stale"));
+    }
+
+    #[test]
+    fn a_change_through_the_api_drops_the_cached_reads() {
+        let (port, token, _tmp, state) = test_server_state();
+        let h = [("X-Varsto-Token", token.as_str())];
+        assert_eq!(raw(port, "GET", "/api/state", &h, "").0, 200);
+        // Any request that is not a GET may have changed something (this
+        // one is refused, which does not matter).
+        assert_eq!(raw(port, "POST", "/api/no-such-change", &h, "{}").0, 400);
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let holder = {
+            let state = state.clone();
+            std::thread::spawn(move || {
+                let _g = state.lock().unwrap();
+                held_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(800));
+            })
+        };
+        held_rx.recv().unwrap();
+        // Nothing cached any more: the read waits for the state, and its
+        // answer is fresh.
+        let t = std::time::Instant::now();
+        let (st, head, _) = raw(port, "GET", "/api/state", &h, "");
+        assert_eq!(st, 200);
+        assert!(!head.contains("x-varsto-stale"));
+        assert!(t.elapsed() >= std::time::Duration::from_millis(500));
+        holder.join().unwrap();
     }
 
     /// One raw request; returns (status, lowercase head, body).
@@ -3261,18 +3745,28 @@ mod tests {
 
     #[test]
     fn expired_boot_code_is_refused() {
+        // A store of its own: redeeming "in the future" purges every code
+        // that would have expired by then, which must not touch the codes
+        // other tests are using at the same time.
+        let grants = Mutex::new(Grants {
+            boot: std::collections::BTreeMap::new(),
+            tickets: std::collections::BTreeMap::new(),
+        });
         let now = std::time::Instant::now();
-        let code = mint_boot_code_at(now);
-        assert!(!redeem_boot_code_at(
+        let code = mint_boot_code_in(&grants, now);
+        assert!(!redeem_boot_code_in(
+            &grants,
             &code,
             now + BOOT_TTL + std::time::Duration::from_secs(1)
         ));
-        let code = mint_boot_code_at(now);
-        assert!(redeem_boot_code_at(
+        let code = mint_boot_code_in(&grants, now);
+        assert!(redeem_boot_code_in(
+            &grants,
             &code,
             now + std::time::Duration::from_secs(30)
         ));
-        assert!(!redeem_boot_code_at(
+        assert!(!redeem_boot_code_in(
+            &grants,
             &code,
             now + std::time::Duration::from_secs(31)
         ));
@@ -3646,6 +4140,63 @@ mod tests {
     /// translation (the templates are the English string literals of
     /// `help.rs` given to `t0`/`tx` and the buttons' labels).
     #[test]
+    fn status_carries_the_protection_of_each_folder() {
+        use varsto_core::storage::StorageSpec;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let (mut engine, _) = Engine::init(&home, "laptop", "pass phrase 123").unwrap();
+        engine
+            .add_storage(StorageSpec::LocalDir {
+                name: "box".into(),
+                path: tmp.path().join("box"),
+                cold: false,
+                carrier: false,
+                place: String::new(),
+                min_free: None,
+            })
+            .unwrap();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("a.bin"), vec![7u8; 50_000]).unwrap();
+        engine.add_folder("docs", &docs).unwrap();
+        engine.push("docs").unwrap();
+        let mut st = State {
+            home,
+            engine: Some(engine),
+            token: "t".into(),
+            bound: "127.0.0.1:0".into(),
+            traffic: Arc::default(),
+            service: ServiceState::default(),
+            pair: None,
+            link: None,
+        };
+        let v = api(&mut st, Method::Get, "/api/status", "", &json!({})).unwrap();
+        let f = &v["folders"][0];
+        assert_eq!(f["name"], "docs");
+        let p = &f["protection"];
+        // One directory is one of the user's own disks: all there, no cloud.
+        assert_eq!(p["state"], "disks");
+        assert_eq!(p["pct"], json!(100.0));
+        assert_eq!(p["disks"]["pct"], json!(100.0));
+        assert_eq!(p["cloud"]["pct"], json!(0.0));
+        assert_eq!(p["cloud"]["bytes"], json!(0));
+        let (total, size) = (
+            p["total_bytes"].as_u64().unwrap(),
+            f["bytes"].as_u64().unwrap(),
+        );
+        assert!(total > 0 && total <= size, "{total} of {size}");
+        assert!(p["total_blocks"].as_u64().unwrap() >= 1);
+        for k in ["verified_pct", "verified_bytes", "blocks"] {
+            assert!(p["disks"].get(k).is_some(), "disks lacks {k}: {p}");
+        }
+        assert!(f["last_change_utc"].is_i64());
+        assert_eq!(
+            p["policy_state"], "violated",
+            "default policy wants a cloud copy: {p}"
+        );
+    }
+
+    #[test]
     fn help_sentences_are_translated() {
         let src = include_str!("../../varsto-core/src/help.rs");
         let src = &src[..src.find("pub fn render_text").unwrap()];
@@ -3696,6 +4247,215 @@ mod tests {
                 .filter(|t| t.len() > 1 && d["strings"].get(t.as_str()).is_none())
                 .collect();
             assert!(missing.is_empty(), "{lang} lacks {missing:?}");
+        }
+    }
+
+    /// Double-quoted string literals of a script (escapes resolved for `\"`
+    /// only), leaving out `//` comments.
+    fn js_literals(src: &str) -> Vec<String> {
+        let b: Vec<char> = src.chars().collect();
+        let (mut out, mut i) = (Vec::new(), 0);
+        while i < b.len() {
+            if b[i] == '/' && b.get(i + 1) == Some(&'/') && (i == 0 || b[i - 1] != ':') {
+                while i < b.len() && b[i] != '\n' {
+                    i += 1;
+                }
+            } else if b[i] == '"' {
+                let mut lit = String::new();
+                i += 1;
+                while i < b.len() && b[i] != '"' && b[i] != '\n' {
+                    if b[i] == '\\' && i + 1 < b.len() {
+                        i += 1;
+                    }
+                    lit.push(b[i]);
+                    i += 1;
+                }
+                out.push(lit);
+                i += 1;
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// Visible text and `title`, `placeholder`, `aria-label` and `alt` values
+    /// of the static page.
+    fn html_texts(page: &str) -> Vec<String> {
+        let mut page = page.to_string();
+        for tag in ["script", "style"] {
+            while let Some(a) = page.find(&format!("<{tag}")) {
+                let end = page[a..].find(&format!("</{tag}>")).unwrap() + a + tag.len() + 3;
+                page.replace_range(a..end, "");
+            }
+        }
+        let norm = |t: &str| {
+            t.replace("&amp;", "&")
+                .replace("&middot;", "\u{b7}")
+                .replace("&larr;", "\u{2190}")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let mut out = Vec::new();
+        for chunk in page.split('<').skip(1) {
+            let (tag, text) = chunk.split_once('>').unwrap_or((chunk, ""));
+            out.push(norm(text));
+            for attr in ["title", "placeholder", "aria-label", "alt"] {
+                if let Some(a) = tag.find(&format!(" {attr}=\"")) {
+                    let rest = &tag[a + attr.len() + 3..];
+                    out.push(norm(&rest[..rest.find('"').unwrap_or(rest.len())]));
+                }
+            }
+        }
+        out.retain(|t| t.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 2);
+        out
+    }
+
+    /// A sentence-like literal the interface might show: capitalised words
+    /// with ordinary punctuation, no code or paths.
+    fn looks_like_ui_text(l: &str) -> bool {
+        let mut c = l.chars();
+        let (a, b) = (c.next(), c.next());
+        // A literal ending in a space is the start of a message the script completes.
+        matches!((a, b), (Some(a), Some(b)) if a.is_ascii_uppercase() && b.is_ascii_lowercase())
+            && l.contains(' ')
+            && !l.ends_with(' ')
+            && l.chars()
+                .all(|c| c.is_ascii_alphabetic() || " ',.()-:?!".contains(c))
+    }
+
+    #[test]
+    fn interface_translations_cover_the_page() {
+        // Names, examples and technical terms that stay as they are, and
+        // literals that are not shown (comments, fonts, browser errors) or
+        // that the script completes with a pattern (a prefix before a
+        // number or a name).
+        const SAME: &[&str] = &[
+            "*.tmp",
+            "Android",
+            "DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA",
+            "Documents",
+            "Linux",
+            "OK",
+            "Varsto",
+            "Varsto v",
+            "Windows",
+            "box",
+            "dana",
+            "data-01",
+            "eu-central-1",
+            "fr-par",
+            "hetzner:backup/varsto",
+            "iOS",
+            "laptop",
+            "macOS",
+            "my-laptop",
+            "phone",
+            "reset",
+            "shelf",
+            "varsto",
+            "varsto mcp grant",
+            "varsto org request",
+            "work-laptop",
+            "Archive is almost full",
+            "Attach disk C",
+            "Could not reach the Varsto service (",
+            "Every file in the trash (",
+            "Failed to fetch",
+            "Helvetica Neue",
+            "Home NAS",
+            "Laptop backup",
+            "Load failed",
+            "Segoe UI",
+            "Suggested next",
+            "The camera could not be opened (",
+            "/Volumes/box",
+            "https://s3.fr-par.scw.cloud",
+            "/Users/me/Documents",
+            "/media/me/data-01",
+            "https://s3.eu-central-1.amazonaws.com",
+            "/Users/me/Pictures",
+            "/Volumes/Old drive/Photos",
+            "/Users/me/Varsto/Photos",
+            "stun.example.net:3478",
+            "Documents: a verification is about to age out",
+        ];
+        // Messages put together from parts are translated by patterns (a
+        // whole text) or parts (inside a text); the ones the page builds
+        // from counts and names must stay covered.
+        const COMPOSED: &[&str] = &[
+            r"^1 file$",
+            r"^(\d+) files$",
+            r"^(\d+) blocks$",
+            r"^(\d+) folders$",
+            r"^(\d+) storages$",
+            r"^(\d+) devices$",
+            r"^(\d+) active$",
+            "^via ([^\u{b7}]+)$",
+            r"^(\d+) ledger batches$",
+            r"^added ([\d.\-/: ]+)$",
+            r"next in (\d+) s",
+            "this device is an administrator",
+            r"(\d+) people\b",
+            r"(\d+) administrators\b",
+            "(^|; )not on this device(?=;|$)",
+            "(^|; )on this device(?=;|$)",
+            r"every block of this folder is on storage ([^;]+)",
+        ];
+        let page_texts = html_texts(INDEX_HTML);
+        assert!(page_texts.len() > 400, "{}", page_texts.len());
+        let mut used: Vec<String> = page_texts;
+        for src in [APP_JS, FOLDERS_JS, VIZ_JS] {
+            used.extend(
+                js_literals(src)
+                    .into_iter()
+                    .filter(|l| looks_like_ui_text(l)),
+            );
+        }
+        assert!(used.len() > 800, "{}", used.len());
+        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV)] {
+            let d: Value = serde_json::from_str(dict).unwrap();
+            let top: Vec<&String> = d.as_object().unwrap().keys().collect();
+            // i18n.js reads only these three; a string next to them is never shown.
+            assert_eq!(
+                top,
+                ["parts", "patterns", "strings"],
+                "{lang}: keys outside the known three"
+            );
+            let strings = d["strings"].as_object().unwrap();
+            assert!(
+                strings
+                    .values()
+                    .all(|v| v.as_str().is_some_and(|t| !t.is_empty())),
+                "{lang}"
+            );
+            let pairs: Vec<&str> = ["patterns", "parts"]
+                .iter()
+                .flat_map(|k| d[*k].as_array().unwrap())
+                .map(|p| {
+                    let p = p.as_array().unwrap();
+                    assert!(
+                        p.len() == 2 && p.iter().all(Value::is_string),
+                        "{lang}: {p:?}"
+                    );
+                    p[0].as_str().unwrap()
+                })
+                .collect();
+            let missing: Vec<&String> = used
+                .iter()
+                .filter(|t| !SAME.contains(&t.as_str()) && !strings.contains_key(t.as_str()))
+                // Messages with a number or name in them are matched by a pattern.
+                .filter(|t| {
+                    !pairs
+                        .iter()
+                        .any(|p| p.starts_with('^') && p.contains(t.trim_end_matches(['(', ' '])))
+                })
+                .collect();
+            assert!(missing.is_empty(), "{lang} lacks {missing:?}");
+            for c in COMPOSED {
+                assert!(pairs.contains(c), "{lang} lacks the pattern {c}");
+            }
         }
     }
 

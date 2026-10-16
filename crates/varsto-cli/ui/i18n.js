@@ -23,24 +23,39 @@
   function ready() { loaded = true; var w = waiting; waiting = []; w.forEach(function (f) { try { f(); } catch (e) { /* the caller's own error */ } }); }
 
   function norm(s) { return s.replace(/\s+/g, " ").trim(); }
-  function translate(s) {
-    if (!dict || !s) { return s; }
-    var k = norm(s);
-    if (!k) { return s; }
+  // Exact string, then the patterns; undefined when neither knows it.
+  function exact(k) {
     var t = dict[k];
     if (t === undefined) {
       for (var i = 0; i < patterns.length; i++) {
         if (patterns[i][0].test(k)) { t = k.replace(patterns[i][0], patterns[i][1]); break; }
       }
     }
-    // Known phrases inside a longer text (lists the service writes, such as
-    // a policy's rules or a sync summary): each is replaced where it occurs.
-    if (t === undefined && parts.length) {
-      var u = k;
-      for (var j = 0; j < parts.length; j++) { u = u.replace(parts[j][0], parts[j][1]); }
-      if (u !== k) { t = u; }
+    return t;
+  }
+  // Lines the page joins from several pieces with " · " (a size, a state, a
+  // count): each piece is translated on its own. Then the known phrases inside
+  // a longer text (lists the service writes, such as a policy's rules or a
+  // sync summary) are replaced where they occur. Used on what a pattern left
+  // in English, too.
+  function refine(k) {
+    var u = k;
+    if (u.indexOf(" · ") > 0) {
+      u = u.split(" · ").map(function (seg) { var x = exact(seg); return x === undefined ? seg : x; }).join(" · ");
     }
-    if (t === undefined || t === k) { return s; }
+    for (var j = 0; j < parts.length; j++) { u = u.replace(parts[j][0], parts[j][1]); }
+    return u;
+  }
+  function translate(s) {
+    if (!dict || !s) { return s; }
+    var k = norm(s);
+    if (!k) { return s; }
+    var t = dict[k];
+    if (t === undefined) {
+      t = exact(k);
+      t = refine(t === undefined ? k : t);
+    }
+    if (t === k) { return s; }
     // Keep the surrounding white space of the original.
     var lead = s.match(/^\s*/)[0], trail = s.match(/\s*$/)[0];
     return lead + t + trail;

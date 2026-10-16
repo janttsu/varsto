@@ -10,12 +10,87 @@ use clap::Subcommand;
 use std::path::Path;
 use varsto_core::autoverify::VerifySchedule;
 use varsto_core::engine::{
-    DrainOptions, DrainRunLimits, DrainStatus, QuotaStatus, RepairOptions, RepairReport,
-    ScrubOptions,
+    DrainOptions, DrainRunLimits, DrainStatus, ForwardOptions, ForwardReport, QuotaStatus,
+    RepairOptions, RepairReport, ScrubOptions,
 };
 use varsto_core::price::StoragePrice;
 use varsto_core::scrub::{ScrubReport, ScrubStatus};
 use varsto_core::Engine;
+
+#[derive(Subcommand)]
+pub enum ForwardCmd {
+    /// Show whether this device forwards and what the last run did (the default).
+    Show,
+    /// Forward now, without the service's budget.
+    Run,
+    /// Turn forwarding on or off, or change its limits (only the options given change).
+    Set {
+        /// Turn forwarding on.
+        #[arg(long, conflicts_with = "off")]
+        on: bool,
+        /// Turn forwarding off.
+        #[arg(long)]
+        off: bool,
+        /// Most MiB forwarded per service run.
+        #[arg(long)]
+        max_mib: Option<u64>,
+        /// MiB of blocks held in memory before they are written.
+        #[arg(long)]
+        buffer_mib: Option<u64>,
+    },
+}
+
+/// `varsto forward`: carry other devices' blocks to this device's storages
+/// (spec section 70). A run goes through the background service when one
+/// runs, because it knows the peers the blocks come from.
+pub fn forward(cli: &Cli, home: &Path, cmd: &Option<ForwardCmd>) -> Result<()> {
+    match cmd.as_ref().unwrap_or(&ForwardCmd::Show) {
+        ForwardCmd::Show => {
+            let engine = crate::open_engine(home)?;
+            print(cli, &engine.forward_status(), |s| s.describe())?;
+        }
+        ForwardCmd::Run => {
+            let body = serde_json::json!({});
+            if let Some(v) = crate::call_service(home, "/api/forward/run", body)? {
+                let r: ForwardReport = serde_json::from_value(v)?;
+                print(cli, &r, |r| r.describe())?;
+                return Ok(());
+            }
+            let mut engine = crate::open_engine(home)?;
+            let r = engine.forward(&ForwardOptions::manual())?;
+            print(cli, &r, |r| {
+                format!(
+                    "{} (no service running: blocks came only from this device's cache and storages, not from peers)",
+                    r.describe()
+                )
+            })?;
+        }
+        ForwardCmd::Set {
+            on,
+            off,
+            max_mib,
+            buffer_mib,
+        } => {
+            let mut engine = crate::open_engine(home)?;
+            let mut s = engine.forward_settings();
+            if *on {
+                s.enabled = true;
+            }
+            if *off {
+                s.enabled = false;
+            }
+            if max_mib.is_some() {
+                s.max_mib = *max_mib;
+            }
+            if buffer_mib.is_some() {
+                s.buffer_mib = *buffer_mib;
+            }
+            engine.set_forward_settings(s)?;
+            print(cli, &engine.forward_status(), |s| s.describe())?;
+        }
+    }
+    Ok(())
+}
 
 #[derive(Subcommand)]
 pub enum VerifyCmd {

@@ -27,6 +27,7 @@ mod logcmd;
 mod mcp;
 mod mcp_keys;
 mod placing;
+mod readcache;
 mod restic;
 mod service;
 mod sse;
@@ -35,6 +36,7 @@ mod tray;
 mod update;
 mod upkeep;
 mod view;
+mod viz;
 
 #[derive(Parser)]
 #[command(
@@ -355,7 +357,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ReplicaCmd,
     },
-    /// Check for a new release and install it over this binary.
+    /// Check for a new release and install it over this binary. With
+    /// `--daily`: the newest daily (test) build instead of a release, from a
+    /// list signed with the separate daily key.
     Update {
         /// Only report whether an update exists.
         #[arg(long)]
@@ -364,6 +368,22 @@ enum Cmd {
         /// when the GitHub release cannot be reached to cross-check it.
         #[arg(long)]
         allow_single_source: bool,
+        /// Take the latest daily build (a development build, not a release)
+        /// instead of a release. The background updater never does this.
+        #[arg(long, conflicts_with = "stable")]
+        daily: bool,
+        /// Take releases (the default); on a daily build, go back to them.
+        #[arg(long, conflicts_with = "daily")]
+        stable: bool,
+    },
+    /// Show or change settings of this device. `varsto config` lists them;
+    /// `varsto config auto-update off` stops the daily check for a new version
+    /// (and, on Windows, its installation); `on` turns it back on.
+    Config {
+        /// Setting name: auto-update.
+        key: Option<String>,
+        /// New value: on or off.
+        value: Option<String>,
     },
     /// Check a downloaded release file: the release signature on SHA256SUMS
     /// (next to the file, or fetched from the download page), then the file's SHA-256.
@@ -469,6 +489,12 @@ enum Cmd {
         key_file: Option<PathBuf>,
         #[command(subcommand)]
         cmd: Option<McpCmd>,
+    },
+    /// Forwarding: carry other devices' blocks to this device's storages
+    /// (also for folders kept selective here): show, run now, turn on or off.
+    Forward {
+        #[command(subcommand)]
+        cmd: Option<upkeep::ForwardCmd>,
     },
     /// Automatic verification of blocks other devices wrote: show, run now, set the schedule.
     Verify {
@@ -1409,6 +1435,9 @@ enum FolderCmd {
         /// Selective sync: files appear as placeholders until fetched.
         #[arg(long)]
         selective: bool,
+        /// How the folder syncs here: normal, send-only or receive-only.
+        #[arg(long)]
+        mode: Option<String>,
     },
     /// Turn selective sync on or off for an attached folder.
     Selective {
@@ -3522,6 +3551,26 @@ fn run(cli: &Cli) -> Result<()> {
                             .collect::<Vec<_>>()
                             .join("\n")
                     })?;
+                    // Storages other devices have, and the same storage listed twice.
+                    if !cli.json {
+                        if let Ok(known) = engine.storage_directory() {
+                            for k in known {
+                                if !k.configured {
+                                    println!(
+                                        "{} | known from {}, not configured here: add it with the same name and its credentials",
+                                        k.name,
+                                        k.devices.join(", ")
+                                    );
+                                } else if !k.same_as.is_empty() {
+                                    eprintln!(
+                                        "warning: {} is the same storage as {}: keep one of them",
+                                        k.name,
+                                        k.same_as.join(", ")
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
                 StorageCmd::Price {
                     name,
@@ -3893,8 +3942,15 @@ fn run(cli: &Cli) -> Result<()> {
                     name_or_id,
                     path,
                     selective,
+                    mode,
                 } => {
+                    // Checked first: a mode that is refused attaches nothing.
+                    let mode: Option<varsto_core::vault::FolderMode> =
+                        mode.as_deref().map(str::parse).transpose()?;
                     let id = engine.attach_folder(name_or_id, path, *selective)?;
+                    if let Some(m) = mode.filter(|m| !m.is_normal()) {
+                        engine.set_folder_mode(name_or_id, m)?;
+                    }
                     println!("folder {} attached at {}", id.short(), path.display());
                 }
                 FolderCmd::Selective { name_or_id, on } => {
@@ -4197,6 +4253,11 @@ fn run(cli: &Cli) -> Result<()> {
             // The running service answers without a passphrase while it is
             // unlocked; the line about the service comes first either way.
             let svc = service::status(&home);
+            if !cli.json {
+                if let Some(note) = update::channel_note(&home) {
+                    println!("varsto {} ({note})", env!("CARGO_PKG_VERSION"));
+                }
+            }
             let api = |path: &str| -> Option<serde_json::Value> {
                 let (f, _) = svc.as_ref()?;
                 let t = service::http_get(&format!("http://127.0.0.1:{}{path}", f.port), &f.token)
@@ -4304,6 +4365,7 @@ fn run(cli: &Cli) -> Result<()> {
             };
             print(cli, &h, varsto_core::help::render_text)?;
         }
+        Cmd::Forward { cmd } => upkeep::forward(cli, &home, cmd)?,
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
         Cmd::Import { cmd } => import::run(cli, &home, cmd)?,
@@ -4787,6 +4849,7 @@ fn run(cli: &Cli) -> Result<()> {
             if !*yes {
                 bail_usage::<()>("this removes keys, ledger, state and configuration from this device (files in folders stay); run again with --yes")?;
             }
+            let running = service::status(&home).is_some();
             if let Some((sf, _)) = service::status(&home) {
                 let url = format!("http://127.0.0.1:{}/api/reset", sf.port);
                 service::http_call(
@@ -4796,9 +4859,21 @@ fn run(cli: &Cli) -> Result<()> {
                     Some(&serde_json::json!({"confirm": "reset"}).to_string()),
                 )?;
                 println!("device reset through the running service");
-            } else {
-                let removed = varsto_core::engine::reset_device(&home)?;
-                println!("device reset; removed: {}", removed.join(", "));
+            }
+            // Whatever the service did, nothing that marks this device as
+            // holding a vault may be left (`ensure_no_vault` looks at vault.json).
+            let removed = varsto_core::engine::reset_device(&home)?;
+            if !removed.is_empty() {
+                println!("removed: {}", removed.join(", "));
+            }
+            if running {
+                // The old service keeps no state now; start it again so it
+                // runs without the old vault.
+                if service::restart_and_wait(&home) {
+                    println!("the background service restarted");
+                } else {
+                    eprintln!("could not restart the background service: start it with `varsto service run` or `varsto install`");
+                }
             }
         }
         Cmd::Device { cmd } => match cmd {
@@ -4945,29 +5020,26 @@ fn run(cli: &Cli) -> Result<()> {
                     code,
                     address,
                 } => {
-                    // The link of the other device's QR code carries the code and its addresses.
                     // The link of the other device's QR code carries the code and
-                    // its addresses: discovery first, then each address.
-                    let (code, mut tries) = match varsto_core::qr::Link::from_text(code) {
-                        Ok(varsto_core::qr::Link::Pair { code, addresses }) => (
-                            code,
-                            std::iter::once(None)
-                                .chain(addresses.into_iter().map(Some))
-                                .collect::<Vec<_>>(),
-                        ),
-                        _ => (code.clone(), vec![None]),
+                    // all its candidate addresses, best first. Order of tries:
+                    // --address, the link's addresses, then the LAN search.
+                    let (code, offered) = match varsto_core::qr::Link::from_text(code) {
+                        Ok(varsto_core::qr::Link::Pair { code, addresses }) => (code, addresses),
+                        _ => (code.clone(), Vec::new()),
                     };
-                    if address.is_some() {
-                        tries = vec![address.clone()];
-                    }
                     let pass = passphrase()?;
-                    let mut result = Err(anyhow!("the other device was not found"));
-                    for a in &tries {
-                        result = varsto_core::pair::receive(&code, name, a.as_deref());
-                        if result.is_ok() {
-                            break;
-                        }
-                    }
+                    let result = varsto_core::pair::receive_with_progress(
+                        &code,
+                        name,
+                        address.as_deref(),
+                        &offered,
+                        &mut |step| match step {
+                            varsto_core::pair::Step::Trying(a) => eprintln!("trying {a} ..."),
+                            varsto_core::pair::Step::Looking => {
+                                eprintln!("looking for the device on the network ...")
+                            }
+                        },
+                    );
                     let bundle = result?;
                     let (engine, notes) = Engine::join_paired(&home, name, &pass, &bundle)?;
                     println!(
@@ -5514,8 +5586,50 @@ fn run(cli: &Cli) -> Result<()> {
             }
         },
         Cmd::Update {
+            daily: true, check, ..
+        } => {
+            let c = update::check_daily(&home)?;
+            if *check {
+                print(cli, &c, |c| {
+                    if c.available {
+                        format!(
+                            "daily build available: {} -> {} ({})",
+                            c.current_build.as_deref().unwrap_or("(a release)"),
+                            c.latest_build,
+                            c.archive.clone().unwrap_or_default()
+                        )
+                    } else if c.newer {
+                        format!(
+                            "daily build {} is out; this copy cannot install it itself ({}): download it from {}",
+                            c.latest_build,
+                            c.reason.as_deref().unwrap_or("no file for this platform"),
+                            c.download_page
+                        )
+                    } else {
+                        format!("up to date: daily build {}", c.latest_build)
+                    }
+                })?;
+            } else {
+                let policy = update::Policy::new(&home, false);
+                let running = service::status(&home).is_some();
+                println!("{}", update::apply_daily(&c, &policy)?);
+                let installer = c.archive.as_deref() == Some(update::DAILY_SETUP);
+                if c.available && running && !installer {
+                    if service::restart_and_wait(&home) {
+                        println!(
+                            "the background service restarted with daily build {}",
+                            c.latest_build
+                        );
+                    } else {
+                        eprintln!("could not restart the background service: start it with `varsto service run` or `varsto install`");
+                    }
+                }
+            }
+        }
+        Cmd::Update {
             check,
             allow_single_source,
+            ..
         } => {
             let c = update::check()?;
             if *check {
@@ -5536,13 +5650,60 @@ fn run(cli: &Cli) -> Result<()> {
                         format!("up to date: {} (latest {})", c.current, c.latest)
                     }
                 })?;
+                if !cli.json {
+                    if let Some(h) = update::stable_hint(&home, &c) {
+                        println!("{h}");
+                    }
+                }
             } else {
                 let policy = update::Policy::new(&home, *allow_single_source);
+                let running = service::status(&home).is_some();
+                if let Some(h) = update::stable_hint(&home, &c) {
+                    println!("{h}");
+                    return Ok(());
+                }
                 println!("{}", update::apply(&c, &policy)?);
-                if c.available && service::restart_running(&home) {
-                    println!("the background service restarts with {}", c.latest);
+                // The Windows setup program restarts Varsto itself.
+                if c.available && running && !c.installer() {
+                    // The service runs the binary that was replaced: start it again.
+                    if service::restart_and_wait(&home) {
+                        println!("the background service restarted with {}", c.latest);
+                    } else {
+                        eprintln!("could not restart the background service: start it with `varsto service run` or `varsto install`");
+                    }
                 }
             }
+        }
+        Cmd::Config { key, value } => {
+            match (key.as_deref(), value.as_deref()) {
+                (None, _) | (Some("auto-update"), None) => {}
+                (Some("auto-update"), Some(v)) => {
+                    let on = match v {
+                        "on" | "true" | "yes" | "1" => true,
+                        "off" | "false" | "no" | "0" => false,
+                        _ => bail!("auto-update takes on or off"),
+                    };
+                    update::set_auto_update(&home, on)?;
+                }
+                (Some(other), _) => bail!("unknown setting {other} (known: auto-update)"),
+            }
+            let on = update::auto_update_enabled(&home);
+            let installs = update::can_install_by_itself();
+            print(
+                cli,
+                &serde_json::json!({"auto-update": on, "installs-by-itself": installs}),
+                |_| {
+                    format!(
+                        "auto-update: {} (looks for a new version once a day; {})",
+                        if on { "on" } else { "off" },
+                        if installs {
+                            "installs it by itself after checking the signature"
+                        } else {
+                            "tells you when one is out"
+                        }
+                    )
+                },
+            )?;
         }
         Cmd::VerifyRelease {
             file,
@@ -5761,6 +5922,23 @@ fn run(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
+/// `varsto [--home DIR] [--json] --version` (or `-V`): the device directory
+/// given on the command line, if any. `None` for any other command line.
+fn version_request(args: &[String]) -> Option<Option<PathBuf>> {
+    let mut home = None;
+    let mut it = args.iter().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--version" | "-V" => return Some(home),
+            "--home" => home = it.next().map(PathBuf::from),
+            "--json" => {}
+            a if a.starts_with("--home=") => home = Some(PathBuf::from(&a["--home=".len()..])),
+            _ => return None,
+        }
+    }
+    None
+}
+
 fn main() {
     // Launched from an app bundle or by double-click: no arguments (macOS may add
     // a -psn_ process serial number). Open the desktop interface.
@@ -5782,6 +5960,18 @@ fn main() {
         } else {
             "desktop".to_string()
         });
+    }
+    if let Some(home) = version_request(&args) {
+        // `--version` names the daily build of a copy installed from that channel.
+        let note = home
+            .or_else(|| std::env::var_os("VARSTO_HOME").map(PathBuf::from))
+            .or_else(|| default_home().ok())
+            .and_then(|h| update::channel_note(&h));
+        match note {
+            Some(n) => println!("varsto {} ({n})", env!("CARGO_PKG_VERSION")),
+            None => println!("varsto {}", env!("CARGO_PKG_VERSION")),
+        }
+        return;
     }
     let cli = Cli::parse_from(args);
     init_logging(&cli);
@@ -6750,9 +6940,10 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
             name_or_id,
             path,
             selective,
+            mode,
         } => (
             "/api/folder/attach",
-            serde_json::json!({"name_or_id": name_or_id, "path": abs(path)?, "selective": selective, "plain": true}),
+            serde_json::json!({"name_or_id": name_or_id, "path": abs(path)?, "selective": selective, "plain": true, "mode": mode}),
         ),
         FolderCmd::Detach { name } => ("/api/folder/detach", serde_json::json!({"name": name})),
         FolderCmd::Remove { name, purge, yes } => {
@@ -6832,7 +7023,7 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
 
 fn transfers(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
     let sf = service::read_service_file(home).ok_or_else(|| {
-        anyhow!("the background service is not running, so nothing is being transferred (start it with `varsto service run` or `varsto install`)")
+        anyhow!("the background service is not running, so nothing is being transferred (start it with `varsto service run` or `varsto install`; `varsto service status` shows whether it runs)")
     })?;
     let base = format!("http://127.0.0.1:{}", sf.port);
     loop {
@@ -7695,5 +7886,79 @@ mod secret_input_tests {
         let lines = secret_lines(&[a, b], "share: ").unwrap();
         let lines: Vec<&str> = lines.iter().map(|l| l.as_str()).collect();
         assert_eq!(lines, ["1: one two", "2: three four", "3: five six"]);
+    }
+}
+
+#[cfg(test)]
+mod update_flag_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("varsto").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn update_takes_daily_or_stable_but_not_both() {
+        let cli = parse(&["update", "--daily"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Update {
+                daily: true,
+                stable: false,
+                check: false,
+                ..
+            }
+        ));
+        let cli = parse(&["update", "--check", "--daily"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Update {
+                daily: true,
+                check: true,
+                ..
+            }
+        ));
+        let cli = parse(&["update", "--stable"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Update {
+                stable: true,
+                daily: false,
+                ..
+            }
+        ));
+        // The plain command is the stable channel.
+        let cli = parse(&["update"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Update {
+                daily: false,
+                stable: false,
+                ..
+            }
+        ));
+        assert!(parse(&["update", "--daily", "--stable"]).is_err());
+        assert!(parse(&["update", "--stable", "--daily"]).is_err());
+    }
+
+    #[test]
+    fn version_names_the_daily_build() {
+        let a = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
+        assert_eq!(version_request(&a(&["varsto", "--version"])), Some(None));
+        assert_eq!(version_request(&a(&["varsto", "-V"])), Some(None));
+        assert_eq!(
+            version_request(&a(&["varsto", "--home", "/x", "--version"])),
+            Some(Some(PathBuf::from("/x")))
+        );
+        assert_eq!(
+            version_request(&a(&["varsto", "--home=/y", "--json", "-V"])),
+            Some(Some(PathBuf::from("/y")))
+        );
+        assert_eq!(version_request(&a(&["varsto", "status"])), None);
+        assert_eq!(
+            version_request(&a(&["varsto", "update", "--version"])),
+            None
+        );
+        assert_eq!(version_request(&a(&["varsto"])), None);
     }
 }

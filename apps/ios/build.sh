@@ -15,5 +15,6 @@ cd "$root/apps/ios" && xcodegen generate
 mkdir -p build
 xcodebuild -project Varsto.xcodeproj -scheme Varsto -sdk iphonesimulator -configuration Release \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet build 2>&1 | tee build/xcodebuild.log
+"$root/apps/ios/check-exe.sh" build/Build/Products/Release-iphonesimulator/Varsto.app/Varsto
 echo "app: apps/ios/build/Build/Products/Release-iphonesimulator/Varsto.app"
 echo "Open apps/ios/Varsto.xcodeproj in Xcode to run on a device (signing needed)."

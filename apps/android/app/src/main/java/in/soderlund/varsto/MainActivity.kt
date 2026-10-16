@@ -26,6 +26,7 @@ import android.widget.FrameLayout
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -36,6 +37,7 @@ import androidx.core.content.FileProvider
 import android.content.res.Configuration
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
 
 /** Shows the local Varsto interface served by the background service. */
@@ -47,6 +49,8 @@ class MainActivity : AppCompatActivity() {
     // A varsto:// link the app was opened with, until the page is there to take it.
     private var pendingLink: String? = null
     private var pageLoaded = false
+    // The visualization page asked for full screen: the system bars are hidden until it leaves.
+    private var fullscreen = false
     // The page's QR scanner asked for the camera; answered once Android has.
     private var cameraRequest: PermissionRequest? = null
     private val askCamera: ActivityResultLauncher<String> =
@@ -84,6 +88,8 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (url?.startsWith("http://127.0.0.1") != true) return
                 pageLoaded = true
+                // A reloaded page starts out of full screen: the bars come back with it.
+                if (fullscreen) applyFullscreen(false)
                 pendingLink?.let { pendingLink = null; openLink(it) }
             }
         }
@@ -99,7 +105,10 @@ class MainActivity : AppCompatActivity() {
         // Edge-to-edge is enforced on Android 15: keep the page below the status bar.
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(0, bars.top, 0, bars.bottom)
+            // The on-screen keyboard shrinks the page (edge-to-edge ignores adjustResize),
+            // so a focused field is never behind it.
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(0, bars.top, 0, maxOf(bars.bottom, ime.bottom))
             WindowInsetsCompat.CONSUMED
         }
         // Dark status-bar icons on the light theme, light icons on the dark one.
@@ -113,7 +122,41 @@ class MainActivity : AppCompatActivity() {
         }
         ContextCompat.startForegroundService(this, Intent(this, VarstoService::class.java))
         pendingLink = linkOf(intent)
+        // Back goes through the page first: it closes a dialog or goes to the previous view and
+        // answers false only from the start view (or when it is not loaded), then the app leaves.
+        // (onBackPressed is no longer called on newer Android versions.)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (!pageLoaded) return leave()
+                web.evaluateJavascript("(window.varstoBack ? window.varstoBack() : false)") { handled ->
+                    AppLog.d("activity", if (handled == "true") "back: handled by the page" else "back: leaving")
+                    if (handled != "true") leave()
+                }
+            }
+        })
         load()
+    }
+
+    /**
+     * Immersive full screen for the page: status and navigation bars hidden (a swipe from the
+     * edge shows them for a moment), the content stays out of the camera cutout. Back leaves it through the
+     * page (`varstoBack`), which then calls this with false.
+     */
+    private fun applyFullscreen(on: Boolean) {
+        fullscreen = on
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (on) {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+        AppLog.i("activity", "full screen: $on")
+    }
+
+    private fun leave() {
+        // Keep the process (and the sync service) around, like the Home button does.
+        moveTaskToBack(true)
     }
 
     /** A varsto:// link opened while the app runs: straight to the page. */
@@ -208,6 +251,12 @@ class MainActivity : AppCompatActivity() {
 
     /** What the page may ask the shell for: all files access, camera upload, and handing a file to another app. */
     inner class Bridge {
+        /** Real full screen for the visualization page (the system bars go; the page covers the screen). */
+        @JavascriptInterface
+        fun setFullscreen(on: Boolean) {
+            runOnUiThread { applyFullscreen(on) }
+        }
+
         @JavascriptInterface
         fun hasAllFilesAccess(): Boolean =
             Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()
@@ -251,6 +300,15 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun openAppSettings() {
             handler.post { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+        }
+
+        /** Print / save as PDF of the page: the WebView ignores window.print(). */
+        @JavascriptInterface
+        fun printPage() {
+            handler.post {
+                val pm = getSystemService(android.content.Context.PRINT_SERVICE) as android.print.PrintManager
+                pm.print("Varsto recovery package", web.createPrintDocumentAdapter("Varsto recovery package"), android.print.PrintAttributes.Builder().build())
+            }
         }
 
         @JavascriptInterface
@@ -359,11 +417,5 @@ class MainActivity : AppCompatActivity() {
             AppLog.e("activity", "service did not answer after $attempts attempts")
             web.loadDataWithBaseURL(null, "<h2>${str(R.string.service_did_not_start)}</h2>", "text/html", "utf-8", null)
         }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        AppLog.d("activity", if (web.canGoBack()) "back: previous page" else "back: leaving")
-        if (web.canGoBack()) web.goBack() else super.onBackPressed()
     }
 }

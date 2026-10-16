@@ -1,0 +1,30 @@
+---
+title: Päivittäiset versiot
+nav: Downloads
+output: daily/index.html
+description: Varston kehitysversiot päähaarasta, tarkistussummaluettelo allekirjoitettu erillisellä päivittäisellä avaimella. Ei julkaisuja, ei tuotantodatalle.
+---
+    <h1>Päivittäiset versiot</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>Nämä ovat kehitysversioita päähaarasta, eivät julkaisuja.</strong></p>
+      <ul>
+        <li>Ne eivät ole julkaisuja, eikä niille ole tehty julkaisutestausta. Niillä ei ole julkaisuallekirjoitusta eikä Applen tai Microsoftin koodinallekirjoitusta. Älä käytä niitä tuotantodataan.</li>
+        <li>Tallennusmuoto voi muuttua versiosta toiseen ilman siirtotyökalua. Muoto 2 edellyttää, että holvit luodaan uudelleen.</li>
+        <li><code>varsto update --daily</code> asentaa alustasi uusimman päivittäisen version (Linuxin ja Windowsin komentorivi-versiot; macOS-sovellus ja Android-APK asennetaan käsin). Pelkkä <code>varsto update</code> pysyy julkaisuissa eikä koskaan asenna päivittäistä versiota.</li>
+        <li>Pidä omat varmuuskopiosi.</li>
+      </ul>
+      <p>Tarvitsetko jotain, mihin voi luottaa? Käytä sen sijaan <a href="{{L}}downloads/">vakaita latauksia</a>.</p>
+    </div>
+    {{DAILY_BUILD}}
+    {{DAILY_TABLE}}
+    <h2>Tarkista</h2>
+    <p>Laita <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> lataamiesi tiedostojen viereen (taulukon tiedostonimet ovat vakionimiä) ja aja</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Jätä <code>--ignore-missing</code> pois, jos latasit kaikki tiedostot. Luettelo on allekirjoitettu erillisellä päivittäisellä avaimella (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign-muoto; avain on <a href="{{P}}daily-key.pub">daily-key.pub</a>), ja sen <code>varsto update --daily</code> tarkistaa. Lataus on täydellinen ja ehjä, ja allekirjoitus osoittaa luettelon tulleen projektin omasta koontiketjusta.</p>
+    <h2>Mitä mukana on</h2>
+    {{DAILY_INCLUDED}}
+    <h2>Tunnetut puutteet</h2>
+    {{DAILY_GAPS}}
+    <h2>Aiemmat versiot</h2>
+    <p>Seitsemän viimeisintä versiota säilytetään samoilla tiedostonimillä; jokaisella on oma allekirjoitettu luettelonsa.</p>
+    {{DAILY_HISTORY}}

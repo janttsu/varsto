@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cas d’usage: Varsto</title>
+<meta name="description" content="Treize situations pour lesquelles Varsto est conçu, d’un avion sans internet à l’incendie d’une maison, avec une note honnête sur ce que fait déjà l’alpha.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/use-cases/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Cas d’usage: Varsto">
+<meta property="og:description" content="Treize situations pour lesquelles Varsto est conçu, d’un avion sans internet à l’incendie d’une maison, avec une note honnête sur ce que fait déjà l’alpha.">
+<meta property="og:url" content="https://varsto.net/fr/use-cases/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/use-cases/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/use-cases/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/use-cases/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/use-cases/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/use-cases/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=e9308487f1">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../use-cases/" hreflang="en" lang="en">English</a> <a href="../../fi/use-cases/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/use-cases/" hreflang="sv" lang="sv">Svenska</a> <a href="../../fr/use-cases/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../fr/">Projet</a>
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/use-cases/" aria-current="page">Cas d'usage</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/screenshots/">Captures d'écran</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/downloads/">Téléchargements</a>
+      <a href="../../blog/">Blog (en)</a>
+      <a href="../../forum/">Forum (en)</a>
+      <a href="../../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Cas d’usage</h1>
+    <p class="lead">Ce sont les situations contre lesquelles la conception est testée. Elles viennent du plan du projet et orientent les exigences, les tests automatisés et la <a href="../features/">liste des fonctionnalités</a>. Chacune dit ce que fait l’alpha aujourd’hui et ce qui est conçu mais pas encore construit. Rien ici n’est une promesse sur l’alpha ; le <a href="../../docs/failure-model.html">modèle de défaillances</a> liste ce qui peut encore mal tourner.</p>
+
+    <section class="feature" id="uc-1">
+      <h2>1. « J’ai oublié de copier le fichier avant le voyage »</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/plane.webp?v=1c3d0704f3"><img src="../../assets/img/usecases/plane.png?v=7d04610f99" alt="Deux appareils dans un avion se synchronisent via le point d’accès du téléphone ; le cloud est barré jusqu’à l’atterrissage." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/plane-dark.webp?v=adb5854823"><img src="../../assets/img/usecases/plane-dark.png?v=5bb5f2c441" alt="Deux appareils dans un avion se synchronisent via le point d’accès du téléphone ; le cloud est barré jusqu’à l’atterrissage." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p><strong>Situation.</strong> Dans un avion, vous vous rendez compte que le fichier sur lequel vous devez travailler est sur votre téléphone, pas sur le portable. Il n’y a pas d’internet.</p>
+        <p><strong>Comment Varsto aide.</strong> Les deux appareils se trouvent en local (le point d’accès du téléphone ou n’importe quel réseau local) et le fichier passe directement de l’un à l’autre. Sur le portable, le dossier est en mode sélectif, donc le fichier est déjà visible sous forme de fichier substitut ; un clic le récupère depuis le téléphone. Vos modifications reprennent le même chemin en sens inverse.</p>
+        <p><strong>Quand le réseau revient</strong>, à l’aéroport ou à l’hôtel, les deux appareils envoient les changements vers votre stockage cloud et les autres appareils se mettent à jour. Le registre sait à chaque instant quelle version se trouve où.</p>
+        <p class="note">Remarques honnêtes : le Wi-Fi des avions isole généralement les clients, c’est pourquoi le point d’accès du téléphone lui-même est le premier choix documenté. Tant que les deux appareils sont dans le même sac, les changements n’existent qu’à un seul endroit ; l’application affiche « sur ces deux appareils seulement, pas encore dans le cloud » et vous rappelle de synchroniser dès qu’un réseau est disponible. La connexion, y compris avec une clé de sécurité, fonctionne hors ligne puisqu’il n’y a aucun serveur à interroger. Aujourd’hui : la synchronisation sélective, les fichiers substituts, le registre et le transfert direct d’appareil à appareil sur le réseau local existent (le point d’accès du téléphone est un réseau local) ; le cloud se met à jour quand il est joignable. À travers internet, les appareils trouvent un chemin à travers le NAT avec STUN et le perçage (hole punching), ou par l’un de vos propres appareils joignables comme relais ; un coffre dont tous les appareils sont derrière un NAT n’a toujours aucun chemin.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-2">
+      <h2>2. L’ordinateur portable volé</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/stolen.webp?v=85977b529d"><img src="../../assets/img/usecases/stolen.png?v=6796f1a05e" alt="Un portable volé : le dossier Strongroom reste verrouillé, l’appareil est révoqué et effacé depuis un téléphone." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/stolen-dark.webp?v=ba70a2203b"><img src="../../assets/img/usecases/stolen-dark.png?v=34b22d5cbb" alt="Un portable volé : le dossier Strongroom reste verrouillé, l’appareil est révoqué et effacé depuis un téléphone." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Le voleur parvient à ouvrir la machine. Les dossiers Strongroom restent verrouillés, car ils demandent votre clé de sécurité, pas un mot de passe qui pourrait être en cache. Depuis un autre appareil, vous révoquez le portable et mettez en file un ordre d’effacement qui s’exécute la prochaine fois que l’appareil lance Varsto et atteint l’un de vos stockages ; un voleur qui le garde hors ligne n’est pas concerné. Tout reste restaurable depuis vos propres stockages. La date de coupure de la révocation dans le registre signifie que les événements signés par l’appareil volé après ce moment sont mis en quarantaine plutôt que crus.</p>
+        <p class="note">Aujourd’hui : les dossiers Strongroom existent (la clé ne vit que tant que votre clé de sécurité est touchée, avec une clé de secours si vous en enregistrez une), et un appareil restauré à partir d’une ancienne sauvegarde est détecté et mis à l’écart dans le registre. Retirer un appareil fonctionne depuis n’importe quel autre appareil (Pairs, Appareils, « Retirer l’appareil… », ou <code>varsto device revoke laptop --wipe</code>) : ses entrées ultérieures dans le registre sont ignorées, vos appareils refusent ses connexions de pair, et le coffre reçoit de nouvelles clés que seuls vos appareils restants obtiennent, de sorte que rien de ce qui est écrit ensuite ne s’ouvre avec ce que détient le portable. L’ordre d’effacement est signé par votre appareil et s’exécute quand le portable atteint de nouveau l’un de vos stockages. Ce que le portable pouvait lire auparavant lui reste lisible, les dossiers partagés avec d’autres personnes gardent leurs clés, et ses identifiants de stockage fonctionnent jusqu’à ce que vous les changiez chez le fournisseur.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-3">
+      <h2>3. Un fournisseur ferme votre compte ou perd vos données</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/provider.webp?v=bd7ed85c17"><img src="../../assets/img/usecases/provider.png?v=69940e970f" alt="Un fournisseur est fermé ; les copies chez un second fournisseur et sur un disque à la maison subsistent et l’application répare." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/provider-dark.webp?v=71aedaf377"><img src="../../assets/img/usecases/provider-dark.png?v=9b3a39369e" alt="Un fournisseur est fermé ; les copies chez un second fournisseur et sur un disque à la maison subsistent et l’application répare." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Votre espace de stockage est fermé sans préavis. Vos données se trouvent aussi chez un second fournisseur et sur vos propres appareils, car Varsto ne dépend jamais d’un seul stockage. L’application vous alerte qu’une politique n’est plus respectée, répare les copies manquantes vers un autre stockage, et le « vidage » retire tout ce qui concerne le fournisseur disparu. Changer de fournisseur est une opération ordinaire, pas un projet de migration.</p>
+        <p class="note">Aujourd’hui : un nombre quelconque de stockages (dossiers, buckets S3, destinations rclone), des politiques de durabilité qui avertissent dans l’application et par notification lorsqu’une règle est à risque ou rompue, <code>fsck</code> indique quelles copies déclarées un stockage ne peut plus garantir, les copies manquantes ou endommagées sur vos stockages sont réparées automatiquement à partir d’une autre copie, et les nouveaux stockages reçoivent ce qui leur manque. Retirer un stockage copie d’abord ses données ailleurs (alpha.8) ; un vidage en arrière-plan dans la limite d’un budget et des quotas sont nouveaux dans la version 0.0.1-alpha.14.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-4">
+      <h2>4. L’incendie de la maison</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/fire.webp?v=94579f2551"><img src="../../assets/img/usecases/fire.png?v=301a60d13c" alt="Une maison en feu ; chaque fichier a aussi une copie chez des proches dans une autre ville et dans un bucket cloud." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/fire-dark.webp?v=50728053e2"><img src="../../assets/img/usecases/fire-dark.png?v=44c6c7d2eb" alt="Une maison en feu ; chaque fichier a aussi une copie chez des proches dans une autre ville et dans un bucket cloud." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Tout ce qui est à la maison disparaît d’un coup : PC, NAS, les disques dans le placard. Les règles de placement par lieu (« une copie hors de cet endroit ») ont fait en sorte que chaque fichier existe aussi dans une autre ville ou un autre pays, dans un bucket cloud, sur un disque gardé chez des proches, ou sur un <a href="#uc-11">réplica non fiable</a> chez un ami. Les appareils d’un même lieu sont traités comme un seul domaine de défaillance, de sorte que deux copies dans la même pièce ne comptent jamais pour deux.</p>
+        <p class="note">Aujourd’hui : chaque stockage porte une étiquette de lieu (maison, cloud, extérieur, ...) et une politique de dossier comme « au moins une copie au lieu cloud » est vérifiée à partir du registre sur chaque appareil, avec un avertissement avant qu’elle ne soit rompue. Un pool de disques peut garder deux copies sur des disques conservés en des lieux différents, et un dossier peut être écrit uniquement sur des lieux choisis. Le regroupement d’appareils entiers en sites est conçu.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-5">
+      <h2>5. La pellicule photo est pleine</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/camera.webp?v=bf647f863b"><img src="../../assets/img/usecases/camera.png?v=7aec7acb3f" alt="La pellicule photo pleine d’un téléphone est envoyée chiffrée ; de la place est libérée une fois qu’une seconde copie est vérifiée." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/camera-dark.webp?v=1357a4c812"><img src="../../assets/img/usecases/camera-dark.png?v=fc7587fe02" alt="La pellicule photo pleine d’un téléphone est envoyée chiffrée ; de la place est libérée une fois qu’une seconde copie est vérifiée." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>L’envoi automatique depuis l’appareil photo déplace photos et vidéos vers vos stockages, chiffrées sur le téléphone avant de le quitter. « Libérer de l’espace » ne supprime les originaux qu’une fois votre politique de conservation satisfaite et les copies vérifiées par leur empreinte, et pas seulement envoyées. Les vignettes restent sur le téléphone pour que la galerie ressemble toujours à une galerie.</p>
+        <p class="note">Aujourd’hui : l’application Android envoie les nouvelles photos et vidéos vers un dossier de votre choix (AAAA/MM selon la date de prise de vue, éventuellement uniquement en Wi-Fi ou pendant la charge), chacune une seule fois, et les vignettes chiffrées et les copies vérifiées existent dans le cœur. Elle ne supprime jamais les originaux : libérer de l’espace dans la galerie reste à venir.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-6">
+      <h2>6. Un nouvel appareil, ou un petit téléphone</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/newdevice.webp?v=fc64382a68"><img src="../../assets/img/usecases/newdevice.png?v=d890f9954b" alt="Un nouveau petit téléphone voit toute l’arborescence des dossiers sous forme de fichiers substituts et n’a téléchargé que quelques éléments." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/newdevice-dark.webp?v=234d034d77"><img src="../../assets/img/usecases/newdevice-dark.png?v=306f7c8797" alt="Un nouveau petit téléphone voit toute l’arborescence des dossiers sous forme de fichiers substituts et n’a téléchargé que quelques éléments." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Rejoignez le coffre avec un nouvel appareil et votre clé, et toute l’arborescence des dossiers apparaît d’un coup sous forme de fichiers substituts. Seul ce que vous ouvrez est téléchargé, et les gros dossiers ne remplissent jamais un petit disque. Un téléphone de 128 Go peut porter un coffre de 2 To. « Libérer de l’espace » remet un fichier à l’état de fichier substitut lorsqu’il est conservé en sécurité ailleurs.</p>
+        <p class="note">Aujourd’hui : <code>varsto folder attach --selective</code>, récupérer et libérer, dans la ligne de commande et l’interface de bureau. Le Finder, l’Explorateur et les gestionnaires de fichiers Linux téléchargent et libèrent des fichiers depuis leurs menus contextuels ; les fichiers substituts natifs dans le Finder, l’Explorateur et Fichiers viendront plus tard.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-7">
+      <h2>7. « Range ce dossier pour moi »</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/tidy.webp?v=f843b65187"><img src="../../assets/img/usecases/tidy.png?v=a03202d808" alt="Une conversation avec un assistant qui travaille dans un seul dossier autorisé et propose une structure plus ordonnée, avec un bouton Confirmer." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/tidy-dark.webp?v=1735fe9174"><img src="../../assets/img/usecases/tidy-dark.png?v=3e91d9c283" alt="Une conversation avec un assistant qui travaille dans un seul dossier autorisé et propose une structure plus ordonnée, avec un bouton Confirmer." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Dix ans de lettres numérisées, de reçus et de notes dans un seul dossier. Vous accordez à un modèle de langage l’accès à ce seul dossier par le serveur MCP de Varsto : un modèle local sur votre propre machine (Ollama, LM Studio ou tout ce qui parle le Model Context Protocol). Le contenu ne quitte jamais vos appareils : aucun assistant cloud n’intervient, rien n’est envoyé à un fournisseur de modèles, et le modèle ne voit que le seul dossier que vous avez autorisé. Il lit les fichiers, détermine ce qu’ils sont et ce qui va ensemble, et propose une structure dans vos mots : par année, par correspondant, par projet, « papiers d’impôts par année, tout le reste par expéditeur ». Une fois que vous avez confirmé, il crée les répertoires, y déplace et renomme les fichiers et écrit un index de ce qui est allé où. La nouvelle organisation se synchronise vers vos autres appareils comme n’importe quel changement que vous feriez vous-même.</p>
+        <p>Les règles sont fixées dans Varsto, pas laissées au modèle : il ne voit que les dossiers que vous avez autorisés, en lecture seule sauf si vous autorisez les changements, jamais vos Strongrooms, et il ne peut rien détruire. Il n’y a pas d’outil de suppression ; écrire ne fait que créer de nouveaux fichiers, et un déplacement ou un renommage ne va que vers un nom libre sur chaque appareil, si bien qu’aucun fichier n’est jamais remplacé par un autre. Si le modèle se trompe, tout est encore là, sous un autre chemin.</p>
+        <p>Où doivent vivre les données inactives, c’est la décision de Varsto, pas celle de l’assistant : l’application tient la date de dernière utilisation de chaque fichier et suggère, dans l’interface, ce qui n’a pas été touché depuis des mois et ce que cela coûterait dans une classe de stockage à froid, avec les sources et les dates.</p>
+        <p class="note">Aujourd’hui : <code>varsto mcp</code> avec des autorisations par dossier (<code>varsto mcp grant Letters --write</code>) : lire, lister, créer des répertoires, déplacer et renommer vers des noms libres, et créer de nouvelles notes, sans aucun moyen de supprimer ni d’écraser ; l’estimation de placement propre à Varsto dans l’interface et en ligne de commande, chiffrée avec vos propres prix de stockage, un clic (ou <code>varsto advice apply</code>) pour libérer les fichiers inactifs sur cet appareil une fois leurs copies vérifiées et la politique du dossier toujours respectée, et, lorsque vous avez un stockage à froid moins cher, un clic pour y déplacer les blocs des fichiers inactifs afin que la facture elle-même baisse, jamais en dessous de la politique du dossier (<code>varsto move Letters --from box --to glacier --idle-days 180</code> fait la même chose à la main, avec <code>--dry-run</code> pour voir d’abord les coûts).</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-8">
+      <h2>8. Documents sensibles</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/sensitive.webp?v=c67f2d78d7"><img src="../../assets/img/usecases/sensitive.png?v=93334cfc6f" alt="Un dossier fiscal dans un Strongroom : ne s’ouvre qu’avec une clé de sécurité, pas de texte en clair sur le téléphone, caché de l’assistant IA." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/sensitive-dark.webp?v=bf583c9b4c"><img src="../../assets/img/usecases/sensitive-dark.png?v=9b59b31414" alt="Un dossier fiscal dans un Strongroom : ne s’ouvre qu’avec une clé de sécurité, pas de texte en clair sur le téléphone, caché de l’assistant IA." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Le dossier des impôts vit dans un Strongroom : il ne s’ouvre qu’au contact de votre clé de sécurité FIDO2, garanti par la cryptographie et non par une boîte de dialogue. Sur le téléphone, rien n’en est jamais écrit en clair, et l’assistant ne peut pas voir que le dossier existe. Une fois le dossier fermé, la clé quitte la mémoire.</p>
+        <p class="note">Aujourd’hui : les dossiers Strongroom ne s’ouvrent qu’avec une clé de sécurité FIDO2 (outils libfido2), peuvent avoir une clé de secours et sont invisibles pour les assistants ; rien n’est écrit en clair sur le stockage. Un dossier d’impôts existant peut être converti en Strongroom : rechiffré sous une nouvelle clé, anciennes copies supprimées du stockage, copies en clair sur les autres appareils remplacées par des fichiers substituts. Les dossiers conservés chiffrés sur le téléphone n’y contiennent que des blocs chiffrés, y compris pour les fichiers gardés pour un usage hors ligne ; l’application Android affiche images, vidéo, audio et texte dans sa propre visionneuse, déchiffrés en mémoire sans écrire de copie sur le téléphone ; les PDF et autres fichiers s’ouvrent encore dans une autre application, qui reçoit une copie déchiffrée que Varsto supprime lorsqu’il se verrouille ou redémarre.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-9">
+      <h2>9. Des dizaines de téraoctets sur de vieux disques</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/disks.webp?v=512fa8dfa3"><img src="../../assets/img/features/disks.png?v=0440552c84" alt="Des disques durs sur une étagère à côté d’un PC avec une station d’accueil USB." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/disks-dark.webp?v=e3049a36e5"><img src="../../assets/img/features/disks-dark.png?v=d310371b86" alt="Des disques durs sur une étagère à côté d’un PC avec une station d’accueil USB." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p><strong>Situation.</strong> Vous gérez une énorme archive sur de vieux disques durs, via une station d’accueil USB. Les disques dorment dans un placard ; certains sont gardés ailleurs. Aujourd’hui, vous les suivez avec un tableur, ou avec git-annex.</p>
+        <p><strong>Comment Varsto aide.</strong> Branchez le disque « data-01 » et dites à l’application de l’utiliser. Elle remplit le disque selon votre politique de conservation, vous dit quand il peut être éjecté, et enregistre dans le registre ce qu’il contient, où il est gardé et quand il a été vérifié pour la dernière fois. Quand vous avez besoin d’un gros fichier sur le portable et que le téléchargement depuis le cloud prendrait des heures, l’application propose : « Branchez le disque data-01 (étagère : maison) ; environ 12 minutes au lieu de 9 heures depuis le cloud ». Un dossier peut être conservé uniquement sur des disques, répliqué autant de fois que vous le choisissez, sans aucune copie dans le cloud.</p>
+        <p class="note">Aujourd’hui : un pool de disques est un stockage ; <code>varsto disk add</code> enregistre un disque, le remplit dans la limite de sa réserve et mémorise ce qu’il contient, <code>disk check</code> le vérifie et le complète à son retour, <code>disk eject</code> dit quand on peut le retirer sans risque, et un fichier dont la copie est sur un disque absent affiche « attach disk data-01 (shelf) » dans l’application et en ligne de commande. Les politiques comptent un disque hors ligne à sa dernière vérification. Les groupes de disques conservent un nombre de copies sur des disques gardés en des lieux différents (<code>varsto disk group shelf --copies 2</code>, chaque disque avec son lieu), les politiques comptent chaque copie sur disque à son lieu, et un dossier écrit uniquement dans le pool (<code>varsto folder placement Archive --storage shelf</code>) n’a aucune copie dans le cloud. Les estimations de durée dans l’invite (plans de récupération) et <code>varsto import git-annex</code> sont nouveaux dans la version 0.0.1-alpha.14.</p>
+      </div>
+    </section>
+
+
+    <section class="feature" id="uc-10">
+      <h2>10. Des gigaoctets entre la maison et le bureau, sans envoi</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/transferrer.webp?v=f3b21b15de"><img src="../../assets/img/features/transferrer.png?v=1169d86f86" alt="Une clé USB marquée comme transporteur entre un PC à la maison et un PC au bureau." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/transferrer-dark.webp?v=fded2eda96"><img src="../../assets/img/features/transferrer-dark.png?v=34b8b11ef0" alt="Une clé USB marquée comme transporteur entre un PC à la maison et un PC au bureau." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Marquez une clé USB ou un disque externe comme <em>transporteur</em> et branchez-le sur les deux machines. Il ne reçoit que les blocs chiffrés qui manquent encore à l’autre côté ; dès que les deux extrémités possèdent un bloc, il est supprimé de la clé, qui transporte aussi les lots du registre, de sorte que les deux machines s’accordent sur ce qui s’est passé même si elles ne partagent jamais un réseau. Montez des images au bureau, rapportez la clé à la maison, branchez-la, c’est fini.</p>
+        <p class="note"><code>varsto storage add-local stick /media/usb --carrier</code> sur les deux appareils.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-11">
+      <h2>11. Deux amis hébergent les sauvegardes l’un de l’autre</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/untrusted.webp?v=645633b6de"><img src="../../assets/img/features/untrusted.png?v=3c570f3f9f" alt="Vous avec les clés, un stockage partagé, et le NAS d’un ami qui conserve des copies chiffrées vérifiées qu’il ne peut pas ouvrir." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/untrusted-dark.webp?v=bd3aee3a9f"><img src="../../assets/img/features/untrusted-dark.png?v=ad7af5f67f" alt="Vous avec les clés, un stockage partagé, et le NAS d’un ami qui conserve des copies chiffrées vérifiées qu’il ne peut pas ouvrir." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Vous donnez à un ami un <em>jeton de réplica</em>. Son appareil copie vos objets chiffrés depuis un stockage que vous atteignez tous deux vers son propre disque, vérifie chaque empreinte et écrit son propre rapport signé dans votre registre. Il ne reçoit jamais de clé qui ouvre quoi que ce soit ; il apprend les noms et les tailles des objets, exactement ce qu’apprend un fournisseur de cloud. Dans votre application, les copies apparaissent comme vérifiées. Il fait la même chose avec votre NAS. Aucun de vous deux ne peut lire les fichiers de l’autre, et vous avez tous deux une copie hors site gratuite.</p>
+        <p class="note"><code>varsto replica token</code> de votre côté ; <code>varsto replica init</code> et <code>replica run</code> du sien. Le même mécanisme sert pour un serveur loué auquel vous ne faites pas confiance.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-12">
+      <h2>12. Partager un dossier avec un autre utilisateur de Varsto</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/sharing.webp?v=a0ea94f30b"><img src="../../assets/img/features/sharing.png?v=57aa0c5c33" alt="Deux utilisateurs ; une clé de dossier est remise pour que l’autre utilisateur puisse synchroniser et lire le dossier." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/sharing-dark.webp?v=e985c6ead3"><img src="../../assets/img/features/sharing-dark.png?v=b1853a6d68" alt="Deux utilisateurs ; une clé de dossier est remise pour que l’autre utilisateur puisse synchroniser et lire le dossier." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>L’appareil de l’autre utilisateur affiche un code de demande ; vous y scellez la clé du dossier (hybride X25519 + ML-KEM-768) et renvoyez le jeton par n’importe quel canal, puisque seul son appareil peut l’ouvrir. Il pointe le dossier vers un stockage que vous atteignez tous deux et, à partir de là, le synchronise et le lit comme n’importe lequel de ses propres dossiers. Son appareil écrit son propre registre signé sous la clé du dossier, de sorte que vous voyez aussi ses copies. Depuis la version alpha.9 (publiée avec alpha.10), vous confirmez qui a envoyé un code de demande en comparant six mots par un autre canal, et un membre ou un jeton non accepté peut être retiré, ce qui fait passer le dossier à une nouvelle clé. Les invitations par code QR sont nouvelles dans la version 0.0.1-alpha.14.</p>
+        <p class="note"><code>varsto share create docs</code> et, pour le destinataire, <code>varsto share accept</code>, ou les mêmes boutons dans l’interface de bureau.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-13">
+      <h2>13. Parcourir des photos sur un appareil qui ne les a pas téléchargées</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/reader.webp?v=b0cecd824e"><img src="../../assets/img/usecases/reader.png?v=31cea47963" alt="Un ordinateur de bureau génère des vignettes, les stocke chiffrées, et un téléphone affiche les aperçus de fichiers qu’il n’a pas téléchargés." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/reader-dark.webp?v=eca1b5945e"><img src="../../assets/img/usecases/reader-dark.png?v=8642bee0fc" alt="Un ordinateur de bureau génère des vignettes, les stocke chiffrées, et un téléphone affiche les aperçus de fichiers qu’il n’a pas téléchargés." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>L’appareil qui détient les photos et les vidéos génère les vignettes une fois, les chiffre sous la clé du dossier et les stocke à côté des données. Chaque autre appareil qui possède la clé, y compris un téléphone dont le dossier n’est fait que de fichiers substituts, affiche les aperçus sans récupérer une seule image. Les fournisseurs de stockage ne voient que du texte chiffré, pour les vignettes comme pour tout le reste.</p>
+      </div>
+    </section>
+
+    <h2>Comment ces cas sont testés</h2>
+    <p>La suite automatisée du dépôt joue plusieurs de ces scénarios avec deux ou trois appareils simulés qui ne sont jamais en ligne en même temps : convergence hors ligne, modifications concurrentes avec copies de conflit, appareil restauré à partir d’une ancienne sauvegarde, réplica, dossier partagé, disque transporteur, synchronisation sélective et vignettes. Un laboratoire de machines virtuelles avec des réseaux domestiques et de bureau derrière des NAT joue à chaque version les scénarios de pair à pair, de réseau local, de panne, de décalage d’horloge, de volume et de disques amovibles (branchement à chaud de disques, préparation d’un disque entier, plans de récupération) ; 39 scénarios au total. Voir <a href="../../docs/testing.html">Testing</a> (en) et le <a href="../../docs/failure-model.html">modèle de défaillances</a>.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>

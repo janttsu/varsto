@@ -314,3 +314,42 @@ impl Storage for RcloneStorage {
         }
     }
 }
+
+/// An rclone remote written as `name:path`, with `alias` remotes followed to
+/// what they point at (`rclone config dump`: only each remote's `type` and,
+/// for an alias, its `remote` are read, never a token or password). Without
+/// rclone or on any problem the remote is returned as given.
+pub fn resolve_alias(remote: &str) -> String {
+    let binary = std::env::var("VARSTO_RCLONE").unwrap_or_else(|_| "rclone".to_string());
+    let Ok(out) = Command::new(&binary)
+        .args(["config", "dump"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return remote.to_string();
+    };
+    let Ok(dump) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+        return remote.to_string();
+    };
+    let mut cur = remote.trim().to_string();
+    for _ in 0..8 {
+        let Some((name, path)) = cur.split_once(':') else {
+            break;
+        };
+        let section = &dump[name];
+        if section["type"].as_str() != Some("alias") {
+            break;
+        }
+        let Some(target) = section["remote"].as_str() else {
+            break;
+        };
+        let path = path.trim_matches('/');
+        cur = if path.is_empty() {
+            target.trim_end_matches('/').to_string()
+        } else {
+            format!("{}/{path}", target.trim_end_matches('/'))
+        };
+    }
+    cur
+}

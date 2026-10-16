@@ -734,40 +734,70 @@ fn situation(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], fg: &Figure
         } else {
             names(&st.iter().map(|x| x.name.clone()).collect::<Vec<_>>())
         };
+        // Singular and plural are separate templates, so each language
+        // can phrase both ("1 tiedosto" / "3 tiedostoa"); the count is a
+        // placeholder only in the plural one.
+        let one = f.files == 1;
+        let devices = if f.devices.is_empty() {
+            i.device.clone()
+        } else {
+            names(&f.devices)
+        };
         let line = if !f.attached {
-            tx(
-                "{folder}: {size} in {files} file(s), not synced on this device; kept on {storages}.",
-                &[
-                    ("folder", f.name.clone()),
-                    ("files", f.files.to_string()),
-                    ("size", human_bytes(f.bytes)),
-                    ("storages", where_),
-                ],
-            )
+            if one {
+                tx(
+                    "{folder}: {size} in 1 file, not synced on this device; kept on {storages}.",
+                    &[
+                        ("folder", f.name.clone()),
+                        ("size", human_bytes(f.bytes)),
+                        ("storages", where_),
+                    ],
+                )
+            } else {
+                tx(
+                    "{folder}: {size} in {files} files, not synced on this device; kept on {storages}.",
+                    &[
+                        ("folder", f.name.clone()),
+                        ("files", f.files.to_string()),
+                        ("size", human_bytes(f.bytes)),
+                        ("storages", where_),
+                    ],
+                )
+            }
         } else if st.is_empty() {
+            if one {
+                tx(
+                    "{folder}: {size} in 1 file, only on this device so far.",
+                    &[("folder", f.name.clone()), ("size", human_bytes(f.bytes))],
+                )
+            } else {
+                tx(
+                    "{folder}: {size} in {files} files, only on this device so far.",
+                    &[
+                        ("folder", f.name.clone()),
+                        ("files", f.files.to_string()),
+                        ("size", human_bytes(f.bytes)),
+                    ],
+                )
+            }
+        } else if one {
             tx(
-                "{folder}: {size} in {files} file(s), only on this device so far.",
+                "{folder}: {size} in 1 file on {devices}; kept on {storages}.",
                 &[
                     ("folder", f.name.clone()),
-                    ("files", f.files.to_string()),
                     ("size", human_bytes(f.bytes)),
+                    ("devices", devices),
+                    ("storages", where_),
                 ],
             )
         } else {
             tx(
-                "{folder}: {size} in {files} file(s) on {devices}; kept on {storages}.",
+                "{folder}: {size} in {files} files on {devices}; kept on {storages}.",
                 &[
                     ("folder", f.name.clone()),
                     ("files", f.files.to_string()),
                     ("size", human_bytes(f.bytes)),
-                    (
-                        "devices",
-                        if f.devices.is_empty() {
-                            i.device.clone()
-                        } else {
-                            names(&f.devices)
-                        },
-                    ),
+                    ("devices", devices),
                     ("storages", where_),
                 ],
             )

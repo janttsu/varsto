@@ -21,6 +21,7 @@
 //! storages), so the reads spread evenly over the period instead of reading
 //! everything at once and nothing for weeks.
 
+use crate::util::plural;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -433,8 +434,8 @@ impl ScrubStatus {
         }
         if !self.unrestored.is_empty() {
             out += &format!(
-                "; {} damaged file(s) waiting for a good copy",
-                self.unrestored.len()
+                "; {} waiting for a good copy",
+                plural(self.unrestored.len(), "damaged file", "damaged files")
             );
         }
         if let Some(e) = &self.last_error {

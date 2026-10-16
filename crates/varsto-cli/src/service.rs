@@ -81,6 +81,8 @@ pub struct ServiceState {
     pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
     /// Automatic repair: queue, last run and copies that could not be repaired.
     pub repair: Option<varsto_core::engine::RepairStatus>,
+    /// Forwarding other devices' blocks to the storages: on or off, last run.
+    pub forward: Option<varsto_core::engine::ForwardStatus>,
     /// Bit-rot check: schedule, last run, passes and damaged files waiting.
     pub scrub: Option<varsto_core::scrub::ScrubStatus>,
     /// Backups: when expiry last ran, the last snapshot taken here, and the
@@ -132,6 +134,14 @@ const BACKUP_UPKEEP_EVERY: i64 = 6 * 3600;
 
 impl ServiceState {
     pub fn summary(&self) -> Value {
+        let mut v = self.summary_base();
+        // Added apart: one more key in the literal passes the macro's
+        // recursion limit.
+        v["forward"] = json!(self.forward);
+        v["forward_text"] = json!(self.forward.as_ref().map(|f| f.describe()));
+        v
+    }
+    fn summary_base(&self) -> Value {
         json!({
             "running": self.running,
             "paused": self.paused,
@@ -422,6 +432,20 @@ impl ServiceState {
             }
         }
         self.repair = Some(engine.repair_status());
+    }
+    /// Forward other devices' blocks to this device's storages (section 70;
+    /// called after a sync and repair), within the service's budget: 1 GiB
+    /// a run, 256 MiB on a phone, or what `config.json` says.
+    pub fn forward_if_due(&mut self, engine: &mut Engine) {
+        if engine.forward_settings().enabled {
+            let phone = std::env::var_os("VARSTO_MOBILE").is_some();
+            match engine.forward(&engine.forward_service_options(phone)) {
+                Ok(r) if r.blocks > 0 => log::info!("forwarding: {}", r.describe()),
+                Ok(_) => {}
+                Err(e) => log::warn!("forwarding failed: {e:#}"),
+            }
+        }
+        self.forward = Some(engine.forward_status());
     }
     /// Before a sync: look after the ledger. A lost or damaged local ledger
     /// (or no ledger anywhere) is rebuilt from the storages at once, before
@@ -922,6 +946,9 @@ impl P2p {
                 return None;
             }
             st.traffic.set_me(e.device_id(), e.own_device_name());
+            let names = e.known_device_names();
+            st.traffic
+                .learn_names(names.iter().map(|(d, n)| (d, n.as_str())));
             varsto_core::activity::set_identity(e.device_id(), e.own_device_name());
             let identity = match e.p2p_identity() {
                 Ok(id) => Some(id),
@@ -1443,8 +1470,44 @@ pub fn notify(title: &str, body: &str) {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = (title, body);
+        windows_toast(title, body);
     }
+}
+
+/// A toast notification through PowerShell, which every Windows 10/11 has.
+/// The text goes in through the environment, never into the script. The
+/// setup program registers the sender name "Varsto" (with the icon); without
+/// it the toast comes from Windows PowerShell.
+#[cfg(target_os = "windows")]
+fn windows_toast(title: &str, body: &str) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const SCRIPT: &str = r#"
+$id = 'Varsto.Notifier'
+if (-not (Test-Path "HKCU:\Software\Classes\AppUserModelId\$id")) { $id = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe' }
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$t = $x.GetElementsByTagName('text')
+$t.Item(0).AppendChild($x.CreateTextNode($env:VARSTO_NOTE_TITLE)) | Out-Null
+$t.Item(1).AppendChild($x.CreateTextNode($env:VARSTO_NOTE_BODY)) | Out-Null
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($x))
+"#;
+    let _ = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            SCRIPT,
+        ])
+        .env("VARSTO_NOTE_TITLE", title)
+        .env("VARSTO_NOTE_BODY", body)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
 }
 
 pub fn service_file(home: &Path) -> PathBuf {
@@ -1568,6 +1631,21 @@ pub fn has_display() -> bool {
         || std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
 }
 
+/// What `remember` says when no desktop keyring can be used here.
+#[cfg(target_os = "linux")]
+const NO_DESKTOP_REMEMBER: &str = "`varsto service remember` needs a desktop session: no keyring can be reached from this session (over SSH, for example). Instead, set the VARSTO_PASSPHRASE environment variable for the service, or unlock it with `varsto unlock`";
+
+/// No desktop keyring can be reached from this process: no display, and
+/// either a remote login (SSH) or no session bus.
+#[cfg(target_os = "linux")]
+fn no_desktop_keyring() -> bool {
+    if has_display() {
+        return false;
+    }
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    set("SSH_CONNECTION") || set("SSH_TTY") || !set("DBUS_SESSION_BUS_ADDRESS")
+}
+
 #[cfg(target_os = "linux")]
 const TIMED_OUT: &str = "secret-tool timed out";
 /// Long enough to type a password into an unlock window.
@@ -1682,6 +1760,9 @@ pub fn remember_passphrase(home: &Path, pass: &str) -> Result<String> {
     }
     #[cfg(target_os = "linux")]
     {
+        if no_desktop_keyring() {
+            return Err(anyhow!(NO_DESKTOP_REMEMBER));
+        }
         let _ = std::io::stdout().flush();
         eprintln!("Storing it in your keyring. If a window asks to unlock the keyring, enter your login password there.");
         let out = match run_secret_tool(
@@ -1699,16 +1780,18 @@ pub fn remember_passphrase(home: &Path, pass: &str) -> Result<String> {
             Ok(out) => out,
             Err(e) if e.to_string() == TIMED_OUT => {
                 return Err(anyhow!(
-                    "the keyring did not answer within {} seconds: it is probably locked and could not show its unlock window (no desktop session here, for example over SSH). Unlock it from your desktop session and run `varsto service remember` there",
-                    SECRET_TOOL_STORE_TIMEOUT.as_secs()
+                    "the keyring did not answer within {} seconds. {}",
+                    SECRET_TOOL_STORE_TIMEOUT.as_secs(),
+                    NO_DESKTOP_REMEMBER
                 ))
             }
             Err(e) => return Err(e),
         };
         if !out.status.success() {
             return Err(anyhow!(
-                "secret-tool could not store it (no keyring in this session?): {}",
-                String::from_utf8_lossy(&out.stderr).trim()
+                "secret-tool could not store it: {}. {}",
+                String::from_utf8_lossy(&out.stderr).trim(),
+                NO_DESKTOP_REMEMBER
             ));
         }
         return Ok("kept in your keyring".into());
@@ -1840,6 +1923,15 @@ pub fn run(opts: Options) -> Result<()> {
     std::thread::Builder::new()
         .name("http".into())
         .spawn(move || desktop::serve_arc(http_server, http_state))?;
+    // Looks for a new version once a day (the `auto-update` setting) and
+    // installs it where this copy can; the signature chain of `varsto update`
+    // is the only way in.
+    {
+        let restart_state = state.clone();
+        crate::update::spawn_auto_update(opts.home.clone(), notify, move |_| {
+            restart_state.lock().unwrap().service.restart_requested = true
+        });
+    }
 
     // Peer-to-peer: serve our chunks, announce on the LAN, learn peers.
     // Peer-to-peer starts as soon as the vault is open and the setting is on: a
@@ -2106,24 +2198,19 @@ pub fn run(opts: Options) -> Result<()> {
                         }
                     }
                     snapshot_syncs = st.service.syncs; // the snapshot above is current
-                    let st = &mut *st;
                     let upkeep = varsto_core::logging::Timer::start();
-                    if let Some(e) = st.engine.as_mut() {
-                        st.service.ledger_after_sync(e);
-                        st.service.auto_verify_if_due(e);
-                        st.service.scrub_if_due(e);
-                        st.service.repair_if_due(e);
-                        st.service.drains_if_due(e);
-                        st.service.backups_if_due(e);
-                        st.service.trash_if_due(e);
-                        st.service.restic_if_due(e);
-                        st.service.moves_if_due(e, true);
-                        st.service.suggest_disks(e);
-                        if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
-                            log::info!("device details not published: {err:#}");
+                    // One step at a time, with the state let go in between:
+                    // the interface's requests waiting for it get their turn
+                    // (each step can take a while on a big vault).
+                    for step in UPKEEP_STEPS {
+                        st = relock(st, &state);
+                        let st = &mut *st;
+                        if let Some(e) = st.engine.as_mut() {
+                            step(&mut st.service, e);
                         }
                     }
-                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, drains, backups, trash, restic, disk suggestions, device details)");
+                    st = relock(st, &state);
+                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, drains, backups, trash, restic, disk suggestions, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),
@@ -2222,6 +2309,42 @@ pub fn boot_url(f: &ServiceFile) -> Result<String> {
         .ok_or_else(|| anyhow!("the service gave no start code"))?
         .to_string();
     Ok(format!("{base}/?boot={code}"))
+}
+
+/// The service's upkeep after a sync, in order (ledger, verify, scrub,
+/// repair, drains, backups, trash, restic, moves, disk suggestions, device
+/// details); each runs with the state taken anew.
+type UpkeepStep = fn(&mut ServiceState, &mut varsto_core::engine::Engine);
+const UPKEEP_STEPS: &[UpkeepStep] = &[
+    |s, e| s.ledger_after_sync(e),
+    |s, e| s.auto_verify_if_due(e),
+    |s, e| s.scrub_if_due(e),
+    |s, e| s.repair_if_due(e),
+    |s, e| s.forward_if_due(e),
+    |s, e| s.drains_if_due(e),
+    |s, e| s.backups_if_due(e),
+    |s, e| s.trash_if_due(e),
+    |s, e| s.restic_if_due(e),
+    |s, e| {
+        s.moves_if_due(e, true);
+    },
+    |s, e| s.suggest_disks(e),
+    |s, e| {
+        if let Err(err) = e.publish_device_details(s.last_sync_utc) {
+            log::info!("device details not published: {err:#}");
+        }
+    },
+];
+
+/// Let go of the state for a moment and take it again: a thread waiting for
+/// it (a request of the interface) gets it first.
+fn relock<'a, T>(
+    guard: std::sync::MutexGuard<'a, T>,
+    m: &'a std::sync::Mutex<T>,
+) -> std::sync::MutexGuard<'a, T> {
+    drop(guard);
+    std::thread::sleep(Duration::from_millis(2));
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Minimal HTTP client for talking to the local service (no extra dependency).
@@ -2336,6 +2459,42 @@ pub fn restart_running(home: &Path) -> bool {
         .is_ok(),
         None => false,
     }
+}
+
+/// Restart the running service and wait until a new one answers. A
+/// supervisor (launchd, systemd, the tray app) starts it again after exit
+/// code 75; without one, the service is started here. Returns whether a
+/// service runs afterwards (false when none ran before).
+pub fn restart_and_wait(home: &Path) -> bool {
+    let Some((old, _)) = status(home) else {
+        return false;
+    };
+    if !restart_running(home) {
+        return false;
+    }
+    let new_service_up = |secs: u64| {
+        for _ in 0..(secs * 5) {
+            std::thread::sleep(Duration::from_millis(200));
+            if status(home).is_some_and(|(f, _)| f.pid != old.pid) {
+                return true;
+            }
+        }
+        false
+    };
+    if new_service_up(15) {
+        return true;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe)
+            .arg("--home")
+            .arg(home)
+            .args(["service", "run"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+    new_service_up(10)
 }
 
 pub fn install(home: &Path, interval_secs: u64) -> Result<String> {

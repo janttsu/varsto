@@ -1,0 +1,37 @@
+---
+title: Comparaison
+nav: Compare
+output: compare/index.html
+description: Comment Varsto se compare à Syncthing, Resilio Sync, MEGA, Filen, Tresorit, git-annex, Cryptomator, rclone et restic/borg : à quoi sert chacun et en quoi ils diffèrent.
+---
+    <h1>Comment Varsto se compare</h1>
+    <p class="lead">Les outils qui gardent des fichiers synchronisés se répartissent en trois groupes. Les outils pair à pair comme Syncthing et Resilio Sync copient des dossiers entre vos propres appareils. Les clouds chiffrés comme MEGA, Filen et Tresorit gardent vos fichiers chez un seul fournisseur. git-annex suit de gros fichiers sur tous les disques et destinations que vous possédez. Varsto combine des éléments des trois : des fichiers chiffrés de bout en bout sur les stockages que vous choisissez, un transfert pair à pair entre vos appareils, et un registre de l’emplacement de chaque copie.</p>
+
+    <table class="compare-table compare-overview">
+      <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="syncthing/">Syncthing</a></th><th scope="col"><a href="resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="mega/">MEGA</a></th><th scope="col"><a href="filen/">Filen</a></th><th scope="col"><a href="tresorit/">Tresorit</a></th><th scope="col"><a href="git-annex/">git-annex</a></th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Où vivent vos fichiers</th><td class="win"><strong>Vos appareils et vos stockages</strong></td><td>Vos appareils</td><td>Vos appareils</td><td>Le cloud de MEGA</td><td>Le cloud de Filen</td><td>Le cloud de Tresorit</td><td>Où vous voulez</td></tr>
+      <tr><th scope="row">Compte ou serveur central</th><td><strong>Aucun</strong></td><td>Aucun</td><td>Pas de compte</td><td>Compte</td><td>Compte</td><td>Compte</td><td>Aucun</td></tr>
+      <tr><th scope="row">Les appareils doivent être en ligne en même temps</th><td><strong>Non</strong></td><td>Oui</td><td>Oui</td><td>Non</td><td>Non</td><td>Non</td><td>Non</td></tr>
+      <tr><th scope="row">Sait où se trouve chaque copie</th><td class="win"><strong>Oui</strong></td><td>Non</td><td>Non</td><td>Une copie chez le fournisseur</td><td>Une copie chez le fournisseur</td><td>Une copie chez le fournisseur</td><td>Oui</td></tr>
+      <tr><th scope="row">Disques amovibles et hors ligne</th><td class="win"><strong>Oui</strong></td><td>Non</td><td>Non</td><td>Non</td><td>Non</td><td>Non</td><td>Oui</td></tr>
+      <tr><th scope="row">Sauvegardes</th><td class="win"><strong>Instantanés en lecture seule sur vos stockages, conservés N jours</strong></td><td>Gestion des versions sur les appareils récepteurs uniquement</td><td>Dossier d’archive, 30 jours par défaut</td><td>Sauvegardes en lecture seule dans le cloud de MEGA</td><td>Mode de sauvegarde à sens unique vers le cloud de Filen</td><td>Historique des versions, pas de sauvegardes séparées</td><td>Copies comptées, ni instantanés ni durée de conservation</td></tr>
+      <tr><th scope="row">Licence et prix</th><td><strong>Code source disponible, gratuit</strong></td><td>Open source, gratuit</td><td>Propriétaire, offre gratuite</td><td>Abonnements, code des clients publié</td><td>Abonnements, clients open source</td><td>Abonnements propriétaires</td><td>Logiciel libre, gratuit</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vert : là où Varsto fait plus que la plupart des outils du tableau.</p>
+    <p class="note">« Une copie chez le fournisseur » signifie que la copie hors site se trouve chez ce fournisseur ; vos appareils gardent aussi leurs propres copies. Chaque page de comparaison explique les détails et renvoie aux sources.</p>
+
+    <h2>Comparaisons</h2>
+    <div class="grid three">
+      <a class="card" href="syncthing/"><h3>Varsto et Syncthing</h3><p>Syncthing maintient des dossiers identiques sur vos propres appareils, en continu et sans aucun cloud.</p></a>
+      <a class="card" href="resilio-sync/"><h3>Varsto et Resilio Sync</h3><p>Resilio Sync synchronise et partage des dossiers entre appareils en pair à pair, grâce à la technologie BitTorrent.</p></a>
+      <a class="card" href="mega/"><h3>Varsto et MEGA</h3><p>MEGA est un stockage cloud chiffré de bout en bout pour les particuliers et les entreprises, avec de généreux forfaits de stockage, une synchronisation de bureau, des applications mobiles et des services associés comme une messagerie et un VPN.</p></a>
+      <a class="card" href="filen/"><h3>Varsto et Filen</h3><p>Filen est un stockage cloud chiffré à connaissance nulle, venu d’Allemagne, pour les particuliers et les équipes soucieux de leur vie privée.</p></a>
+      <a class="card" href="tresorit/"><h3>Varsto et Tresorit</h3><p>Tresorit est un stockage cloud et un service de partage de fichiers chiffrés de bout en bout, venus de Suisse, destinés surtout aux entreprises et aux secteurs réglementés, avec aussi des offres pour les particuliers.</p></a>
+      <a class="card" href="git-annex/"><h3>Varsto et git-annex</h3><p>git-annex gère de gros fichiers avec git sans stocker leur contenu dans git.</p></a>
+      <a class="card" href="cryptomator/"><h3>Varsto et Cryptomator</h3><p>Cryptomator chiffre un dossier de coffre pour n’importe quel cloud ; c’est le client du fournisseur de cloud qui le transporte entre les appareils.</p></a>
+      <a class="card" href="rclone/"><h3>Varsto et rclone</h3><p>rclone copie et synchronise des fichiers vers et depuis plus de soixante-dix systèmes de stockage, avec une destination crypt qui chiffre ce qui y transite.</p></a>
+      <a class="card" href="restic/"><h3>Varsto, restic et BorgBackup</h3><p>restic et borg prennent des instantanés chiffrés et dédupliqués dans un dépôt : des sauvegardes, pas de la synchronisation.</p></a>
+    </div>
+    <p class="note">Varsto est un logiciel alpha : ne lui confiez pas de données dont vous n’avez aucune autre copie, et sa cryptographie n’a pas été auditée de façon indépendante. Les autres produits présentés ici sont matures. Les faits les concernant ont été vérifiés dans leur propre documentation en octobre 2026 ; les prix et les offres changent souvent, consultez donc leurs pages pour les chiffres actuels. Les corrections sont les bienvenues sous forme de <a href="https://github.com/janttsu/varsto/issues" rel="noopener">tickets GitHub</a>.</p>

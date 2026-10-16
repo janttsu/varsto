@@ -20,6 +20,25 @@
 //! Then the archive for this platform is downloaded, its SHA-256 checked
 //! against the signed list, and the running binary replaced. Downloads use
 //! the system `curl` so that the binary carries no TLS stack of its own.
+//!
+//! On Windows the setup program (`Varsto-<version>-setup.exe`) is the only
+//! way to install and to update: the signed setup file is downloaded, checked
+//! like any archive and run silently from a private folder, and it replaces
+//! the installation, closes and restarts the running parts. A copy that the
+//! setup program did not install (an old portable alpha.14 unzipped by hand)
+//! cannot update itself; it is told to download and run the installer once,
+//! and updates continue automatically from there. The service looks for
+//! a new version once a day (`auto-update` setting) and installs it by itself
+//! where it can (a setup-installed Windows copy), or tells the user where it
+//! cannot.
+//!
+//! `varsto update --daily` takes the newest daily (development) build instead:
+//! `daily/latest/SHA256SUMS` signed with a separate daily key
+//! (`daily-key.pub`) whose trusted comment names the channel, the build id and
+//! the signing time. The two channels share nothing that could be confused: the
+//! key, the state file (`update-state-daily.json`) and the installed-build
+//! record (`update-channel.json`) are separate, and the background updater only
+//! ever uses the stable channel. See spec section 67.
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine as _;
@@ -32,7 +51,7 @@ use std::path::{Path, PathBuf};
 
 /// The download site; the one place to change it (or override with
 /// `VARSTO_UPDATE_URL`, e.g. for a mirror; the signature check stays). The old
-/// address, varsto.soderlund.in, keeps serving /downloads/ for old clients.
+/// address keeps serving /downloads/ for old clients.
 pub const DEFAULT_SITE: &str = "https://varsto.net";
 pub const SITE_ENV: &str = "VARSTO_UPDATE_URL";
 /// Second channel: the checksum list attached to each GitHub release.
@@ -81,6 +100,8 @@ pub fn target_triple() -> &'static str {
 pub struct PublicKey {
     pub id: [u8; 8],
     key: VerifyingKey,
+    /// Which channel this key is trusted for ("release" or "daily"), for messages.
+    label: &'static str,
 }
 
 impl PublicKey {
@@ -116,6 +137,7 @@ pub fn parse_public_key(text: &str) -> Result<PublicKey> {
     Ok(PublicKey {
         id: raw[2..10].try_into().unwrap(),
         key,
+        label: "release",
     })
 }
 
@@ -167,8 +189,9 @@ pub fn verify_signature(key: &PublicKey, data: &[u8], sig_text: &str) -> Result<
     let s = parse_signature(sig_text)?;
     if s.id != key.id {
         bail!(
-            "signed with key {:016X}, not the release key {}",
+            "signed with key {:016X}, not the {} key {}",
             u64::from_le_bytes(s.id),
+            key.label,
             key.id_hex()
         );
     }
@@ -178,7 +201,10 @@ pub fn verify_signature(key: &PublicKey, data: &[u8], sig_text: &str) -> Result<
         data.to_vec()
     };
     key.key.verify_strict(&message, &s.sig).map_err(|_| {
-        anyhow!("bad signature: the file was changed or not signed by the release key")
+        anyhow!(
+            "bad signature: the file was changed or not signed by the {} key",
+            key.label
+        )
     })?;
     let mut global = s.sig.to_bytes().to_vec();
     global.extend_from_slice(s.trusted.as_bytes());
@@ -235,11 +261,18 @@ pub const STATE_FILE: &str = "update-state.json";
 
 impl State {
     pub fn load(home: &Path) -> State {
-        varsto_core::util::read_json_or_default(&home.join(STATE_FILE)).unwrap_or_default()
+        State::load_file(home, STATE_FILE)
     }
     fn save(&self, home: &Path) -> Result<()> {
+        self.save_file(home, STATE_FILE)
+    }
+    /// The state of one channel (`update-state.json` is the stable one).
+    fn load_file(home: &Path, name: &str) -> State {
+        varsto_core::util::read_json_or_default(&home.join(name)).unwrap_or_default()
+    }
+    fn save_file(&self, home: &Path, name: &str) -> Result<()> {
         varsto_core::util::private_dir(home)?;
-        varsto_core::util::write_atomic(&home.join(STATE_FILE), &serde_json::to_vec_pretty(self)?)
+        varsto_core::util::write_atomic(&home.join(name), &serde_json::to_vec_pretty(self)?)
     }
 }
 
@@ -328,6 +361,17 @@ pub struct Check {
     pub target: String,
 }
 
+impl Check {
+    /// The update is the Windows setup program, which restarts Varsto itself.
+    pub fn installer(&self) -> bool {
+        self.archive.as_deref().is_some_and(is_setup_file)
+    }
+}
+
+fn is_setup_file(name: &str) -> bool {
+    (name.starts_with("Varsto-") && name.ends_with("-setup.exe")) || name == DAILY_SETUP
+}
+
 /// Parse "0.0.1-alpha.3" into a comparable tuple.
 fn version_key(v: &str) -> (u64, u64, u64, u8, u64) {
     let (core, pre) = v.split_once('-').unwrap_or((v, ""));
@@ -384,16 +428,14 @@ fn check_with(fetch: &dyn Fetch, base: &str, key: &PublicKey) -> Result<Check> {
     }
     let current = env!("CARGO_PKG_VERSION").to_string();
     let target = target_triple().to_string();
-    // Inside Varsto.app the whole bundle is replaced from the disk image;
-    // elsewhere the archive for this platform carries the binary.
-    let dmg = format!("Varsto-{latest}-macos.dmg");
     let archive = manifest.as_object().and_then(|m| {
-        if app_bundle().is_some() {
-            return m.contains_key(&dmg).then(|| dmg.clone());
-        }
-        m.keys()
-            .find(|k| k.contains(&target) && (k.ends_with(".tar.gz") || k.ends_with(".zip")))
-            .cloned()
+        pick_archive(
+            m.keys().map(String::as_str),
+            &latest,
+            &target,
+            app_bundle().is_some(),
+            installed_by_setup(),
+        )
     });
     let newer = version_key(&latest) > version_key(&current)
         && version_key(&latest) > version_key(MIN_ACCEPTED_VERSION);
@@ -405,6 +447,64 @@ fn check_with(fetch: &dyn Fetch, base: &str, key: &PublicKey) -> Result<Check> {
         latest,
         archive,
         target,
+    })
+}
+
+/// The file name of the Windows setup program of a release.
+pub fn setup_name(version: &str) -> String {
+    format!("Varsto-{version}-setup.exe")
+}
+
+/// Whether this copy was installed by the Windows setup program: its
+/// uninstaller (`unins000.exe`) sits next to the binary.
+pub fn installed_by_setup() -> bool {
+    cfg!(windows)
+        && std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(|d| d.join("unins000.exe")))
+            .is_some_and(|u| u.is_file())
+}
+
+/// Which file of the release replaces this copy. Inside Varsto.app the whole
+/// bundle comes from the disk image; a copy installed by the Windows setup
+/// program takes the setup program (when the release has one); other Windows
+/// copies take nothing (see `windows_installer_notice`); elsewhere the archive
+/// for this platform carries the binary.
+fn pick_archive<'a>(
+    names: impl Iterator<Item = &'a str>,
+    latest: &str,
+    target: &str,
+    in_bundle: bool,
+    by_setup: bool,
+) -> Option<String> {
+    let names: Vec<&str> = names.collect();
+    let dmg = format!("Varsto-{latest}-macos.dmg");
+    if in_bundle {
+        return names.contains(&dmg.as_str()).then_some(dmg);
+    }
+    if target.contains("windows") {
+        let setup = setup_name(latest);
+        return (by_setup && names.contains(&setup.as_str())).then_some(setup);
+    }
+    names
+        .into_iter()
+        .find(|k| k.contains(target) && k.ends_with(".tar.gz"))
+        .map(str::to_string)
+}
+
+/// What a Windows copy that the setup program did not install is told: it
+/// cannot update itself, the installer has to be run once. `None` elsewhere
+/// and for setup-installed copies. `file` is the installer's file name.
+fn windows_installer_notice(
+    target: &str,
+    by_setup: bool,
+    base: &str,
+    file: &str,
+) -> Option<String> {
+    (target.contains("windows") && !by_setup).then(|| {
+        format!(
+            "this copy was not installed with the setup program, and on Windows only the setup program updates Varsto. Download and run the installer once ({base}{file}); your vault and settings stay as they are, and updates continue automatically after that"
+        )
     })
 }
 
@@ -438,7 +538,8 @@ pub fn download_verified(
         .clone()
         .ok_or_else(|| anyhow!("no archive for {}", check.target))?;
     let expected_name = archive.starts_with(&format!("varsto-{}-", check.latest))
-        || archive == format!("Varsto-{}-macos.dmg", check.latest);
+        || archive == format!("Varsto-{}-macos.dmg", check.latest)
+        || archive == setup_name(&check.latest);
     if !expected_name || archive.contains(['/', '\\']) {
         bail!("the manifest names an unexpected archive {archive}; refusing to update");
     }
@@ -522,6 +623,18 @@ pub fn download_verified(
 pub fn apply(check: &Check, policy: &Policy) -> Result<String> {
     if !check.available {
         if check.newer {
+            if let Some(notice) = windows_installer_notice(
+                &check.target,
+                installed_by_setup(),
+                &check.download_page,
+                &setup_name(&check.latest),
+            ) {
+                bail!(
+                    "{} is out (you have {}), but {notice}",
+                    check.latest,
+                    check.current
+                );
+            }
             // Never "up to date" while a newer version exists: say why this
             // copy cannot replace itself and where to get the new one.
             bail!(
@@ -536,11 +649,77 @@ pub fn apply(check: &Check, policy: &Policy) -> Result<String> {
     }
     // A fresh directory with a random name and mode 0700 (tempfile creates
     // it exclusively): nobody can pre-create it or plant a binary inside.
+    remove_stale_update_dirs();
     let tmp = tempfile::Builder::new()
-        .prefix("varsto-update-")
+        .prefix(UPDATE_DIR_PREFIX)
         .tempdir()
         .context("create a temporary directory for the update")?;
+    if check.installer() {
+        // The setup program runs after this process is gone: its folder must
+        // outlive us (the next update removes it).
+        let dir = tmp.keep();
+        return install_from(check, &dir, policy);
+    }
     install_from(check, tmp.path(), policy)
+}
+
+const UPDATE_DIR_PREFIX: &str = "varsto-update-";
+
+/// Setup programs of earlier updates stay in their private folders until
+/// the next update; folders older than a day go now.
+fn remove_stale_update_dirs() {
+    let Ok(rd) = fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > std::time::Duration::from_secs(86_400));
+        if old
+            && e.file_name()
+                .to_string_lossy()
+                .starts_with(UPDATE_DIR_PREFIX)
+            && e.file_type().is_ok_and(|t| t.is_dir())
+        {
+            let _ = fs::remove_dir_all(e.path());
+        }
+    }
+}
+
+/// The command line that runs a setup program without asking anything: no
+/// windows, no message boxes, no reboot, and the running Varsto closed (and,
+/// by the script's own entries, started again afterwards).
+pub fn setup_args(log: &Path) -> Vec<String> {
+    vec![
+        "/VERYSILENT".into(),
+        "/SUPPRESSMSGBOXES".into(),
+        "/NORESTART".into(),
+        "/CLOSEAPPLICATIONS".into(),
+        format!("/LOG={}", log.display()),
+    ]
+}
+
+/// Start the verified setup program and let it go: it replaces files of the
+/// process that started it, so it must not wait for it.
+fn start_setup(setup: &Path, dir: &Path) -> Result<()> {
+    let mut cmd = std::process::Command::new(setup);
+    cmd.args(setup_args(&dir.join("setup.log")))
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    cmd.spawn().context("start the setup program")?;
+    Ok(())
 }
 
 /// The Varsto.app bundle this binary runs from (macOS), if any.
@@ -624,23 +803,67 @@ fn install_app_from_dmg(dmg: &Path, bundle: &Path, tmp: &Path) -> Result<()> {
 
 fn install_from(check: &Check, tmp: &Path, policy: &Policy) -> Result<String> {
     let v = download_verified(&Curl, &downloads_base(), &release_key(), check, tmp, policy)?;
+    let message = install_file(&v, tmp, &check.current, &check.latest)?;
+    // A release replaces a daily build: this copy is on the stable channel again.
+    if let Some(home) = policy.home {
+        clear_channel(home);
+    }
+    Ok(message)
+}
+
+/// Put a verified download in place of the running copy: the app bundle from
+/// a disk image, the Windows setup program, or the binary from an archive.
+/// `from` and `to` are only for the message.
+fn install_file(v: &Verified, tmp: &Path, from: &str, to: &str) -> Result<String> {
     if v.path.extension().is_some_and(|e| e == "dmg") {
         let bundle = app_bundle().ok_or_else(|| anyhow!("not running from Varsto.app"))?;
         install_app_from_dmg(&v.path, &bundle, tmp)?;
         return Ok(format!(
             "updated {} -> {} ({}; {}); the app and service restart with it",
-            check.current,
-            check.latest,
+            from,
+            to,
             bundle.display(),
             v.notes.join("; ")
         ));
     }
+    if v.path
+        .file_name()
+        .is_some_and(|n| is_setup_file(&n.to_string_lossy()))
+    {
+        if !cfg!(windows) {
+            bail!("the setup program only runs on Windows");
+        }
+        start_setup(&v.path, tmp)?;
+        return Ok(format!(
+            "updating {} -> {} with the setup program ({}); Varsto closes, is replaced and starts again in a moment",
+            from,
+            to,
+            v.notes.join("; ")
+        ));
+    }
+    if cfg!(windows) {
+        bail!("on Windows only the setup program installs Varsto; run the installer once");
+    }
+    let exe = std::env::current_exe()?;
+    install_archive(&v.path, tmp, &exe)?;
+    Ok(format!(
+        "updated {} -> {} ({}; {}); restart the service or app to use it",
+        from,
+        to,
+        exe.display(),
+        v.notes.join("; ")
+    ))
+}
+
+/// Unpack an archive (tar.gz) and replace the binary `exe` with the
+/// `varsto` it holds, atomically (a rename).
+fn install_archive(archive: &Path, tmp: &Path, exe: &Path) -> Result<()> {
     let extract = tmp.join("x");
     fs::create_dir_all(&extract)?;
     let tar = std::process::Command::new("tar")
         .args([
             "-xf",
-            &v.path.display().to_string(),
+            &archive.display().to_string(),
             "-C",
             &extract.display().to_string(),
         ])
@@ -652,11 +875,7 @@ fn install_from(check: &Check, tmp: &Path, policy: &Policy) -> Result<String> {
             String::from_utf8_lossy(&tar.stderr).trim()
         );
     }
-    let bin_name = if cfg!(windows) {
-        "varsto.exe"
-    } else {
-        "varsto"
-    };
+    let bin_name = "varsto";
     let found: Vec<PathBuf> = walkdir::WalkDir::new(&extract)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -668,38 +887,533 @@ fn install_from(check: &Check, tmp: &Path, policy: &Policy) -> Result<String> {
         [] => bail!("archive does not contain {bin_name}"),
         _ => bail!("archive contains more than one {bin_name}; not installed"),
     };
-    let exe = std::env::current_exe()?;
-    replace_binary(&new_bin, &exe)?;
-    Ok(format!(
-        "updated {} -> {} ({}; {}); restart the service or app to use it",
-        check.current,
-        check.latest,
-        exe.display(),
-        v.notes.join("; ")
+    replace_binary(&new_bin, exe)
+}
+
+#[cfg(unix)]
+fn replace_binary(new_bin: &Path, exe: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let staged = exe.with_extension("new");
+    fs::copy(new_bin, &staged)?;
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
+    fs::rename(&staged, exe)?;
+    Ok(())
+}
+
+/// Windows copies are replaced by the setup program, never by a rename.
+#[cfg(not(unix))]
+fn replace_binary(_new_bin: &Path, _exe: &Path) -> Result<()> {
+    bail!("on Windows only the setup program installs Varsto")
+}
+
+// ----- the daily channel ------------------------------------------------------------
+
+/// The daily public key (minisign format), also at `<site>/daily-key.pub`. It
+/// is trusted for the daily channel only: `varsto update` (stable) never
+/// accepts a signature made with it, and `varsto update --daily` never
+/// accepts one made with the release key.
+pub const DAILY_KEY: &str = include_str!("../../../daily-key.pub");
+/// Where the daily builds and their signed checksum list live, below the site.
+pub const DAILY_PATH: &str = "daily/latest/";
+/// The Windows setup program of a daily build (a stable name; the signed list
+/// says which build it is).
+pub const DAILY_SETUP: &str = "varsto-daily-windows-setup.exe";
+/// Freeze protection of the daily channel (its own file, never the stable one).
+pub const DAILY_STATE_FILE: &str = "update-state-daily.json";
+/// Which channel this copy was installed from, written by `update --daily`.
+pub const CHANNEL_FILE: &str = "update-channel.json";
+/// A daily list signed longer ago than this is not trusted (a frozen or
+/// replayed list); builds come every few days, so a month is generous.
+const DAILY_MAX_AGE_SECS: i64 = 30 * 86_400;
+/// Signing times this far ahead of the clock are refused (they would freeze
+/// the channel for everything signed later).
+const DAILY_FUTURE_SECS: i64 = 86_400;
+
+/// The daily key built into this binary.
+pub fn daily_key() -> PublicKey {
+    let mut k = parse_public_key(DAILY_KEY).expect("daily-key.pub is a valid public key");
+    k.label = "daily";
+    k
+}
+
+/// `<site>/daily/latest/`, where the signed list and the current files live.
+pub fn daily_base() -> String {
+    format!("{}/{DAILY_PATH}", site())
+}
+
+/// The daily builds page, for downloads by hand.
+pub fn daily_page() -> String {
+    format!("{}/daily/", site())
+}
+
+/// What `update --daily` remembers of the build it installed.
+#[derive(Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Installed {
+    pub channel: String,
+    /// The build id from the signed list, e.g. `20261016-316c579`.
+    pub build: String,
+    /// Signing time of the list the build came with.
+    pub signed_at: i64,
+    /// The version the build reported when installed.
+    pub version: String,
+}
+
+/// The daily build this copy was installed from, if it was.
+pub fn installed_daily(home: &Path) -> Option<Installed> {
+    let i: Installed = serde_json::from_slice(&fs::read(home.join(CHANNEL_FILE)).ok()?).ok()?;
+    (i.channel == "daily" && valid_build_id(&i.build)).then_some(i)
+}
+
+fn record_daily(home: &Path, build: &str, signed_at: i64) -> Result<()> {
+    varsto_core::util::private_dir(home)?;
+    let i = Installed {
+        channel: "daily".into(),
+        build: build.into(),
+        signed_at,
+        version: env!("CARGO_PKG_VERSION").into(),
+    };
+    varsto_core::util::write_atomic(&home.join(CHANNEL_FILE), &serde_json::to_vec_pretty(&i)?)
+}
+
+/// This copy is on the stable channel again (a release was installed).
+pub fn clear_channel(home: &Path) {
+    let _ = fs::remove_file(home.join(CHANNEL_FILE));
+}
+
+/// "daily build 20261016-316c579" for `--version` and `status`, if this copy
+/// came from the daily channel.
+pub fn channel_note(home: &Path) -> Option<String> {
+    installed_daily(home).map(|i| format!("daily build {}", i.build))
+}
+
+/// A build id: `YYYYMMDD-<commit>`.
+pub fn valid_build_id(id: &str) -> bool {
+    match id.split_once('-') {
+        Some((d, c)) => {
+            d.len() == 8
+                && d.bytes().all(|b| b.is_ascii_digit())
+                && (7..=40).contains(&c.len())
+                && c.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        }
+        None => false,
+    }
+}
+
+/// The date part of a valid build id, as a comparable number.
+fn build_date(id: &str) -> u32 {
+    id.get(..8).and_then(|d| d.parse().ok()).unwrap_or(0)
+}
+
+/// The file of the daily list that carries the binary for this platform, as
+/// the stable (signed) name; `Err` says why the CLI cannot install it.
+fn daily_file(
+    os: &str,
+    arch: &str,
+    in_bundle: bool,
+    by_setup: bool,
+) -> Result<&'static str, String> {
+    match (os, arch) {
+        ("linux", "x86_64") => Ok("varsto-daily-linux-x86_64.tar.gz"),
+        ("windows", "x86_64") if by_setup => Ok(DAILY_SETUP),
+        ("windows", "x86_64") => Err(
+            "this copy was not installed with the setup program, and on Windows only the setup program updates Varsto. Download and run the installer once (varsto-daily-windows-setup.exe); your vault and settings stay as they are, and updates continue automatically after that"
+                .into(),
+        ),
+        ("macos", _) => Err(format!(
+            "the macOS daily build is a disk image (varsto-daily-macos-apple-silicon.dmg){}; the command line does not install it",
+            if in_bundle { "" } else { " and there is no command-line archive for macOS" }
+        )),
+        _ => Err(format!("there is no daily build of the command line for {os}/{arch}")),
+    }
+}
+
+/// A daily checksum list whose signature was verified, and what to do with it.
+#[derive(Serialize, Clone, Debug)]
+pub struct DailyCheck {
+    pub channel: &'static str,
+    /// The daily build installed from this channel, if this copy came from it.
+    pub current_build: Option<String>,
+    /// The build the signed list is for.
+    pub latest_build: String,
+    /// When the list was signed (seconds).
+    pub signed_at: i64,
+    /// The signed list is for a newer build than the installed one.
+    pub newer: bool,
+    /// ... and this binary can install it itself.
+    pub available: bool,
+    pub download_page: String,
+    /// The file (stable name) that replaces this copy.
+    pub archive: Option<String>,
+    /// Why this copy cannot install the build itself.
+    pub reason: Option<String>,
+    pub target: String,
+    /// The signed list; the download is checked against this text only.
+    #[serde(skip)]
+    sums: String,
+}
+
+pub fn check_daily(home: &Path) -> Result<DailyCheck> {
+    let policy = Policy::new(home, false);
+    check_daily_with(&Curl, &daily_base(), &daily_key(), &policy)
+}
+
+/// Fetch the daily list and its signature and decide what it means for this
+/// copy. Only signed data is used: `latest.json` on the site is not read.
+fn check_daily_with(
+    fetch: &dyn Fetch,
+    base: &str,
+    key: &PublicKey,
+    policy: &Policy,
+) -> Result<DailyCheck> {
+    let sums = fetch.get(&format!("{base}SHA256SUMS"))?;
+    let sig = fetch
+        .get(&format!("{base}SHA256SUMS.sig"))
+        .context("the daily list is not signed (no SHA256SUMS.sig); refusing to trust it")?;
+    let trusted = verify_signature(key, &sums, &String::from_utf8_lossy(&sig)).context(
+        "the daily SHA256SUMS does not carry a valid daily signature; refusing to trust it",
+    )?;
+    if trusted_field(&trusted, "channel") != Some("daily") {
+        bail!("the signature is not for the daily channel; refusing to trust it");
+    }
+    if trusted_field(&trusted, "file") != Some("SHA256SUMS") {
+        bail!("the signature is for another file than SHA256SUMS; refusing to trust it");
+    }
+    let build = trusted_field(&trusted, "build")
+        .filter(|b| valid_build_id(b))
+        .ok_or_else(|| anyhow!("the signature names no valid daily build; refusing to trust it"))?
+        .to_string();
+    let timestamp: i64 = trusted_field(&trusted, "timestamp")
+        .and_then(|t| t.parse().ok())
+        .ok_or_else(|| anyhow!("the signature carries no signing time; refusing to trust it"))?;
+    // Freeze and replay protection, as for releases but with the daily
+    // channel's own state: the signing time never goes backwards ...
+    let state = policy
+        .home
+        .map(|h| State::load_file(h, DAILY_STATE_FILE))
+        .unwrap_or_default();
+    if timestamp < state.last_timestamp {
+        bail!(
+            "the signed daily list is older ({}) than the last one accepted ({}, build {}); refusing (a rollback?)",
+            varsto_core::util::format_date(timestamp),
+            varsto_core::util::format_date(state.last_timestamp),
+            state.last_version
+        );
+    }
+    // ... is not in the future, and is recent.
+    if timestamp > policy.now + DAILY_FUTURE_SECS {
+        bail!(
+            "the daily list is signed in the future ({}); check this computer's clock",
+            varsto_core::util::format_date(timestamp)
+        );
+    }
+    if policy.now - timestamp > DAILY_MAX_AGE_SECS {
+        bail!(
+            "the newest signed daily list is {} days old (build {build}); the site may be frozen or no daily build was published. Refusing to install it",
+            (policy.now - timestamp) / 86_400
+        );
+    }
+    // Never an older build than the installed one, judged by the signed
+    // build id (not the version, which daily builds share).
+    let installed = policy.home.and_then(installed_daily);
+    let newer = match &installed {
+        None => true,
+        Some(i) if i.build == build => false,
+        Some(i) if build_date(&build) < build_date(&i.build) => bail!(
+            "the signed daily list is for build {build}, older than the installed build {}; refusing to install an older build",
+            i.build
+        ),
+        Some(i) if build_date(&build) == build_date(&i.build) => timestamp > i.signed_at,
+        Some(_) => true,
+    };
+    let sums = String::from_utf8(sums).context("SHA256SUMS is not text")?;
+    let (archive, reason) = match daily_file(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        app_bundle().is_some(),
+        installed_by_setup(),
+    ) {
+        Ok(name) => match listed_hash(&sums, name) {
+            Some(_) => (Some(name.to_string()), None),
+            None => (
+                None,
+                Some(format!("{name} is not listed in the signed daily list")),
+            ),
+        },
+        Err(why) => (None, Some(why)),
+    };
+    Ok(DailyCheck {
+        channel: "daily",
+        current_build: installed.map(|i| i.build),
+        latest_build: build,
+        signed_at: timestamp,
+        newer,
+        available: newer && archive.is_some(),
+        download_page: daily_page(),
+        archive,
+        reason,
+        target: target_triple().to_string(),
+        sums,
+    })
+}
+
+/// Download the daily file named by the signed list into `dir` and check its
+/// SHA-256 against that list. Nothing is installed here.
+fn download_daily_verified(
+    fetch: &dyn Fetch,
+    base: &str,
+    check: &DailyCheck,
+    dir: &Path,
+    policy: &Policy,
+) -> Result<Verified> {
+    let archive = check
+        .archive
+        .clone()
+        .ok_or_else(|| anyhow!("no daily file for {}", check.target))?;
+    if !archive.starts_with("varsto-daily-") || archive.contains(['/', '\\']) {
+        bail!("the daily list names an unexpected file {archive}; refusing to update");
+    }
+    let expected = listed_hash(&check.sums, &archive)
+        .ok_or_else(|| anyhow!("{archive} is not listed in the signed daily list"))?;
+    let path = dir.join(&archive);
+    fetch.download(&format!("{base}{archive}"), &path)?;
+    let actual = sha256_file(&path)?;
+    if actual != expected {
+        bail!(
+            "checksum mismatch for {archive}: expected {expected} (signed list of build {}), got {actual}. The site may be in the middle of publishing a new build; try again in a minute",
+            check.latest_build
+        );
+    }
+    // Only now: a failed check must not move the line.
+    if let Some(home) = policy.home {
+        let state = State::load_file(home, DAILY_STATE_FILE);
+        State {
+            last_timestamp: check.signed_at.max(state.last_timestamp),
+            last_version: check.latest_build.clone(),
+        }
+        .save_file(home, DAILY_STATE_FILE)?;
+    }
+    Ok(Verified {
+        path,
+        notes: vec![
+            format!("signature verified (daily key {})", daily_key().id_hex()),
+            "daily builds have no second channel: the site's signature alone was checked".into(),
+        ],
+    })
+}
+
+/// Download, verify and install the latest daily build over the running binary.
+/// The caller restarts the service.
+pub fn apply_daily(check: &DailyCheck, policy: &Policy) -> Result<String> {
+    let from = check
+        .current_build
+        .as_deref()
+        .map(|b| format!("daily {b}"))
+        .unwrap_or_else(|| format!("{} (release)", env!("CARGO_PKG_VERSION")));
+    if !check.newer {
+        return Ok(format!(
+            "already up to date (daily build {})",
+            check
+                .current_build
+                .as_deref()
+                .unwrap_or(&check.latest_build)
+        ));
+    }
+    if !check.available {
+        bail!(
+            "daily build {} is out (you have {from}), but this copy cannot install it by itself: {}. Download it from {}",
+            check.latest_build,
+            check.reason.as_deref().unwrap_or("no file for this platform"),
+            check.download_page
+        );
+    }
+    remove_stale_update_dirs();
+    let tmp = tempfile::Builder::new()
+        .prefix(UPDATE_DIR_PREFIX)
+        .tempdir()
+        .context("create a temporary directory for the update")?;
+    let installer = check.archive.as_deref().is_some_and(is_setup_file);
+    // The setup program runs after this process is gone: its folder must outlive us.
+    let dir = if installer {
+        tmp.keep()
+    } else {
+        tmp.path().to_path_buf()
+    };
+    let v = download_daily_verified(&Curl, &daily_base(), check, &dir, policy)?;
+    let message = install_file(&v, &dir, &from, &format!("daily {}", check.latest_build))?;
+    if let Some(home) = policy.home {
+        record_daily(home, &check.latest_build, check.signed_at)?;
+    }
+    Ok(message)
+}
+
+/// What to tell a user of a daily build who asked for the stable channel and
+/// finds no newer release: the compiled-in version stops this binary from
+/// installing an older or equal release, so the way back is by hand.
+pub fn stable_hint(home: &Path, c: &Check) -> Option<String> {
+    let i = installed_daily(home)?;
+    if c.newer {
+        return None;
+    }
+    Some(format!(
+        "this copy is daily build {} (version {}); the latest release {} is not newer, and an update never installs an older or equal version. To go back to releases, download {} by hand, check it with `varsto verify-release`, and install it, or wait for the next release",
+        i.build, i.version, c.latest, c.download_page
     ))
 }
 
-fn replace_binary(new_bin: &Path, exe: &Path) -> Result<()> {
-    let staged = exe.with_extension("new");
-    fs::copy(new_bin, &staged)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
-        fs::rename(&staged, exe)?;
-    }
-    #[cfg(windows)]
-    {
-        // A running executable cannot be overwritten but can be renamed.
-        let old = exe.with_extension("old");
-        let _ = fs::remove_file(&old);
-        fs::rename(exe, &old)?;
-        if let Err(e) = fs::rename(&staged, exe) {
-            let _ = fs::rename(&old, exe);
-            return Err(e.into());
-        }
-    }
+// ----- automatic updates ----------------------------------------------------------
+
+/// The setting file in the device directory: `off` turns the daily check off.
+const AUTO_FILE: &str = "auto-update";
+/// When the last successful daily check ran, and for which version the user
+/// was told already (one notification per version).
+const AUTO_CHECKED: &str = "auto-update-checked";
+const AUTO_TOLD: &str = "auto-update-told";
+/// The daily check, and the wait after a failure.
+const AUTO_EVERY_SECS: i64 = 86_400;
+const AUTO_RETRY_SECS: u64 = 3_600;
+
+/// Is the daily check on? It is, unless `varsto config auto-update off` or the
+/// switch in the interface turned it off.
+pub fn auto_update_enabled(home: &Path) -> bool {
+    fs::read_to_string(home.join(AUTO_FILE))
+        .map(|t| t.trim() != "off")
+        .unwrap_or(true)
+}
+
+pub fn set_auto_update(home: &Path, on: bool) -> Result<()> {
+    fs::create_dir_all(home)?;
+    fs::write(home.join(AUTO_FILE), if on { "on\n" } else { "off\n" })?;
     Ok(())
+}
+
+/// Whether this copy installs a new version by itself: a Windows copy that
+/// the setup program installed; elsewhere (and for an old portable copy) the
+/// user is told and installs it from the interface or the menu.
+pub fn can_install_by_itself() -> bool {
+    installed_by_setup()
+}
+
+fn read_number(path: &Path) -> i64 {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// What one pass of the daily check did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AutoStep {
+    /// Not due, or switched off.
+    Idle,
+    /// Up to date.
+    Current,
+    /// A newer version exists and the user was told (once per version).
+    Told(String),
+    /// A newer version is being installed (setup program started or binary replaced).
+    Installing(String),
+    /// Nothing could be done; try again in an hour (`reason` for the log).
+    Retry(String),
+}
+
+/// One pass of the daily check: look for a newer version (at most once a day)
+/// and, when this copy can, install it. The signature chain of `apply` is the
+/// only way in; nothing is installed without it. `tell` shows a notification
+/// (title, text); `installed` is called after a binary was replaced in place
+/// (not for the setup program, which restarts Varsto itself).
+pub fn auto_step(
+    home: &Path,
+    now: i64,
+    tell: &dyn Fn(&str, &str),
+    installed: &dyn Fn(&Check),
+) -> AutoStep {
+    if !auto_update_enabled(home) {
+        return AutoStep::Idle;
+    }
+    if now - read_number(&home.join(AUTO_CHECKED)) < AUTO_EVERY_SECS {
+        return AutoStep::Idle;
+    }
+    let c = match check() {
+        Ok(c) => c,
+        Err(e) => return AutoStep::Retry(format!("{e:#}")),
+    };
+    let stamp = |name: &str, v: &str| {
+        let _ = fs::write(home.join(name), v);
+    };
+    if !c.newer {
+        stamp(AUTO_CHECKED, &now.to_string());
+        return AutoStep::Current;
+    }
+    let told_before = fs::read_to_string(home.join(AUTO_TOLD))
+        .map(|t| t.trim() == c.latest)
+        .unwrap_or(false);
+    if c.available && can_install_by_itself() {
+        if !told_before {
+            stamp(AUTO_TOLD, &c.latest);
+            tell(
+                "Varsto update available",
+                &format!(
+                    "Varsto {} is out (you have {}). Installing it now.",
+                    c.latest, c.current
+                ),
+            );
+        }
+        let policy = Policy::new(home, false);
+        return match apply(&c, &policy) {
+            Ok(_) => {
+                stamp(AUTO_CHECKED, &now.to_string());
+                if !c.installer() {
+                    installed(&c);
+                    tell(
+                        "Varsto updated",
+                        &format!("Varsto {} is installed; the service restarts.", c.latest),
+                    );
+                }
+                AutoStep::Installing(c.latest)
+            }
+            // A cross-check that cannot be made yet, a bad network: later.
+            Err(e) => AutoStep::Retry(format!("{e:#}")),
+        };
+    }
+    stamp(AUTO_CHECKED, &now.to_string());
+    if !told_before {
+        stamp(AUTO_TOLD, &c.latest);
+        tell(
+            "Varsto update available",
+            &format!(
+                "Varsto {} is out (you have {}). Open Varsto to install it.",
+                c.latest, c.current
+            ),
+        );
+    }
+    AutoStep::Told(c.latest)
+}
+
+/// The daily check as a background thread of the service. `tell` shows a
+/// notification, `installed` asks the service to restart onto a replaced binary.
+pub fn spawn_auto_update(
+    home: PathBuf,
+    tell: impl Fn(&str, &str) + Send + 'static,
+    installed: impl Fn(&Check) + Send + 'static,
+) {
+    let _ = std::thread::Builder::new()
+        .name("auto-update".into())
+        .spawn(move || {
+            // Let the service settle first; a restart loop must not hammer the site.
+            std::thread::sleep(std::time::Duration::from_secs(120));
+            loop {
+                let now = varsto_core::util::now_utc();
+                match auto_step(&home, now, &tell, &installed) {
+                    AutoStep::Retry(why) => log::info!("automatic update check: {why}"),
+                    AutoStep::Installing(v) => log::info!("automatic update to {v} started"),
+                    AutoStep::Told(v) => log::info!("automatic update check: {v} is out"),
+                    AutoStep::Idle | AutoStep::Current => {}
+                }
+                // Hourly pass; the check itself runs once a day (AUTO_CHECKED).
+                let wait = AUTO_RETRY_SECS;
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+            }
+        });
 }
 
 // ----- verify-release ---------------------------------------------------------------
@@ -1041,6 +1755,173 @@ mod tests {
     }
 
     #[test]
+    fn the_setup_program_is_picked_only_for_installed_copies() {
+        let names = [
+            "Varsto-9.9.9-setup.exe",
+            "varsto-9.9.9-x86_64-unknown-linux-musl.tar.gz",
+        ];
+        let pick = |setup: bool, bundle: bool, target: &str| {
+            pick_archive(names.iter().copied(), "9.9.9", target, bundle, setup)
+        };
+        let win = "x86_64-pc-windows-gnu";
+        assert_eq!(
+            pick(true, false, win).as_deref(),
+            Some("Varsto-9.9.9-setup.exe")
+        );
+        // A portable copy is offered nothing: it has to run the installer once.
+        assert_eq!(pick(false, false, win), None);
+        // So is an installed copy of a release without a setup program (no zip fallback).
+        let no_setup = ["varsto-9.9.9-x86_64-pc-windows-gnu.zip"];
+        assert_eq!(
+            pick_archive(no_setup.into_iter(), "9.9.9", win, false, true),
+            None
+        );
+        // The setup program never serves another platform.
+        assert_eq!(
+            pick(false, false, "x86_64-unknown-linux-musl").as_deref(),
+            Some("varsto-9.9.9-x86_64-unknown-linux-musl.tar.gz")
+        );
+        assert_eq!(pick(false, true, win), None);
+    }
+
+    #[test]
+    fn a_portable_windows_copy_is_told_to_run_the_installer_once() {
+        let check = Check {
+            current: "0.0.1-alpha.14".into(),
+            latest: "9.9.9".into(),
+            available: false,
+            newer: true,
+            download_page: "https://example.invalid/downloads/".into(),
+            archive: None,
+            target: "x86_64-pc-windows-gnu".into(),
+        };
+        // The running test binary has no unins000.exe beside it: a copy the
+        // setup program did not install.
+        assert!(!installed_by_setup());
+        let e = apply(&check, &Policy::new(Path::new("/nonexistent"), false))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("9.9.9 is out"), "{e}");
+        assert!(e.contains("not installed with the setup program"), "{e}");
+        assert!(
+            e.contains("https://example.invalid/downloads/Varsto-9.9.9-setup.exe"),
+            "{e}"
+        );
+        assert!(e.contains("updates continue automatically"), "{e}");
+        assert!(!e.contains(".zip"), "{e}");
+        // The notice is for Windows copies the setup program did not install, only.
+        let notice = |target: &str, by_setup: bool| {
+            windows_installer_notice(target, by_setup, "https://x/", "Varsto-1-setup.exe")
+        };
+        assert!(notice("x86_64-pc-windows-gnu", false).is_some());
+        assert_eq!(notice("x86_64-pc-windows-gnu", true), None);
+        assert_eq!(notice("x86_64-unknown-linux-musl", false), None);
+        // A setup-installed copy gets the installer as its update file, and
+        // a missing installer is not papered over with another file.
+        let names = [
+            "Varsto-9.9.9-setup.exe",
+            "varsto-9.9.9-x86_64-pc-windows-gnu.zip",
+        ];
+        let pick = |setup| {
+            pick_archive(
+                names.iter().copied(),
+                "9.9.9",
+                "x86_64-pc-windows-gnu",
+                false,
+                setup,
+            )
+        };
+        assert_eq!(pick(true).as_deref(), Some("Varsto-9.9.9-setup.exe"));
+        assert_eq!(pick(false), None);
+    }
+
+    #[test]
+    fn a_signed_setup_program_is_accepted_and_a_swapped_one_is_not() {
+        let (sk, pk) = test_key(7);
+        let dir = tempfile::tempdir().unwrap();
+        let setup = "Varsto-9.9.9-setup.exe";
+        let body = b"setup program".to_vec();
+        let sums = format!("{}  {setup}\n", hex::encode(Sha256::digest(&body)));
+        let sig = sign(
+            &sk,
+            sums.as_bytes(),
+            "timestamp:1\tfile:SHA256SUMS\tversion:9.9.9",
+        );
+        let mut files = HashMap::new();
+        files.insert(format!("{BASE}{setup}"), body);
+        files.insert(format!("{BASE}SHA256SUMS"), sums.into_bytes());
+        files.insert(format!("{BASE}SHA256SUMS.sig"), sig.into_bytes());
+        let fake = Fake {
+            files,
+            downloaded: RefCell::new(false),
+        };
+        let check = Check {
+            current: "0.0.1".into(),
+            latest: "9.9.9".into(),
+            available: true,
+            newer: true,
+            download_page: BASE.into(),
+            archive: Some(setup.into()),
+            target: "x86_64-pc-windows-gnu".into(),
+        };
+        assert!(check.installer());
+        let v = download_verified(&fake, BASE, &pk, &check, dir.path(), &pol(true)).unwrap();
+        assert_eq!(fs::read(&v.path).unwrap(), b"setup program");
+        // The same file name for another version is refused.
+        let mut other = check.clone();
+        other.archive = Some("Varsto-9.9.8-setup.exe".into());
+        assert!(download_verified(&fake, BASE, &pk, &other, dir.path(), &pol(true)).is_err());
+        // A swapped download does not match the signed checksum.
+        let mut swapped = Fake {
+            files: fake.files.clone(),
+            downloaded: RefCell::new(false),
+        };
+        swapped
+            .files
+            .insert(format!("{BASE}{setup}"), b"evil".to_vec());
+        let e = download_verified(&swapped, BASE, &pk, &check, dir.path(), &pol(true)).unwrap_err();
+        assert!(format!("{e:#}").contains("checksum mismatch"), "{e:#}");
+    }
+
+    #[test]
+    fn the_setup_program_runs_silently_and_closes_varsto() {
+        let args = setup_args(Path::new("C:\\t\\setup.log"));
+        for want in [
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/CLOSEAPPLICATIONS",
+        ] {
+            assert!(args.iter().any(|a| a == want), "{want}");
+        }
+        assert!(args.iter().any(|a| a.starts_with("/LOG=")));
+    }
+
+    #[test]
+    fn the_daily_check_can_be_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(auto_update_enabled(dir.path()));
+        set_auto_update(dir.path(), false).unwrap();
+        assert!(!auto_update_enabled(dir.path()));
+        // Off: not even a network call (the step returns before check()).
+        let told = RefCell::new(0);
+        let step = auto_step(
+            dir.path(),
+            10_000_000,
+            &|_, _| *told.borrow_mut() += 1,
+            &|_| {},
+        );
+        assert_eq!(step, AutoStep::Idle);
+        assert_eq!(*told.borrow(), 0);
+        set_auto_update(dir.path(), true).unwrap();
+        assert!(auto_update_enabled(dir.path()));
+        // On, but checked a moment ago: idle as well.
+        fs::write(dir.path().join(AUTO_CHECKED), "9999990").unwrap();
+        let step = auto_step(dir.path(), 10_000_000, &|_, _| {}, &|_| {});
+        assert_eq!(step, AutoStep::Idle);
+    }
+
+    #[test]
     fn site_override() {
         // Only the default is checked here: the variable is process-wide.
         if std::env::var_os(SITE_ENV).is_none() {
@@ -1185,5 +2066,374 @@ mod tests {
             format!("{e:#}").contains("signed manifest is for version"),
             "{e:#}"
         );
+    }
+
+    // ----- the daily channel -------------------------------------------------
+
+    const DBASE: &str = "https://example.invalid/daily/latest/";
+    const DFILE: &str = "varsto-daily-linux-x86_64.tar.gz";
+    const BUILD: &str = "20261016-316c579";
+
+    /// The tests' daily list, signed with `sk`; `trusted` is the signed comment.
+    fn daily_files(sk: &SigningKey, body: &[u8], trusted: &str) -> Fake {
+        let sums = format!(
+            "{}  {DFILE}\n{}  {DAILY_SETUP}\n",
+            hex::encode(Sha256::digest(body)),
+            hex::encode(Sha256::digest(b"setup"))
+        );
+        let sig = sign(sk, sums.as_bytes(), trusted);
+        let mut files = HashMap::new();
+        files.insert(format!("{DBASE}{DFILE}"), body.to_vec());
+        files.insert(format!("{DBASE}SHA256SUMS"), sums.into_bytes());
+        files.insert(format!("{DBASE}SHA256SUMS.sig"), sig.into_bytes());
+        Fake {
+            files,
+            downloaded: RefCell::new(false),
+        }
+    }
+
+    fn daily_comment(ts: i64, build: &str) -> String {
+        format!("timestamp:{ts}\tfile:SHA256SUMS\tchannel:daily\tbuild:{build}")
+    }
+
+    fn dpol(home: &Path) -> Policy<'_> {
+        Policy {
+            home: Some(home),
+            allow_single_source: false,
+            now: 3_000_000,
+        }
+    }
+
+    #[test]
+    fn the_embedded_daily_key_is_not_the_release_key() {
+        let (d, r) = (daily_key(), release_key());
+        assert_eq!(d.id_hex().len(), 16);
+        assert_ne!(d.id, r.id);
+        assert_ne!(d.key.as_bytes(), r.key.as_bytes());
+        assert_eq!(d.label, "daily");
+        assert_eq!(r.label, "release");
+    }
+
+    #[test]
+    fn a_daily_signature_is_not_a_stable_one_and_the_other_way_round() {
+        let (daily_sk, daily_pk) = test_key(9);
+        let (rel_sk, rel_pk) = test_key(7);
+        let home = tempfile::tempdir().unwrap();
+        // The daily key signs the daily list: the daily check accepts it ...
+        let fake = daily_files(&daily_sk, b"build", &daily_comment(900_000, BUILD));
+        let c = check_daily_with(&fake, DBASE, &daily_pk, &dpol(home.path())).unwrap();
+        assert_eq!(c.latest_build, BUILD);
+        // ... and the stable verifier (the release key) refuses the same bytes.
+        let sums = &fake.files[&format!("{DBASE}SHA256SUMS")];
+        let sig = String::from_utf8(fake.files[&format!("{DBASE}SHA256SUMS.sig")].clone()).unwrap();
+        assert!(verify_signature(&rel_pk, sums, &sig).is_err());
+        // A stable-signed list handed to the daily check is refused too.
+        let fake = daily_files(&rel_sk, b"build", &daily_comment(900_000, BUILD));
+        assert!(check_daily_with(&fake, DBASE, &daily_pk, &dpol(home.path())).is_err());
+        // The whole stable download path refuses a list signed by the daily key.
+        let (daily_signed, check) = release(&daily_sk);
+        let dir = tempfile::tempdir().unwrap();
+        let e = download_verified(&daily_signed, BASE, &rel_pk, &check, dir.path(), &pol(true))
+            .unwrap_err();
+        assert!(
+            format!("{e:#}").contains("valid release signature"),
+            "{e:#}"
+        );
+        assert!(!*daily_signed.downloaded.borrow());
+        // Even the right key, but a comment that says nothing about the daily
+        // channel (the release format), is no daily list.
+        let fake = daily_files(
+            &daily_sk,
+            b"build",
+            "timestamp:900000\tfile:SHA256SUMS\tversion:9.9.9",
+        );
+        let e = check_daily_with(&fake, DBASE, &daily_pk, &dpol(home.path())).unwrap_err();
+        assert!(
+            format!("{e:#}").contains("not for the daily channel"),
+            "{e:#}"
+        );
+        // Another file name or build id in the signed comment.
+        let fake = daily_files(
+            &daily_sk,
+            b"build",
+            "timestamp:900000\tfile:manifest.json\tchannel:daily\tbuild:20261016-316c579",
+        );
+        assert!(check_daily_with(&fake, DBASE, &daily_pk, &dpol(home.path())).is_err());
+        let fake = daily_files(&daily_sk, b"build", &daily_comment(900_000, "latest"));
+        assert!(check_daily_with(&fake, DBASE, &daily_pk, &dpol(home.path())).is_err());
+    }
+
+    #[test]
+    fn the_daily_list_must_be_signed_and_unchanged() {
+        let (sk, pk) = test_key(9);
+        let home = tempfile::tempdir().unwrap();
+        let mut fake = daily_files(&sk, b"build", &daily_comment(900_000, BUILD));
+        fake.files.remove(&format!("{DBASE}SHA256SUMS.sig"));
+        let e = check_daily_with(&fake, DBASE, &pk, &dpol(home.path())).unwrap_err();
+        assert!(format!("{e:#}").contains("not signed"), "{e:#}");
+        // A list swapped after signing.
+        let mut fake = daily_files(&sk, b"build", &daily_comment(900_000, BUILD));
+        let other = format!("{}  {DFILE}\n", "0".repeat(64));
+        fake.files
+            .insert(format!("{DBASE}SHA256SUMS"), other.into_bytes());
+        assert!(check_daily_with(&fake, DBASE, &pk, &dpol(home.path())).is_err());
+        // The comment edited to name another build.
+        let mut fake = daily_files(&sk, b"build", &daily_comment(900_000, BUILD));
+        let sig = String::from_utf8(fake.files[&format!("{DBASE}SHA256SUMS.sig")].clone())
+            .unwrap()
+            .replace("316c579", "abcdef0");
+        fake.files
+            .insert(format!("{DBASE}SHA256SUMS.sig"), sig.into_bytes());
+        assert!(check_daily_with(&fake, DBASE, &pk, &dpol(home.path())).is_err());
+    }
+
+    #[test]
+    fn a_stale_replayed_or_future_daily_list_is_refused() {
+        let (sk, pk) = test_key(9);
+        let home = tempfile::tempdir().unwrap();
+        let now = 3_000_000;
+        let ok = daily_files(&sk, b"build", &daily_comment(now - 3600, BUILD));
+        check_daily_with(&ok, DBASE, &pk, &dpol(home.path())).unwrap();
+        // Older than the last accepted list: a rollback, per channel.
+        State {
+            last_timestamp: now - 100,
+            last_version: "20261015-aaaaaaa".into(),
+        }
+        .save_file(home.path(), DAILY_STATE_FILE)
+        .unwrap();
+        let e = check_daily_with(&ok, DBASE, &pk, &dpol(home.path())).unwrap_err();
+        assert!(format!("{e:#}").contains("older"), "{e:#}");
+        // The stable state file is not the daily one: it moves nothing here.
+        let home2 = tempfile::tempdir().unwrap();
+        State {
+            last_timestamp: now,
+            last_version: "9.9.9".into(),
+        }
+        .save(home2.path())
+        .unwrap();
+        check_daily_with(&ok, DBASE, &pk, &dpol(home2.path())).unwrap();
+        // A month old: frozen or replayed.
+        let old = daily_files(
+            &sk,
+            b"build",
+            &daily_comment(now - DAILY_MAX_AGE_SECS - 10, BUILD),
+        );
+        let e = check_daily_with(&old, DBASE, &pk, &dpol(home2.path())).unwrap_err();
+        assert!(format!("{e:#}").contains("days old"), "{e:#}");
+        // Signed in the future.
+        let future = daily_files(
+            &sk,
+            b"build",
+            &daily_comment(now + DAILY_FUTURE_SECS + 10, BUILD),
+        );
+        let e = check_daily_with(&future, DBASE, &pk, &dpol(home2.path())).unwrap_err();
+        assert!(format!("{e:#}").contains("future"), "{e:#}");
+    }
+
+    #[test]
+    fn a_build_older_than_the_installed_daily_build_is_refused() {
+        let (sk, pk) = test_key(9);
+        let home = tempfile::tempdir().unwrap();
+        record_daily(home.path(), "20261016-316c579", 900_000).unwrap();
+        let list = |build: &str, ts: i64| daily_files(&sk, b"b", &daily_comment(ts, build));
+        let check = |f: &Fake| check_daily_with(f, DBASE, &pk, &dpol(home.path()));
+        // Older day: refused, whatever the signing time says.
+        let e = check(&list("20261015-1111111", 990_000)).unwrap_err();
+        assert!(
+            format!("{e:#}").contains("older than the installed build"),
+            "{e:#}"
+        );
+        // The same build: up to date.
+        let c = check(&list("20261016-316c579", 995_000)).unwrap();
+        assert!(!c.newer && !c.available);
+        // Another build of the same day: newer only when signed later.
+        assert!(!check(&list("20261016-2222222", 899_000)).unwrap().newer);
+        assert!(check(&list("20261016-2222222", 950_000)).unwrap().newer);
+        // A later day.
+        let c = check(&list("20261017-3333333", 960_000)).unwrap();
+        assert!(c.newer);
+        assert_eq!(c.current_build.as_deref(), Some("20261016-316c579"));
+        // Not installed from daily: any signed build is an update.
+        let fresh = tempfile::tempdir().unwrap();
+        let c = check_daily_with(
+            &list("20250101-4444444", 960_000),
+            DBASE,
+            &pk,
+            &dpol(fresh.path()),
+        )
+        .unwrap();
+        assert!(c.newer && c.current_build.is_none());
+    }
+
+    #[test]
+    fn a_daily_download_is_checked_against_the_signed_list() {
+        if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            return; // the file name is picked per platform
+        }
+        let (sk, pk) = test_key(9);
+        let home = tempfile::tempdir().unwrap();
+        let fake = daily_files(&sk, b"daily bits", &daily_comment(900_000, BUILD));
+        let c = check_daily_with(&fake, DBASE, &pk, &dpol(home.path())).unwrap();
+        assert!(c.available);
+        let dir = tempfile::tempdir().unwrap();
+        let v = download_daily_verified(&fake, DBASE, &c, dir.path(), &dpol(home.path())).unwrap();
+        assert_eq!(fs::read(&v.path).unwrap(), b"daily bits");
+        // Only the daily state moved.
+        assert_eq!(
+            State::load_file(home.path(), DAILY_STATE_FILE).last_timestamp,
+            900_000
+        );
+        assert!(!home.path().join(STATE_FILE).exists());
+        // A swapped file (the site changed it after the list was signed).
+        let home = tempfile::tempdir().unwrap();
+        let mut bad = daily_files(&sk, b"daily bits", &daily_comment(900_000, BUILD));
+        bad.files
+            .insert(format!("{DBASE}{DFILE}"), b"evil bits".to_vec());
+        let c = check_daily_with(&bad, DBASE, &pk, &dpol(home.path())).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let e =
+            download_daily_verified(&bad, DBASE, &c, dir.path(), &dpol(home.path())).unwrap_err();
+        assert!(format!("{e:#}").contains("checksum mismatch"), "{e:#}");
+        // A failed check does not move the line.
+        assert!(!home.path().join(DAILY_STATE_FILE).exists());
+    }
+
+    #[test]
+    fn the_daily_file_per_platform() {
+        assert_eq!(
+            daily_file("linux", "x86_64", false, false),
+            Ok("varsto-daily-linux-x86_64.tar.gz")
+        );
+        // A Windows copy the setup program did not install is sent to the installer.
+        let e = daily_file("windows", "x86_64", false, false).unwrap_err();
+        assert!(e.contains("not installed with the setup program"), "{e}");
+        assert!(e.contains(DAILY_SETUP), "{e}");
+        assert!(!e.contains(".zip"), "{e}");
+        assert_eq!(
+            daily_file("windows", "x86_64", false, true),
+            Ok(DAILY_SETUP)
+        );
+        assert!(is_setup_file(DAILY_SETUP));
+        // The disk image and the Android and iOS packages are not installed by the CLI.
+        let e = daily_file("macos", "aarch64", true, false).unwrap_err();
+        assert!(e.contains("disk image"), "{e}");
+        assert!(daily_file("macos", "aarch64", false, false).is_err());
+        assert!(daily_file("android", "aarch64", false, false).is_err());
+        assert!(daily_file("linux", "aarch64", false, false).is_err());
+    }
+
+    #[test]
+    fn a_daily_install_remembers_its_channel_and_a_release_forgets_it() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(channel_note(home.path()), None);
+        record_daily(home.path(), BUILD, 900_000).unwrap();
+        assert_eq!(
+            channel_note(home.path()).as_deref(),
+            Some("daily build 20261016-316c579")
+        );
+        // A damaged or foreign record is no channel.
+        fs::write(
+            home.path().join(CHANNEL_FILE),
+            b"{\"channel\":\"daily\",\"build\":\"x\",\"signed_at\":1,\"version\":\"1\"}",
+        )
+        .unwrap();
+        assert_eq!(channel_note(home.path()), None);
+        fs::write(home.path().join(CHANNEL_FILE), b"nonsense").unwrap();
+        assert_eq!(channel_note(home.path()), None);
+        record_daily(home.path(), BUILD, 900_000).unwrap();
+        clear_channel(home.path());
+        assert_eq!(channel_note(home.path()), None);
+        assert!(valid_build_id("20261016-316c579"));
+        assert!(!valid_build_id("20261016"));
+        assert!(!valid_build_id("2026101-316c579"));
+        assert!(!valid_build_id("20261016-XYZ1234"));
+    }
+
+    #[test]
+    fn going_back_to_releases_from_a_daily_build_is_explained() {
+        let home = tempfile::tempdir().unwrap();
+        let (_, mut check) = release(&test_key(7).0);
+        check.newer = false;
+        assert!(stable_hint(home.path(), &check).is_none());
+        record_daily(home.path(), BUILD, 900_000).unwrap();
+        let h = stable_hint(home.path(), &check).unwrap();
+        assert!(h.contains(BUILD) && h.contains("by hand"), "{h}");
+        check.newer = true;
+        assert!(stable_hint(home.path(), &check).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_archive_replaces_the_binary_atomically() {
+        let work = tempfile::tempdir().unwrap();
+        let src = work.path().join("src/varsto-daily");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("varsto"), b"new binary").unwrap();
+        let pack = |name: &str| {
+            let archive = work.path().join(name);
+            let st = std::process::Command::new("tar")
+                .arg("-czf")
+                .arg(&archive)
+                .arg("-C")
+                .arg(work.path().join("src"))
+                .arg("varsto-daily")
+                .status()
+                .unwrap();
+            assert!(st.success());
+            archive
+        };
+        let archive = pack("a.tar.gz");
+        let exe = work.path().join("bin-varsto");
+        fs::write(&exe, b"old binary").unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        install_archive(&archive, tmp.path(), &exe).unwrap();
+        assert_eq!(fs::read(&exe).unwrap(), b"new binary");
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&exe).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        // No staging file is left, and an archive without the binary changes nothing.
+        assert!(!work.path().join("bin-varsto.new").exists());
+        fs::remove_file(src.join("varsto")).unwrap();
+        fs::write(src.join("other"), b"x").unwrap();
+        let empty = pack("b.tar.gz");
+        let tmp2 = tempfile::tempdir().unwrap();
+        assert!(install_archive(&empty, tmp2.path(), &exe).is_err());
+        assert_eq!(fs::read(&exe).unwrap(), b"new binary");
+    }
+
+    #[test]
+    fn the_signing_script_signs_what_the_daily_key_verifies() {
+        // The list of the first signed daily build and the signature that
+        // scripts/sign-daily.sh made for it with the real daily key (public
+        // data: the file served at daily/latest/).
+        let sums = "e881f985e35d755f184c85e00a349ec9f99ea181a5963263b0dbd3bea605b355  varsto-daily-linux-x86_64.tar.gz\ncc3d46bb3f395f77a0ccfa946ce3a89bfd433e35381eda95a8257af0be0dcf20  varsto-daily-android-debug.apk\n21030bd4b1e8a1985e517cba30cba92f8f23f9f60a38ec9372658298bd82c24d  varsto-daily-windows-setup.exe\n33af812cf359115867bbd16ac66919e6162a41b3bc63aa5780cbf81664578487  varsto-daily-windows-x86_64.zip\nea6b57df15c5089c3392071b1e2d94896219052075e35b81c60b2477d48a1f4f  varsto-daily-macos-apple-silicon.dmg\ne6d57201ca60c8e813160b359c62cb0372b1e46b9a30570382dd98235712a64b  varsto-daily-ios-unsigned.ipa\n";
+        let sig = "untrusted comment: signature from the Varsto daily key\nRURxphXBFtyFQxIc8Bbm9D4n5+5aoJsBpOvVUJf6ujO9Cg9XsJT/MGK+DZ+P4QRw7i1ccCCA2klnfilOcmhUy9Pw+zK1Tvb4Eg0=\ntrusted comment: timestamp:1792145768	file:SHA256SUMS	channel:daily	build:20261016-316c579\nBTXQZQZolP8XiWbBj8r+EtJQ7BQHvG4/cXekbHxdFxB4X0Ytofox8i2zOxX9J1zHw3fxotQFGwTBK8u0VikuBw==\n";
+        let key = daily_key();
+        let trusted = verify_signature(&key, sums.as_bytes(), sig).unwrap();
+        assert_eq!(trusted_field(&trusted, "channel"), Some("daily"));
+        assert_eq!(trusted_field(&trusted, "file"), Some("SHA256SUMS"));
+        assert_eq!(trusted_field(&trusted, "build"), Some("20261016-316c579"));
+        // The release key does not accept it, and a changed list is refused.
+        assert!(verify_signature(&release_key(), sums.as_bytes(), sig).is_err());
+        assert!(verify_signature(&key, sums.replace('e', "f").as_bytes(), sig).is_err());
+        // The same bytes pass the whole daily check (with a clock near the signing time).
+        let mut files = HashMap::new();
+        files.insert(format!("{DBASE}SHA256SUMS"), sums.as_bytes().to_vec());
+        files.insert(format!("{DBASE}SHA256SUMS.sig"), sig.as_bytes().to_vec());
+        let fake = Fake {
+            files,
+            downloaded: RefCell::new(false),
+        };
+        let home = tempfile::tempdir().unwrap();
+        let policy = Policy {
+            home: Some(home.path()),
+            allow_single_source: false,
+            now: 1_792_145_768 + 3600,
+        };
+        let c = check_daily_with(&fake, DBASE, &key, &policy).unwrap();
+        assert_eq!(c.latest_build, "20261016-316c579");
+        assert!(c.newer);
     }
 }

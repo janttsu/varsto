@@ -6,6 +6,9 @@
 # Default targets: x86_64-unknown-linux-musl, x86_64-pc-windows-gnu and, when
 # cargo-zigbuild is available, aarch64-apple-darwin + x86_64-apple-darwin
 # (combined into one universal binary with llvm-lipo and packaged as Varsto.app).
+# Windows is not packaged here: the cross-compiled varsto.exe and varsto-window.exe
+# are staged in dist/windows/app and CI turns them into Varsto-<version>-setup.exe
+# (installer/windows/build.ps1, Inno Setup, on a Windows runner).
 # Output: website/public/downloads/<name>, SHA256SUMS, manifest.json, source archive,
 # and SHA256SUMS.sig when the release key is available (scripts/sign-release.sh;
 # without it the list stays unsigned and deploy.sh refuses to publish it).
@@ -36,14 +39,24 @@ build_target() {
       if [ "$have_zig" != 1 ]; then echo "!! cargo-zigbuild missing, cannot build $t" >&2; return 1; fi
       cargo zigbuild --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *musl*)
-      # musl-gcc when present (Debian/Ubuntu musl-tools); a glibc gcc with the
-      # distribution's default _FORTIFY_SOURCE emits __memcpy_chk, which musl lacks.
-      export CC_x86_64_unknown_linux_musl="${CC_x86_64_unknown_linux_musl:-$(command -v musl-gcc || echo gcc)}"
-      export CFLAGS_x86_64_unknown_linux_musl="${CFLAGS_x86_64_unknown_linux_musl:--U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0}"
+      # musl-gcc when present (Debian/Ubuntu musl-tools). Otherwise the host gcc:
+      # its distribution default _FORTIFY_SOURCE emits __memcpy_chk, which musl
+      # lacks, and its default C23 mode breaks linking against musl, so the
+      # fallback uses gnu17 and turns fortify off.
+      if musl_cc="$(command -v musl-gcc)"; then
+        musl_cflags="-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
+      else
+        musl_cc=gcc
+        musl_cflags="-std=gnu17 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
+      fi
+      export CC_x86_64_unknown_linux_musl="${CC_x86_64_unknown_linux_musl:-$musl_cc}"
+      export CFLAGS_x86_64_unknown_linux_musl="${CFLAGS_x86_64_unknown_linux_musl:-$musl_cflags}"
+      echo "   musl C compiler: $CC_x86_64_unknown_linux_musl (CFLAGS: $CFLAGS_x86_64_unknown_linux_musl)"
       cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *windows-gnu*)
       export CC_x86_64_pc_windows_gnu="${CC_x86_64_pc_windows_gnu:-x86_64-w64-mingw32-gcc}" AR_x86_64_pc_windows_gnu="${AR_x86_64_pc_windows_gnu:-x86_64-w64-mingw32-ar}"
-      cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
+      # varsto.exe (service, tray, command line) and varsto-window.exe (the native window, WebView2).
+      cargo build --release --target "$t" -p varsto-cli -p varsto-window 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *)
       cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
   esac
@@ -52,17 +65,21 @@ build_target() {
 for t in "${targets[@]}"; do
   echo "== building $t"
   if ! build_target "$t"; then echo "!! build failed for $t, skipping" >&2; continue; fi
+  case "$t" in
+    *windows*)
+      # Input of the installer build, not a download.
+      winapp="$root/dist/windows/app"
+      rm -rf "$winapp"; mkdir -p "$winapp"
+      cp "$root/target/$t/release/varsto.exe" "$root/target/$t/release/varsto-window.exe" "$winapp/"
+      cp "$root/README.md" "$root/LICENSE" "$root/NOTICE" "$root/TRADEMARK.md" "$winapp/"
+      continue
+      ;;
+  esac
   stage="$(mktemp -d)"
   name="varsto-$version-$t"
   mkdir -p "$stage/$name"
   cp "$root/README.md" "$root/LICENSE" "$root/NOTICE" "$root/TRADEMARK.md" "$stage/$name/"
   case "$t" in
-    *windows*)
-      cp "$root/target/$t/release/varsto.exe" "$stage/$name/"
-      printf '@echo off\r\nstart "" /B "%%~dp0varsto.exe" tray --open\r\n' > "$stage/$name/Varsto.cmd"
-      printf 'Varsto for Windows (alpha; cross-compiled, tested on Windows Server 2025 by the build pipeline).\r\n\r\nDouble-click Varsto.cmd: a tray icon appears, the background service starts and the\r\nlocal interface opens in your browser. Start at login: varsto.exe service install\r\nCommand line: varsto.exe --help. Updates: tray menu or varsto.exe update.\r\n' > "$stage/$name/README-Windows.txt"
-      (cd "$stage" && zip -qr "$out/$name.zip" "$name")
-      ;;
     *apple-darwin*)
       mac_bins+=("$root/target/$t/release/varsto")
       cp "$root/target/$t/release/varsto" "$stage/$name/"

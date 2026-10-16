@@ -275,13 +275,15 @@ final class ServiceClient {
 }
 
 /// The main window: the local interface in a WebKit view.
-final class MainWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
+final class MainWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate, WKScriptMessageHandler {
     let web: WKWebView
     var loadedURL = ""
 
     init() {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent() // the session token never touches disk
+        // Full screen of an element of the page (a video in the viewer) is allowed too.
+        if #available(macOS 12.3, *) { config.preferences.isElementFullscreenEnabled = true }
         web = WKWebView(frame: .zero, configuration: config)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -290,17 +292,52 @@ final class MainWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, 
         window.minSize = NSSize(width: 720, height: 480)
         window.center()
         window.setFrameAutosaveName("VarstoMain")
+        // The visualization page asks for the window's own full-screen mode (the green button's).
+        window.collectionBehavior.insert(.fullScreenPrimary)
         window.contentView = web
         super.init(window: window)
         window.delegate = self
         web.navigationDelegate = self
         web.uiDelegate = self
+        // WKWebView ignores window.print(): the page posts here instead (print / save as PDF
+        // of the recovery package).
+        web.configuration.userContentController.add(self, name: "varstoPrint")
+        // Full screen on the page's request: { fullscreen: Bool }.
+        web.configuration.userContentController.add(self, name: "varstoShell")
+    }
+
+    /// Tell the page the window's full-screen state, so its button and Esc handling follow it
+    /// (also when the user left with the green button or the system gesture).
+    private func notifyFullscreen(_ on: Bool) {
+        web.evaluateJavaScript("window.varstoShellFullscreen && window.varstoShellFullscreen(\(on ? "true" : "false"))", completionHandler: nil)
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) { notifyFullscreen(true) }
+    func windowDidExitFullScreen(_ notification: Notification) { notifyFullscreen(false) }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "varstoShell" {
+            guard let window = window, let body = message.body as? [String: Any], let on = body["fullscreen"] as? Bool else { return }
+            if on != window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
+            return
+        }
+        guard message.name == "varstoPrint", let window = window else { return }
+        let info = NSPrintInfo.shared
+        info.horizontalPagination = .fit
+        info.isVerticallyCentered = false
+        let op = web.printOperation(with: info)
+        op.view?.frame = web.bounds
+        op.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
     func show(url: URL?) {
-        if let url = url, url.absoluteString != loadedURL {
+        // Each call gets a fresh one-time start code, so the URL always differs. Reloading for
+        // that would throw away the page the user is working in (a half-filled form, an open
+        // dialog) whenever the Dock icon is clicked: load only when nothing is loaded yet or the
+        // service moved to another port.
+        if let url = url, needsLoad(url) {
             loadedURL = url.absoluteString
             web.load(URLRequest(url: url))
         } else if web.url == nil {
@@ -309,6 +346,15 @@ final class MainWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, 
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    private func needsLoad(_ url: URL) -> Bool {
+        guard !loadedURL.isEmpty, let shown = web.url, shown.host == url.host, shown.port == url.port else { return true }
+        return false
+    }
+
+    // A failed load must not block the next attempt.
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { loadedURL = "" }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { loadedURL = "" }
 
     // The page's QR scanner asks for the camera: allowed for the local interface only
     // (macOS still asks the user once, with NSCameraUsageDescription).
