@@ -47,6 +47,7 @@ varsto --home ~/.varsto-laptop sync
 varsto install                             # Linux: varsto on PATH, tray at login, menu entry. Background sync (systemd user unit / macOS launch agent) is set up by any command once a vault exists; varsto uninstall turns it off
 varsto tray                                # Linux/Windows: tray icon + background service (macOS: Varsto.app; Windows: use the installer, docs/windows.md)
 varsto update --check                      # self-update from the download page (also checked automatically)
+varsto update --daily                      # the newest daily (test) build instead of a release; signed with its own key, never automatic
 varsto transfers --watch                   # uploads, downloads and peer traffic running now
 
 # on another device that can reach the same storage:
