@@ -10,8 +10,12 @@ During alpha development, storage formats may change without migration paths. On
 |---|---|---|---|---|
 | 0 (alpha-0) | 0.0.1-alpha.0 | 0.0.1-alpha.0 to 0.0.1-alpha.3 (no `v0.0.1-alpha.3` tag exists; the last format-0 reader tag is `v0.0.1-alpha.2`) | none (`varsto pull` and `varsto fsck` of those versions) | see the format version 1 note below |
 | 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, including 0.0.1-alpha.13 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
-| 2 (blocks, packs and keyed chunker, alpha-0-format.md section 62) | unreleased (0.0.1-alpha.15) | not yet released | none yet | none yet |
+| 2 (blocks, packs and keyed chunker, alpha-0-format.md section 62) | 0.0.1-alpha.15 | 0.0.1-alpha.15 and later. Vaults of format 1 (0.0.1-alpha.14 and earlier) are not read: alpha.15 refuses them and says to recreate the vault | none yet (`varsto pull` and `varsto fsck` of the same version) | `v0.0.1-alpha.15` |
 | 3 (planned: signed records, folder key grants) | not yet assigned | not yet released | none yet | none yet |
+
+## Format version 2 (0.0.1-alpha.15)
+
+`FORMAT_VERSION` is 2. There is no migration from format 1: block objects of their own (`chunks/`) are not read, so an alpha.14 vault opens without its data. Checked in the lab (`upgrade-from-alpha-14`) with the format number left at 1: `status` worked and `fsck --verify` reported every block of the vault missing. With the bump an alpha.15 build refuses a format 1 vault when it opens it or joins through its storage and says to recreate it (`varsto reset --yes`, `varsto init`, then sync the files into the new vault). Alpha.14 refuses a format 2 vault with "vault format version 2 is not readable by this version (1)". Release rule 3 (a reader for the previous format) is met by the alpha.14 binary, which stays downloadable and is the tool to read an alpha.14 vault.
 
 ## Release rules
 

@@ -85,8 +85,17 @@ def v(vm, args, json_out=True, check_rc=True, env=""):
 
 
 def tree_hashes(vm, path):
-    out = run(vm, f"cd {shlex.quote(path)} 2>/dev/null && find . -type f ! -name '*.varsto-placeholder' ! -name '.varsto-tmp-*' -print0 | sort -z | xargs -0 -r sha256sum").stdout
+    out = run(vm, f"cd {shlex.quote(path)} 2>/dev/null && find . -type f ! -name '*.varsto-placeholder' ! -name '.varsto-tmp-*' ! -name '.varsto-folder' -print0 | sort -z | xargs -0 -r sha256sum").stdout
     return {line[66:]: line[:64] for line in out.splitlines() if line}
+
+
+def bucket_packs():
+    """The pack objects in the S3 bucket (format 2: `packs/<xx>/<id>`; the
+    pack indexes and tombstone lists under packs/index and packs/tombstones
+    are not packs), smallest first."""
+    root = lab.DIR / "s3" / BUCKET / "packs"
+    out = [p for p in root.glob("??/*") if p.is_file()]
+    return sorted(out, key=lambda p: (p.stat().st_size, p.name))
 
 
 def same_tree(a, b, what):
@@ -183,8 +192,11 @@ def s_init():
     check(push["files_changed"] >= 150, f"pushed {push['files_changed']} files")
     st = v("vl-laptop", "status")
     check(st["folders"][0]["chunks_without_storage_copy"] == 0, "chunks without a storage copy")
-    objs = list((lab.DIR / "s3" / BUCKET / "chunks").rglob("*"))
-    check(len(objs) > 20, f"only {len(objs)} objects in the bucket")
+    # Format 2 stores every block in a pack: no object of its own per block.
+    packs = bucket_packs()
+    check(packs, "no pack in the bucket")
+    check(sum(p.stat().st_size for p in packs) > 6 << 20, f"only {sum(p.stat().st_size for p in packs)} bytes of packs in the bucket")
+    check(not list((lab.DIR / "s3" / BUCKET / "chunks").rglob("*")), "block objects of their own in the bucket")
     CTX["docs"] = tree_hashes("vl-laptop", "/home/varsto/data/docs")
 
 
@@ -273,7 +285,7 @@ def s_selective():
     v("vl-pub", "folder attach docs /home/varsto/sel --selective", json_out=False)
     v("vl-pub", "sync")
     ph = int(run("vl-pub", "find ~/sel -name '*.varsto-placeholder' | wc -l").stdout)
-    real = int(run("vl-pub", "find ~/sel -type f ! -name '*.varsto-placeholder' | wc -l").stdout)
+    real = int(run("vl-pub", "find ~/sel -type f ! -name '*.varsto-placeholder' ! -name '.varsto-folder' | wc -l").stdout)
     check(ph >= 150 and real == 0, f"placeholders {ph}, files {real}")
     v("vl-pub", "folder fetch docs big.bin")
     got = run("vl-pub", "sha256sum ~/sel/big.bin").stdout.split()[0]
@@ -285,12 +297,14 @@ def s_selective():
 
 @scenario("damage-and-repair")
 def s_repair():
-    chunks = sorted(p for p in (lab.DIR / "s3" / BUCKET / "chunks").rglob("*") if p.is_file())
-    victim = chunks[len(chunks) // 2]
+    # Format 2: blocks live in packs. The conflicts above made small packs next
+    # to the first push's large one: flip a byte in the largest, remove the smallest.
+    packs = bucket_packs()
+    check(len(packs) >= 2, f"{len(packs)} packs in the bucket, need 2")
+    victim, gone = packs[-1], packs[0]
     data = bytearray(victim.read_bytes())
     data[len(data) // 2] ^= 0xFF
     victim.write_bytes(bytes(data))
-    gone = chunks[len(chunks) // 3]
     gone.unlink()
     # rclone serve s3 lists from a 5 s directory cache and drops the
     # connection when a listed file is gone: let it notice first.
@@ -443,6 +457,10 @@ def drop_bucket_chunks():
     import shutil
     shutil.rmtree(lab.DIR / "s3" / BUCKET / "chunks", ignore_errors=True)
     (lab.DIR / "s3" / BUCKET / "chunks").mkdir()
+    # Format 2: the blocks are in packs (packs/<xx>/<id>); the pack indexes and
+    # tombstone lists stay, as they are no blocks.
+    for d in (lab.DIR / "s3" / BUCKET / "packs").glob("??"):
+        shutil.rmtree(d, ignore_errors=True)
 
 
 @scenario("p2p-setup")
@@ -702,7 +720,7 @@ def s_disk_init():
     check(60_000 < ratio < 70_000 and n["Reserved block count"] == 0, f"mkfs options: {n}")
     # Every object on the drive hashes to its name (a full check reads them back).
     chk = dl("disk check 'Blue 4GB' --full")
-    files = int(run(DL_VM, f"find {shlex.quote(mount)}/varsto/chunks -type f ! -name '.*' | wc -l").stdout)
+    files = int(run(DL_VM, f"find {shlex.quote(mount)}/varsto/packs -type f ! -name '.*' | wc -l").stdout)
     check(not chk["bad"] and not chk["missing"] and chk["objects_checked"] == files, f"full check: {chk}, {files} files")
     um = dl("disk unmount 'Blue 4GB'")
     CTX["disk_init"]["unmount"] = [s["step"] for s in um["steps"]]
@@ -865,7 +883,7 @@ def s_staged_move():
     want = run(DL_VM, "cd ~/dl-docs && find . -type f | sort | xargs sha256sum | sha256sum").stdout.split()[0]
 
     def box_objects():
-        return int(run(DL_VM, "find ~/dl-box/chunks -type f ! -name '.*' | wc -l").stdout)
+        return int(run(DL_VM, "find ~/dl-box/packs -type f ! -name '.*' ! -path '*/index/*' ! -path '*/tombstones/*' | wc -l").stdout)
 
     before = box_objects()
     check(before > 0, "the box holds nothing after the push")
@@ -908,93 +926,6 @@ def s_staged_move():
     got = run(DL_VM, "cd ~/dl-docs && find . -type f | sort | xargs sha256sum | sha256sum").stdout.split()[0]
     check(got == want, "the local files changed")
     dl_clean()
-
-
-# ----- devices on different versions (alpha.9 and this build) -------------------------------
-
-def v9(vm, args, json_out=True, check_rc=True):
-    """Like v(), with the alpha.9 binary (/opt/varsto/varsto9)."""
-    cmd = f"{ENV} /opt/varsto/varsto9 {'--json ' if json_out else ''}{args}"
-    r = run(vm, cmd, check_rc=check_rc)
-    out = r.stdout.strip()
-    if not check_rc and r.returncode != 0:
-        return {"_failed": True, "_rc": r.returncode, "_err": (r.stderr or "").strip(), "_out": out}
-    if json_out:
-        try:
-            return json.loads(out)
-        except json.JSONDecodeError:
-            return out
-    return out
-
-
-@scenario("mixed-versions")
-def s_mixed():
-    check(run("vl-laptop", "test -x /opt/varsto/varsto9", check_rc=False).returncode == 0, "no alpha.9 binary on the VMs")
-    s_reset()
-    # The laptop stays on alpha.9; desktop and pub run this build.
-    out = v9("vl-laptop", "init --name laptop")
-    key = out["vault_key"]
-    v9("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
-                     f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
-    gen_data("vl-laptop", "/home/varsto/data/docs", seed=9, big_mb=2, small=20)
-    v9("vl-laptop", "folder add docs /home/varsto/data/docs", json_out=False)
-    v9("vl-laptop", "push docs")
-    s3 = (f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http --s3-access-key-id {lab.S3['key']} "
-          "--storage-name cloud")
-    v("vl-desktop", f"join --name desktop {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(key)}")
-    v("vl-pub", f"join --name pub {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(key)}")
-    for vm in ("vl-desktop", "vl-pub"):
-        v(vm, "folder attach docs /home/varsto/data/docs", json_out=False)
-        v(vm, "sync")
-    same_tree(tree_hashes("vl-laptop", "/home/varsto/data/docs"), tree_hashes("vl-desktop", "/home/varsto/data/docs"),
-              "alpha.9 laptop vs new desktop")
-    # Both ways.
-    run("vl-desktop", "echo from-new > ~/data/docs/from-new.txt")
-    v("vl-desktop", "sync")
-    v9("vl-laptop", "sync")
-    check(run("vl-laptop", "cat ~/data/docs/from-new.txt", check_rc=False).stdout.strip() == "from-new",
-          "alpha.9 did not get a file written by the new version")
-    # Policies set on either version reach the other.
-    v("vl-desktop", "policy set docs --min-copies 1 --verified-within-days 30", json_out=False)
-    v9("vl-laptop", "sync")
-    st = v9("vl-laptop", "status")
-    pol = [f.get("policy") for f in st["folders"] if f["name"] == "docs"]
-    CTX["mixed_policy_seen_by_a9"] = pol
-    check(pol and pol[0] and "30" in json.dumps(pol[0]), f"alpha.9 does not see the policy set by the new version: {pol}")
-    v9("vl-laptop", "policy set docs --min-copies 1 --verified-within-days 60", json_out=False)
-    v("vl-desktop", "sync")
-    pol = [f.get("policy") for f in v("vl-desktop", "status")["folders"] if f["name"] == "docs"]
-    check(pol and "60" in json.dumps(pol[0]), f"the new version does not see the policy set by alpha.9: {pol}")
-    # The new version removes a device; the alpha.9 device follows the new key.
-    v("vl-desktop", "device revoke pub --yes")
-    v9("vl-laptop", "sync")
-    run("vl-desktop", "echo after-revoke-by-new > ~/data/docs/r1.txt")
-    v("vl-desktop", "sync")
-    v9("vl-laptop", "sync")
-    check(run("vl-laptop", "cat ~/data/docs/r1.txt", check_rc=False).stdout.strip() == "after-revoke-by-new",
-          "alpha.9 lost the vault after the new version removed a device")
-    # And the other way round: alpha.9 removes a device the new version knows.
-    kit = v("vl-desktop", "recovery kit", json_out=False)
-    words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
-    v("vl-work", f"join --name work {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
-    v9("vl-laptop", "sync")
-    v9("vl-laptop", "device revoke work --yes", json_out=False)
-    v("vl-desktop", "sync")
-    check(any(d["name"] == "work" and d["revoked"] for d in v("vl-desktop", "device list")),
-          "the new version did not accept a removal made by alpha.9")
-    run("vl-laptop", "echo after-revoke-by-a9 > ~/data/docs/r2.txt")
-    v9("vl-laptop", "sync")
-    v("vl-desktop", "sync")
-    check(run("vl-desktop", "cat ~/data/docs/r2.txt", check_rc=False).stdout.strip() == "after-revoke-by-a9",
-          "the new version lost the vault after alpha.9 removed a device")
-    # Upgrading in place: the laptop's own directory, opened by this build.
-    v("vl-laptop", "sync")
-    v("vl-laptop", "fsck")
-    run("vl-laptop", "echo after-upgrade > ~/data/docs/up.txt")
-    v("vl-laptop", "sync")
-    v("vl-desktop", "sync")
-    check(run("vl-desktop", "cat ~/data/docs/up.txt", check_rc=False).stdout.strip() == "after-upgrade",
-          "the upgraded laptop does not sync")
 
 
 # ----- when things break: storage outage, black-holed network, crash, clock skew --------------
@@ -1169,7 +1100,7 @@ PY""")
     res["pull_1g"] = timed_rss("vl-desktop", "pull large")[:2]
     CTX["scale"] = res
     print("      scale (seconds, peak MiB):", res, flush=True)
-    n = int(run("vl-desktop", "find ~/data/many -type f | wc -l").stdout)
+    n = int(run("vl-desktop", "find ~/data/many -type f ! -name '.varsto-folder' | wc -l").stdout)
     check(n == 20000, f"desktop has {n} of 20000 files")
     a = run("vl-laptop", "sha256sum ~/data/large/disk.img").stdout.split()[0]
     b = run("vl-desktop", "sha256sum ~/data/large/disk.img").stdout.split()[0]
@@ -1345,9 +1276,9 @@ def s_scrub():
     unchanged size and time aside as .damaged-<date>, putting the synced
     version back; an edited file with a new time is left alone."""
     fresh_pair()
-    singles = sorted(p for p in (lab.DIR / "s3" / BUCKET / "chunks").rglob("*") if p.is_file())
-    check(singles, "no single block objects in the bucket")
-    victim = singles[len(singles) // 2]
+    packs = bucket_packs()
+    check(packs, "no pack in the bucket")
+    victim = packs[-1]  # one flipped byte damages the one block it lies in
     data = bytearray(victim.read_bytes())
     data[len(data) // 3] ^= 0xFF
     victim.write_bytes(bytes(data))
@@ -1597,12 +1528,232 @@ def s_restic():
         run(vm, "pkill -x varsto; true", check_rc=False)
 
 
+# ----- upgrade from the last release (alpha.14) --------------------------------------------
+
+A14_URL = "https://varsto.net/downloads/varsto-0.0.1-alpha.14-x86_64-unknown-linux-musl.tar.gz"
+A14_SUMS = "https://varsto.net/downloads/SHA256SUMS"
+A14_BIN = "/opt/varsto/varsto14"
+# What this build does with a vault made by alpha.14: "opens" (format version
+# unchanged) or "refused" (format version moved on: refused with a message
+# that says the vault must be recreated).
+UPGRADE_EXPECT = "refused"
+
+
+def fetch_alpha14():
+    """The released alpha.14 Linux binary (cached under the lab directory),
+    its package checked against the published SHA256SUMS."""
+    import urllib.request
+    d = lab.DIR / "alpha14"
+    binp = d / "varsto"
+    if binp.exists():
+        return binp
+    d.mkdir(exist_ok=True)
+    name = A14_URL.rsplit("/", 1)[1]
+    pkg = d / name
+    pkg.write_bytes(urllib.request.urlopen(A14_URL, timeout=120).read())
+    sums = urllib.request.urlopen(A14_SUMS, timeout=60).read().decode()
+    want = next(line.split()[0] for line in sums.splitlines() if line.strip().endswith(name))
+    got = hashlib.sha256(pkg.read_bytes()).hexdigest()
+    check(got == want, f"alpha.14 package: sha256 {got} but SHA256SUMS says {want}")
+    with tarfile.open(pkg) as t:
+        member = next(m for m in t.getmembers() if m.name.endswith("/varsto") and m.isfile())
+        binp.write_bytes(t.extractfile(member).read())
+    binp.chmod(0o755)
+    return binp
+
+
+def copy_to_vm(vm, local, remote):
+    lab.sh(["scp", "-q", "-i", str(lab.key_path()), "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR", str(local), f"{lab.USER}@{lab.ip_of(vm)}:{remote}.new"])
+    run(vm, f"chmod 755 {remote}.new && mv {remote}.new {remote}")
+
+
+def v14(vm, args, json_out=True, check_rc=True, env="", home=""):
+    """Like v(), with the released alpha.14 binary (/opt/varsto/varsto14)."""
+    cmd = f"{ENV} {env} {A14_BIN} {home} {'--json ' if json_out else ''}{args}"
+    r = run(vm, cmd, check_rc=check_rc)
+    out = r.stdout.strip()
+    if not check_rc and r.returncode != 0:
+        return {"_failed": True, "_rc": r.returncode, "_err": (r.stderr or "").strip(), "_out": out}
+    if json_out:
+        try:
+            return json.loads(out)
+        except json.JSONDecodeError:
+            return out
+    return out
+
+
+def outcome(r):
+    """(exit code, message) of a v(..., check_rc=False) result."""
+    if isinstance(r, dict) and r.get("_failed"):
+        return r["_rc"], (str(r.get("_err") or "") + " " + json.dumps(r.get("_out")))[:700]
+    return 0, "ok"
+
+
+@scenario("upgrade-from-alpha-14")
+def s_upgrade():
+    """A vault made and filled with the released alpha.14 (S3 and a local
+    storage, a folder of a few thousand small files, one of large files, a
+    shared folder) is opened with this build: status, fsck --verify, a fresh
+    device joining with the vault words, byte-identical files, new files both
+    ways, an unforked ledger, `verify`. Everything seen is kept in
+    CTX["upgrade"] (results.json). When UPGRADE_EXPECT is "refused" the old
+    vault must be refused with a clear message instead."""
+    old = fetch_alpha14()
+    s_reset()
+    for vm in lab.DEVICES:
+        run(vm, "rm -rf ~/share-home ~/shared ~/box ~/deskbox", check_rc=False)
+    for vm in ("vl-laptop", "vl-desktop", "vl-pub", "vl-work"):
+        copy_to_vm(vm, old, A14_BIN)
+    seen = CTX["upgrade"] = {"alpha14_sha256": hashlib.sha256(old.read_bytes()).hexdigest()}
+    ver = run("vl-laptop", f"{A14_BIN} --version").stdout.strip()
+    check("alpha.14" in ver, f"old binary says {ver}")
+    s3 = (f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http --s3-access-key-id {lab.S3['key']} "
+          "--storage-name cloud")
+    # --- alpha.14 builds the vault
+    v14("vl-laptop", "init --name laptop")
+    v14("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                      f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
+    v14("vl-laptop", "storage add-local box /home/varsto/box --place home", json_out=False)
+    run("vl-laptop", """python3 - <<'PY'
+import random, pathlib
+r = random.Random(14)
+root = pathlib.Path('/home/varsto/data/many')
+for i in range(3000):
+    d = root / f"d{i % 30:02d}" / f"e{i % 7:02d}"; d.mkdir(parents=True, exist_ok=True)
+    (d / f"f{i:04d}.txt").write_bytes(r.randbytes(r.randint(50, 5000)))
+(root / "Ääkköset ja välilyönnit.txt").write_text("unicode name\\n")
+big = pathlib.Path('/home/varsto/data/large'); big.mkdir(parents=True, exist_ok=True)
+for n, mb in (("a.bin", 40), ("b.bin", 70), ("c.bin", 5)):
+    (big / n).write_bytes(r.randbytes(mb << 20))
+(big / "zeros.bin").write_bytes(bytes(8 << 20))
+m = pathlib.Path('/home/varsto/data/media'); m.mkdir(parents=True, exist_ok=True)
+(m / "shared.bin").write_bytes(r.randbytes(9 << 20))
+(m / "note.txt").write_text("shared note\\n")
+PY""")
+    for name in ("many", "large", "media"):
+        v14("vl-laptop", f"folder add {name} /home/varsto/data/{name}", json_out=False)
+    for name in ("many", "large", "media"):
+        v14("vl-laptop", f"push {name}")
+    kit = v14("vl-laptop", "recovery kit", json_out=False)
+    words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
+    check(len(words.split()) == 24, "no recovery words")
+    v14("vl-desktop", f"join --name desktop {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
+    v14("vl-desktop", "storage add-local deskbox /home/varsto/deskbox --place home", json_out=False)
+    for name in ("many", "large", "media"):
+        v14("vl-desktop", f"folder attach {name} /home/varsto/data/{name}", json_out=False)
+        v14("vl-desktop", f"sync {name}")
+    # A member of the shared folder (another person: a vault of its own).
+    home = "--home /home/varsto/share-home"
+    req = v14("vl-work", "share request --name ville", home=home)
+    tok = v14("vl-laptop", f"share create media --to {shlex.quote(req['request_code'])} --fingerprint {shlex.quote(req['fingerprint'])}", json_out=False)
+    token = re.search(r"(vst[12]\.\S+)", tok)
+    check(token, "no sealed token: " + tok[-300:])
+    out = v14("vl-work", f"share accept --name ville-pc --token {shlex.quote(token.group(1))} --storage-name owner "
+                         f"--s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http --s3-access-key-id {lab.S3['key']}",
+              json_out=False, home=home)
+    check("joined shared folder media" in out, out[-300:])
+    v14("vl-laptop", "push media", check_rc=False)
+    v14("vl-work", "folder attach media /home/varsto/shared", json_out=False, home=home)
+    v14("vl-work", "sync", home=home)
+    for vm in ("vl-laptop", "vl-desktop"):
+        v14(vm, "sync")
+    base = {name: tree_hashes("vl-laptop", f"/home/varsto/data/{name}") for name in ("many", "large", "media")}
+    check(len(base["many"]) == 3001 and len(base["large"]) == 4, f"baseline sizes: {[len(x) for x in base.values()]}")
+    for name, tree in base.items():
+        same_tree(tree, tree_hashes("vl-desktop", f"/home/varsto/data/{name}"), f"alpha.14 laptop vs desktop, {name}")
+    same_tree(base["media"], tree_hashes("vl-work", "/home/varsto/shared"), "alpha.14 shared folder on the member")
+    fsck14 = v14("vl-laptop", "fsck --verify")
+    check(not fsck14["chunks_missing"] and not fsck14.get("objects_corrupt"), f"alpha.14 fsck: {fsck14}")
+    seen["baseline_files"] = {k: len(t) for k, t in base.items()}
+    # --- this build opens it
+    seen["new_version"] = run("vl-laptop", "varsto --version").stdout.strip()
+    st = v("vl-laptop", "status", check_rc=False)
+    seen["status_rc"], seen["status"] = outcome(st)
+    fsck = v("vl-laptop", "fsck --verify", check_rc=False)
+    seen["fsck_rc"], seen["fsck"] = outcome(fsck)
+    print("      upgrade:", json.dumps(seen)[:900], flush=True)
+    if UPGRADE_EXPECT == "refused":
+        # Format 2 (blocks in packs) does not read the objects of format 1:
+        # the vault is refused when it is opened, and the message says what to do.
+        text = (str(seen["status"]) + str(seen["fsck"])).lower()
+        check(seen["status_rc"] != 0 and seen["fsck_rc"] != 0 and "recreate the vault" in text and "alpha.14" in text,
+              f"the new build did not refuse the alpha.14 vault clearly: {seen}")
+        # Joining through the storage of an alpha.14 vault is refused the same way.
+        j = v("vl-pub", f"join --name pub {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}", check_rc=False)
+        rc, msg = outcome(j)
+        seen["join_rc"], seen["join"] = rc, msg
+        check(rc != 0 and "recreate the vault" in msg.lower(), f"joining an alpha.14 vault: {rc} {msg}")
+        # The old binary keeps working on its own vault, and refuses a vault of the new format.
+        check(outcome(v14("vl-laptop", "status", check_rc=False))[0] == 0, "alpha.14 cannot open its own vault any more")
+        run("vl-desktop", "rm -rf ~/newfmt", check_rc=False)
+        v("vl-desktop", "--home /home/varsto/newfmt init --name newfmt", check_rc=True)
+        r = v14("vl-desktop", "status", home="--home /home/varsto/newfmt", check_rc=False)
+        rc, msg = outcome(r)
+        seen["alpha14_on_new_vault"] = [rc, msg]
+        check(rc != 0 and "not readable" in msg, f"alpha.14 on a format 2 vault: {rc} {msg}")
+        # The way forward the message names: reset, init, sync the files into a new vault.
+        # The new vault goes into the emptied bucket (rclone serve s3 lists from a 5 s cache).
+        for d in (lab.DIR / "s3" / BUCKET).glob("*"):
+            shutil.rmtree(d) if d.is_dir() else d.unlink()
+        time.sleep(6)
+        v("vl-laptop", "reset --yes", json_out=False)
+        v("vl-laptop", "init --name laptop")
+        v("vl-laptop", f"storage add-s3 fresh --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                       f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
+        v("vl-laptop", "folder add many2 /home/varsto/data/many", json_out=False)
+        v("vl-laptop", "push many2")
+        f = v("vl-laptop", "fsck --verify")
+        check(not f["chunks_missing"] and not f.get("objects_corrupt"), f"fsck of the recreated vault: {f}")
+        run("vl-desktop", "rm -rf ~/newfmt")
+        return
+    check(seen["status_rc"] == 0, f"status of the alpha.14 vault: {seen['status']}")
+    check(seen["fsck_rc"] == 0 and not fsck["chunks_missing"] and not fsck.get("objects_corrupt"), f"fsck --verify: {seen['fsck']}")
+    v("vl-desktop", "status")
+    v("vl-desktop", "fsck --verify")
+    for name in ("many", "large", "media"):
+        v("vl-laptop", f"sync {name}")
+        v("vl-desktop", f"sync {name}")
+        same_tree(base[name], tree_hashes("vl-laptop", f"/home/varsto/data/{name}"), f"laptop after the upgrade, {name}")
+        same_tree(base[name], tree_hashes("vl-desktop", f"/home/varsto/data/{name}"), f"desktop after the upgrade, {name}")
+    # A third, fresh device joins the old vault with its words.
+    v("vl-pub", f"join --name pub {s3}", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
+    for name in ("many", "large", "media"):
+        v("vl-pub", f"folder attach {name} /home/varsto/data/{name}", json_out=False)
+        v("vl-pub", f"sync {name}")
+        same_tree(base[name], tree_hashes("vl-pub", f"/home/varsto/data/{name}"), f"fresh device, {name}")
+    # New files on both devices; two-way sync converges.
+    run("vl-laptop", "head -c 3000000 /dev/urandom > ~/data/large/new-from-laptop.bin; echo laptop > ~/data/many/new-from-laptop.txt")
+    run("vl-desktop", "head -c 2000000 /dev/urandom > ~/data/large/new-from-desktop.bin; echo desktop > ~/data/many/new-from-desktop.txt")
+    for _ in range(2):
+        for vm in ("vl-laptop", "vl-desktop", "vl-pub"):
+            v(vm, "sync")
+    for name, ext in (("many", "txt"), ("large", "bin")):
+        t = tree_hashes("vl-laptop", f"/home/varsto/data/{name}")
+        check(f"./new-from-desktop.{ext}" in t and f"./new-from-laptop.{ext}" in t, f"{name}: a new file did not arrive")
+        same_tree(t, tree_hashes("vl-desktop", f"/home/varsto/data/{name}"), f"after new files, {name}, laptop vs desktop")
+        same_tree(t, tree_hashes("vl-pub", f"/home/varsto/data/{name}"), f"after new files, {name}, laptop vs pub")
+    for vm in ("vl-laptop", "vl-desktop", "vl-pub"):
+        f = v(vm, "fsck --verify")
+        check(not f["chunks_missing"] and not f.get("objects_corrupt") and not f.get("forked_devices"), f"{vm} fsck after the upgrade: {f}")
+        ls = v(vm, "ledger status")
+        check(not (isinstance(ls, dict) and ls.get("forked_devices")), f"{vm} ledger fork: {ls}")
+        seen[f"ledger_status_{vm}"] = ls
+    vr = v("vl-laptop", "verify run", check_rc=False)
+    check(outcome(vr)[0] == 0, f"verify run: {vr}")
+    seen["verify"] = vr
+    # The member of the shared folder stays on alpha.14 while the owner is on this build.
+    run("vl-laptop", "echo from-owner-after-upgrade > ~/data/media/after.txt")
+    v("vl-laptop", "sync media")
+    seen["alpha14_member_sync"] = outcome(v14("vl-work", "sync", home=home, check_rc=False))
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
-             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks, s_mixed,
+             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
              s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_scrub, s_restic, s_ledger_loss,
-             s_ledger_withhold]
+             s_ledger_withhold, s_upgrade]
 
 
 def main():

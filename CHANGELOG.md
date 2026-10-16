@@ -54,7 +54,12 @@ spec still names them because sections were written as the work was done.
   never kills a block the ledger still claims. Pushes, moves, repairs,
   storage removals and Strongroom conversions collect blocks across files
   into packs; imports pack each content. Reads of packs are bounded by the
-  pack target plus one block. Vaults of earlier formats are not read.
+  pack target plus one block. The storage format version is now 2: vaults of
+  format 1 (0.0.1-alpha.14 and earlier) are not read. Alpha.15 refuses them
+  when it opens one or joins through its storage, with a message that says to
+  recreate the vault (`varsto reset --yes`, `varsto init`, sync the files
+  again); alpha.14 refuses a format 2 vault. Keep the alpha.14 binary to read
+  an old vault.
 
 ## [0.0.1-alpha.14] - 2026-10-14
 

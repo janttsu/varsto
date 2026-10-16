@@ -1039,11 +1039,7 @@ impl Engine {
         })?;
         let meta: VaultMeta = serde_json::from_slice(&meta_bytes)?;
         if meta.format_version != crate::FORMAT_VERSION {
-            bail!(
-                "vault format version {} is not readable by this version ({})",
-                meta.format_version,
-                crate::FORMAT_VERSION
-            );
+            bail!("{}", crate::format_mismatch(meta.format_version));
         }
         let master = SecretKey::from_hex(vault_key_hex)?;
         let epochs = membership::discover_epochs(backend.as_ref(), &meta.vault_id, &master)?;
@@ -1452,10 +1448,7 @@ impl Engine {
         let vault: LocalVault = util::read_json(&home.join("vault.json"))
             .with_context(|| format!("no vault in {}", home.display()))?;
         if vault.format_version != crate::FORMAT_VERSION {
-            bail!(
-                "local vault format {} is not readable by this version",
-                vault.format_version
-            );
+            bail!("{}", crate::format_mismatch(vault.format_version));
         }
         util::private_home(home)?;
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
