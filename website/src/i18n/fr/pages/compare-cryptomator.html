@@ -1,0 +1,44 @@
+---
+title: Alternative à Cryptomator : Varsto et Cryptomator comparés
+nav: Compare
+output: compare/cryptomator/index.html
+description: Vous cherchez une alternative à Cryptomator qui synchronise en plus de chiffrer, sur votre propre stockage (S3, NAS, disques, rclone) ? À quoi sert Cryptomator, comment il fonctionne et comment il se compare à Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Toutes les comparaisons</a></p>
+    <h1>Varsto et Cryptomator</h1>
+    <p class="lead">Cryptomator chiffre un dossier, le coffre, afin qu’il puisse être conservé dans n’importe quel cloud sans que le fournisseur puisse le lire. Il est gratuit et open source, dispose d’applications de bureau et mobiles, et ne fait qu’une chose : le coffre. Acheminer le coffre vers un autre appareil est laissé au client du fournisseur de cloud.</p>
+
+    <h2>Comment fonctionne Cryptomator</h2>
+    <p>Un coffre est un dossier de fichiers et de répertoires chiffrés, avec à sa racine un fichier de configuration <code>vault.cryptomator</code>. Sur le bureau, le coffre apparaît comme un lecteur virtuel : les fichiers sont chiffrés et déchiffrés de façon transparente pendant que vous les utilisez, et il n’existe aucune copie non chiffrée sur le disque. Les noms de fichiers sont chiffrés eux aussi. Le contenu est chiffré avec AES (la combinaison <code>SIV_GCM</code> ou <code>SIV_CTRMAC</code>), et les clés maîtresses sont protégées par un mot de passe via scrypt et l’encapsulation de clé AES. Cryptomator ne déplace le coffre nulle part : vous le placez dans un dossier que Dropbox, Google Drive, OneDrive ou un autre client synchronise, et c’est ce client qui transporte les fichiers chiffrés entre les appareils. Il n’y a aucun registre des appareils ou des stockages qui détiennent une copie, aucun mécanisme de partage propre (quiconque possède le dossier du coffre et son mot de passe l’ouvre ; un produit distinct, Hub, gère l’accès pour les organisations) et aucune règle sur le nombre de copies requises.</p>
+
+    <h2>Côte à côte</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Cryptomator</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Où vivent vos fichiers</th><td>Dans un dossier de coffre sur votre appareil, et partout où le client cloud que vous utilisez copie ce dossier.</td><td>Sur vos propres appareils et sur les stockages que vous choisissez : buckets compatibles S3, n’importe quelle destination rclone, dossiers locaux ou réseau, et pools de disques amovibles.</td></tr>
+      <tr><th scope="row">Compte ou serveur central</th><td>Aucun pour Cryptomator lui-même ; le cloud où vous conservez le coffre a son propre compte.</td><td>Aucun. Il n’y a pas de serveur Varsto ; les appareils se trouvent via vos stockages et sur le réseau local.</td></tr>
+      <tr><th scope="row">Chiffrement</th><td>Côté client, avant que le client cloud ne voie les fichiers : chiffrement du contenu en AES, noms de fichiers chiffrés, clés maîtresses protégées par mot de passe. Mature et largement relu.</td><td>De bout en bout, côté client, avant que quoi que ce soit ne quitte l’appareil ; hybride post-quantique (ML-KEM pour les clés de partage, signatures Ed25519 + ML-DSA-65). Pas encore audité de façon indépendante.</td></tr>
+      <tr><th scope="row">Synchronisation entre appareils</th><td>Aucune en propre : c’est le client du fournisseur de cloud qui synchronise le dossier du coffre.</td><td>Oui : les appareils se synchronisent via vos stockages, et directement en pair à pair lorsqu’ils peuvent se joindre.</td></tr>
+      <tr><th scope="row">Sait où se trouve chaque copie</th><td>Non : Cryptomator ne voit que le dossier du coffre sur cet appareil.</td><td>Oui : un registre signé enregistre quel stockage et quel appareil détient chaque bloc ; des politiques de durabilité (par défaut 1 copie n’importe où, 1 externe, 1 sur vos propres appareils ou disques, vérifiée par un autre appareil sous 30 jours) avertissent lorsqu’une règle n’est pas respectée.</td></tr>
+      <tr><th scope="row">Partage avec d’autres personnes</th><td>Aucun mécanisme de partage propre : un coffre est ouvert par quiconque possède le dossier et le mot de passe.</td><td>Oui : un dossier est partagé avec un autre utilisateur par une clé scellée, les membres peuvent être retirés, et un membre peut être en lecture seule.</td></tr>
+      <tr><th scope="row">Disques amovibles et hors ligne</th><td>Un coffre peut être conservé sur n’importe quel disque, mais rien ne suit les disques absents.</td><td>Oui : les pools de disques sont remplis, vérifiés et reconnus à leur retour ; les fichiers situés sur un disque absent demandent ce disque.</td></tr>
+      <tr><th scope="row">Sauvegardes</th><td>Aucune en propre ; la gestion des versions du fournisseur de cloud, s’il y en a une, s’applique aux fichiers chiffrés.</td><td>Oui : choisissez un dossier sur n’importe quel appareil et Varsto en conserve des instantanés chiffrés en lecture seule sur vos stockages externes uniquement, jamais sur vos appareils, pendant le nombre de jours que vous choisissez (90 par défaut), puis supprime ceux qui ont expiré. Restaurez n’importe quel instantané dans un dossier que vous nommez, depuis l’application ou la ligne de commande.</td></tr>
+      <tr><th scope="row">Licence et prix</th><td>Open source (GPL-3.0), gratuit ; une licence commerciale est proposée aux éditeurs de logiciels.</td><td>Code source disponible (PolyForm Shield 1.0.0), gratuit ; vous ne payez que votre fournisseur de stockage.</td></tr>
+      <tr><th scope="row">Maturité</th><td>Projet mature et ancien.</td><td>Alpha : pas pour des données de production, les formats peuvent encore changer.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Lequel choisir</h2>
+    <div class="grid two">
+      <div class="card"><h3>Cryptomator</h3><p>Choisissez Cryptomator quand vous utilisez déjà un client cloud qui vous convient et que vous voulez en chiffrer le dossier avec un outil mature et open source, sans avoir besoin de savoir où se trouvent les copies ni de partager avec d’autres.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choisissez Varsto quand le chiffrement doit venir avec la synchronisation elle-même, à travers des buckets, des partages NAS et des disques amovibles, avec un registre de l’emplacement de chaque copie, des politiques qui avertissent quand une copie manque, et le partage avec d’autres personnes.</p></div>
+    </div>
+    <p class="note">Varsto est un logiciel alpha : ne lui confiez pas de données dont vous n’avez aucune autre copie, et sa cryptographie n’a pas été auditée de façon indépendante. Les autres produits présentés ici sont matures. Les faits les concernant ont été vérifiés dans leur propre documentation en octobre 2026 ; les prix et les offres changent souvent, consultez donc leurs pages pour les chiffres actuels. Les corrections sont les bienvenues sur le <a href="{{P}}forum/">forum</a> ou sur GitHub.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://cryptomator.org/">Site web de Cryptomator</a></li>
+      <li><a href="https://docs.cryptomator.org/">Documentation de Cryptomator</a></li>
+      <li><a href="https://docs.cryptomator.org/security/architecture/">Architecture de sécurité (format du coffre, chiffrements, protection des clés)</a></li>
+      <li><a href="https://github.com/cryptomator/cryptomator">Dépôt du code source (licence : GPL-3.0)</a></li>
+    </ul>

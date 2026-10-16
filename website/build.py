@@ -100,7 +100,7 @@ def version_images(body: str) -> str:
 # Website languages: English at the root, the others under /<lang>/ with
 # pages translated in website/src/i18n/<lang>/pages/. Docs, blog and forum
 # stay English (internal documentation is English only).
-LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska")]
+LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska"), ("fr", "Français")]
 NAV_I18N = {
     "fi": {"Project": "Projekti", "Features": "Ominaisuudet", "Use cases": "Käyttötapaukset", "Compare": "Vertailu",
            "How it works": "Miten se toimii", "Screenshots": "Kuvakaappaukset", "Docs": "Dokumentaatio (en)",
@@ -108,11 +108,15 @@ NAV_I18N = {
     "sv": {"Project": "Projekt", "Features": "Funktioner", "Use cases": "Användningsfall", "Compare": "Jämförelse",
            "How it works": "Så fungerar det", "Screenshots": "Skärmbilder", "Docs": "Dokumentation (en)",
            "Downloads": "Nedladdningar", "Blog": "Blogg (en)", "Forum": "Forum (en)", "Contribute": "Bidra", "GitHub": "GitHub"},
+    "fr": {"Project": "Projet", "Features": "Fonctionnalités", "Use cases": "Cas d'usage", "Compare": "Comparaison",
+           "How it works": "Fonctionnement", "Screenshots": "Captures d'écran", "Docs": "Documentation (en)",
+           "Downloads": "Téléchargements", "Blog": "Blog (en)", "Forum": "Forum (en)", "Contribute": "Contribuer", "GitHub": "GitHub"},
 }
 ENGLISH_ONLY = ("docs/", "blog/", "forum/")
 ALPHA_I18N = {
     "fi": "<strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.",
     "sv": "<strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.",
+    "fr": "<strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.",
 }
 FOOTER_I18N = {
     "fi": [
@@ -125,15 +129,22 @@ FOOTER_I18N = {
         "Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.",
         '<a href="{p}docs/security-policy.html">Säkerhetspolicy</a> · <a href="{p}docs/licence.html">Licens</a> · <a href="{p}docs/trademark.html">Varumärke</a> (på engelska)',
     ],
+    "fr": [
+        f'{BRAND} est un nom de travail. Code source : <a href="{REPO}">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).',
+        "Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.",
+        '<a href="{p}docs/security-policy.html">Politique de sécurité</a> · <a href="{p}docs/licence.html">Licence</a> · <a href="{p}docs/trademark.html">Marque</a> (en anglais)',
+    ],
 }
-SKIP_I18N = {"en": "Skip to content", "fi": "Siirry sisältöön", "sv": "Hoppa till innehållet"}
+SKIP_I18N = {"en": "Skip to content", "fi": "Siirry sisältöön", "sv": "Hoppa till innehållet",
+             "fr": "Aller au contenu"}
 # The home page title: what people search for.
 TAGLINE = {"en": "encrypted file sync and backup on your own storage",
            "fi": "salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan",
-           "sv": "krypterad filsynkronisering och säkerhetskopiering till din egen lagring"}
+           "sv": "krypterad filsynkronisering och säkerhetskopiering till din egen lagring",
+           "fr": "synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage"}
 
 
-OG_LOCALE = {"en": "en_GB", "fi": "fi_FI", "sv": "sv_SE"}
+OG_LOCALE = {"en": "en_GB", "fi": "fi_FI", "sv": "sv_SE", "fr": "fr_FR"}
 
 
 def absolute(lang: str, page_rel: str) -> str:
@@ -427,7 +438,7 @@ def build_translated_pages() -> None:
             rel = meta.get("output", f"{src.stem}.html")
             out_rel = f"{lang}/{rel}"
             depth = out_rel.count("/")
-            body = fill(body, depth)
+            body = fill(body, depth, lang)
             # {{L}}: this language's root (links between translated pages);
             # {{P}}: the site root (assets, docs, blog).
             body = body.replace("{{L}}", "../" * (depth - 1)).replace("{{P}}", "../" * depth)
@@ -455,9 +466,117 @@ def tree_counts() -> dict[str, str]:
     return {"RUST_LINES": f"{round(rust, -3):,}".replace(",", " "), "TESTS": str(tests), "LAB_SCENARIOS": str(scenarios)}
 
 
-def fill(body: str, depth: int) -> str:
+# The daily build channel: the page body is filled from src/data/daily.json,
+# which website/tools/daily/make_daily.py writes. The files themselves live on
+# the server under daily/ and are not part of the generated site.
+DAILY_JSON = SRC / "data" / "daily.json"
+DAILY_I18N = {
+    "en": {
+        "build": 'Latest build <strong>{id}</strong>, {date}; version string {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
+        "cols": ("Platform", "Download", "Size", "Built from", "SHA-256"),
+        "dated": "dated copy",
+        "main": 'The main line at commit <a href="{repo}/commit/{c}">{c}</a>.',
+        "prs": "Open pull requests merged on top: {list}.",
+        "note": "",
+        "ci": 'CI run: <a href="{url}">{url}</a>',
+        "gaps": {},
+    },
+    "fi": {
+        "build": 'Uusin versio <strong>{id}</strong>, {date}; versiotunnus {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
+        "cols": ("Alusta", "Lataus", "Koko", "Rakennettu commitista", "SHA-256"),
+        "dated": "päivätty kopio",
+        "main": 'Päähaara commitissa <a href="{repo}/commit/{c}">{c}</a>.',
+        "prs": "Päälle liitetyt avoimet pull requestit: {list}.",
+        "note": "Lisäksi pieniä CI-korjauksia.",
+        "ci": 'CI-ajo: <a href="{url}">{url}</a>',
+        "gaps": {
+            "unsigned": "Mitään ei ole allekirjoitettu: ei julkaisuallekirjoitusta eikä Applen tai Microsoftin koodinallekirjoitusta. Tarkistussummat paljastavat vain vioittuneen latauksen.",
+            "not-format-2": "Muotoa 2 (tietueiden uudistus) ei ole mukana; kun se tulee, näillä versioilla luodut holvit täytyy luoda uudelleen.",
+            "os-warnings": "macOS, Windows ja iOS varoittavat allekirjoittamattomasta ohjelmistosta; macOS:ssä avaus onnistuu hiiren oikealla painikkeella ja Avaa, Windowsissa SmartScreen pyytää vahvistusta.",
+            "windows-ci-only": "Windows-asennusohjelma on savutestattu vain CI:ssä (asennus, päivitys, korjaus, vanhempaan versioon palaamisen esto, poisto), ei oikealla koneella.",
+            "ios-untested": "iOS-ipa:a ei ole ajettu oikealla laitteella. Asenna se AltStorella, SideStorella tai Sideloadlyllä.",
+            "ui-strings": "Osa sovelluksen käyttöliittymän teksteistä on vielä kääntämättä; ne kirjataan lokiin.",
+        },
+    },
+    "sv": {
+        "build": 'Senaste bygget <strong>{id}</strong>, {date}; versionssträng {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
+        "cols": ("Plattform", "Nedladdning", "Storlek", "Byggd från", "SHA-256"),
+        "dated": "daterad kopia",
+        "main": 'Huvudgrenen vid commit <a href="{repo}/commit/{c}">{c}</a>.',
+        "prs": "Öppna pull requests som lagts ovanpå: {list}.",
+        "note": "Dessutom små CI-rättningar.",
+        "ci": 'CI-körning: <a href="{url}">{url}</a>',
+        "gaps": {
+            "unsigned": "Inget är signerat: ingen releasesignatur och ingen kodsignering från Apple eller Microsoft. Kontrollsummorna upptäcker bara en trasig nedladdning.",
+            "not-format-2": "Format 2 (omarbetningen av posterna) ingår inte; när det kommer måste valv som skapats med dessa byggen skapas om.",
+            "os-warnings": "macOS, Windows och iOS varnar för osignerad programvara; på macOS öppnar du med högerklick och Öppna, på Windows ber SmartScreen om bekräftelse.",
+            "windows-ci-only": "Windows-installationsprogrammet har bara röktestats i CI (installation, uppgradering, reparation, nekad nedgradering, avinstallation), inte på en riktig dator.",
+            "ios-untested": "iOS-ipa:n har inte körts på en riktig enhet. Installera den med AltStore, SideStore eller Sideloadly.",
+            "ui-strings": "Vissa texter i appens gränssnitt är ännu inte översatta; de loggas.",
+        },
+    },
+    "fr": {
+        "build": 'Dernière version <strong>{id}</strong>, {date} ; chaîne de version {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
+        "cols": ("Plateforme", "Téléchargement", "Taille", "Construit depuis", "SHA-256"),
+        "dated": "copie datée",
+        "main": 'La branche principale au commit <a href="{repo}/commit/{c}">{c}</a>.',
+        "prs": "Pull requests ouvertes fusionnées par-dessus : {list}.",
+        "note": "Plus de petites corrections de CI.",
+        "ci": 'Exécution CI : <a href="{url}">{url}</a>',
+        "gaps": {
+            "unsigned": "Rien n’est signé : ni signature de version, ni signature de code Apple ou Microsoft. Les sommes de contrôle ne détectent qu’un téléchargement corrompu.",
+            "not-format-2": "Le format 2 (la refonte des enregistrements) n’est pas inclus ; lorsqu’il arrivera, les coffres créés avec ces versions devront être recréés.",
+            "os-warnings": "macOS, Windows et iOS avertissent à propos des logiciels non signés ; sous macOS, ouvrez par clic droit puis Ouvrir, sous Windows SmartScreen demande une confirmation.",
+            "windows-ci-only": "Le programme d’installation Windows n’a subi qu’un test de fumée en CI (installation, mise à jour, réparation, refus de rétrogradation, désinstallation), pas sur une vraie machine.",
+            "ios-untested": "L’ipa iOS n’a pas été exécuté sur un vrai appareil. Installez-le avec AltStore, SideStore ou Sideloadly.",
+            "ui-strings": "Certains textes de l’interface de l’application ne sont pas encore traduits ; ils sont consignés dans les journaux.",
+        },
+    },
+}
+
+
+def daily_blocks(lang: str, depth: int) -> dict[str, str]:
+    """The pieces of the daily page: BUILD, TABLE, INCLUDED, GAPS, HISTORY."""
+    t = DAILY_I18N[lang]
+    pre = "../" * depth
+    data = json.loads(DAILY_JSON.read_text())
+    cur = data["current"]
+    e = html.escape
+    rows = "\n".join(
+        f'<tr><th scope="row">{e(p["label"])}</th>'
+        f'<td><a href="{pre}daily/latest/{e(p["latest"])}">{e(p["latest"])}</a><br>'
+        f'<span class="dl-meta"><a href="{pre}daily/builds/{e(cur["id"])}/{e(p["file"])}">{t["dated"]}</a></span></td>'
+        f'<td>{p["size"] / 1048576:.1f} MB</td>'
+        f'<td><a href="{REPO}/commit/{e(p["commit"])}"><code>{e(p["commit"])}</code></a></td>'
+        f'<td><code class="sum">{p["sha256"]}</code></td></tr>'
+        for p in cur["platforms"]
+    )
+    head = "".join(f"<th>{e(c)}</th>" for c in t["cols"])
+    included = [t["main"].format(repo=REPO, c=e(cur["main_commit"]))]
+    if cur["prs"]:
+        links = ", ".join(f'<a href="{REPO}/pull/{n}">#{n}</a>' for n in cur["prs"])
+        included.append(t["prs"].format(list=links))
+    if cur.get("note"):
+        included.append(e(cur["note"]) if lang == "en" else t["note"])
+    if cur.get("ci_run"):
+        included.append(t["ci"].format(url=e(cur["ci_run"])))
+    gaps = [t["gaps"].get(g["id"], g["text"]) for g in data["known_gaps"]]
+    history = [f'<li><a href="{pre}daily/builds/{e(h["id"])}/">{e(h["id"])}</a> ({e(h["date"])})</li>' for h in [cur] + data["history"]]
+    return {
+        "BUILD": '<p class="lead">' + t["build"].format(id=e(cur["id"]), date=e(cur["date"]), version=e(cur["version"]), pre=pre) + "</p>",
+        "TABLE": f'<table class="downloads"><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>',
+        "INCLUDED": "<ul>" + "".join(f"<li>{x}</li>" for x in included) + "</ul>",
+        "GAPS": "<ul>" + "".join(f"<li>{e(x)}</li>" for x in gaps) + "</ul>",
+        "HISTORY": "<ul>" + "".join(history) + "</ul>",
+    }
+
+
+def fill(body: str, depth: int, lang: str = "en") -> str:
     """The placeholders every page body may use."""
     body = body.replace("{{DOWNLOADS}}", downloads_table(depth)).replace("{{POSTS}}", posts_list(depth))
+    if "{{DAILY_" in body:
+        for key, value in daily_blocks(lang, depth).items():
+            body = body.replace("{{DAILY_" + key + "}}", value)
     body = body.replace("{{VERSION}}", cargo_version()).replace("{{RELEASED}}", RELEASED_VERSION)
     for key, value in COUNTS.items():
         body = body.replace("{{" + key + "}}", value)
@@ -609,6 +728,8 @@ def build_redirects() -> None:
 def copy_data() -> None:
     """Data files pages link to (benchmark results) are published as they are."""
     for src in sorted((SRC / "data").glob("*.json")):
+        if src.name == "daily.json":  # input of the daily page, not published as it is
+            continue
         (OUT / "data").mkdir(parents=True, exist_ok=True)
         (OUT / "data" / src.name).write_bytes(src.read_bytes())
 

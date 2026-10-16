@@ -1,0 +1,31 @@
+---
+title: Dagliga byggen
+nav: Downloads
+output: daily/index.html
+description: Osignerade utvecklingsbyggen av Varsto från huvudgrenen. Inga releaser, inte för produktionsdata, och varsto update installerar dem aldrig.
+---
+    <h1>Dagliga byggen</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>Det här är utvecklingsbyggen från huvudgrenen, inte releaser.</strong></p>
+      <ul>
+        <li>De är inte signerade och har inte gått igenom någon releasetestning. Använd dem inte för produktionsdata.</li>
+        <li>Lagringsformatet kan ändras mellan byggen utan någon migrering. Format 2 kommer att kräva att valv skapas på nytt.</li>
+        <li><code>varsto update</code> installerar dem aldrig och läser inte den här sidan. Om du vill byta till ett nyare dagligt bygge laddar du ner det på nytt.</li>
+        <li>Behåll egna säkerhetskopior.</li>
+      </ul>
+      <p>Behöver du något att lita på? Använd de <a href="{{L}}downloads/">stabila nedladdningarna</a> i stället.</p>
+    </div>
+    {{DAILY_BUILD}}
+    {{DAILY_TABLE}}
+    <h2>Verifiera</h2>
+    <p>Lägg <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> bredvid filerna du laddade ner (filnamnen i tabellen är de fasta namnen) och kör</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är inte signerad; den visar bara att en nedladdning är komplett och oskadd.</p>
+    <h2>Vad som ingår</h2>
+    {{DAILY_INCLUDED}}
+    <p>iOS-filen kan komma från en senare commit än de andra; tabellen visar commit för varje fil.</p>
+    <h2>Kända brister</h2>
+    {{DAILY_GAPS}}
+    <h2>Tidigare byggen</h2>
+    <p>De sju senaste daterade byggena sparas, med filerna under sina ursprungliga namn. Adresserna i tabellen pekar alltid på det nyaste bygget.</p>
+    {{DAILY_HISTORY}}

@@ -1,0 +1,31 @@
+---
+title: Versions quotidiennes
+nav: Downloads
+output: daily/index.html
+description: Versions de développement non signées de Varsto, issues de la branche principale. Pas des versions officielles, pas pour des données de production, et jamais installées par varsto update.
+---
+    <h1>Versions quotidiennes</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>Ce sont des versions de développement issues de la branche principale, pas des versions officielles.</strong></p>
+      <ul>
+        <li>Elles ne sont pas signées et n’ont subi aucun test de publication. Ne les utilisez pas pour des données de production.</li>
+        <li>Le format de stockage peut changer d’une version à l’autre sans aucune migration. Le format 2 exigera de recréer les coffres.</li>
+        <li><code>varsto update</code> ne les installe jamais et ne consulte pas cette page. Pour passer à une version quotidienne plus récente, téléchargez-la de nouveau.</li>
+        <li>Conservez vos propres sauvegardes.</li>
+      </ul>
+      <p>Vous cherchez quelque chose de fiable ? Utilisez plutôt les <a href="{{L}}downloads/">téléchargements stables</a>.</p>
+    </div>
+    {{DAILY_BUILD}}
+    {{DAILY_TABLE}}
+    <h2>Vérifier</h2>
+    <p>Placez <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> à côté des fichiers téléchargés (les noms du tableau sont les noms fixes) et exécutez</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Omettez <code>--ignore-missing</code> si vous avez téléchargé tous les fichiers. Cette liste n’est pas signée ; elle montre seulement qu’un téléchargement est complet et intact.</p>
+    <h2>Contenu</h2>
+    {{DAILY_INCLUDED}}
+    <p>Le fichier iOS peut provenir d’un commit plus récent que les autres ; le tableau indique le commit de chaque fichier.</p>
+    <h2>Lacunes connues</h2>
+    {{DAILY_GAPS}}
+    <h2>Versions précédentes</h2>
+    <p>Les sept dernières versions datées sont conservées, avec les fichiers sous leur nom d’origine. Les adresses du tableau pointent toujours vers la version la plus récente.</p>
+    {{DAILY_HISTORY}}

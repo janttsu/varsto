@@ -6,7 +6,10 @@
 #   scripts/screenshots/update-site.sh --dir <dir>     # finalize.py output from elsewhere
 # Copies the pictures into website/public/assets/img/screenshots, sets their
 # width and height on the Screenshots page (and its Finnish and Swedish
-# copies), states the version, commit and
+# copies; the localized browser-UI sets in screenshots-fi/ and screenshots-sv/,
+# which the Finnish and Swedish pages use, are made by hand with
+# ui-shots.py --lang and finalize.py, and are left as they are: the patterns
+# below match only the .../screenshots/<name>.png paths), states the version, commit and
 # date they were captured from, and rebuilds the site (deploy separately with
 # website/deploy.sh).
 set -euo pipefail
@@ -32,11 +35,12 @@ python3 - "$src" "$dest" "$root/website/src" <<'PY'
 import json, pathlib, re, shutil, sys
 src, dest, pages = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
 meta = json.loads((src / "shots.json").read_text())
-# The caption per language; the English page and its Finnish and Swedish copies.
+# The caption per language; the English page and its Finnish, Swedish and French copies.
 CAPTION = {
     "en": ("Captured automatically from version {v}{c} on {d}{s}.", "GitHub Actions run"),
     "fi": ("Kuvattu automaattisesti versiosta {v}{c} {d}{s}.", "GitHub Actions -ajo"),
     "sv": ("Tagna automatiskt från version {v}{c} den {d}{s}.", "GitHub Actions-körning"),
+    "fr": ("Capturées automatiquement depuis la version {v}{c} le {d}{s}.", "exécution GitHub Actions"),
 }
 def stamp(lang, version, commit, date, source, esc=lambda s: s):
     text, run = CAPTION[lang]
@@ -48,7 +52,8 @@ for name in meta["sizes"]:
     shutil.copyfile(src / f"{name}.png", dest / f"{name}.png")
 for lang, page in [("en", pages / "pages/screenshots.html"),
                    ("fi", pages / "i18n/fi/pages/screenshots.html"),
-                   ("sv", pages / "i18n/sv/pages/screenshots.html")]:
+                   ("sv", pages / "i18n/sv/pages/screenshots.html"),
+                   ("fr", pages / "i18n/fr/pages/screenshots.html")]:
     if not page.exists():
         continue
     html = page.read_text()

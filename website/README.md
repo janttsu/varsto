@@ -1,6 +1,6 @@
 # Website
 
-Static site for the project: **Project** (front page), **Docs** (rendered from the repository), **Downloads**, **Blog** (with RSS) and **Forum** (GitHub issues and discussions for now; a forum of its own is planned). Every page shows the alpha warning. The pages are in English, Finnish and Swedish (`website/src/i18n/<lang>/pages/`); docs, blog and the generated downloads block are English only.
+Static site for the project: **Project** (front page), **Docs** (rendered from the repository), **Downloads**, **Blog** (with RSS) and **Forum** (GitHub issues and discussions for now; a forum of its own is planned). Every page shows the alpha warning. The pages are in English, Finnish, Swedish and French (`website/src/i18n/<lang>/pages/`); docs, blog and the generated downloads block are English only.
 
 - No inline scripts or styles, no third-party resources, system fonts: the strict Content Security Policy on the server stays valid.
 - Light and dark themes (follows the system, with a manual toggle).
