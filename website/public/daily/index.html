@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daily builds: Varsto</title>
+<meta name="description" content="Unsigned development builds of Varsto from the main line. Not releases, not for production data, and never installed by varsto update.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/daily/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Daily builds: Varsto">
+<meta property="og:description" content="Unsigned development builds of Varsto from the main line. Not releases, not for production data, and never installed by varsto update.">
+<meta property="og:url" content="https://varsto.net/daily/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/daily/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/daily/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/daily/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/daily/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/daily/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=e9308487f1">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../daily/" hreflang="en" lang="en" aria-current="true">English</a> <a href="../fi/daily/" hreflang="fi" lang="fi">Suomi</a> <a href="../sv/daily/" hreflang="sv" lang="sv">Svenska</a> <a href="../fr/daily/" hreflang="fr" lang="fr">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/" aria-current="page">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Daily builds</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>These are development builds from the main line, not releases.</strong></p>
+      <ul>
+        <li>They are not signed and have not been through release testing. Do not use them for production data.</li>
+        <li>The storage format can change from one build to the next without any migration. Format 2 will require vaults to be recreated.</li>
+        <li><code>varsto update</code> never installs them and never reads this page. To move to a newer daily build, download it again.</li>
+        <li>Keep your own backups.</li>
+      </ul>
+      <p>Looking for something to rely on? Use the <a href="../downloads/">stable downloads</a> instead.</p>
+    </div>
+    <p class="lead">Latest build <strong>20261016-316c579</strong>, 2026-10-16; version string 0.0.1-alpha.14. <a href="../daily/latest.json">latest.json</a> · <a href="../daily/latest/SHA256SUMS">SHA256SUMS</a></p>
+    <table class="downloads"><thead><tr><th>Platform</th><th>Download</th><th>Size</th><th>Built from</th><th>SHA-256</th></tr></thead><tbody><tr><th scope="row">Linux x86_64 (static, musl)</th><td><a href="../daily/latest/varsto-daily-linux-x86_64.tar.gz">varsto-daily-linux-x86_64.tar.gz</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-linux-x86_64.tar.gz">dated copy</a></span></td><td>14.0 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">e881f985e35d755f184c85e00a349ec9f99ea181a5963263b0dbd3bea605b355</code></td></tr>
+<tr><th scope="row">Android (debug APK)</th><td><a href="../daily/latest/varsto-daily-android-debug.apk">varsto-daily-android-debug.apk</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-android-debug.apk">dated copy</a></span></td><td>30.9 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">cc3d46bb3f395f77a0ccfa946ce3a89bfd433e35381eda95a8257af0be0dcf20</code></td></tr>
+<tr><th scope="row">Windows installer</th><td><a href="../daily/latest/varsto-daily-windows-setup.exe">varsto-daily-windows-setup.exe</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-windows-setup.exe">dated copy</a></span></td><td>13.6 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">21030bd4b1e8a1985e517cba30cba92f8f23f9f60a38ec9372658298bd82c24d</code></td></tr>
+<tr><th scope="row">Windows portable zip</th><td><a href="../daily/latest/varsto-daily-windows-x86_64.zip">varsto-daily-windows-x86_64.zip</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-windows-x86_64.zip">dated copy</a></span></td><td>13.9 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">33af812cf359115867bbd16ac66919e6162a41b3bc63aa5780cbf81664578487</code></td></tr>
+<tr><th scope="row">macOS Apple Silicon (dmg)</th><td><a href="../daily/latest/varsto-daily-macos-apple-silicon.dmg">varsto-daily-macos-apple-silicon.dmg</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-macos-apple-silicon.dmg">dated copy</a></span></td><td>14.2 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">ea6b57df15c5089c3392071b1e2d94896219052075e35b81c60b2477d48a1f4f</code></td></tr>
+<tr><th scope="row">iOS (unsigned ipa)</th><td><a href="../daily/latest/varsto-daily-ios-unsigned.ipa">varsto-daily-ios-unsigned.ipa</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-8f57797-ios-unsigned.ipa">dated copy</a></span></td><td>10.0 MB</td><td><a href="https://github.com/janttsu/varsto/commit/8f57797"><code>8f57797</code></a></td><td><code class="sum">e6d57201ca60c8e813160b359c62cb0372b1e46b9a30570382dd98235712a64b</code></td></tr></tbody></table>
+    <h2>Verify</h2>
+    <p>Put <a href="../daily/latest/SHA256SUMS">SHA256SUMS</a> next to the files you downloaded (the file names are the stable ones in the table) and run</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. This list is not signed; it only shows that a download is complete and intact.</p>
+    <h2>What is in it</h2>
+    <ul><li>The main line at commit <a href="https://github.com/janttsu/varsto/commit/651a3fd">651a3fd</a>.</li><li>Open pull requests merged on top: <a href="https://github.com/janttsu/varsto/pull/39">#39</a>, <a href="https://github.com/janttsu/varsto/pull/41">#41</a>, <a href="https://github.com/janttsu/varsto/pull/44">#44</a>, <a href="https://github.com/janttsu/varsto/pull/42">#42</a>, <a href="https://github.com/janttsu/varsto/pull/43">#43</a>, <a href="https://github.com/janttsu/varsto/pull/38">#38</a>, <a href="https://github.com/janttsu/varsto/pull/40">#40</a>, <a href="https://github.com/janttsu/varsto/pull/46">#46</a>.</li><li>Plus two CI fixes (boot code test isolation, Android screenshot script).</li><li>CI run: <a href="https://github.com/janttsu/varsto/actions/runs/38858694704">https://github.com/janttsu/varsto/actions/runs/38858694704</a></li></ul>
+    <p>The iOS file can come from a later commit than the others; the table shows the commit of each file.</p>
+    <h2>Known gaps</h2>
+    <ul><li>Nothing is signed: no release signature, no Apple or Microsoft code signing. The checksums only catch a corrupted download.</li><li>Format 2 (the records work) is not included; when it lands, vaults created with these builds must be recreated.</li><li>macOS, Windows and iOS warn about unsigned software; expect right-click and Open on macOS, and SmartScreen on Windows.</li><li>The Windows installer has been smoke-tested on CI only (install, upgrade, repair, downgrade refusal, uninstall), not on a real machine.</li><li>The iOS ipa has not been run on a real device. Sideload it with AltStore, SideStore or Sideloadly.</li><li>Some strings in the app interface are not translated yet; they are logged.</li></ul>
+    <h2>Previous builds</h2>
+    <p>The seven most recent dated builds are kept, with the files under their original names. The addresses in the table always point to the newest build.</p>
+    <ul><li><a href="../daily/builds/20261016-316c579/">20261016-316c579</a> (2026-10-16)</li></ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

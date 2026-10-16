@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Versions quotidiennes: Varsto</title>
+<meta name="description" content="Versions de développement non signées de Varsto, issues de la branche principale. Pas des versions officielles, pas pour des données de production, et jamais installées par varsto update.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/daily/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Versions quotidiennes: Varsto">
+<meta property="og:description" content="Versions de développement non signées de Varsto, issues de la branche principale. Pas des versions officielles, pas pour des données de production, et jamais installées par varsto update.">
+<meta property="og:url" content="https://varsto.net/fr/daily/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/daily/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/daily/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/daily/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/daily/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/daily/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=e9308487f1">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../daily/" hreflang="en" lang="en">English</a> <a href="../../fi/daily/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/daily/" hreflang="sv" lang="sv">Svenska</a> <a href="../../fr/daily/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../fr/">Projet</a>
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/use-cases/">Cas d'usage</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/screenshots/">Captures d'écran</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/downloads/" aria-current="page">Téléchargements</a>
+      <a href="../../blog/">Blog (en)</a>
+      <a href="../../forum/">Forum (en)</a>
+      <a href="../../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Versions quotidiennes</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>Ce sont des versions de développement issues de la branche principale, pas des versions officielles.</strong></p>
+      <ul>
+        <li>Elles ne sont pas signées et n’ont subi aucun test de publication. Ne les utilisez pas pour des données de production.</li>
+        <li>Le format de stockage peut changer d’une version à l’autre sans aucune migration. Le format 2 exigera de recréer les coffres.</li>
+        <li><code>varsto update</code> ne les installe jamais et ne consulte pas cette page. Pour passer à une version quotidienne plus récente, téléchargez-la de nouveau.</li>
+        <li>Conservez vos propres sauvegardes.</li>
+      </ul>
+      <p>Vous cherchez quelque chose de fiable ? Utilisez plutôt les <a href="../downloads/">téléchargements stables</a>.</p>
+    </div>
+    <p class="lead">Dernière version <strong>20261016-316c579</strong>, 2026-10-16 ; chaîne de version 0.0.1-alpha.14. <a href="../../daily/latest.json">latest.json</a> · <a href="../../daily/latest/SHA256SUMS">SHA256SUMS</a></p>
+    <table class="downloads"><thead><tr><th>Plateforme</th><th>Téléchargement</th><th>Taille</th><th>Construit depuis</th><th>SHA-256</th></tr></thead><tbody><tr><th scope="row">Linux x86_64 (static, musl)</th><td><a href="../../daily/latest/varsto-daily-linux-x86_64.tar.gz">varsto-daily-linux-x86_64.tar.gz</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-linux-x86_64.tar.gz">copie datée</a></span></td><td>14.0 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">e881f985e35d755f184c85e00a349ec9f99ea181a5963263b0dbd3bea605b355</code></td></tr>
+<tr><th scope="row">Android (debug APK)</th><td><a href="../../daily/latest/varsto-daily-android-debug.apk">varsto-daily-android-debug.apk</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-android-debug.apk">copie datée</a></span></td><td>30.9 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">cc3d46bb3f395f77a0ccfa946ce3a89bfd433e35381eda95a8257af0be0dcf20</code></td></tr>
+<tr><th scope="row">Windows installer</th><td><a href="../../daily/latest/varsto-daily-windows-setup.exe">varsto-daily-windows-setup.exe</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-windows-setup.exe">copie datée</a></span></td><td>13.6 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">21030bd4b1e8a1985e517cba30cba92f8f23f9f60a38ec9372658298bd82c24d</code></td></tr>
+<tr><th scope="row">Windows portable zip</th><td><a href="../../daily/latest/varsto-daily-windows-x86_64.zip">varsto-daily-windows-x86_64.zip</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-windows-x86_64.zip">copie datée</a></span></td><td>13.9 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">33af812cf359115867bbd16ac66919e6162a41b3bc63aa5780cbf81664578487</code></td></tr>
+<tr><th scope="row">macOS Apple Silicon (dmg)</th><td><a href="../../daily/latest/varsto-daily-macos-apple-silicon.dmg">varsto-daily-macos-apple-silicon.dmg</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-macos-apple-silicon.dmg">copie datée</a></span></td><td>14.2 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">ea6b57df15c5089c3392071b1e2d94896219052075e35b81c60b2477d48a1f4f</code></td></tr>
+<tr><th scope="row">iOS (unsigned ipa)</th><td><a href="../../daily/latest/varsto-daily-ios-unsigned.ipa">varsto-daily-ios-unsigned.ipa</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-8f57797-ios-unsigned.ipa">copie datée</a></span></td><td>10.0 MB</td><td><a href="https://github.com/janttsu/varsto/commit/8f57797"><code>8f57797</code></a></td><td><code class="sum">e6d57201ca60c8e813160b359c62cb0372b1e46b9a30570382dd98235712a64b</code></td></tr></tbody></table>
+    <h2>Vérifier</h2>
+    <p>Placez <a href="../../daily/latest/SHA256SUMS">SHA256SUMS</a> à côté des fichiers téléchargés (les noms du tableau sont les noms fixes) et exécutez</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Omettez <code>--ignore-missing</code> si vous avez téléchargé tous les fichiers. Cette liste n’est pas signée ; elle montre seulement qu’un téléchargement est complet et intact.</p>
+    <h2>Contenu</h2>
+    <ul><li>La branche principale au commit <a href="https://github.com/janttsu/varsto/commit/651a3fd">651a3fd</a>.</li><li>Pull requests ouvertes fusionnées par-dessus : <a href="https://github.com/janttsu/varsto/pull/39">#39</a>, <a href="https://github.com/janttsu/varsto/pull/41">#41</a>, <a href="https://github.com/janttsu/varsto/pull/44">#44</a>, <a href="https://github.com/janttsu/varsto/pull/42">#42</a>, <a href="https://github.com/janttsu/varsto/pull/43">#43</a>, <a href="https://github.com/janttsu/varsto/pull/38">#38</a>, <a href="https://github.com/janttsu/varsto/pull/40">#40</a>, <a href="https://github.com/janttsu/varsto/pull/46">#46</a>.</li><li>Plus de petites corrections de CI.</li><li>Exécution CI : <a href="https://github.com/janttsu/varsto/actions/runs/38858694704">https://github.com/janttsu/varsto/actions/runs/38858694704</a></li></ul>
+    <p>Le fichier iOS peut provenir d’un commit plus récent que les autres ; le tableau indique le commit de chaque fichier.</p>
+    <h2>Lacunes connues</h2>
+    <ul><li>Rien n’est signé : ni signature de version, ni signature de code Apple ou Microsoft. Les sommes de contrôle ne détectent qu’un téléchargement corrompu.</li><li>Le format 2 (la refonte des enregistrements) n’est pas inclus ; lorsqu’il arrivera, les coffres créés avec ces versions devront être recréés.</li><li>macOS, Windows et iOS avertissent à propos des logiciels non signés ; sous macOS, ouvrez par clic droit puis Ouvrir, sous Windows SmartScreen demande une confirmation.</li><li>Le programme d’installation Windows n’a subi qu’un test de fumée en CI (installation, mise à jour, réparation, refus de rétrogradation, désinstallation), pas sur une vraie machine.</li><li>L’ipa iOS n’a pas été exécuté sur un vrai appareil. Installez-le avec AltStore, SideStore ou Sideloadly.</li><li>Certains textes de l’interface de l’application ne sont pas encore traduits ; ils sont consignés dans les journaux.</li></ul>
+    <h2>Versions précédentes</h2>
+    <p>Les sept dernières versions datées sont conservées, avec les fichiers sous leur nom d’origine. Les adresses du tableau pointent toujours vers la version la plus récente.</p>
+    <ul><li><a href="../../daily/builds/20261016-316c579/">20261016-316c579</a> (2026-10-16)</li></ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>

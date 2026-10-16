@@ -15,6 +15,9 @@ fi
 # Without a local download set (a fresh checkout deploying a page or a
 # screenshot), leave the server's downloads alone instead of deleting them.
 # The server's screenshots come from CI (ops/site/screenshots-sync.py).
-keep=(--exclude /assets/img/screenshots/)
+# /testbuilds/ and /daily/ hold large files that are uploaded by hand or by the
+# daily build workflow, outside this repository: never delete them. Only the
+# generated daily page (/daily/index.html) is part of the site.
+keep=(--exclude /assets/img/screenshots/ --exclude /testbuilds/ --include /daily/ --include /daily/index.html --exclude '/daily/*')
 [ -f "$here/public/downloads/manifest.json" ] || { keep+=(--exclude /downloads/); echo "no local download set: the server's downloads stay as they are"; }
 rsync -rltv --delete "${keep[@]}" --chmod=D755,F644 "$here/public/" "${DEPLOY_HOST}:${DEPLOY_PATH}/"
