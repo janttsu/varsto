@@ -48,6 +48,15 @@ def sha256(path: pathlib.Path) -> str:
 
 def one(art: pathlib.Path, pattern: str) -> pathlib.Path:
     hits = sorted(p for p in art.rglob(pattern) if p.is_file())
+    if len(hits) > 1:
+        # The same package is uploaded by its build job and again inside the
+        # assembled download set; take the download set when it has one, and
+        # otherwise accept copies whose bytes are identical.
+        assembled = [h for h in hits if "downloads" in h.relative_to(art).parts]
+        if assembled:
+            hits = assembled[:1]
+        elif len({sha256_of(h) for h in hits}) == 1:
+            hits = hits[:1]
     if len(hits) != 1:
         sys.exit(f"expected exactly one {pattern} below {art}, found {[str(h) for h in hits]}")
     return hits[0]
