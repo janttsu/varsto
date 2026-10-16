@@ -21,6 +21,7 @@ pub mod chunk_seal;
 pub mod chunking;
 pub mod crypto;
 pub mod diskconf;
+pub mod diskformat;
 pub mod disksuggest;
 pub mod engine;
 pub mod events;
