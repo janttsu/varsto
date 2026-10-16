@@ -6,7 +6,10 @@
 #   scripts/screenshots/update-site.sh --dir <dir>     # finalize.py output from elsewhere
 # Copies the pictures into website/public/assets/img/screenshots, sets their
 # width and height on the Screenshots page (and its Finnish and Swedish
-# copies), states the version, commit and
+# copies; the localized browser-UI sets in screenshots-fi/ and screenshots-sv/,
+# which the Finnish and Swedish pages use, are made by hand with
+# ui-shots.py --lang and finalize.py, and are left as they are: the patterns
+# below match only the .../screenshots/<name>.png paths), states the version, commit and
 # date they were captured from, and rebuilds the site (deploy separately with
 # website/deploy.sh).
 set -euo pipefail

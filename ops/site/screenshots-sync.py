@@ -82,6 +82,10 @@ def stamp(lang, version, commit, date, source, esc=lambda s: s):
         v=esc(version), c=f" (commit {esc(commit[:7])})" if commit else "", d=esc(date),
         s=f", {esc(source)}" if source else "") + "</span>"
 esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+# The Finnish and Swedish pages show the browser-UI pictures from
+# assets/img/screenshots-fi/ and screenshots-sv/ (made with ui-shots.py --lang,
+# not part of this tarball). The size pattern below requires ".../screenshots/",
+# so those <img> tags are left alone and only the shared native shots are patched.
 for lang, page in [("en", site / "screenshots/index.html"),
                    ("fi", site / "fi/screenshots/index.html"),
                    ("sv", site / "sv/screenshots/index.html"),
