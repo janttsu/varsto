@@ -21,13 +21,16 @@
 //! against the signed list, and the running binary replaced. Downloads use
 //! the system `curl` so that the binary carries no TLS stack of its own.
 //!
-//! Copies put in place by the Windows setup program (`Varsto-<version>-setup.exe`)
-//! update through that program: the signed setup file is downloaded, checked
+//! On Windows the setup program (`Varsto-<version>-setup.exe`) is the only
+//! way to install and to update: the signed setup file is downloaded, checked
 //! like any archive and run silently from a private folder, and it replaces
-//! the installation, closes and restarts the running parts. Portable
-//! (zip) copies replace their own binaries as before. The service looks for
+//! the installation, closes and restarts the running parts. A copy that the
+//! setup program did not install (an old portable alpha.14 unzipped by hand)
+//! cannot update itself; it is told to download and run the installer once,
+//! and updates continue automatically from there. The service looks for
 //! a new version once a day (`auto-update` setting) and installs it by itself
-//! where it can (Windows), or tells the user where it cannot.
+//! where it can (a setup-installed Windows copy), or tells the user where it
+//! cannot.
 //!
 //! `varsto update --daily` takes the newest daily (development) build instead:
 //! `daily/latest/SHA256SUMS` signed with a separate daily key
@@ -464,8 +467,9 @@ pub fn installed_by_setup() -> bool {
 
 /// Which file of the release replaces this copy. Inside Varsto.app the whole
 /// bundle comes from the disk image; a copy installed by the Windows setup
-/// program takes the setup program (when the release has one); elsewhere the
-/// archive for this platform carries the binary.
+/// program takes the setup program (when the release has one); other Windows
+/// copies take nothing (see `windows_installer_notice`); elsewhere the archive
+/// for this platform carries the binary.
 fn pick_archive<'a>(
     names: impl Iterator<Item = &'a str>,
     latest: &str,
@@ -478,14 +482,30 @@ fn pick_archive<'a>(
     if in_bundle {
         return names.contains(&dmg.as_str()).then_some(dmg);
     }
-    let setup = setup_name(latest);
-    if by_setup && names.contains(&setup.as_str()) {
-        return Some(setup);
+    if target.contains("windows") {
+        let setup = setup_name(latest);
+        return (by_setup && names.contains(&setup.as_str())).then_some(setup);
     }
     names
         .into_iter()
-        .find(|k| k.contains(target) && (k.ends_with(".tar.gz") || k.ends_with(".zip")))
+        .find(|k| k.contains(target) && k.ends_with(".tar.gz"))
         .map(str::to_string)
+}
+
+/// What a Windows copy that the setup program did not install is told: it
+/// cannot update itself, the installer has to be run once. `None` elsewhere
+/// and for setup-installed copies. `file` is the installer's file name.
+fn windows_installer_notice(
+    target: &str,
+    by_setup: bool,
+    base: &str,
+    file: &str,
+) -> Option<String> {
+    (target.contains("windows") && !by_setup).then(|| {
+        format!(
+            "this copy was not installed with the setup program, and on Windows only the setup program updates Varsto. Download and run the installer once ({base}{file}); your vault and settings stay as they are, and updates continue automatically after that"
+        )
+    })
 }
 
 /// A downloaded archive whose checksum the signed list vouches for.
@@ -603,6 +623,18 @@ pub fn download_verified(
 pub fn apply(check: &Check, policy: &Policy) -> Result<String> {
     if !check.available {
         if check.newer {
+            if let Some(notice) = windows_installer_notice(
+                &check.target,
+                installed_by_setup(),
+                &check.download_page,
+                &setup_name(&check.latest),
+            ) {
+                bail!(
+                    "{} is out (you have {}), but {notice}",
+                    check.latest,
+                    check.current
+                );
+            }
             // Never "up to date" while a newer version exists: say why this
             // copy cannot replace itself and where to get the new one.
             bail!(
@@ -809,6 +841,9 @@ fn install_file(v: &Verified, tmp: &Path, from: &str, to: &str) -> Result<String
             v.notes.join("; ")
         ));
     }
+    if cfg!(windows) {
+        bail!("on Windows only the setup program installs Varsto; run the installer once");
+    }
     let exe = std::env::current_exe()?;
     install_archive(&v.path, tmp, &exe)?;
     Ok(format!(
@@ -820,9 +855,8 @@ fn install_file(v: &Verified, tmp: &Path, from: &str, to: &str) -> Result<String
     ))
 }
 
-/// Unpack an archive (tar.gz or zip) and replace the binary `exe` with the
-/// `varsto` it holds, atomically (a rename); the Windows window program beside
-/// it is replaced too.
+/// Unpack an archive (tar.gz) and replace the binary `exe` with the
+/// `varsto` it holds, atomically (a rename).
 fn install_archive(archive: &Path, tmp: &Path, exe: &Path) -> Result<()> {
     let extract = tmp.join("x");
     fs::create_dir_all(&extract)?;
@@ -841,11 +875,7 @@ fn install_archive(archive: &Path, tmp: &Path, exe: &Path) -> Result<()> {
             String::from_utf8_lossy(&tar.stderr).trim()
         );
     }
-    let bin_name = if cfg!(windows) {
-        "varsto.exe"
-    } else {
-        "varsto"
-    };
+    let bin_name = "varsto";
     let found: Vec<PathBuf> = walkdir::WalkDir::new(&extract)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -857,42 +887,23 @@ fn install_archive(archive: &Path, tmp: &Path, exe: &Path) -> Result<()> {
         [] => bail!("archive does not contain {bin_name}"),
         _ => bail!("archive contains more than one {bin_name}; not installed"),
     };
-    replace_binary(&new_bin, exe)?;
-    // The Windows window program beside the binary is replaced with it.
-    let window_exe = exe.with_file_name("varsto-window.exe");
-    if cfg!(windows) && window_exe.is_file() {
-        if let Some(w) = walkdir::WalkDir::new(&extract)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .find(|e| e.file_type().is_file() && e.file_name() == "varsto-window.exe")
-        {
-            replace_binary(w.path(), &window_exe)?;
-        }
-    }
+    replace_binary(&new_bin, exe)
+}
+
+#[cfg(unix)]
+fn replace_binary(new_bin: &Path, exe: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let staged = exe.with_extension("new");
+    fs::copy(new_bin, &staged)?;
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
+    fs::rename(&staged, exe)?;
     Ok(())
 }
 
-fn replace_binary(new_bin: &Path, exe: &Path) -> Result<()> {
-    let staged = exe.with_extension("new");
-    fs::copy(new_bin, &staged)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
-        fs::rename(&staged, exe)?;
-    }
-    #[cfg(windows)]
-    {
-        // A running executable cannot be overwritten but can be renamed.
-        let old = exe.with_extension("old");
-        let _ = fs::remove_file(&old);
-        fs::rename(exe, &old)?;
-        if let Err(e) = fs::rename(&staged, exe) {
-            let _ = fs::rename(&old, exe);
-            return Err(e.into());
-        }
-    }
-    Ok(())
+/// Windows copies are replaced by the setup program, never by a rename.
+#[cfg(not(unix))]
+fn replace_binary(_new_bin: &Path, _exe: &Path) -> Result<()> {
+    bail!("on Windows only the setup program installs Varsto")
 }
 
 // ----- the daily channel ------------------------------------------------------------
@@ -1005,7 +1016,10 @@ fn daily_file(
     match (os, arch) {
         ("linux", "x86_64") => Ok("varsto-daily-linux-x86_64.tar.gz"),
         ("windows", "x86_64") if by_setup => Ok(DAILY_SETUP),
-        ("windows", "x86_64") => Ok("varsto-daily-windows-x86_64.zip"),
+        ("windows", "x86_64") => Err(
+            "this copy was not installed with the setup program, and on Windows only the setup program updates Varsto. Download and run the installer once (varsto-daily-windows-setup.exe); your vault and settings stay as they are, and updates continue automatically after that"
+                .into(),
+        ),
         ("macos", _) => Err(format!(
             "the macOS daily build is a disk image (varsto-daily-macos-apple-silicon.dmg){}; the command line does not install it",
             if in_bundle { "" } else { " and there is no command-line archive for macOS" }
@@ -1273,11 +1287,11 @@ pub fn set_auto_update(home: &Path, on: bool) -> Result<()> {
     Ok(())
 }
 
-/// Whether this copy installs a new version by itself: on Windows (the setup
-/// program or the portable zip); elsewhere the user is told and installs it
-/// from the interface or the menu.
+/// Whether this copy installs a new version by itself: a Windows copy that
+/// the setup program installed; elsewhere (and for an old portable copy) the
+/// user is told and installs it from the interface or the menu.
 pub fn can_install_by_itself() -> bool {
-    cfg!(windows)
+    installed_by_setup()
 }
 
 fn read_number(path: &Path) -> i64 {
@@ -1743,7 +1757,6 @@ mod tests {
     #[test]
     fn the_setup_program_is_picked_only_for_installed_copies() {
         let names = [
-            "varsto-9.9.9-x86_64-pc-windows-gnu.zip",
             "Varsto-9.9.9-setup.exe",
             "varsto-9.9.9-x86_64-unknown-linux-musl.tar.gz",
         ];
@@ -1755,16 +1768,13 @@ mod tests {
             pick(true, false, win).as_deref(),
             Some("Varsto-9.9.9-setup.exe")
         );
-        // A portable copy keeps the zip.
+        // A portable copy is offered nothing: it has to run the installer once.
+        assert_eq!(pick(false, false, win), None);
+        // So is an installed copy of a release without a setup program (no zip fallback).
+        let no_setup = ["varsto-9.9.9-x86_64-pc-windows-gnu.zip"];
         assert_eq!(
-            pick(false, false, win).as_deref(),
-            Some("varsto-9.9.9-x86_64-pc-windows-gnu.zip")
-        );
-        // An installed copy of a release without a setup program takes the zip too.
-        let only_zip = ["varsto-9.9.9-x86_64-pc-windows-gnu.zip"];
-        assert_eq!(
-            pick_archive(only_zip.into_iter(), "9.9.9", win, false, true).as_deref(),
-            Some("varsto-9.9.9-x86_64-pc-windows-gnu.zip")
+            pick_archive(no_setup.into_iter(), "9.9.9", win, false, true),
+            None
         );
         // The setup program never serves another platform.
         assert_eq!(
@@ -1772,6 +1782,57 @@ mod tests {
             Some("varsto-9.9.9-x86_64-unknown-linux-musl.tar.gz")
         );
         assert_eq!(pick(false, true, win), None);
+    }
+
+    #[test]
+    fn a_portable_windows_copy_is_told_to_run_the_installer_once() {
+        let check = Check {
+            current: "0.0.1-alpha.14".into(),
+            latest: "9.9.9".into(),
+            available: false,
+            newer: true,
+            download_page: "https://example.invalid/downloads/".into(),
+            archive: None,
+            target: "x86_64-pc-windows-gnu".into(),
+        };
+        // The running test binary has no unins000.exe beside it: a copy the
+        // setup program did not install.
+        assert!(!installed_by_setup());
+        let e = apply(&check, &Policy::new(Path::new("/nonexistent"), false))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("9.9.9 is out"), "{e}");
+        assert!(e.contains("not installed with the setup program"), "{e}");
+        assert!(
+            e.contains("https://example.invalid/downloads/Varsto-9.9.9-setup.exe"),
+            "{e}"
+        );
+        assert!(e.contains("updates continue automatically"), "{e}");
+        assert!(!e.contains(".zip"), "{e}");
+        // The notice is for Windows copies the setup program did not install, only.
+        let notice = |target: &str, by_setup: bool| {
+            windows_installer_notice(target, by_setup, "https://x/", "Varsto-1-setup.exe")
+        };
+        assert!(notice("x86_64-pc-windows-gnu", false).is_some());
+        assert_eq!(notice("x86_64-pc-windows-gnu", true), None);
+        assert_eq!(notice("x86_64-unknown-linux-musl", false), None);
+        // A setup-installed copy gets the installer as its update file, and
+        // a missing installer is not papered over with another file.
+        let names = [
+            "Varsto-9.9.9-setup.exe",
+            "varsto-9.9.9-x86_64-pc-windows-gnu.zip",
+        ];
+        let pick = |setup| {
+            pick_archive(
+                names.iter().copied(),
+                "9.9.9",
+                "x86_64-pc-windows-gnu",
+                false,
+                setup,
+            )
+        };
+        assert_eq!(pick(true).as_deref(), Some("Varsto-9.9.9-setup.exe"));
+        assert_eq!(pick(false), None);
     }
 
     #[test]
@@ -2016,9 +2077,9 @@ mod tests {
     /// The tests' daily list, signed with `sk`; `trusted` is the signed comment.
     fn daily_files(sk: &SigningKey, body: &[u8], trusted: &str) -> Fake {
         let sums = format!(
-            "{}  {DFILE}\n{}  varsto-daily-windows-x86_64.zip\n",
+            "{}  {DFILE}\n{}  {DAILY_SETUP}\n",
             hex::encode(Sha256::digest(body)),
-            hex::encode(Sha256::digest(b"zip"))
+            hex::encode(Sha256::digest(b"setup"))
         );
         let sig = sign(sk, sums.as_bytes(), trusted);
         let mut files = HashMap::new();
@@ -2243,10 +2304,11 @@ mod tests {
             daily_file("linux", "x86_64", false, false),
             Ok("varsto-daily-linux-x86_64.tar.gz")
         );
-        assert_eq!(
-            daily_file("windows", "x86_64", false, false),
-            Ok("varsto-daily-windows-x86_64.zip")
-        );
+        // A Windows copy the setup program did not install is sent to the installer.
+        let e = daily_file("windows", "x86_64", false, false).unwrap_err();
+        assert!(e.contains("not installed with the setup program"), "{e}");
+        assert!(e.contains(DAILY_SETUP), "{e}");
+        assert!(!e.contains(".zip"), "{e}");
         assert_eq!(
             daily_file("windows", "x86_64", false, true),
             Ok(DAILY_SETUP)

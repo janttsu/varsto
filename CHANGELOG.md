@@ -39,6 +39,11 @@ spec still names them because sections were written as the work was done.
 
 ### Changed
 
+- Windows: the portable zip is gone; install with the setup program
+  (`Varsto-<version>-setup.exe`), which is now the only Windows download, also
+  on the daily channel. `varsto update` and `varsto update --daily` always
+  install through it; an old portable copy is told to download and run the
+  installer once, and updates continue automatically after that (spec 65).
 - Format 2 blocks (spec 62): chunk nonces follow the packed bytes, chunks are
   compressed with zstd level 3 after a 64 KiB probe, the chunker's Gear table
   is keyed per folder with new block sizes by file size, and every block of

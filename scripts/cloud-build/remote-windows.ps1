@@ -1,13 +1,18 @@
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
 # Runs on a fresh Windows Server build instance over SSH: smoke-tests the
-# cross-compiled Windows zip on real Windows (command line, vault, sync,
+# cross-compiled Windows programs on real Windows (command line, vault, sync,
 # background service and its local API, self-update check).
+# -Exe: path of the cross-compiled varsto.exe (CI). Without it the programs
+# come as C:\build\varsto-windows.zip, a transport archive that
+# scripts/cloud-build/scw-build.py makes from dist/windows/app.
+param([string]$Exe = "")
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 Set-Location C:\build
-Expand-Archive -Force varsto-windows.zip -DestinationPath .\unzipped
-$dir = Get-ChildItem .\unzipped | Select-Object -First 1
-$exe = Join-Path $dir.FullName "varsto.exe"
+if ($Exe) { $exe = $Exe } else {
+  Expand-Archive -Force varsto-windows.zip -DestinationPath .\unzipped
+  $exe = (Get-ChildItem .\unzipped -Recurse -Filter varsto.exe | Select-Object -First 1).FullName
+}
 Write-Host "== $(Get-ComputerInfo | Select-Object -ExpandProperty OsName) $([Environment]::OSVersion.Version)"
 & $exe --version
 $env:VARSTO_PASSPHRASE = "cloud-test-passphrase-123"

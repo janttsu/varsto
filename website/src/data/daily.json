@@ -64,17 +64,6 @@
         "build": "20261016-316c579"
       },
       {
-        "key": "windows-zip",
-        "label": "Windows portable zip",
-        "file": "varsto-testbuild-20261016-316c579-windows-x86_64.zip",
-        "latest": "varsto-daily-windows-x86_64.zip",
-        "size": 14523288,
-        "sha256": "33af812cf359115867bbd16ac66919e6162a41b3bc63aa5780cbf81664578487",
-        "commit": "316c579",
-        "signed": false,
-        "build": "20261016-316c579"
-      },
-      {
         "key": "macos",
         "label": "macOS Apple Silicon (dmg)",
         "file": "varsto-daily-20261016-d4d1f14-macos-apple-silicon.dmg",

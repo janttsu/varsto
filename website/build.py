@@ -319,8 +319,7 @@ PLATFORMS = [
     ("macOS", "macos", lambda n: n.endswith("-macos.dmg") or n.endswith("-macos.zip") or n.endswith("-macos-apple-silicon-lite.zip"),
      [("Command line only (Apple Silicon)", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz"))],
      "Apple Silicon. Open the disk image and drag Varsto to Applications. The app has its own window, a menu-bar item, Finder actions (right-click a file: Download or Free up space with Varsto; double-click a placeholder to download and open it), the background service and the varsto command line inside the bundle. Unsigned: right-click, Open the first time."),
-    ("Windows", "windows", lambda n: n.endswith("-setup.exe") or n.endswith("-x86_64-pc-windows-gnu.zip"),
-     [("Portable zip (no installer)", lambda n: n.endswith("-x86_64-pc-windows-gnu.zip"))],
+    ("Windows", "windows", lambda n: n.endswith("-setup.exe"), [],
      "x86_64 installer. Installs for your user without administrator rights (or for everyone): Start menu and desktop icons, Varsto in its own window, the background service and tray at login, automatic updates. Run it again to upgrade or repair; your data stays. Not code-signed, so SmartScreen may ask you to confirm. Built and smoke-tested on Windows Server 2025 in CI; not yet through the manual checklist on a real machine."),
     ("Android", "android", lambda n: n.endswith("-android-debug.apk"), [],
      "Debug-signed APK for sideloading: allow the install when the phone asks. Runs the same core as a foreground service. Tested in the Android 15 emulator only."),
@@ -424,13 +423,13 @@ def downloads_table(depth: int) -> str:
     cards = []
     for title, icon, primary, alts, status in PLATFORMS:
         candidates = [(n, d, sz) for n, d, sz in files if primary and primary(n)]
-        # The Mac-built app first, the Windows installer before the portable zip.
-        candidates.sort(key=lambda t: (t[0].endswith("-lite.zip"), not t[0].endswith("-setup.exe")))
+        # The Mac-built app before the interim lite apps.
+        candidates.sort(key=lambda t: t[0].endswith("-lite.zip"))
         main = candidates[0] if candidates else None
         icon_svg = f'<svg class="dl-icon" viewBox="0 0 24 24" aria-hidden="true">{ICONS[icon]}</svg>'
         if main:
             name, digest, size = main
-            label = ("Download Varsto.app (Apple Silicon)" if not name.endswith("-lite.zip") else "Download Varsto.app (interim, Apple Silicon)") if title == "macOS" else ("Download the Windows installer" if name.endswith("-setup.exe") else "Download for Windows (zip)") if title == "Windows" else f"Download for {html.escape(title)}"
+            label = ("Download Varsto.app (Apple Silicon)" if not name.endswith("-lite.zip") else "Download Varsto.app (interim, Apple Silicon)") if title == "macOS" else "Download the Windows installer" if title == "Windows" else f"Download for {html.escape(title)}"
             button = (f'<a class="dl-primary" href="{pre}downloads/{html.escape(name)}">{label}</a>'
                       f'<p class="dl-meta">{html.escape(name)}<br>{human(size)} · <span class="sum" title="{digest}">SHA-256 {digest[:12]}…</span></p>')
         elif title == "Source":

@@ -3,8 +3,8 @@
 #
 #   installer\windows\build.ps1 -Version 0.0.1-alpha.14 -Source <folder> [-Out dist\installer]
 #
-# <folder> holds varsto.exe, varsto-window.exe and the licence files (the
-# unpacked Windows zip). The script makes the multi-size icon from the brand
+# <folder> holds varsto.exe, varsto-window.exe and the licence files (CI: the
+# windows-programs artifact, made by website/build-release.sh). The script makes the multi-size icon from the brand
 # PNG files, fetches Microsoft's WebView2 bootstrapper for the installer to
 # carry (skipped with -NoWebView2; the installer then runs without that
 # check), finds or installs Inno Setup 6, and compiles installer\windows\varsto.iss.
