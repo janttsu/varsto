@@ -68,8 +68,10 @@
   var active = false, dirty = true, raf = 0, timer = 0, pollTimer = 0, abort = null;
   var mode = "auto";
   try { var m0 = localStorage.getItem("varsto-viz-bg"); if (m0 === "light" || m0 === "black" || m0 === "auto") { mode = m0; } } catch (e) { /* not kept */ }
-  var root, canvas, ctx, stage, bar, panels = {}, chipsBox, resEl, statusEl, dotEl, demoTag, fsBtn;
+  var root, canvas, ctx, stage, side, bar, panels = {}, chipsBox, resEl, statusEl, dotEl, demoTag, fsBtn;
   var W = 1, H = 1, dpr = 1, cssW = 1, cssH = 1;
+  // The part of the canvas the board may use: all of it, or in the full-screen view of a wide screen the canvas minus the bar, the chips and the side panel drawn over it.
+  var area = { x: 0, y: 0, w: 1, h: 1 };
   var layout = null, layoutKey = "";
   var lastDraw = 0;
   var reduced = false;
@@ -148,7 +150,7 @@
     canvas = el("canvas"); canvas.setAttribute("role", "img"); canvas.setAttribute("aria-label", T("Live picture of where Varsto keeps your data and what moves now"));
     demoTag = el("div", "viz-demo hidden", T("Demo data"));
     stage.appendChild(canvas); stage.appendChild(demoTag);
-    var side = el("aside", "viz-side");
+    side = el("aside", "viz-side");
     ["jobs", "disks", "protect", "health", "cost"].forEach(function (k) { panels[k] = el("section", "viz-card"); side.appendChild(panels[k]); });
     main.appendChild(stage); main.appendChild(side);
     root.appendChild(bar); root.appendChild(chipsBox); root.appendChild(main);
@@ -206,7 +208,7 @@
     try { if (screen.orientation && screen.orientation.addEventListener) { screen.orientation.addEventListener("change", detectDisplay); } } catch (e) { /* none */ }
     // A monitor or TV attached or moved to: the Window Management API fires "change" on the screen.
     try { if (screen.addEventListener) { screen.addEventListener("change", detectDisplay); } } catch (e) { /* none */ }
-    if (window.ResizeObserver) { new ResizeObserver(function () { detectDisplay(); }).observe(stage); }
+    if (window.ResizeObserver) { var ro = new ResizeObserver(function () { detectDisplay(); }); ro.observe(stage); ro.observe(side); ro.observe(chipsBox); }
     watchDpr();
     document.addEventListener("keydown", function (ev) {
       if (!active || ev.ctrlKey || ev.metaKey || ev.altKey) { return; }
@@ -228,6 +230,15 @@
     } catch (e) { /* none */ }
   }
   function onDpr() { watchDpr(); detectDisplay(); }
+  // Wide full-screen view: the canvas is the whole window and the bar, chips and side panel sit on it.
+  function overlayFull() { return (!!fullEl() || pseudoFull) && window.innerWidth > 1100; }
+  // The side panel never scrolls: the cards that do not fit are left out, the least important first.
+  function fitSide(over) {
+    var order = ["cost", "disks", "protect", "health", "jobs"];
+    order.forEach(function (k) { panels[k].style.display = ""; });
+    if (!over) { return; }
+    for (var i = 0; i < order.length - 1 && side.scrollHeight > side.clientHeight + 1; i++) { panels[order[i]].style.display = "none"; }
+  }
   function detectDisplay() {
     if (!canvas) { return; }
     var r = stage.getBoundingClientRect();
@@ -241,8 +252,18 @@
     W = bw; H = bh; layoutKey = "";
     var sw = Math.round((screen.width || cssW) * dpr), sh = Math.round((screen.height || cssH) * dpr);
     resEl.textContent = T("Display") + " " + Math.max(sw, sh) + "×" + Math.min(sw, sh) + " · ×" + nf(dpr, 2) + " · " + T("canvas") + " " + bw + "×" + bh;
-    // Bigger text on big screens: the page's root size follows the CSS width.
-    root.style.setProperty("--vz-scale", String(clamp(Math.min(cssW, cssH * 1.6) / 900, 1, 2.6)));
+    var over = overlayFull();
+    root.classList.toggle("viz-over", over);
+    // Bigger text on big screens: the page's root size follows the CSS size of the canvas, or of the window when the canvas is the whole window.
+    var sc = over ? Math.min(window.innerWidth / 1280, window.innerHeight / 720) : Math.min(cssW, cssH * 1.6) / 900;
+    root.style.setProperty("--vz-scale", String(clamp(sc, 1, 3.2)));
+    area = { x: 0, y: 0, w: cssW, h: cssH };
+    if (over) {
+      var cr = chipsBox.getBoundingClientRect(), sr = side.getBoundingClientRect(), g = 14 * clamp(sc, 1, 3.2);
+      area = { x: g, y: Math.max(0, cr.bottom - r.top) + g * 0.5, w: Math.max(1, sr.left - r.left - 2 * g), h: 1 };
+      area.h = Math.max(1, cssH - area.y - g);
+    }
+    fitSide(over);
     dirty = true; schedule(0);
   }
 
@@ -358,8 +379,8 @@
     function ext(p) { minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]); minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]); }
     zones.forEach(function (z) { [[z.x0, z.y0], [z.x1, z.y0], [z.x1, z.y1], [z.x0, z.y1]].forEach(function (c) { ext(P(c[0], c[1], 0)); }); });
     pos.forEach(function (q) { var p = P(q[1], q[2], 0); ext([p[0] - 1.3, p[1] - 1.9]); ext([p[0] + 1.3, p[1] + 1.3]); });
-    var pad = 0.04, k = Math.min(cssW * (1 - 2 * pad) / (maxX - minX), cssH * (1 - 2 * pad) / (maxY - minY));
-    return { k: k, zones: zones, dy: dy, pos: pos, ox: (cssW - (maxX + minX) * k) / 2, oy: (cssH - (maxY + minY) * k) / 2 };
+    var pad = area.w < area.h * 0.8 ? 0.01 : 0.03, k = Math.min(area.w * (1 - 2 * pad) / (maxX - minX), area.h * (1 - 2 * pad) / (maxY - minY));
+    return { k: k, zones: zones, dy: dy, pos: pos, ox: area.x + (area.w - (maxX + minX) * k) / 2, oy: area.y + (area.h - (maxY + minY) * k) / 2 };
   }
   function S(x, y, z) { var p = P(x, y, z); return [layout.ox + p[0] * layout.k, layout.oy + p[1] * layout.k]; }
 
@@ -429,7 +450,7 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(canvas.width / cssW, 0, 0, canvas.height / cssH, 0, 0);
     // Layout in CSS pixels.
-    var key = JSON.stringify([sn.devices.map(function (d) { return d.id; }), sn.storages.map(function (s) { return s.name + s.kind; }), (sn.disks && sn.disks.list || []).map(function (d) { return d.pool + d.label; }), cssW, cssH, T("Home")]);
+    var key = JSON.stringify([sn.devices.map(function (d) { return d.id; }), sn.storages.map(function (s) { return s.name + s.kind; }), (sn.disks && sn.disks.list || []).map(function (d) { return d.pool + d.label; }), cssW, cssH, T("Home"), area.x, area.y, area.w, area.h]);
     if (!layout || key !== layoutKey) {
       var model = buildModel(sn); doLayout(model); layout = model; layoutKey = key;
     } else {
@@ -441,7 +462,7 @@
     }
     var m = layout, k = m.k;
     placed = [];
-    var fontS = clamp(k * 0.2, cssW < 520 ? 9 : 11, 34);
+    var fontS = clamp(k * 0.2, cssW < 520 ? 9 : 11, 90);
     // Zones (platforms).
     m.zones.forEach(function (z) {
       var c = [S(z.x0, z.y0, 0), S(z.x1, z.y0, 0), S(z.x1, z.y1, 0), S(z.x0, z.y1, 0)];
@@ -737,6 +758,7 @@
     else { p.appendChild(el("p", "viz-empty", T("No priced cloud storage."))); }
     if (sn.cost && sn.cost.unpriced && sn.cost.unpriced.length) { p.appendChild(el("p", "viz-empty", T("No price set for") + " " + sn.cost.unpriced.join(", "))); }
     updateStatus();
+    if (side) { fitSide(overlayFull()); }
   }
   function updateStatus() {
     var s = demo ? "demo" : status;
