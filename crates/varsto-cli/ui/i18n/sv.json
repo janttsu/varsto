@@ -1694,7 +1694,17 @@
   "Ejecting": "Utmatning",
   "average copies per block": "kopior per block i genomsnitt",
   "Check for updates every day": "Sök efter uppdateringar varje dag",
-  "Where Varsto can install a new version by itself (Windows) it does, after checking the Varsto release signature; elsewhere it tells you.": "Där Varsto kan installera en ny version själv (Windows) gör den det efter att ha kontrollerat Varstos utgivningssignatur; på andra system talar den om det."
+  "Where Varsto can install a new version by itself (Windows) it does, after checking the Varsto release signature; elsewhere it tells you.": "Där Varsto kan installera en ny version själv (Windows) gör den det efter att ha kontrollerat Varstos utgivningssignatur; på andra system talar den om det.",
+  "Keep on this device": "Behåll på den här enheten",
+  "Full sync: download and keep every file": "Full synkronisering: hämta och behåll alla filer",
+  "Selective sync: placeholders, files only when opened or pinned": "Selektiv synkronisering: platshållare, filer bara när de öppnas eller fästs",
+  "With selective sync this device keeps no files, but it still passes new files of the other devices on to the storages it has.": "Med selektiv synkronisering behåller den här enheten inga filer, men den för ändå vidare de andra enheternas nya filer till de lagringsplatser den har.",
+  "Direction": "Riktning",
+  "Both ways": "Åt båda hållen",
+  "Send only: never apply other devices' changes here": "Endast sändning: andra enheters ändringar tillämpas aldrig här",
+  "Receive only: never publish changes made here": "Endast mottagning: ändringar som görs här publiceras aldrig",
+  "Forwarding blocks to the storages for «{s}»": "För vidare block till lagringsplatserna åt «{s}»",
+  "Forwarding": "Vidarebefordran"
  },
  "patterns": [
   [

@@ -1311,6 +1311,48 @@ fn mobile() -> bool {
     std::env::var_os("VARSTO_MOBILE").is_some()
 }
 
+/// `POST /api/folder/attach`: attach a folder of the vault here, kept in
+/// full or selective (`selective`), plain or encrypted on a phone (`plain`),
+/// both ways, send-only or receive-only (`mode`; section 70). The mode is
+/// checked before anything is attached, so a refused one leaves nothing.
+fn attach_request(engine: &mut Engine, input: &Value) -> Result<varsto_core::ids::FolderId> {
+    let selective = input
+        .get("selective")
+        .and_then(|c| c.as_bool())
+        .unwrap_or(false);
+    let name_or_id = s(input, "name_or_id")?;
+    let plain = wants_plain(input);
+    let mode: Option<varsto_core::vault::FolderMode> = opt(input, "mode")
+        .filter(|m| !m.trim().is_empty())
+        .map(|m| m.parse())
+        .transpose()?;
+    if mode == Some(varsto_core::vault::FolderMode::ReceiveOnly) && !plain {
+        bail!("receive-only is for folders with plain files; this folder would be kept encrypted on this device");
+    }
+    let path = match opt(input, "path").filter(|p| !p.trim().is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => {
+            let name = engine
+                .folders()
+                .into_iter()
+                .find(|(r, _)| {
+                    r.name == name_or_id || r.folder_id.as_str().starts_with(&name_or_id)
+                })
+                .map(|(r, _)| r.name.clone())
+                .unwrap_or_else(|| name_or_id.clone());
+            default_folder_path(engine.home(), &name, plain)?
+        }
+    };
+    let id = engine.attach_folder(&name_or_id, &path, selective)?;
+    if !plain {
+        engine.set_encrypted_here(&name_or_id, true)?;
+    }
+    if let Some(mode) = mode.filter(|m| !m.is_normal()) {
+        engine.set_folder_mode(&name_or_id, mode)?;
+    }
+    Ok(id)
+}
+
 /// The `plain` flag of a folder request: plain files unless the request says
 /// otherwise; phones default to "encrypted on this device".
 fn wants_plain(input: &Value) -> bool {
@@ -2233,28 +2275,7 @@ fn api_unlocked(
             Ok(json!({"ok": true, "objects_deleted": deleted}))
         }
         (Method::Post, "/api/folder/attach") => {
-            let selective = input
-                .get("selective")
-                .and_then(|c| c.as_bool())
-                .unwrap_or(false);
-            let name_or_id = s(input, "name_or_id")?;
-            let plain = wants_plain(input);
-            let path = match opt(input, "path").filter(|p| !p.trim().is_empty()) {
-                Some(p) => PathBuf::from(p),
-                None => {
-                    let name = engine
-                        .folders()
-                        .into_iter()
-                        .find(|(r, _)| r.name == name_or_id || r.folder_id.as_str().starts_with(&name_or_id))
-                        .map(|(r, _)| r.name.clone())
-                        .unwrap_or_else(|| name_or_id.clone());
-                    default_folder_path(engine.home(), &name, plain)?
-                }
-            };
-            let id = engine.attach_folder(&name_or_id, &path, selective)?;
-            if !plain {
-                engine.set_encrypted_here(&name_or_id, true)?;
-            }
+            let id = attach_request(engine, input)?;
             service.folders_changed = true;
             service.request_sync();
             Ok(json!({"ok": true, "id": id.to_string()}))
@@ -2994,6 +3015,20 @@ fn api_unlocked(
             }
             Ok(json!({"ok": true, "price": engine.storage_price(&name)}))
         }
+        // Forwarding other devices' blocks to this device's storages (section 70).
+        (Method::Get, "/api/forward") => Ok(serde_json::to_value(engine.forward_status())?),
+        (Method::Post, "/api/forward") => {
+            if let Some(on) = input.get("enabled").and_then(|v| v.as_bool()) {
+                engine.set_forwarding(on)?;
+            }
+            service.forward = Some(engine.forward_status());
+            Ok(serde_json::to_value(engine.forward_status())?)
+        }
+        (Method::Post, "/api/forward/run") => {
+            let r = engine.forward(&varsto_core::engine::ForwardOptions::manual())?;
+            service.forward = Some(engine.forward_status());
+            Ok(serde_json::to_value(r)?)
+        }
         (Method::Get, "/api/verify") => Ok(serde_json::to_value(engine.verify_status())?),
         (Method::Post, "/api/verify") => {
             let mut sched = engine.verify_schedule().clone();
@@ -3251,6 +3286,57 @@ mod tests {
     }
 
     use super::*;
+
+    /// The attach dialog's choices reach the mount: selective sync and the
+    /// direction; a receive-only folder kept encrypted is refused before
+    /// anything is attached.
+    #[test]
+    fn attaching_takes_selective_sync_and_the_direction() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path();
+        let storage = StorageSpec::LocalDir {
+            name: "box".into(),
+            path: t.join("box"),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+            min_free: None,
+        };
+        std::fs::create_dir_all(t.join("box")).unwrap();
+        let pass = "correct horse battery staple";
+        let (mut a, key) = Engine::init(&t.join("a"), "phone", pass).unwrap();
+        a.add_storage(storage.clone()).unwrap();
+        a.add_folder("camera", &t.join("a-camera")).unwrap();
+        a.add_folder("notes", &t.join("a-notes")).unwrap();
+        a.sync(None).unwrap();
+        let mut b = Engine::join(&t.join("b"), "laptop", pass, &key, storage).unwrap();
+
+        let refused = attach_request(
+            &mut b,
+            &json!({"name_or_id": "notes", "path": t.join("b-notes"), "plain": false, "mode": "receive-only"}),
+        );
+        assert!(refused.is_err());
+        assert!(
+            attach_request(&mut b, &json!({"name_or_id": "notes", "mode": "sideways"})).is_err()
+        );
+
+        attach_request(
+            &mut b,
+            &json!({"name_or_id": "camera", "path": t.join("b-camera"), "plain": true, "selective": true, "mode": "send-only"}),
+        )
+        .unwrap();
+        attach_request(
+            &mut b,
+            &json!({"name_or_id": "notes", "path": t.join("b-notes"), "plain": true}),
+        )
+        .unwrap();
+        let st = b.status().unwrap();
+        let of = |n: &str| st.folders.iter().find(|f| f.name == n).unwrap();
+        assert!(of("camera").selective);
+        assert_eq!(of("camera").mode, varsto_core::vault::FolderMode::SendOnly);
+        assert!(!of("notes").selective);
+        assert_eq!(of("notes").mode, varsto_core::vault::FolderMode::Normal);
+    }
 
     /// A real server on a free port with a locked (engine-less) state.
     fn test_server() -> (u16, String, tempfile::TempDir) {

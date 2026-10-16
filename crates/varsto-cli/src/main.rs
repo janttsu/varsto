@@ -480,6 +480,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<McpCmd>,
     },
+    /// Forwarding: carry other devices' blocks to this device's storages
+    /// (also for folders kept selective here): show, run now, turn on or off.
+    Forward {
+        #[command(subcommand)]
+        cmd: Option<upkeep::ForwardCmd>,
+    },
     /// Automatic verification of blocks other devices wrote: show, run now, set the schedule.
     Verify {
         #[command(subcommand)]
@@ -1419,6 +1425,9 @@ enum FolderCmd {
         /// Selective sync: files appear as placeholders until fetched.
         #[arg(long)]
         selective: bool,
+        /// How the folder syncs here: normal, send-only or receive-only.
+        #[arg(long)]
+        mode: Option<String>,
     },
     /// Turn selective sync on or off for an attached folder.
     Selective {
@@ -3923,8 +3932,15 @@ fn run(cli: &Cli) -> Result<()> {
                     name_or_id,
                     path,
                     selective,
+                    mode,
                 } => {
+                    // Checked first: a mode that is refused attaches nothing.
+                    let mode: Option<varsto_core::vault::FolderMode> =
+                        mode.as_deref().map(str::parse).transpose()?;
                     let id = engine.attach_folder(name_or_id, path, *selective)?;
+                    if let Some(m) = mode.filter(|m| !m.is_normal()) {
+                        engine.set_folder_mode(name_or_id, m)?;
+                    }
                     println!("folder {} attached at {}", id.short(), path.display());
                 }
                 FolderCmd::Selective { name_or_id, on } => {
@@ -4334,6 +4350,7 @@ fn run(cli: &Cli) -> Result<()> {
             };
             print(cli, &h, varsto_core::help::render_text)?;
         }
+        Cmd::Forward { cmd } => upkeep::forward(cli, &home, cmd)?,
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
         Cmd::Import { cmd } => import::run(cli, &home, cmd)?,
@@ -6831,9 +6848,10 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
             name_or_id,
             path,
             selective,
+            mode,
         } => (
             "/api/folder/attach",
-            serde_json::json!({"name_or_id": name_or_id, "path": abs(path)?, "selective": selective, "plain": true}),
+            serde_json::json!({"name_or_id": name_or_id, "path": abs(path)?, "selective": selective, "plain": true, "mode": mode}),
         ),
         FolderCmd::Detach { name } => ("/api/folder/detach", serde_json::json!({"name": name})),
         FolderCmd::Remove { name, purge, yes } => {

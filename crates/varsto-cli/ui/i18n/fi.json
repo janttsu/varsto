@@ -1694,7 +1694,17 @@
   "Ejecting": "Irrotus",
   "average copies per block": "kopioita lohkoa kohti keskimäärin",
   "Check for updates every day": "Päivitykset tarkistetaan päivittäin",
-  "Where Varsto can install a new version by itself (Windows) it does, after checking the Varsto release signature; elsewhere it tells you.": "Missä Varsto voi asentaa uuden version itse (Windows), se tekee sen tarkistettuaan Varston julkaisuallekirjoituksen; muualla se kertoo asiasta."
+  "Where Varsto can install a new version by itself (Windows) it does, after checking the Varsto release signature; elsewhere it tells you.": "Missä Varsto voi asentaa uuden version itse (Windows), se tekee sen tarkistettuaan Varston julkaisuallekirjoituksen; muualla se kertoo asiasta.",
+  "Keep on this device": "Säilytys tällä laitteella",
+  "Full sync: download and keep every file": "Täysi synkronointi: lataa ja säilytä kaikki tiedostot",
+  "Selective sync: placeholders, files only when opened or pinned": "Valikoiva synkronointi: paikkamerkit, tiedostot vain avattaessa tai kiinnitettäessä",
+  "With selective sync this device keeps no files, but it still passes new files of the other devices on to the storages it has.": "Valikoivassa synkronoinnissa tämä laite ei säilytä tiedostoja, mutta se välittää silti muiden laitteiden uudet tiedostot eteenpäin tallennuspaikkoihin, joihin sillä on pääsy.",
+  "Direction": "Suunta",
+  "Both ways": "Molempiin suuntiin",
+  "Send only: never apply other devices' changes here": "Vain lähetys: muiden laitteiden muutoksia ei koskaan tuoda tänne",
+  "Receive only: never publish changes made here": "Vain vastaanotto: täällä tehtyjä muutoksia ei koskaan julkaista",
+  "Forwarding blocks to the storages for «{s}»": "Välittää lohkoja tallennuspaikkoihin: «{s}»",
+  "Forwarding": "Välitys"
  },
  "patterns": [
   [

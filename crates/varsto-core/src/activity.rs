@@ -86,6 +86,9 @@ pub const TRASH_MOVE: &str = "trash_move";
 pub const DRAIN: &str = "drain";
 /// Restoring a version of a file from the version history (`engine::history`).
 pub const HISTORY_RESTORE: &str = "history_restore";
+/// Forwarding other devices' blocks to the storages (`engine::forward`);
+/// the subject is "<devices>: <folder>".
+pub const FORWARD: &str = "forward";
 
 /// What `done` and `total` count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -500,6 +503,7 @@ pub fn describe(t: &TaskView) -> String {
         (FSCK, "verify") => "verifying every block of the vault".to_string(),
         (FSCK, _) => "checking the vault".to_string(),
         (DATA_MOVE, _) => format!("moving the data of folder «{s}»"),
+        (FORWARD, _) => format!("forwarding blocks to the storages for «{s}»"),
         (STORAGE_REMOVAL, "delete") => format!("deleting the data on storage «{s}»"),
         (STORAGE_REMOVAL, _) => format!("copying blocks off storage «{s}»"),
         (SCRUB, "disk") => format!("checking disk «{s}» for bit rot"),

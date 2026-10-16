@@ -81,6 +81,8 @@ pub struct ServiceState {
     pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
     /// Automatic repair: queue, last run and copies that could not be repaired.
     pub repair: Option<varsto_core::engine::RepairStatus>,
+    /// Forwarding other devices' blocks to the storages: on or off, last run.
+    pub forward: Option<varsto_core::engine::ForwardStatus>,
     /// Bit-rot check: schedule, last run, passes and damaged files waiting.
     pub scrub: Option<varsto_core::scrub::ScrubStatus>,
     /// Backups: when expiry last ran, the last snapshot taken here, and the
@@ -132,6 +134,14 @@ const BACKUP_UPKEEP_EVERY: i64 = 6 * 3600;
 
 impl ServiceState {
     pub fn summary(&self) -> Value {
+        let mut v = self.summary_base();
+        // Added apart: one more key in the literal passes the macro's
+        // recursion limit.
+        v["forward"] = json!(self.forward);
+        v["forward_text"] = json!(self.forward.as_ref().map(|f| f.describe()));
+        v
+    }
+    fn summary_base(&self) -> Value {
         json!({
             "running": self.running,
             "paused": self.paused,
@@ -422,6 +432,20 @@ impl ServiceState {
             }
         }
         self.repair = Some(engine.repair_status());
+    }
+    /// Forward other devices' blocks to this device's storages (section 70;
+    /// called after a sync and repair), within the service's budget: 1 GiB
+    /// a run, 256 MiB on a phone, or what `config.json` says.
+    pub fn forward_if_due(&mut self, engine: &mut Engine) {
+        if engine.forward_settings().enabled {
+            let phone = std::env::var_os("VARSTO_MOBILE").is_some();
+            match engine.forward(&engine.forward_service_options(phone)) {
+                Ok(r) if r.blocks > 0 => log::info!("forwarding: {}", r.describe()),
+                Ok(_) => {}
+                Err(e) => log::warn!("forwarding failed: {e:#}"),
+            }
+        }
+        self.forward = Some(engine.forward_status());
     }
     /// Before a sync: look after the ledger. A lost or damaged local ledger
     /// (or no ledger anywhere) is rebuilt from the storages at once, before
@@ -2181,6 +2205,7 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.auto_verify_if_due(e);
                         st.service.scrub_if_due(e);
                         st.service.repair_if_due(e);
+                        st.service.forward_if_due(e);
                         st.service.drains_if_due(e);
                         st.service.backups_if_due(e);
                         st.service.trash_if_due(e);
@@ -2191,7 +2216,7 @@ pub fn run(opts: Options) -> Result<()> {
                             log::info!("device details not published: {err:#}");
                         }
                     }
-                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, drains, backups, trash, restic, disk suggestions, device details)");
+                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, drains, backups, trash, restic, disk suggestions, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),
