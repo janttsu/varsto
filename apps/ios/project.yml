@@ -43,7 +43,11 @@ targets:
         "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": ["$(SRCROOT)/../../target/aarch64-apple-ios-sim/release"]
         ARCHS: arm64
         ONLY_ACTIVE_ARCH: "NO"
-        OTHER_LDFLAGS: ["-lvarsto_ffi"]
+        # Explicit .a paths, never -lvarsto_ffi: the crate also builds a cdylib, and
+        # the linker would pick libvarsto_ffi.dylib (a runner path, not in the app).
+        # The system libraries are what the Rust standard library and the TLS code need.
+        "OTHER_LDFLAGS[sdk=iphoneos*]": ["$(SRCROOT)/../../target/aarch64-apple-ios/release/libvarsto_ffi.a", "-lresolv", "-liconv", "-lc++", "-framework", "Security", "-framework", "CoreFoundation", "-framework", "SystemConfiguration"]
+        "OTHER_LDFLAGS[sdk=iphonesimulator*]": ["$(SRCROOT)/../../target/aarch64-apple-ios-sim/release/libvarsto_ffi.a", "-lresolv", "-liconv", "-lc++", "-framework", "Security", "-framework", "CoreFoundation", "-framework", "SystemConfiguration"]
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         MARKETING_VERSION: "0.0.1"

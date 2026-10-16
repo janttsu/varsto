@@ -73,4 +73,5 @@ plutil -extract NSLocalNetworkUsageDescription raw -o - "$plist" >/dev/null
 plutil -extract UIDeviceFamily json -o - "$plist"; echo
 [ -f "$chk/Payload/Varsto.app/Assets.car" ] || { echo "no Assets.car: app icon missing" >&2; exit 1; }
 lipo -archs "$chk/Payload/Varsto.app/Varsto" | grep -qx arm64 || { echo "executable is not arm64" >&2; exit 1; }
+"$root/apps/ios/check-exe.sh" "$chk/Payload/Varsto.app/Varsto"
 echo "ipa: $ipa ($(du -h "$ipa" | cut -f1))"
