@@ -52,7 +52,6 @@ PLATFORMS = [
     ("linux-x86_64", "Linux x86_64 (static, musl)", "-linux-x86_64.tar.gz", "varsto-daily-linux-x86_64.tar.gz"),
     ("android", "Android (debug APK)", "-android-debug.apk", "varsto-daily-android-debug.apk"),
     ("windows-setup", "Windows installer", "-windows-setup.exe", "varsto-daily-windows-setup.exe"),
-    ("windows-zip", "Windows portable zip", "-windows-x86_64.zip", "varsto-daily-windows-x86_64.zip"),
     ("macos", "macOS Apple Silicon (dmg)", "-macos-apple-silicon.dmg", "varsto-daily-macos-apple-silicon.dmg"),
     ("ios", "iOS (unsigned ipa)", "-ios-unsigned.ipa", "varsto-daily-ios-unsigned.ipa"),
 ]

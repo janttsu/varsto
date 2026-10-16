@@ -74,13 +74,13 @@ varsto config auto-update off      # on turns it back on; varsto config shows th
 ```
 
 You can always update by hand: `varsto update` (or `varsto update --check`),
-the update button in the interface or the tray menu. A portable copy (the
-zip) replaces its own files instead of running the installer.
+the update button in the interface or the tray menu. Both always run the
+installer; a copy that the setup program did not install cannot update
+itself (see "Coming from the portable zip" below).
 
 `varsto update --daily` takes the newest daily (test) build instead of a
-release: the signed `varsto-daily-windows-setup.exe` for a copy installed by the
-setup program, `varsto-daily-windows-x86_64.zip` for a portable one. It is
-checked against the separate daily key ([RELEASING.md](../RELEASING.md),
+release: the signed `varsto-daily-windows-setup.exe`, run like the release
+setup program. It is checked against the separate daily key ([RELEASING.md](../RELEASING.md),
 Daily builds), never happens by itself, and `varsto --version` then names the
 daily build. `varsto update --stable` goes back to releases once one is newer.
 
@@ -129,12 +129,16 @@ apply (`/LOG=file`, `/DIR=`, `/TASKS=`, `/ALLUSERS`, `/CURRENTUSER`). Notes:
 | Login start | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Varsto` (`HKLM` for all users) |
 | Logs | `service.log` and the log folder in the data folder (tray menu or Settings > Logs) |
 
-## Portable zip
+## Coming from the portable zip
 
-`varsto-<version>-x86_64-pc-windows-gnu.zip` needs no installer: unzip
-anywhere and double-click `Varsto.cmd` (tray icon, service, window). It
-updates itself by replacing its own files; there is no Start menu entry or
-login start unless you run `varsto.exe service install`.
+Up to 0.0.1-alpha.14 there was also a portable zip. It is gone: the installer
+is the only Windows download, and the only way Varsto updates on Windows.
+An old portable copy cannot update itself; `varsto update` (and
+`varsto update --daily`) says so and names the installer. Download and run
+`Varsto-<version>-setup.exe` once, and updates continue automatically from
+there. Your vault and settings live in the data folder, which the installer
+never touches, so the new installation finds them; you can delete the old
+unzipped folder afterwards.
 
 ## Problems
 
@@ -156,5 +160,7 @@ login start unless you run `varsto.exe service install`.
   runs: install, upgrade in place, repair, refused downgrade, window, uninstall).
 - CI: the `windows-installer` job in `.github/workflows/ci.yml` builds and
   tests the installer on Windows Server 2025 and uploads it; the download
-  set (`website/assemble-release.sh`) lists it first for Windows, the zip as
-  "portable".
+  set (`website/assemble-release.sh`) lists it as the Windows download. The
+  cross-compiled `varsto.exe` and `varsto-window.exe` (`dist/windows/app`,
+  made by `website/build-release.sh`) are only the installer's input and
+  the Windows smoke test's, not downloads.
