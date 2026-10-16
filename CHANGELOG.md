@@ -16,6 +16,16 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Added
+
+- Visualization page (spec 63): an isometric live board of devices, storages,
+  the disk pool and the cloud with animated flows (bytes per second, folder,
+  estimated finish), verification and repair rings, protection per folder,
+  the offline disk stack with the docked disk's phase, cost estimates and
+  alerts. Full screen (button or F) renders at the display's native size,
+  background follows the theme or is Light or pure black. New
+  `GET /api/viz` snapshot; sprites from `website/tools/render/viz_sprites.py`.
+
 ### Changed
 
 - Format 2 blocks (spec 62): chunk nonces follow the packed bytes, chunks are
