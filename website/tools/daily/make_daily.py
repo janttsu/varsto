@@ -1,35 +1,39 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
-"""Prepare a Varsto daily build for publishing.
+"""Prepare a Varsto daily build for publishing BY HAND (the manual/offline path).
+
+The normal path is automatic: .github/workflows/daily.yml builds, signs and
+publishes the pre-release "daily" and ops/site/daily-sync.py on the server
+pulls it. Use this tool only when that path is not available (for example a
+build made on your own machines). It writes the same layout the server has.
 
 Input: a folder with the build files of one daily build (any file name prefix;
-the platform is recognised by the file name ending, see PLATFORMS). The commit
-each file was built from is the last dash-separated token before the platform
-ending when it looks like a git hash (e.g. varsto-testbuild-20261016-316c579-
-linux-x86_64.tar.gz), otherwise the build's --main-commit.
+the platform is recognised by the file name ending, see PLATFORMS; the stable
+varsto-daily-* names work too). The commit each file was built from is the last
+dash-separated token before the platform ending when it looks like a git hash,
+otherwise --commit.
 
-What it does:
-  1. updates website/src/data/daily.json (the page is generated from it): the
-     new build becomes "current", the previous current one moves to "history"
-     (at most --keep builds in all, the current one included);
-  2. writes the server layout under --out (not part of the generated site):
-       daily/builds/<id>/<files>, SHA256SUMS, index.html
-       daily/latest/<stable names> (relative symlinks into ../builds/<id>/),
-       daily/latest/SHA256SUMS, daily/latest.json
-  3. prints the build ids that fall out of the window; delete them on the
-     server by hand or in the workflow (this script never deletes anything
-     outside --out).
+What it writes under --out (not part of the generated site):
+  daily/builds/<id>/<stable names>, SHA256SUMS, index.html
+  daily/latest/<stable names> (relative symlinks into ../builds/<id>/),
+  daily/latest/SHA256SUMS, daily/latest.json (same fields as daily-sync.py writes)
+and prints the build ids that fall out of the --keep window (delete them on the
+server by hand; this script never deletes anything).
+
+SHA256SUMS is NOT signed here. Sign it before upload, with the daily key:
+  VARSTO_DAILY_KEY=~/.config/varsto-release/daily-key.pem \\
+      scripts/sign-daily.sh --build-id <id> <out>/daily/builds/<id>/SHA256SUMS
+and copy SHA256SUMS.sig next to it and to daily/latest/. `varsto update --daily`
+refuses a list without a valid signature. The page itself is static and reads
+daily/latest.json, so no site deploy is needed.
 
 Upload (never with --delete, never touching downloads/ or testbuilds/):
   ssh <host> 'mkdir -p <web root>/daily/builds/<id> <web root>/daily/latest'
   rsync -rlt --chmod=D755,F644 <out>/daily/ <host>:<web root>/daily/
 
-Then regenerate and deploy the site page (python3 website/build.py) so that
-/daily/ shows the new build.
-
 Example:
   make_daily.py --src ~/builds/20261016-316c579 --build-id 20261016-316c579 \\
-      --date 2026-10-16 --main-commit 651a3fd --prs 39,41,44 --out /tmp/daily-out
+      --date 2026-10-16 --commit 651a3fd --out ~/daily-out
 """
 from __future__ import annotations
 
@@ -43,28 +47,14 @@ import shutil
 import sys
 from pathlib import Path
 
-SITE_URL = "https://varsto.net"
-HERE = Path(__file__).resolve().parent
-DAILY_JSON = HERE.parent.parent / "src" / "data" / "daily.json"
-
-# (key, label, file name ending of the dated file, stable "latest" name)
+# (key, file name ending of the input file, stable name)
 PLATFORMS = [
-    ("linux-x86_64", "Linux x86_64 (static, musl)", "-linux-x86_64.tar.gz", "varsto-daily-linux-x86_64.tar.gz"),
-    ("android", "Android (debug APK)", "-android-debug.apk", "varsto-daily-android-debug.apk"),
-    ("windows-setup", "Windows installer", "-windows-setup.exe", "varsto-daily-windows-setup.exe"),
-    ("windows-zip", "Windows portable zip", "-windows-x86_64.zip", "varsto-daily-windows-x86_64.zip"),
-    ("macos", "macOS Apple Silicon (dmg)", "-macos-apple-silicon.dmg", "varsto-daily-macos-apple-silicon.dmg"),
-    ("ios", "iOS (unsigned ipa)", "-ios-unsigned.ipa", "varsto-daily-ios-unsigned.ipa"),
-]
-
-# Known gaps used when daily.json has none yet. The ids key the page translations in build.py.
-DEFAULT_GAPS = [
-    ("unsigned", "Nothing is signed: no release signature, no Apple or Microsoft code signing. The checksums only catch a corrupted download."),
-    ("not-format-2", "Format 2 (the records work) is not included; when it lands, vaults created with these builds must be recreated."),
-    ("os-warnings", "macOS, Windows and iOS warn about unsigned software; expect right-click and Open on macOS, and SmartScreen on Windows."),
-    ("windows-ci-only", "The Windows installer has been smoke-tested on CI only (install, upgrade, repair, downgrade refusal, uninstall), not on a real machine."),
-    ("ios-untested", "The iOS ipa has not been run on a real device. Sideload it with AltStore, SideStore or Sideloadly."),
-    ("ui-strings", "Some strings in the app interface are not translated yet; they are logged."),
+    ("linux-x86_64", "-linux-x86_64.tar.gz", "varsto-daily-linux-x86_64.tar.gz"),
+    ("android", "-android-debug.apk", "varsto-daily-android-debug.apk"),
+    ("windows-setup", "-windows-setup.exe", "varsto-daily-windows-setup.exe"),
+    ("macos", "-macos-apple-silicon.dmg", "varsto-daily-macos-apple-silicon.dmg"),
+    ("ios", "-ios-unsigned.ipa", "varsto-daily-ios-unsigned.ipa"),
+    ("screenshots", "-screenshots.tar.gz", "varsto-daily-screenshots.tar.gz"),
 ]
 
 
@@ -77,8 +67,7 @@ def sha256(path: Path) -> str:
 
 
 def commit_of(name: str, ending: str, fallback: str) -> str:
-    stem = name[: -len(ending)]
-    last = stem.rsplit("-", 1)[-1]
+    last = name[: -len(ending)].rsplit("-", 1)[-1]
     return last if re.fullmatch(r"[0-9a-f]{7,40}", last) else fallback
 
 
@@ -91,17 +80,15 @@ def link_or_copy(src: Path, dst: Path) -> None:
         shutil.copyfile(src, dst)
 
 
-def build_index(entry: dict) -> str:
-    rows = "".join(
-        f'<li><a href="{html.escape(p["file"])}">{html.escape(p["file"])}</a> ({p["size"]} bytes, built from {html.escape(p["commit"])})\n'
-        for p in entry["platforms"]
-    )
+def build_index(meta: dict) -> str:
+    e = html.escape
+    rows = "".join(f'<li><a href="{e(p["file"])}">{e(p["file"])}</a> ({p["size"]} bytes)\n' for p in meta["platforms"])
     return (
         '<!doctype html><meta charset=utf-8><meta name=robots content="noindex">'
-        f'<title>Varsto daily build {html.escape(entry["id"])}</title>'
-        f'<h1>Varsto daily build {html.escape(entry["id"])}</h1>'
-        '<p>Unsigned development build, not a release. See <a href="../../">the daily builds page</a>.</p>'
-        f'<ul>{rows}<li><a href="SHA256SUMS">SHA256SUMS</a></ul>\n'
+        f'<title>Varsto daily build {e(meta["id"])}</title>'
+        f'<h1>Varsto daily build {e(meta["id"])}</h1>'
+        '<p>Development build, not a release. See <a href="../../">the daily builds page</a>.</p>'
+        f'<ul>{rows}<li><a href="SHA256SUMS">SHA256SUMS</a> (<a href="SHA256SUMS.sig">signature</a>)</ul>\n'
     )
 
 
@@ -110,20 +97,23 @@ def main() -> int:
     ap.add_argument("--src", required=True, type=Path, help="folder with the build files")
     ap.add_argument("--build-id", required=True, help="e.g. 20261016-316c579")
     ap.add_argument("--date", required=True, help="YYYY-MM-DD")
-    ap.add_argument("--version", default="0.0.1-alpha.14", help="version string inside the builds")
-    ap.add_argument("--main-commit", required=True, help="main commit the build is based on")
-    ap.add_argument("--prs", default="", help="comma-separated PR numbers merged on top of main")
-    ap.add_argument("--note", default="", help="one-line note about the build (e.g. extra CI fixes)")
+    ap.add_argument("--version", default="", help="version string inside the builds (default: version in the workspace Cargo.toml)")
+    ap.add_argument("--commit", required=True, help="commit the build is based on")
     ap.add_argument("--ci-run", default="", help="URL of the CI run")
     ap.add_argument("--out", required=True, type=Path, help="directory to write the server layout into")
-    ap.add_argument("--daily-json", type=Path, default=DAILY_JSON)
     ap.add_argument("--keep", type=int, default=7, help="dated builds kept on the server")
     a = ap.parse_args()
+    if not re.fullmatch(r"[0-9]{8}-[0-9a-f]{7,40}", a.build_id):
+        sys.exit("--build-id must look like 20261016-316c579")
+    version = a.version
+    if not version:
+        cargo = Path(__file__).resolve().parents[3] / "Cargo.toml"
+        m = re.search(r'^version\s*=\s*"([^"]+)"', cargo.read_text(), re.M)
+        version = m.group(1) if m else ""
 
-    old = json.loads(a.daily_json.read_text()) if a.daily_json.exists() else {}
     platforms = []
-    for key, label, ending, stable in PLATFORMS:
-        hits = sorted(p for p in a.src.iterdir() if p.is_file() and p.name.endswith(ending))
+    for key, ending, stable in PLATFORMS:
+        hits = sorted(p for p in a.src.iterdir() if p.is_file() and (p.name.endswith(ending) or p.name == stable))
         if not hits:
             print(f"warning: no file for {key} ({ending})", file=sys.stderr)
             continue
@@ -131,65 +121,45 @@ def main() -> int:
             sys.exit(f"several files for {key}: {[h.name for h in hits]}")
         f = hits[0]
         platforms.append({
-            "key": key, "label": label, "file": f.name, "latest": stable, "size": f.stat().st_size,
-            "sha256": sha256(f), "commit": commit_of(f.name, ending, a.main_commit), "signed": False,
+            "key": key, "file": stable, "src": f, "size": f.stat().st_size, "sha256": sha256(f),
+            "commit": commit_of(f.name, ending, a.commit),
         })
     if not platforms:
         sys.exit("no build files found")
 
-    current = {
-        "id": a.build_id, "date": a.date, "version": a.version,
-        "main_commit": a.main_commit, "prs": [int(x) for x in a.prs.split(",") if x.strip()],
-        "note": a.note, "ci_run": a.ci_run, "platforms": platforms,
-    }
-    history = [h for h in old.get("history", []) if h["id"] != a.build_id]
-    prev = old.get("current")
-    if prev and prev["id"] != a.build_id:
-        history.insert(0, {"id": prev["id"], "date": prev["date"]})
-    history = history[: max(a.keep - 1, 0)]
-    kept = {a.build_id} | {h["id"] for h in history}
-    before = [old.get("current", {}).get("id")] + [h["id"] for h in old.get("history", [])]
-    pruned = [x for x in before if x and x not in kept]
-
-    data = {
-        "channel": {"name": "daily", "url": f"{SITE_URL}/daily/", "updater": False, "keep": a.keep},
-        "current": current,
-        "history": history,
-        "known_gaps": old.get("known_gaps") or [{"id": i, "text": t} for i, t in DEFAULT_GAPS],
-    }
-    a.daily_json.parent.mkdir(parents=True, exist_ok=True)
-    a.daily_json.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-
-    # Server layout.
     root = a.out / "daily"
-    bdir = root / "builds" / a.build_id
-    ldir = root / "latest"
+    builds = root / "builds"
+    bdir, ldir = builds / a.build_id, root / "latest"
     bdir.mkdir(parents=True, exist_ok=True)
     ldir.mkdir(parents=True, exist_ok=True)
     for p in platforms:
-        link_or_copy(a.src / p["file"], bdir / p["file"])
+        link_or_copy(p["src"], bdir / p["file"])
+    meta = {
+        "schema": 1, "channel": "daily", "id": a.build_id, "date": a.date, "version": version, "commit": a.commit,
+        "ci_run": a.ci_run,
+        "platforms": [{k: v for k, v in p.items() if k != "src"} for p in platforms],
+    }
     (bdir / "SHA256SUMS").write_text("".join(f'{p["sha256"]}  {p["file"]}\n' for p in platforms))
-    (bdir / "index.html").write_text(build_index(current))
+    (bdir / "latest.json").write_text(json.dumps(meta, indent=2) + "\n")
+    (bdir / "index.html").write_text(build_index(meta))
     for stale in ldir.iterdir():
         stale.unlink()
     for p in platforms:
-        (ldir / p["latest"]).symlink_to(f'../builds/{a.build_id}/{p["file"]}')
-    (ldir / "SHA256SUMS").write_text("".join(f'{p["sha256"]}  {p["latest"]}\n' for p in platforms))
-    latest = dict(data["channel"])
-    latest["build"] = {
-        **{k: v for k, v in current.items() if k != "platforms"},
-        "sha256sums_url": f"{SITE_URL}/daily/latest/SHA256SUMS",
-        "platforms": [
-            {**p, "url": f'{SITE_URL}/daily/latest/{p["latest"]}',
-             "dated_url": f'{SITE_URL}/daily/builds/{a.build_id}/{p["file"]}'}
-            for p in platforms
-        ],
-    }
-    (root / "latest.json").write_text(json.dumps(latest, indent=2, ensure_ascii=False) + "\n")
+        (ldir / p["file"]).symlink_to(f'../builds/{a.build_id}/{p["file"]}')
+    shutil.copyfile(bdir / "SHA256SUMS", ldir / "SHA256SUMS")
+    ids = sorted((d.name for d in builds.iterdir() if re.fullmatch(r"[0-9]{8}-[0-9a-f]{7,40}", d.name)), reverse=True)
+    history = []
+    for i in ids[: a.keep]:
+        try:
+            date = json.loads((builds / i / "latest.json").read_text()).get("date", "")
+        except (OSError, ValueError):
+            date = ""
+        history.append({"id": i, "date": date})
+    (root / "latest.json").write_text(json.dumps({**meta, "history": history}, indent=2) + "\n")
 
-    print(f"build {a.build_id}: {len(platforms)} platforms; daily.json and {root} written")
-    for x in pruned:
-        print(f"prune on server: daily/builds/{x}")
+    print(f"build {a.build_id}: {len(platforms)} files; {root} written (SHA256SUMS is not signed yet)")
+    for i in ids[a.keep:]:
+        print(f"prune on server: daily/builds/{i}")
     return 0
 
 

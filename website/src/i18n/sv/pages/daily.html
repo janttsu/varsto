@@ -20,12 +20,11 @@ description: Osignerade utvecklingsbyggen av Varsto från huvudgrenen. Inga rele
     <h2>Verifiera</h2>
     <p>Lägg <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> bredvid filerna du laddade ner (filnamnen i tabellen är de fasta namnen) och kör</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är inte signerad; den visar bara att en nedladdning är komplett och oskadd.</p>
+    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är signerad med den separata dagliga nyckeln (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign-format; nyckeln är <a href="{{P}}daily-key.pub">daily-key.pub</a>), och det är den som <code>varsto update --daily</code> kontrollerar. Förutom att en nedladdning är komplett och oskadd visar signaturen att listan kommer från projektets egen bygglinje.</p>
     <h2>Vad som ingår</h2>
     {{DAILY_INCLUDED}}
-    <p>iOS-filen kan komma från en senare commit än de andra; tabellen visar commit för varje fil.</p>
     <h2>Kända brister</h2>
     {{DAILY_GAPS}}
     <h2>Tidigare byggen</h2>
-    <p>De sju senaste daterade byggena sparas, med filerna under sina ursprungliga namn. Adresserna i tabellen pekar alltid på det nyaste bygget.</p>
+    <p>De sju senaste byggena sparas med samma filnamn; varje bygge har sin egen signerade lista.</p>
     {{DAILY_HISTORY}}

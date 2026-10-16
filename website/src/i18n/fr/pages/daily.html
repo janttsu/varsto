@@ -20,12 +20,11 @@ description: Versions de développement non signées de Varsto, issues de la bra
     <h2>Vérifier</h2>
     <p>Placez <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> à côté des fichiers téléchargés (les noms du tableau sont les noms fixes) et exécutez</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Omettez <code>--ignore-missing</code> si vous avez téléchargé tous les fichiers. Cette liste n’est pas signée ; elle montre seulement qu’un téléchargement est complet et intact.</p>
+    <p>Omettez <code>--ignore-missing</code> si vous avez téléchargé tous les fichiers. La liste est signée avec la clé quotidienne distincte (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, format minisign ; la clé est <a href="{{P}}daily-key.pub">daily-key.pub</a>), ce que vérifie <code>varsto update --daily</code>. Outre l’intégrité du téléchargement, la signature montre que la liste provient de la chaîne de construction du projet.</p>
     <h2>Contenu</h2>
     {{DAILY_INCLUDED}}
-    <p>Le fichier iOS peut provenir d’un commit plus récent que les autres ; le tableau indique le commit de chaque fichier.</p>
     <h2>Lacunes connues</h2>
     {{DAILY_GAPS}}
     <h2>Versions précédentes</h2>
-    <p>Les sept dernières versions datées sont conservées, avec les fichiers sous leur nom d’origine. Les adresses du tableau pointent toujours vers la version la plus récente.</p>
+    <p>Les sept dernières versions sont conservées, avec les mêmes noms de fichiers ; chacune a sa propre liste signée.</p>
     {{DAILY_HISTORY}}

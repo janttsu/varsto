@@ -15,12 +15,22 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+  # The daily build workflow (daily.yml) calls this one for a given commit.
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit, branch or tag to build (default is the caller's ref)
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
+# github.workflow is the caller's name in a called workflow, so a daily run
+# and a push run of the same commit do not queue behind each other.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
 # bash with pipefail everywhere, so `cmd | tee log` fails when cmd fails.
@@ -38,6 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -66,6 +77,8 @@ jobs:
         run: cargo deny check
       - name: Tests
         run: cargo test --workspace 2>&1 | tee test.log
+      - name: Site tooling (daily-sync.py against a fake release)
+        run: python3 -I -m unittest discover -s ops/site -p 'test_*.py'
       - name: Linux and Windows packages
         run: website/build-release.sh x86_64-unknown-linux-musl x86_64-pc-windows-gnu 2>&1 | tee build.log
       - name: Smoke test the Linux package
@@ -121,6 +134,8 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/download-artifact@v4
         with:
           name: packages-linux-windows
@@ -151,6 +166,8 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/download-artifact@v4
         with:
           name: packages-linux-windows
@@ -190,6 +207,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -241,6 +260,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
@@ -342,6 +363,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios, aarch64-apple-ios-sim
@@ -375,6 +398,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
@@ -407,6 +431,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/download-artifact@v4
         with:
           path: art
@@ -414,7 +440,11 @@ jobs:
         run: |
           python3 -m pip install --quiet --break-system-packages pillow
           version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
-          python3 scripts/screenshots/finalize.py art dist/screenshots --version "$version" --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
+          # HEAD of the checkout: the commit a called run (daily.yml) built, not
+          # the caller's github.sha; a pull request keeps its own head commit.
+          commit="${{ github.event.pull_request.head.sha }}"
+          [ -n "$commit" ] || commit="$(git rev-parse HEAD)"
+          python3 scripts/screenshots/finalize.py art dist/screenshots --version "$version" --commit "$commit" \
             --source "GitHub Actions run ${{ github.run_number }}"
           cat dist/screenshots/shots.json
       - uses: actions/upload-artifact@v4

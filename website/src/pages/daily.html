@@ -20,12 +20,11 @@ description: Unsigned development builds of Varsto from the main line. Not relea
     <h2>Verify</h2>
     <p>Put <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> next to the files you downloaded (the file names are the stable ones in the table) and run</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. This list is not signed; it only shows that a download is complete and intact.</p>
+    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. The list is signed with the separate daily key (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign format; the key is <a href="{{P}}daily-key.pub">daily-key.pub</a>), which is what <code>varsto update --daily</code> checks. Besides telling you that a download is complete and intact, the signature shows that the list came from the project's own build.</p>
     <h2>What is in it</h2>
     {{DAILY_INCLUDED}}
-    <p>The iOS file can come from a later commit than the others; the table shows the commit of each file.</p>
     <h2>Known gaps</h2>
     {{DAILY_GAPS}}
     <h2>Previous builds</h2>
-    <p>The seven most recent dated builds are kept, with the files under their original names. The addresses in the table always point to the newest build.</p>
+    <p>The seven most recent builds are kept, with the same file names; each has its own signed list.</p>
     {{DAILY_HISTORY}}

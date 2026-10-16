@@ -20,12 +20,11 @@ description: Varston allekirjoittamattomat kehitysversiot päähaarasta. Ei julk
     <h2>Tarkista</h2>
     <p>Laita <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> lataamiesi tiedostojen viereen (taulukon tiedostonimet ovat vakionimiä) ja aja</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Jätä <code>--ignore-missing</code> pois, jos latasit kaikki tiedostot. Luetteloa ei ole allekirjoitettu; se osoittaa vain, että lataus on täydellinen ja ehjä.</p>
+    <p>Jätä <code>--ignore-missing</code> pois, jos latasit kaikki tiedostot. Luettelo on allekirjoitettu erillisellä päivittäisellä avaimella (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign-muoto; avain on <a href="{{P}}daily-key.pub">daily-key.pub</a>), ja sen <code>varsto update --daily</code> tarkistaa. Lataus on täydellinen ja ehjä, ja allekirjoitus osoittaa luettelon tulleen projektin omasta koontiketjusta.</p>
     <h2>Mitä mukana on</h2>
     {{DAILY_INCLUDED}}
-    <p>iOS-tiedosto voi olla rakennettu muita uudemmasta commitista; taulukossa näkyy kunkin tiedoston commit.</p>
     <h2>Tunnetut puutteet</h2>
     {{DAILY_GAPS}}
     <h2>Aiemmat versiot</h2>
-    <p>Seitsemän viimeisintä päivättyä versiota säilytetään, tiedostot alkuperäisillä nimillään. Taulukon osoitteet osoittavat aina uusimpaan versioon.</p>
+    <p>Seitsemän viimeisintä versiota säilytetään samoilla tiedostonimillä; jokaisella on oma allekirjoitettu luettelonsa.</p>
     {{DAILY_HISTORY}}
