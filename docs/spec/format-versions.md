@@ -10,6 +10,8 @@ During alpha development, storage formats may change without migration paths. On
 |---|---|---|---|---|
 | 0 (alpha-0) | 0.0.1-alpha.0 | 0.0.1-alpha.0 to 0.0.1-alpha.3 (no `v0.0.1-alpha.3` tag exists; the last format-0 reader tag is `v0.0.1-alpha.2`) | none (`varsto pull` and `varsto fsck` of those versions) | see the format version 1 note below |
 | 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, including 0.0.1-alpha.13 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
+| 2 (blocks, packs and keyed chunker, alpha-0-format.md section 62) | unreleased (0.0.1-alpha.15) | not yet released | none yet | none yet |
+| 3 (planned: signed records, folder key grants) | not yet assigned | not yet released | none yet | none yet |
 
 ## Release rules
 
