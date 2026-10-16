@@ -16,6 +16,14 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Added
+
+- iOS: an unsigned `.ipa` for AltStore, SideStore and Sideloadly, built by
+  `apps/ios/make-ipa.sh` or the manually started GitHub workflow `ios-ipa.yml`
+  (also on `ios-v*` tags); app icon asset catalog, iPad orientations, version
+  numbers in `Info.plist`; build, install and cost notes (GitHub, Scaleway Mac
+  mini) in `docs/ios-build.md`.
+
 ### Changed
 
 - Format 2 blocks (spec 62): chunk nonces follow the packed bytes, chunks are

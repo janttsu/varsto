@@ -1,0 +1,108 @@
+# Unsigned iOS/iPadOS .ipa for AltStore, SideStore, Sideloadly and similar.
+# Manual or on `ios-v*` tags only (never on push): macOS runners are the slow
+# ones. The repository is public, so GitHub-hosted standard runners are free
+# (private repositories would pay a multiplied rate for macOS minutes).
+# Expected duration: about 15-25 minutes cold (Rust release build of the FFI
+# library dominates), about 8-12 minutes with a warm cache. How-to: docs/ios-build.md
+name: iOS .ipa (unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build (default is the selected branch)
+        required: false
+        default: ""
+      release_tag:
+        description: Existing or new tag whose draft pre-release gets the .ipa attached (empty = artifact only)
+        required: false
+        default: ""
+  push:
+    tags: ['ios-v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ipa:
+    name: Build unsigned .ipa
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      TAG_INPUT: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-device
+      - run: brew install xcodegen
+      - name: Build the .ipa
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          echo "VARSTO_VERSION=$version" >> "$GITHUB_ENV"
+          apps/ios/make-ipa.sh --out dist/ios-ipa --version "$version" --build-number "$GITHUB_RUN_NUMBER" 2>&1 | tee build.log
+      - name: Install steps in the job summary
+        run: |
+          ipa="Varsto-$VARSTO_VERSION-ios-unsigned.ipa"
+          {
+            echo "## $ipa"
+            echo
+            echo "Unsigned: your sideloader signs it with your own Apple ID. Commit \`$GITHUB_SHA\`."
+            echo
+            echo '```'
+            unzip -l "dist/ios-ipa/$ipa" | head -n 25
+            echo '```'
+            echo
+            echo "### Download"
+            echo
+            echo '```'
+            echo "gh run download $GITHUB_RUN_ID --repo $GITHUB_REPOSITORY --name Varsto-ios-unsigned"
+            echo '```'
+            echo
+            echo "### Install"
+            echo
+            echo "- **AltStore** (needs AltServer on a Mac or PC on the same Wi-Fi): on the iPad open AltStore, My Apps, the + button, pick the .ipa (from Files)."
+            echo "- **SideStore** (no computer after setup): My Apps, the + button, pick the .ipa."
+            echo "- **Sideloadly** (Mac or PC, USB cable): drag the .ipa into Sideloadly, enter your Apple ID, Start."
+            echo "- Then Settings, General, VPN and Device Management, trust your Apple ID; with iOS 16 and later turn on Developer Mode (Settings, Privacy and Security)."
+            echo "- A free Apple ID signs for 7 days (3 apps, 10 app IDs per week); AltStore and SideStore refresh it automatically while they can reach your computer or their VPN loopback. The bundle identifier may be rewritten by the tool; the data stays with the installed copy."
+            echo "- Updating: install the newer .ipa over the old app (same bundle identifier); the vault in the app container is kept."
+            echo "- Limits: no LAN discovery by multicast (pair with the address shown under the code), background sync only when iOS allows. See docs/ios-build.md."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Output to the job summary on failure
+        if: failure()
+        run: |
+          { echo "## build.log (last 150 lines)"; echo '```'; tail -n 150 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Varsto-ios-unsigned
+          path: |
+            dist/ios-ipa/*.ipa
+          retention-days: 14
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Varsto-ios-unsigned-logs
+          path: |
+            build.log
+            apps/ios/build/ipa/xcodebuild.log
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Attach to a release
+        if: ${{ github.ref_type == 'tag' || inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${TAG_INPUT:-$GITHUB_REF_NAME}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft --prerelease --title "$tag" --notes "Unsigned iOS build for AltStore, SideStore or Sideloadly." --target "$GITHUB_SHA"
+          gh release upload "$tag" dist/ios-ipa/*.ipa --clobber
