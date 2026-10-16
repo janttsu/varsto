@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Daily builds: Varsto</title>
-<meta name="description" content="Unsigned development builds of Varsto from the main line. Not releases, not for production data, and never installed by varsto update.">
+<meta name="description" content="Development builds of Varsto from the main line, with a checksum list signed by a separate daily key. Not releases, not for production data.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/daily/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Daily builds: Varsto">
-<meta property="og:description" content="Unsigned development builds of Varsto from the main line. Not releases, not for production data, and never installed by varsto update.">
+<meta property="og:description" content="Development builds of Varsto from the main line, with a checksum list signed by a separate daily key. Not releases, not for production data.">
 <meta property="og:url" content="https://varsto.net/daily/">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -60,31 +60,32 @@
     <div class="daily-warn" role="note">
       <p><strong>These are development builds from the main line, not releases.</strong></p>
       <ul>
-        <li>They are not signed and have not been through release testing. Do not use them for production data.</li>
+        <li>They are not releases and have not been through release testing. They carry no release signature and no Apple or Microsoft code signing. Do not use them for production data.</li>
         <li>The storage format can change from one build to the next without any migration. Format 2 will require vaults to be recreated.</li>
-        <li><code>varsto update</code> never installs them and never reads this page. To move to a newer daily build, download it again.</li>
+        <li><code>varsto update --daily</code> installs the latest daily build for your platform (the Linux and Windows command-line builds; the macOS app and the Android APK are installed by hand). Plain <code>varsto update</code> stays on releases and never installs a daily build.</li>
         <li>Keep your own backups.</li>
       </ul>
       <p>Looking for something to rely on? Use the <a href="../downloads/">stable downloads</a> instead.</p>
     </div>
-    <p class="lead">Latest build <strong>20261016-316c579</strong>, 2026-10-16; version string 0.0.1-alpha.14. <a href="../daily/latest.json">latest.json</a> · <a href="../daily/latest/SHA256SUMS">SHA256SUMS</a></p>
-    <table class="downloads"><thead><tr><th>Platform</th><th>Download</th><th>Size</th><th>Built from</th><th>SHA-256</th></tr></thead><tbody><tr><th scope="row">Linux x86_64 (static, musl)</th><td><a href="../daily/latest/varsto-daily-linux-x86_64.tar.gz">varsto-daily-linux-x86_64.tar.gz</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-linux-x86_64.tar.gz">dated copy</a></span></td><td>14.0 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">e881f985e35d755f184c85e00a349ec9f99ea181a5963263b0dbd3bea605b355</code></td></tr>
-<tr><th scope="row">Android (debug APK)</th><td><a href="../daily/latest/varsto-daily-android-debug.apk">varsto-daily-android-debug.apk</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-android-debug.apk">dated copy</a></span></td><td>30.9 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">cc3d46bb3f395f77a0ccfa946ce3a89bfd433e35381eda95a8257af0be0dcf20</code></td></tr>
-<tr><th scope="row">Windows installer</th><td><a href="../daily/latest/varsto-daily-windows-setup.exe">varsto-daily-windows-setup.exe</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-windows-setup.exe">dated copy</a></span></td><td>13.6 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">21030bd4b1e8a1985e517cba30cba92f8f23f9f60a38ec9372658298bd82c24d</code></td></tr>
-<tr><th scope="row">macOS Apple Silicon (dmg)</th><td><a href="../daily/latest/varsto-daily-macos-apple-silicon.dmg">varsto-daily-macos-apple-silicon.dmg</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-macos-apple-silicon.dmg">dated copy</a></span></td><td>14.2 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">ea6b57df15c5089c3392071b1e2d94896219052075e35b81c60b2477d48a1f4f</code></td></tr>
-<tr><th scope="row">iOS (unsigned ipa)</th><td><a href="../daily/latest/varsto-daily-ios-unsigned.ipa">varsto-daily-ios-unsigned.ipa</a><br><span class="dl-meta"><a href="../daily/builds/20261016-316c579/varsto-testbuild-20261016-8f57797-ios-unsigned.ipa">dated copy</a></span></td><td>10.0 MB</td><td><a href="https://github.com/janttsu/varsto/commit/8f57797"><code>8f57797</code></a></td><td><code class="sum">e6d57201ca60c8e813160b359c62cb0372b1e46b9a30570382dd98235712a64b</code></td></tr></tbody></table>
+    <p class="lead" id="daily-build" data-pre="../" data-unavailable="The build details could not be loaded right now. The links in the table still point to the newest build." hidden>Latest build <strong data-f="id"></strong>, <span data-f="date"></span>; version string <span data-f="version"></span>. <a href="../daily/latest.json">latest.json</a> · <a href="../daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="../daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a></p>
+    <noscript><p class="lead">The links in the table always point to the newest build. The build id, sizes and checksums are filled in by a small script; without it read <a href="../daily/latest.json">latest.json</a> and <a href="../daily/latest/SHA256SUMS">SHA256SUMS</a> directly.</p></noscript>
+    <table class="downloads" id="daily-table"><thead><tr><th>Platform</th><th>Download</th><th>Size</th><th>Built from</th><th>SHA-256</th></tr></thead><tbody><tr data-file="varsto-daily-linux-x86_64.tar.gz"><th scope="row">Linux x86_64 (static, musl)</th><td><a href="../daily/latest/varsto-daily-linux-x86_64.tar.gz">varsto-daily-linux-x86_64.tar.gz</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-android-debug.apk"><th scope="row">Android (debug APK)</th><td><a href="../daily/latest/varsto-daily-android-debug.apk">varsto-daily-android-debug.apk</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-windows-setup.exe"><th scope="row">Windows installer</th><td><a href="../daily/latest/varsto-daily-windows-setup.exe">varsto-daily-windows-setup.exe</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-macos-apple-silicon.dmg"><th scope="row">macOS Apple Silicon (dmg)</th><td><a href="../daily/latest/varsto-daily-macos-apple-silicon.dmg">varsto-daily-macos-apple-silicon.dmg</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-ios-unsigned.ipa"><th scope="row">iOS (unsigned ipa)</th><td><a href="../daily/latest/varsto-daily-ios-unsigned.ipa">varsto-daily-ios-unsigned.ipa</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr></tbody></table>
     <h2>Verify</h2>
     <p>Put <a href="../daily/latest/SHA256SUMS">SHA256SUMS</a> next to the files you downloaded (the file names are the stable ones in the table) and run</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. This list is not signed; it only shows that a download is complete and intact.</p>
+    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. The list is signed with the separate daily key (<a href="../daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign format; the key is <a href="../daily-key.pub">daily-key.pub</a>), which is what <code>varsto update --daily</code> checks. Besides telling you that a download is complete and intact, the signature shows that the list came from the project's own build.</p>
     <h2>What is in it</h2>
-    <ul><li>The main line at commit <a href="https://github.com/janttsu/varsto/commit/651a3fd">651a3fd</a>.</li><li>Open pull requests merged on top: <a href="https://github.com/janttsu/varsto/pull/39">#39</a>, <a href="https://github.com/janttsu/varsto/pull/41">#41</a>, <a href="https://github.com/janttsu/varsto/pull/44">#44</a>, <a href="https://github.com/janttsu/varsto/pull/42">#42</a>, <a href="https://github.com/janttsu/varsto/pull/43">#43</a>, <a href="https://github.com/janttsu/varsto/pull/38">#38</a>, <a href="https://github.com/janttsu/varsto/pull/40">#40</a>, <a href="https://github.com/janttsu/varsto/pull/46">#46</a>.</li><li>Plus two CI fixes (boot code test isolation, Android screenshot script).</li><li>CI run: <a href="https://github.com/janttsu/varsto/actions/runs/38858694704">https://github.com/janttsu/varsto/actions/runs/38858694704</a></li></ul>
-    <p>The iOS file can come from a later commit than the others; the table shows the commit of each file.</p>
+    <ul id="daily-included" hidden><li>The main line at commit <a data-f="commit"></a>.</li><li>CI run: <a data-f="ci_run"></a></li></ul>
     <h2>Known gaps</h2>
-    <ul><li>Nothing is signed: no release signature, no Apple or Microsoft code signing. The checksums only catch a corrupted download.</li><li>Format 2 (the records work) is not included; when it lands, vaults created with these builds must be recreated.</li><li>macOS, Windows and iOS warn about unsigned software; expect right-click and Open on macOS, and SmartScreen on Windows.</li><li>The Windows installer has been smoke-tested on CI only (install, upgrade, repair, downgrade refusal, uninstall), not on a real machine.</li><li>The iOS ipa has not been run on a real device. Sideload it with AltStore, SideStore or Sideloadly.</li><li>Some strings in the app interface are not translated yet; they are logged.</li></ul>
+    <ul><li>The builds carry no release signature and no Apple or Microsoft code signing. The checksum list is signed with the separate daily key (checked by varsto update --daily), which shows that a build came from the project&#x27;s CI, not that it has been tested.</li><li>macOS, Windows and iOS warn about unsigned software; expect right-click and Open on macOS, and SmartScreen on Windows.</li><li>The Windows installer has been smoke-tested on CI only (install, upgrade, repair, downgrade refusal, uninstall), not on a real machine.</li><li>The iOS ipa has not been run on a real device. Sideload it with AltStore, SideStore or Sideloadly.</li><li>Some strings in the app interface are not translated yet; they are logged.</li><li>Windows and iOS are still from the previous build 20261016-316c579; they were not rebuilt this round.</li><li>The grace period before a storage that has fallen behind is given up (package E) defaults to 30 days.</li><li>The Kotlin, Swift and Windows full-screen code and the pairing fix have not been verified on real devices.</li><li>The first update with --daily needs a binary that already contains the feature, so install this build by hand once; after that varsto update --daily can take over.</li></ul>
     <h2>Previous builds</h2>
-    <p>The seven most recent dated builds are kept, with the files under their original names. The addresses in the table always point to the newest build.</p>
-    <ul><li><a href="../daily/builds/20261016-316c579/">20261016-316c579</a> (2026-10-16)</li></ul>
+    <p>The seven most recent builds are kept, with the same file names; each has its own signed list.</p>
+    <ul id="daily-history"></ul>
+    <script src="../assets/js/daily.js?v=008e885cd7" defer></script>
 
   </div>
 </main>

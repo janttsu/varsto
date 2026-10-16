@@ -1,0 +1,150 @@
+# The daily channel: when main has moved, build every platform, sign the list
+# of files with the dedicated daily key and publish them as the assets of ONE
+# rolling GitHub pre-release with the tag `daily` (recreated on every run; no
+# v* tag is touched). The web server pulls it (ops/site/daily-sync.py, from
+# cron) and checks the signature before it serves anything under /daily/.
+# Nothing on GitHub writes to the server. The stable updater never reads this
+# channel. Setup and rehearsal: ops/site/README.md and docs/daily-channel.md.
+#
+# Manual run (Actions, Daily builds, Run workflow):
+#   ref      branch, tag or commit to build (default main)
+#   publish  false = build and sign, keep the result as a workflow artifact only
+name: Daily builds
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build (default main)
+        required: false
+        default: ""
+      publish:
+        description: Publish the pre-release `daily` (false = only keep the files as a workflow artifact)
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: Has main moved?
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.c.outputs.build }}
+      sha: ${{ steps.c.outputs.sha }}
+      id: ${{ steps.c.outputs.id }}
+      date: ${{ steps.c.outputs.date }}
+      version: ${{ steps.c.outputs.version }}
+    steps:
+      - id: c
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_INPUT: ${{ inputs.ref }}
+        run: |
+          ref="${REF_INPUT:-main}"
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$ref" --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "cannot resolve $ref"; exit 1; }
+          # The commit of the published build is recorded on the first line of the release body.
+          last="$(gh release view daily --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | sed -n 's/^commit: *//p' | head -1 || true)"
+          build=true
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$sha" = "$last" ]; then
+            build=false
+            echo "main is still at $sha, the commit of the published daily build: nothing to do"
+          fi
+          version="$(gh api "repos/$GITHUB_REPOSITORY/contents/Cargo.toml?ref=$sha" --jq .content | base64 -d | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/')"
+          {
+            echo "build=$build"
+            echo "sha=$sha"
+            echo "id=$(date -u +%Y%m%d)-${sha:0:7}"
+            echo "date=$(date -u +%Y-%m-%d)"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          echo "ref $ref = $sha (published: ${last:-none}); build=$build"
+
+  ci:
+    name: Build and test
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.check.outputs.sha }}
+
+  ipa:
+    name: iOS ipa
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    uses: ./.github/workflows/ios-ipa.yml
+    with:
+      ref: ${{ needs.check.outputs.sha }}
+
+  package:
+    name: Package, sign, publish
+    needs: [check, ci, ipa]
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    env:
+      BUILD_ID: ${{ needs.check.outputs.id }}
+      SHA: ${{ needs.check.outputs.sha }}
+      PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+    steps:
+      # The workflow's own ref (main for the schedule): the scripts and
+      # daily-key.pub come from there, whatever commit is being built.
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: Assemble the stable names, SHA256SUMS and latest.json
+        run: |
+          python3 -I scripts/daily-assemble.py --art art --out dist --build-id "$BUILD_ID" \
+            --date "${{ needs.check.outputs.date }}" --version "${{ needs.check.outputs.version }}" --commit "$SHA" \
+            --ci-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          ls -l dist
+      - name: Sign SHA256SUMS with the daily key
+        env:
+          DAILY_KEY_PEM: ${{ secrets.VARSTO_DAILY_KEY }}
+        run: |
+          [ -n "$DAILY_KEY_PEM" ] || { echo "::error::the repository secret VARSTO_DAILY_KEY is not set (ops/site/README.md)"; exit 1; }
+          umask 077
+          keydir="$(mktemp -d)"
+          trap 'rm -rf "$keydir"' EXIT
+          printf '%s\n' "$DAILY_KEY_PEM" > "$keydir/daily-key.pem"
+          # The 8-byte key id sits in the public key file after the "Ed" tag; sign-daily.sh
+          # then refuses the key unless it reproduces daily-key.pub exactly.
+          sed -n 2p daily-key.pub | base64 -d | head -c 10 | tail -c 8 | od -An -v -tx1 | tr -d ' \n' > "$keydir/daily-key.id"
+          VARSTO_DAILY_KEY="$keydir/daily-key.pem" scripts/sign-daily.sh --build-id "$BUILD_ID" dist/SHA256SUMS
+          scripts/sign-daily.sh --verify dist/SHA256SUMS
+          (cd dist && sha256sum -c SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: daily-assets
+          path: dist
+          retention-days: 14
+          if-no-files-found: error
+      - name: Publish the pre-release daily
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "commit: $SHA"
+            echo "build: $BUILD_ID"
+            echo
+            echo "Rolling development build of the main line, signed with the daily key (SHA256SUMS.sig)."
+            echo "Not a release; the website pulls it. Files: https://varsto.net/daily/"
+          } > notes.txt
+          gh release delete daily --yes --cleanup-tag 2>/dev/null || true
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/daily" 2>/dev/null || true
+          gh release create daily dist/* --prerelease --latest=false --target "$SHA" \
+            --title "Daily build $BUILD_ID" --notes-file notes.txt

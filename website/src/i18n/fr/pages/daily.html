@@ -20,12 +20,11 @@ description: Versions de développement de Varsto, issues de la branche principa
     <h2>Vérifier</h2>
     <p>Placez <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> à côté des fichiers téléchargés (les noms du tableau sont les noms fixes) et exécutez</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Omettez <code>--ignore-missing</code> si vous avez téléchargé tous les fichiers. La liste est signée par une clé quotidienne distincte (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, clé publique <a href="{{P}}daily-key.pub">daily-key.pub</a>) que <code>varsto update --daily</code> vérifie. La clé quotidienne ne vaut que pour le canal quotidien : elle n’est jamais acceptée pour une version officielle, et la clé des versions officielles n’est jamais acceptée pour une version quotidienne.</p>
+    <p>Omettez <code>--ignore-missing</code> si vous avez téléchargé tous les fichiers. La liste est signée avec la clé quotidienne distincte (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, format minisign ; la clé est <a href="{{P}}daily-key.pub">daily-key.pub</a>), ce que vérifie <code>varsto update --daily</code>. Outre l’intégrité du téléchargement, la signature montre que la liste provient de la chaîne de construction du projet.</p>
     <h2>Contenu</h2>
     {{DAILY_INCLUDED}}
-    <p>Chaque plateforme est publiée dès que son fichier est prêt, les lignes peuvent donc venir de versions différentes ; le tableau indique la version et le commit de chaque fichier.</p>
     <h2>Lacunes connues</h2>
     {{DAILY_GAPS}}
     <h2>Versions précédentes</h2>
-    <p>Les sept dernières versions datées sont conservées, avec les fichiers sous leur nom d’origine. Les adresses du tableau pointent toujours vers la version la plus récente.</p>
+    <p>Les sept dernières versions sont conservées, avec les mêmes noms de fichiers ; chacune a sa propre liste signée.</p>
     {{DAILY_HISTORY}}

@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dagliga byggen: Varsto</title>
-<meta name="description" content="Osignerade utvecklingsbyggen av Varsto från huvudgrenen. Inga releaser, inte för produktionsdata, och varsto update installerar dem aldrig.">
+<meta name="description" content="Utvecklingsbyggen av Varsto från huvudgrenen, med kontrollsummelistan signerad av en separat daglig nyckel. Inga releaser, inte för produktionsdata.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/sv/daily/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Dagliga byggen: Varsto">
-<meta property="og:description" content="Osignerade utvecklingsbyggen av Varsto från huvudgrenen. Inga releaser, inte för produktionsdata, och varsto update installerar dem aldrig.">
+<meta property="og:description" content="Utvecklingsbyggen av Varsto från huvudgrenen, med kontrollsummelistan signerad av en separat daglig nyckel. Inga releaser, inte för produktionsdata.">
 <meta property="og:url" content="https://varsto.net/sv/daily/">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -60,31 +60,32 @@
     <div class="daily-warn" role="note">
       <p><strong>Det här är utvecklingsbyggen från huvudgrenen, inte releaser.</strong></p>
       <ul>
-        <li>De är inte signerade och har inte gått igenom någon releasetestning. Använd dem inte för produktionsdata.</li>
+        <li>De är inte releaser och har inte gått igenom någon releasetestning. De saknar releasesignatur och kodsignering från Apple eller Microsoft. Använd dem inte för produktionsdata.</li>
         <li>Lagringsformatet kan ändras mellan byggen utan någon migrering. Format 2 kommer att kräva att valv skapas på nytt.</li>
-        <li><code>varsto update</code> installerar dem aldrig och läser inte den här sidan. Om du vill byta till ett nyare dagligt bygge laddar du ner det på nytt.</li>
+        <li><code>varsto update --daily</code> installerar det senaste dagliga bygget för din plattform (kommandoradsbyggena för Linux och Windows; macOS-appen och Android-APK:n installeras för hand). Vanliga <code>varsto update</code> håller sig till releaser och installerar aldrig ett dagligt bygge.</li>
         <li>Behåll egna säkerhetskopior.</li>
       </ul>
       <p>Behöver du något att lita på? Använd de <a href="../downloads/">stabila nedladdningarna</a> i stället.</p>
     </div>
-    <p class="lead">Senaste bygget <strong>20261016-316c579</strong>, 2026-10-16; versionssträng 0.0.1-alpha.14. <a href="../../daily/latest.json">latest.json</a> · <a href="../../daily/latest/SHA256SUMS">SHA256SUMS</a></p>
-    <table class="downloads"><thead><tr><th>Plattform</th><th>Nedladdning</th><th>Storlek</th><th>Byggd från</th><th>SHA-256</th></tr></thead><tbody><tr><th scope="row">Linux x86_64 (static, musl)</th><td><a href="../../daily/latest/varsto-daily-linux-x86_64.tar.gz">varsto-daily-linux-x86_64.tar.gz</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-linux-x86_64.tar.gz">daterad kopia</a></span></td><td>14.0 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">e881f985e35d755f184c85e00a349ec9f99ea181a5963263b0dbd3bea605b355</code></td></tr>
-<tr><th scope="row">Android (debug APK)</th><td><a href="../../daily/latest/varsto-daily-android-debug.apk">varsto-daily-android-debug.apk</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-android-debug.apk">daterad kopia</a></span></td><td>30.9 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">cc3d46bb3f395f77a0ccfa946ce3a89bfd433e35381eda95a8257af0be0dcf20</code></td></tr>
-<tr><th scope="row">Windows installer</th><td><a href="../../daily/latest/varsto-daily-windows-setup.exe">varsto-daily-windows-setup.exe</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-windows-setup.exe">daterad kopia</a></span></td><td>13.6 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">21030bd4b1e8a1985e517cba30cba92f8f23f9f60a38ec9372658298bd82c24d</code></td></tr>
-<tr><th scope="row">macOS Apple Silicon (dmg)</th><td><a href="../../daily/latest/varsto-daily-macos-apple-silicon.dmg">varsto-daily-macos-apple-silicon.dmg</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-316c579-macos-apple-silicon.dmg">daterad kopia</a></span></td><td>14.2 MB</td><td><a href="https://github.com/janttsu/varsto/commit/316c579"><code>316c579</code></a></td><td><code class="sum">ea6b57df15c5089c3392071b1e2d94896219052075e35b81c60b2477d48a1f4f</code></td></tr>
-<tr><th scope="row">iOS (unsigned ipa)</th><td><a href="../../daily/latest/varsto-daily-ios-unsigned.ipa">varsto-daily-ios-unsigned.ipa</a><br><span class="dl-meta"><a href="../../daily/builds/20261016-316c579/varsto-testbuild-20261016-8f57797-ios-unsigned.ipa">daterad kopia</a></span></td><td>10.0 MB</td><td><a href="https://github.com/janttsu/varsto/commit/8f57797"><code>8f57797</code></a></td><td><code class="sum">e6d57201ca60c8e813160b359c62cb0372b1e46b9a30570382dd98235712a64b</code></td></tr></tbody></table>
+    <p class="lead" id="daily-build" data-pre="../../" data-unavailable="Uppgifterna om bygget kunde inte laddas just nu. Länkarna i tabellen pekar ändå på det nyaste bygget." hidden>Senaste bygget <strong data-f="id"></strong>, <span data-f="date"></span>; versionssträng <span data-f="version"></span>. <a href="../../daily/latest.json">latest.json</a> · <a href="../../daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="../../daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a></p>
+    <noscript><p class="lead">Länkarna i tabellen pekar alltid på det nyaste bygget. Bygg-id, storlekar och kontrollsummor fylls i av ett litet skript; utan det kan du läsa <a href="../../daily/latest.json">latest.json</a> och <a href="../../daily/latest/SHA256SUMS">SHA256SUMS</a> direkt.</p></noscript>
+    <table class="downloads" id="daily-table"><thead><tr><th>Plattform</th><th>Nedladdning</th><th>Storlek</th><th>Byggd från</th><th>SHA-256</th></tr></thead><tbody><tr data-file="varsto-daily-linux-x86_64.tar.gz"><th scope="row">Linux x86_64 (static, musl)</th><td><a href="../../daily/latest/varsto-daily-linux-x86_64.tar.gz">varsto-daily-linux-x86_64.tar.gz</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-android-debug.apk"><th scope="row">Android (debug APK)</th><td><a href="../../daily/latest/varsto-daily-android-debug.apk">varsto-daily-android-debug.apk</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-windows-setup.exe"><th scope="row">Windows installer</th><td><a href="../../daily/latest/varsto-daily-windows-setup.exe">varsto-daily-windows-setup.exe</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-macos-apple-silicon.dmg"><th scope="row">macOS Apple Silicon (dmg)</th><td><a href="../../daily/latest/varsto-daily-macos-apple-silicon.dmg">varsto-daily-macos-apple-silicon.dmg</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-ios-unsigned.ipa"><th scope="row">iOS (unsigned ipa)</th><td><a href="../../daily/latest/varsto-daily-ios-unsigned.ipa">varsto-daily-ios-unsigned.ipa</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr></tbody></table>
     <h2>Verifiera</h2>
     <p>Lägg <a href="../../daily/latest/SHA256SUMS">SHA256SUMS</a> bredvid filerna du laddade ner (filnamnen i tabellen är de fasta namnen) och kör</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är inte signerad; den visar bara att en nedladdning är komplett och oskadd.</p>
+    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är signerad med den separata dagliga nyckeln (<a href="../../daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign-format; nyckeln är <a href="../../daily-key.pub">daily-key.pub</a>), och det är den som <code>varsto update --daily</code> kontrollerar. Förutom att en nedladdning är komplett och oskadd visar signaturen att listan kommer från projektets egen bygglinje.</p>
     <h2>Vad som ingår</h2>
-    <ul><li>Huvudgrenen vid commit <a href="https://github.com/janttsu/varsto/commit/651a3fd">651a3fd</a>.</li><li>Öppna pull requests som lagts ovanpå: <a href="https://github.com/janttsu/varsto/pull/39">#39</a>, <a href="https://github.com/janttsu/varsto/pull/41">#41</a>, <a href="https://github.com/janttsu/varsto/pull/44">#44</a>, <a href="https://github.com/janttsu/varsto/pull/42">#42</a>, <a href="https://github.com/janttsu/varsto/pull/43">#43</a>, <a href="https://github.com/janttsu/varsto/pull/38">#38</a>, <a href="https://github.com/janttsu/varsto/pull/40">#40</a>, <a href="https://github.com/janttsu/varsto/pull/46">#46</a>.</li><li>Dessutom små CI-rättningar.</li><li>CI-körning: <a href="https://github.com/janttsu/varsto/actions/runs/38858694704">https://github.com/janttsu/varsto/actions/runs/38858694704</a></li></ul>
-    <p>iOS-filen kan komma från en senare commit än de andra; tabellen visar commit för varje fil.</p>
+    <ul id="daily-included" hidden><li>Huvudgrenen vid commit <a data-f="commit"></a>.</li><li>CI-körning: <a data-f="ci_run"></a></li></ul>
     <h2>Kända brister</h2>
-    <ul><li>Inget är signerat: ingen releasesignatur och ingen kodsignering från Apple eller Microsoft. Kontrollsummorna upptäcker bara en trasig nedladdning.</li><li>Format 2 (omarbetningen av posterna) ingår inte; när det kommer måste valv som skapats med dessa byggen skapas om.</li><li>macOS, Windows och iOS varnar för osignerad programvara; på macOS öppnar du med högerklick och Öppna, på Windows ber SmartScreen om bekräftelse.</li><li>Windows-installationsprogrammet har bara röktestats i CI (installation, uppgradering, reparation, nekad nedgradering, avinstallation), inte på en riktig dator.</li><li>iOS-ipa:n har inte körts på en riktig enhet. Installera den med AltStore, SideStore eller Sideloadly.</li><li>Vissa texter i appens gränssnitt är ännu inte översatta; de loggas.</li></ul>
+    <ul><li>Byggena har ingen releasesignatur och ingen kodsignering från Apple eller Microsoft. Kontrollsummelistan är signerad med den separata dagliga nyckeln (varsto update --daily kontrollerar den), vilket visar att ett bygge kommer från projektets CI, inte att det har testats.</li><li>macOS, Windows och iOS varnar för osignerad programvara; på macOS öppnar du med högerklick och Öppna, på Windows ber SmartScreen om bekräftelse.</li><li>Windows-installationsprogrammet har bara röktestats i CI (installation, uppgradering, reparation, nekad nedgradering, avinstallation), inte på en riktig dator.</li><li>iOS-ipa:n har inte körts på en riktig enhet. Installera den med AltStore, SideStore eller Sideloadly.</li><li>Vissa texter i appens gränssnitt är ännu inte översatta; de loggas.</li><li>Windows and iOS are still from the previous build 20261016-316c579; they were not rebuilt this round.</li><li>The grace period before a storage that has fallen behind is given up (package E) defaults to 30 days.</li><li>The Kotlin, Swift and Windows full-screen code and the pairing fix have not been verified on real devices.</li><li>The first update with --daily needs a binary that already contains the feature, so install this build by hand once; after that varsto update --daily can take over.</li></ul>
     <h2>Tidigare byggen</h2>
-    <p>De sju senaste daterade byggena sparas, med filerna under sina ursprungliga namn. Adresserna i tabellen pekar alltid på det nyaste bygget.</p>
-    <ul><li><a href="../../daily/builds/20261016-316c579/">20261016-316c579</a> (2026-10-16)</li></ul>
+    <p>De sju senaste byggena sparas med samma filnamn; varje bygge har sin egen signerade lista.</p>
+    <ul id="daily-history"></ul>
+    <script src="../../assets/js/daily.js?v=008e885cd7" defer></script>
 
   </div>
 </main>

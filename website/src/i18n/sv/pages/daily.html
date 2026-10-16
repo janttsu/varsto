@@ -20,12 +20,11 @@ description: Utvecklingsbyggen av Varsto från huvudgrenen, med kontrollsummelis
     <h2>Verifiera</h2>
     <p>Lägg <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> bredvid filerna du laddade ner (filnamnen i tabellen är de fasta namnen) och kör</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är signerad med en separat daglig nyckel (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, publik nyckel <a href="{{P}}daily-key.pub">daily-key.pub</a>) som <code>varsto update --daily</code> kontrollerar. Den dagliga nyckeln gäller bara den dagliga kanalen: den godtas aldrig för en release, och releasenyckeln godtas aldrig för ett dagligt bygge.</p>
+    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är signerad med den separata dagliga nyckeln (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign-format; nyckeln är <a href="{{P}}daily-key.pub">daily-key.pub</a>), och det är den som <code>varsto update --daily</code> kontrollerar. Förutom att en nedladdning är komplett och oskadd visar signaturen att listan kommer från projektets egen bygglinje.</p>
     <h2>Vad som ingår</h2>
     {{DAILY_INCLUDED}}
-    <p>Varje plattform publiceras så fort dess fil är klar, så raderna kan komma från olika bygge; tabellen visar bygge och commit för varje fil.</p>
     <h2>Kända brister</h2>
     {{DAILY_GAPS}}
     <h2>Tidigare byggen</h2>
-    <p>De sju senaste daterade byggena sparas, med filerna under sina ursprungliga namn. Adresserna i tabellen pekar alltid på det nyaste bygget.</p>
+    <p>De sju senaste byggena sparas med samma filnamn; varje bygge har sin egen signerade lista.</p>
     {{DAILY_HISTORY}}

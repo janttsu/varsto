@@ -528,34 +528,34 @@ def tree_counts() -> dict[str, str]:
     return {"RUST_LINES": f"{round(rust, -3):,}".replace(",", " "), "TESTS": str(tests), "LAB_SCENARIOS": str(scenarios)}
 
 
-# The daily build channel: the page body is filled from src/data/daily.json,
-# which website/tools/daily/make_daily.py writes. The files themselves live on
-# the server under daily/ and are not part of the generated site.
+# The daily build channel. The page is static: the platform rows, the stable
+# links and the known gaps are generated from src/data/daily.json, and the
+# numbers that change with every build (build id, date, version, commit, size
+# and SHA-256 per file, the list of previous builds) are filled in by
+# assets/js/daily.js from /daily/latest.json, which the server writes
+# (ops/site/daily-sync.py), so a new daily build needs no site deploy. The
+# files themselves live on the server under daily/ and are not part of the
+# generated site.
 DAILY_JSON = SRC / "data" / "daily.json"
 DAILY_I18N = {
     "en": {
-        "build": 'Latest build <strong>{id}</strong>, {date}; version string {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
+        "build": 'Latest build <strong data-f="id"></strong>, <span data-f="date"></span>; version string <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'The links in the table always point to the newest build. The build id, sizes and checksums are filled in by a small script; without it read <a href="{pre}daily/latest.json">latest.json</a> and <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> directly.',
+        "unavailable": "The build details could not be loaded right now. The links in the table still point to the newest build.",
         "cols": ("Platform", "Download", "Size", "Built from", "SHA-256"),
-        "dated": "dated copy",
-        "build_word": "build",
-        "main": 'The main line at commit <a href="{repo}/commit/{c}">{c}</a>.',
-        "prs": "Open pull requests merged on top: {list}.",
-        "note": "",
-        "ci": 'CI run: <a href="{url}">{url}</a>',
+        "main": 'The main line at commit <a data-f="commit"></a>.',
+        "ci": 'CI run: <a data-f="ci_run"></a>',
         "gaps": {},
     },
     "fi": {
-        "build": 'Uusin versio <strong>{id}</strong>, {date}; versiotunnus {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
+        "build": 'Uusin versio <strong data-f="id"></strong>, <span data-f="date"></span>; versiotunnus <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'Taulukon linkit osoittavat aina uusimpaan versioon. Version tunnuksen, koot ja tarkistussummat täyttää pieni skripti; ilman sitä lue <a href="{pre}daily/latest.json">latest.json</a> ja <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> suoraan.',
+        "unavailable": "Version tietoja ei voitu ladata juuri nyt. Taulukon linkit osoittavat silti uusimpaan versioon.",
         "cols": ("Alusta", "Lataus", "Koko", "Rakennettu commitista", "SHA-256"),
-        "dated": "päivätty kopio",
-        "build_word": "versio",
-        "main": 'Päähaara commitissa <a href="{repo}/commit/{c}">{c}</a>.',
-        "prs": "Päälle liitetyt avoimet pull requestit: {list}.",
-        "note": "Lisäksi pieniä CI-korjauksia.",
-        "ci": 'CI-ajo: <a href="{url}">{url}</a>',
+        "main": 'Päähaara commitissa <a data-f="commit"></a>.',
+        "ci": 'CI-ajo: <a data-f="ci_run"></a>',
         "gaps": {
-            "unsigned": "Les versions n’ont ni signature de version ni signature de code Apple ou Microsoft. Seule la liste de sommes de contrôle est signée, par une clé quotidienne distincte qui ne vaut que pour le canal quotidien.",
-            "not-format-2": "Muotoa 2 (tietueiden uudistus) ei ole mukana; kun se tulee, näillä versioilla luodut holvit täytyy luoda uudelleen.",
+            "unsigned": "Versioissa ei ole julkaisuallekirjoitusta eikä Applen tai Microsoftin koodinallekirjoitusta. Tarkistussummaluettelo on allekirjoitettu erillisellä päivittäisellä avaimella (varsto update --daily tarkistaa sen), mikä osoittaa version tulleen projektin CI:stä, ei sitä että se olisi testattu.",
             "os-warnings": "macOS, Windows ja iOS varoittavat allekirjoittamattomasta ohjelmistosta; macOS:ssä avaus onnistuu hiiren oikealla painikkeella ja Avaa, Windowsissa SmartScreen pyytää vahvistusta.",
             "windows-ci-only": "Windows-asennusohjelma on savutestattu vain CI:ssä (asennus, päivitys, korjaus, vanhempaan versioon palaamisen esto, poisto), ei oikealla koneella.",
             "ios-untested": "iOS-ipa:a ei ole ajettu oikealla laitteella. Asenna se AltStorella, SideStorella tai Sideloadlyllä.",
@@ -575,17 +575,14 @@ DAILY_I18N = {
         },
     },
     "sv": {
-        "build": 'Senaste bygget <strong>{id}</strong>, {date}; versionssträng {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
+        "build": 'Senaste bygget <strong data-f="id"></strong>, <span data-f="date"></span>; versionssträng <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'Länkarna i tabellen pekar alltid på det nyaste bygget. Bygg-id, storlekar och kontrollsummor fylls i av ett litet skript; utan det kan du läsa <a href="{pre}daily/latest.json">latest.json</a> och <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> direkt.',
+        "unavailable": "Uppgifterna om bygget kunde inte laddas just nu. Länkarna i tabellen pekar ändå på det nyaste bygget.",
         "cols": ("Plattform", "Nedladdning", "Storlek", "Byggd från", "SHA-256"),
-        "dated": "daterad kopia",
-        "build_word": "bygge",
-        "main": 'Huvudgrenen vid commit <a href="{repo}/commit/{c}">{c}</a>.',
-        "prs": "Öppna pull requests som lagts ovanpå: {list}.",
-        "note": "Dessutom små CI-rättningar.",
-        "ci": 'CI-körning: <a href="{url}">{url}</a>',
+        "main": 'Huvudgrenen vid commit <a data-f="commit"></a>.',
+        "ci": 'CI-körning: <a data-f="ci_run"></a>',
         "gaps": {
-            "unsigned": "Inget är signerat: ingen releasesignatur och ingen kodsignering från Apple eller Microsoft. Kontrollsummorna upptäcker bara en trasig nedladdning.",
-            "not-format-2": "Format 2 (omarbetningen av posterna) ingår inte; när det kommer måste valv som skapats med dessa byggen skapas om.",
+            "unsigned": "Byggena har ingen releasesignatur och ingen kodsignering från Apple eller Microsoft. Kontrollsummelistan är signerad med den separata dagliga nyckeln (varsto update --daily kontrollerar den), vilket visar att ett bygge kommer från projektets CI, inte att det har testats.",
             "os-warnings": "macOS, Windows och iOS varnar för osignerad programvara; på macOS öppnar du med högerklick och Öppna, på Windows ber SmartScreen om bekräftelse.",
             "windows-ci-only": "Windows-installationsprogrammet har bara röktestats i CI (installation, uppgradering, reparation, nekad nedgradering, avinstallation), inte på en riktig dator.",
             "ios-untested": "iOS-ipa:n har inte körts på en riktig enhet. Installera den med AltStore, SideStore eller Sideloadly.",
@@ -593,17 +590,14 @@ DAILY_I18N = {
         },
     },
     "fr": {
-        "build": 'Dernière version <strong>{id}</strong>, {date} ; chaîne de version {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
+        "build": 'Dernière version <strong data-f="id"></strong>, <span data-f="date"></span> ; chaîne de version <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'Les liens du tableau pointent toujours vers la version la plus récente. L’identifiant, les tailles et les sommes de contrôle sont ajoutés par un petit script ; sans lui, lisez directement <a href="{pre}daily/latest.json">latest.json</a> et <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>.',
+        "unavailable": "Les détails de la version n’ont pas pu être chargés pour le moment. Les liens du tableau pointent toujours vers la version la plus récente.",
         "cols": ("Plateforme", "Téléchargement", "Taille", "Construit depuis", "SHA-256"),
-        "dated": "copie datée",
-        "build_word": "version",
-        "main": 'La branche principale au commit <a href="{repo}/commit/{c}">{c}</a>.',
-        "prs": "Pull requests ouvertes fusionnées par-dessus : {list}.",
-        "note": "Plus de petites corrections de CI.",
-        "ci": 'Exécution CI : <a href="{url}">{url}</a>',
+        "main": 'La branche principale au commit <a data-f="commit"></a>.',
+        "ci": 'Exécution CI : <a data-f="ci_run"></a>',
         "gaps": {
-            "unsigned": "Rien n’est signé : ni signature de version, ni signature de code Apple ou Microsoft. Les sommes de contrôle ne détectent qu’un téléchargement corrompu.",
-            "not-format-2": "Le format 2 (la refonte des enregistrements) n’est pas inclus ; lorsqu’il arrivera, les coffres créés avec ces versions devront être recréés.",
+            "unsigned": "Les versions n’ont ni signature de version ni signature de code Apple ou Microsoft. La liste des sommes de contrôle est signée avec la clé quotidienne distincte (vérifiée par varsto update --daily), ce qui montre qu’une version provient de la CI du projet, pas qu’elle a été testée.",
             "os-warnings": "macOS, Windows et iOS avertissent à propos des logiciels non signés ; sous macOS, ouvrez par clic droit puis Ouvrir, sous Windows SmartScreen demande une confirmation.",
             "windows-ci-only": "Le programme d’installation Windows n’a subi qu’un test de fumée en CI (installation, mise à jour, réparation, refus de rétrogradation, désinstallation), pas sur une vraie machine.",
             "ios-untested": "L’ipa iOS n’a pas été exécuté sur un vrai appareil. Installez-le avec AltStore, SideStore ou Sideloadly.",
@@ -614,38 +608,31 @@ DAILY_I18N = {
 
 
 def daily_blocks(lang: str, depth: int) -> dict[str, str]:
-    """The pieces of the daily page: BUILD, TABLE, INCLUDED, GAPS, HISTORY."""
+    """The pieces of the daily page: BUILD, TABLE, INCLUDED, GAPS, HISTORY.
+    Static HTML with the stable links; daily.js fills the data-f cells."""
     t = DAILY_I18N[lang]
     pre = "../" * depth
     data = json.loads(DAILY_JSON.read_text())
-    cur = data["current"]
     e = html.escape
     rows = "\n".join(
-        f'<tr><th scope="row">{e(p["label"])}</th>'
-        f'<td><a href="{pre}daily/latest/{e(p["latest"])}">{e(p["latest"])}</a><br>'
-        f'<span class="dl-meta"><a href="{pre}daily/builds/{e(p.get("build", cur["id"]))}/{e(p["file"])}">{t["dated"]}</a> · {t["build_word"]} <code>{e(p.get("build", cur["id"]))}</code></span></td>'
-        f'<td>{p["size"] / 1048576:.1f} MB</td>'
-        f'<td><a href="{REPO}/commit/{e(p["commit"])}"><code>{e(p["commit"])}</code></a></td>'
-        f'<td><code class="sum">{p["sha256"]}</code></td></tr>'
-        for p in cur["platforms"]
+        f'<tr data-file="{e(p["latest"])}"><th scope="row">{e(p["label"])}</th>'
+        f'<td><a href="{pre}daily/latest/{e(p["latest"])}">{e(p["latest"])}</a></td>'
+        '<td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>'
+        for p in data["platforms"]
     )
     head = "".join(f"<th>{e(c)}</th>" for c in t["cols"])
-    included = [t["main"].format(repo=REPO, c=e(cur["main_commit"]))]
-    if cur["prs"]:
-        links = ", ".join(f'<a href="{REPO}/pull/{n}">#{n}</a>' for n in cur["prs"])
-        included.append(t["prs"].format(list=links))
-    if cur.get("note"):
-        included.append(e(cur["note"]) if lang == "en" else t["note"])
-    if cur.get("ci_run"):
-        included.append(t["ci"].format(url=e(cur["ci_run"])))
     gaps = [t["gaps"].get(g["id"], g["text"]) for g in data["known_gaps"]]
-    history = [f'<li><a href="{pre}daily/builds/{e(h["id"])}/">{e(h["id"])}</a> ({e(h["date"])})</li>' for h in [cur] + data["history"]]
+    script = f'<script src="{pre}assets/js/daily.js?v={asset_version("assets/js/daily.js")}" defer></script>'
     return {
-        "BUILD": '<p class="lead">' + t["build"].format(id=e(cur["id"]), date=e(cur["date"]), version=e(cur["version"]), pre=pre) + "</p>",
-        "TABLE": f'<table class="downloads"><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>',
-        "INCLUDED": "<ul>" + "".join(f"<li>{x}</li>" for x in included) + "</ul>",
+        "BUILD": (
+            f'<p class="lead" id="daily-build" data-pre="{pre}" data-unavailable="{e(t["unavailable"])}" hidden>'
+            + t["build"].format(pre=pre) + "</p>\n    "
+            + f'<noscript><p class="lead">{t["noscript"].format(pre=pre)}</p></noscript>'
+        ),
+        "TABLE": f'<table class="downloads" id="daily-table"><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>',
+        "INCLUDED": f'<ul id="daily-included" hidden><li>{t["main"]}</li><li>{t["ci"]}</li></ul>',
         "GAPS": "<ul>" + "".join(f"<li>{e(x)}</li>" for x in gaps) + "</ul>",
-        "HISTORY": "<ul>" + "".join(history) + "</ul>",
+        "HISTORY": f'<ul id="daily-history"></ul>\n    {script}',
     }
 
 

@@ -20,12 +20,11 @@ description: Development builds of Varsto from the main line, with a checksum li
     <h2>Verify</h2>
     <p>Put <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> next to the files you downloaded (the file names are the stable ones in the table) and run</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. The list is signed with a separate daily key (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, public key <a href="{{P}}daily-key.pub">daily-key.pub</a>), which <code>varsto update --daily</code> checks. The daily key only works for the daily channel: it is never accepted for a release, and the release key is never accepted for a daily build.</p>
+    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. The list is signed with the separate daily key (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign format; the key is <a href="{{P}}daily-key.pub">daily-key.pub</a>), which is what <code>varsto update --daily</code> checks. Besides telling you that a download is complete and intact, the signature shows that the list came from the project's own build.</p>
     <h2>What is in it</h2>
     {{DAILY_INCLUDED}}
-    <p>Each platform is published as soon as its file is ready, so the rows can come from different builds; the table names the build and the commit of each file.</p>
     <h2>Known gaps</h2>
     {{DAILY_GAPS}}
     <h2>Previous builds</h2>
-    <p>The seven most recent dated builds are kept, with the files under their original names. The addresses in the table always point to the newest build.</p>
+    <p>The seven most recent builds are kept, with the same file names; each has its own signed list.</p>
     {{DAILY_HISTORY}}
