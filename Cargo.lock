@@ -4184,7 +4184,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-cli"
-version = "0.0.1-alpha.14"
+version = "0.0.1-alpha.15"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4213,7 +4213,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-core"
-version = "0.0.1-alpha.14"
+version = "0.0.1-alpha.15"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4262,7 +4262,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-ffi"
-version = "0.0.1-alpha.14"
+version = "0.0.1-alpha.15"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4285,7 +4285,7 @@ dependencies = [
 
 [[package]]
 name = "varsto-window"
-version = "0.0.1-alpha.14"
+version = "0.0.1-alpha.15"
 dependencies = [
  "serde",
  "serde_json",

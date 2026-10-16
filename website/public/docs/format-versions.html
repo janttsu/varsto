@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Storage format versions</h1>
-<p class="note">From <code>docs/spec/format-versions.md</code> in the repository, rendered 2026-10-16. These documents describe the main branch; the released version is 0.0.1-alpha.14. Sections marked 'after 0.0.1-alpha.14' are not in a release yet.</p>
+<p class="note">From <code>docs/spec/format-versions.md</code> in the repository, rendered 2026-10-16. These documents describe the main branch; the released version is 0.0.1-alpha.15. Sections marked 'after 0.0.1-alpha.15' are not in a release yet.</p>
 <h2 id="purpose">Purpose</h2>
 <p>During alpha development, storage formats may change without migration paths. Once a format version is released, that version stays readable. This table tracks which released versions of Varsto can read each storage format, and whether standalone reader tools are available for data recovery.</p>
 <h2 id="format-versions">Format versions</h2>
@@ -83,8 +83,24 @@
 <td>none yet (<code>varsto pull</code> and <code>varsto fsck</code> of the same version)</td>
 <td>every tag from <code>v0.0.1-alpha.4</code> on</td>
 </tr>
+<tr>
+<td>2 (blocks, packs and keyed chunker, alpha-0-format.md section 62)</td>
+<td>0.0.1-alpha.15</td>
+<td>0.0.1-alpha.15 and later. Vaults of format 1 (0.0.1-alpha.14 and earlier) are not read: alpha.15 refuses them and says to recreate the vault</td>
+<td>none yet (<code>varsto pull</code> and <code>varsto fsck</code> of the same version)</td>
+<td><code>v0.0.1-alpha.15</code></td>
+</tr>
+<tr>
+<td>3 (planned: signed records, folder key grants)</td>
+<td>not yet assigned</td>
+<td>not yet released</td>
+<td>none yet</td>
+<td>none yet</td>
+</tr>
 </tbody>
 </table>
+<h2 id="format-version-2-001-alpha15">Format version 2 (0.0.1-alpha.15)</h2>
+<p><code>FORMAT_VERSION</code> is 2. There is no migration from format 1: block objects of their own (<code>chunks/</code>) are not read, so an alpha.14 vault opens without its data. Checked in the lab (<code>upgrade-from-alpha-14</code>) with the format number left at 1: <code>status</code> worked and <code>fsck --verify</code> reported every block of the vault missing. With the bump an alpha.15 build refuses a format 1 vault when it opens it or joins through its storage and says to recreate it (<code>varsto reset --yes</code>, <code>varsto init</code>, then sync the files into the new vault). Alpha.14 refuses a format 2 vault with "vault format version 2 is not readable by this version (1)". Release rule 3 (a reader for the previous format) is met by the alpha.14 binary, which stays downloadable and is the tool to read an alpha.14 vault.</p>
 <h2 id="release-rules">Release rules</h2>
 <ol type="1">
 <li>Tag every alpha release (<code>v0.0.1-alpha.N</code>) with the source commit and binaries. Tags <code>v0.0.1-alpha.3</code> and <code>v0.0.1-alpha.9</code> do not exist: those releases were folded into the next tag (<code>v0.0.1-alpha.4</code> and <code>v0.0.1-alpha.10</code>).</li>
@@ -93,6 +109,10 @@
 <li>Update this table before publishing each storage format version, with the release number and reader status.</li>
 <li>Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.</li>
 </ol>
+<h2 id="daily-update-channel-after-001-alpha13-format-version-1-unchanged">Daily update channel after 0.0.1-alpha.13 (format version 1 unchanged)</h2>
+<p>Device-local files only (alpha-0-format.md section 67): <code>update-state-daily.json</code> and <code>update-channel.json</code> in the device directory. Earlier versions ignore them. The download site gains <code>daily/latest/SHA256SUMS.sig</code>, signed with a separate daily key.</p>
+<h2 id="forwarding-alpha-0-formatmd-section-70-storage-format-unchanged">Forwarding (alpha-0-format.md section 70; storage format unchanged)</h2>
+<p>New objects <code>vault/forward-leases/&lt;folder&gt;/&lt;slot&gt;.json</code> (plain JSON leases, deleted by their holder or once they lapse), a device-local <code>forward</code> block in <code>config.json</code> and <code>state/forward.json</code>. No new ledger event: forwarded copies are <code>chunk_stored</code> claims as before. Earlier versions ignore the leases (they never forward, so they never write the same blocks twice through forwarding) and read the claims as usual.</p>
 <h2 id="service-transport-and-storage-hardening-after-001-alpha13-format-version-1-unchanged">Service, transport and storage hardening after 0.0.1-alpha.13 (format version 1 unchanged)</h2>
 <p>Additive fields and local files only (alpha-0-format.md section 60): <code>check_hex</code> in the <code>strongroom</code> block of a folder record, <code>mac_hex</code> in a disk pool's <code>.varsto-disk.json</code>, and the device-local files <code>mcp-keys-used.json</code> and <code>update-state.json</code>. Earlier versions ignore the fields and read the same records. Three things need a hand: a Strongroom enrolled before this change has no key check (key-by-hand operations refuse it) and was enrolled without the PIN prompt, which changes the secret the security key derives, so enrol it again; a disk marker without a MAC is added one when the disk is attached, and a copy of a marker is not adopted without <code>varsto disk add</code>; and an updater needs <code>manifest.json.minisig</code> next to <code>manifest.json</code> on the download site.</p>
 <h2 id="packs-in-001-alpha12-format-version-1-unchanged">Packs in 0.0.1-alpha.12 (format version 1 unchanged)</h2>

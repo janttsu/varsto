@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
 # Build Varsto-<version>-setup.exe with Inno Setup.
 #
-#   installer\windows\build.ps1 -Version 0.0.1-alpha.14 -Source <folder> [-Out dist\installer]
+#   installer\windows\build.ps1 -Version 0.0.1-alpha.15 -Source <folder> [-Out dist\installer]
 #
 # <folder> holds varsto.exe, varsto-window.exe and the licence files (CI: the
 # windows-programs artifact, made by website/build-release.sh). The script makes the multi-size icon from the brand
@@ -28,7 +28,7 @@ foreach ($f in "varsto.exe", "varsto-window.exe") {
   if (-not (Test-Path (Join-Path $Source $f))) { throw "$f is not in $Source" }
 }
 
-# 0.0.1-alpha.14 -> 0.0.1.14 (Windows file version: four numbers).
+# 0.0.1-alpha.15 -> 0.0.1.15 (Windows file version: four numbers).
 if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]+\.(\d+))?$') { throw "unexpected version $Version" }
 $numeric = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$(if ($Matches[4]) { $Matches[4] } else { 0 })"
 

@@ -23,7 +23,7 @@ bundle id, minimum iOS, icon, arm64) and uploads it as the artifact
 ```bash
 gh workflow run ios-ipa.yml --repo janttsu/varsto -f ref=main
 # optional: attach to a draft pre-release as well
-gh workflow run ios-ipa.yml --repo janttsu/varsto -f ref=main -f release_tag=ios-v0.0.1-alpha.14
+gh workflow run ios-ipa.yml --repo janttsu/varsto -f ref=main -f release_tag=ios-v0.0.1-alpha.15
 gh run list --workflow ios-ipa.yml --repo janttsu/varsto --limit 1
 gh run watch <run id> --repo janttsu/varsto
 gh run download <run id> --repo janttsu/varsto --name Varsto-ios-unsigned --dir ios-ipa
@@ -52,7 +52,7 @@ Needs Xcode, `brew install xcodegen` and rustup:
 
 ```bash
 apps/ios/make-ipa.sh                 # dist/ios-ipa/Varsto-<version>-ios-unsigned.ipa
-apps/ios/make-ipa.sh --out ~/Desktop --version 0.0.1-alpha.14
+apps/ios/make-ipa.sh --out ~/Desktop --version 0.0.1-alpha.15
 ```
 
 ## Install

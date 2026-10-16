@@ -16,34 +16,14 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
-### Added
+Nothing yet.
 
-- Files page: a folder overview (name, size, files, mode, last change) and a
-  colour-coded safety indicator per folder, also in the navigation: 100 % in
-  external storage, 100 % on your own disks only, partly protected (with the
-  percentage) or only on devices. It is computed from the ledger and carried
-  in `protection` of every folder in `/api/status` (spec 63). File lists have
-  a compact (default) and a comfortable density, kept in the browser.
-- Visualization page (spec 63): an isometric live board of devices, storages,
-  the disk pool and the cloud with animated flows (bytes per second, folder,
-  estimated finish), verification and repair rings, protection per folder,
-  the offline disk stack with the docked disk's phase, cost estimates and
-  alerts. Full screen (button or F) renders at the display's native size,
-  background follows the theme or is Light or pure black. New
-  `GET /api/viz` snapshot; sprites from `website/tools/render/viz_sprites.py`.
-- iOS: an unsigned `.ipa` for AltStore, SideStore and Sideloadly, built by
-  `apps/ios/make-ipa.sh` or the manually started GitHub workflow `ios-ipa.yml`
-  (also on `ios-v*` tags); app icon asset catalog, iPad orientations, version
-  numbers in `Info.plist`; build, install and cost notes (GitHub, Scaleway Mac
-  mini) in `docs/ios-build.md`.
+## [0.0.1-alpha.15] - 2026-10-16
+
+Spec sections 62 to 71. Storage format 2: vaults of alpha.14 and earlier are not read and must be recreated; every device must run alpha.15. This is still an alpha: not for production data. Two findings of the security review (file lists and share epochs accepted on the folder key alone) wait for the records layer of the next format and are not closed here.
 
 ### Changed
 
-- Windows: the portable zip is gone; install with the setup program
-  (`Varsto-<version>-setup.exe`), which is now the only Windows download, also
-  on the daily channel. `varsto update` and `varsto update --daily` always
-  install through it; an old portable copy is told to download and run the
-  installer once, and updates continue automatically after that (spec 65).
 - Format 2 blocks (spec 62): chunk nonces follow the packed bytes, chunks are
   compressed with zstd level 3 after a 64 KiB probe, the chunker's Gear table
   is keyed per folder with new block sizes by file size, and every block of
@@ -60,6 +40,117 @@ spec still names them because sections were written as the work was done.
   recreate the vault (`varsto reset --yes`, `varsto init`, sync the files
   again); alpha.14 refuses a format 2 vault. Keep the alpha.14 binary to read
   an old vault.
+- Windows: the portable zip is gone; install with the setup program
+  (`Varsto-<version>-setup.exe`), which is now the only Windows download, also
+  on the daily channel. `varsto update` and `varsto update --daily` always
+  install through it; an old portable copy is told to download and run the
+  installer once, and updates continue automatically after that (spec 65).
+- Disk initialisation (`disk init`) uses one drive layout (spec 66): GPT only,
+  one partition starting at 1 MiB, a partition type per filesystem, with
+  command builders for Linux, macOS and Windows.
+- Messages use real singular and plural forms instead of "(s)".
+- `varsto service remember` over SSH without a desktop keyring now fails at
+  once with an explanation (use `VARSTO_PASSPHRASE` or `varsto unlock`).
+- Camera upload folders on phones are send-only, the encrypted default is
+  explained, and such a folder cannot be turned selective.
+- A folder without a placement is written to the fewest storages that keep
+  its policy.
+- Interface: the Finnish and Swedish translations cover the rest of the
+  interface (composite lines, plurals, organization header, path labels,
+  ledger batch counts); the coverage test now also checks the static page,
+  sentences in the scripts and the composite patterns.
+
+### Added
+
+- Windows (spec 65): `varsto-window.exe` shows the interface in a native
+  WebView2 window (saved size and position, one window per user, tray starts
+  it, browser fallback), a single tray per session, and the Inno Setup
+  installer (upgrade in place, repair, uninstall that keeps the data folder,
+  WebView2 check). Windows copies installed by the setup program check for
+  updates daily (`varsto config auto-update`, interface switch), install the
+  signed setup program silently, and show toast notifications.
+- `varsto update --daily` and `--check --daily` (spec 67): installs the newest
+  daily build from `daily/latest/`, whose checksum list is signed with a
+  separate daily key (`daily-key.pub`); the updater checks the signature, the
+  channel, the signing time and the build age, and a daily signature never
+  validates a release or the other way round. Daily builds are automated by
+  `daily.yml` (all platforms when main moved, a signed rolling pre-release)
+  and shown on a static daily page of the website.
+- Files page: a folder overview (name, size, files, mode, last change) and a
+  colour-coded safety indicator per folder, also in the navigation: 100 % in
+  external storage, 100 % on your own disks only, partly protected (with the
+  percentage) or only on devices. It is computed from the ledger and carried
+  in `protection` of every folder in `/api/status` (spec 63). File lists have
+  a compact (default) and a comfortable density, kept in the browser.
+- Visualization page (spec 64): an isometric live board of devices, storages,
+  the disk pool and the cloud with animated flows (bytes per second, folder,
+  estimated finish), verification and repair rings, protection per folder,
+  the offline disk stack with the docked disk's phase (a SATA dock sprite),
+  cost estimates and alerts. Full screen (button or F) fills the display at
+  its native size, including 16:9 and 4K, with real full screen in the
+  browser and in the Android, macOS and Windows shells; Esc, the button and
+  Back leave it. Background follows the theme or is Light or pure black.
+  Flow labels keep their place and particles are calmer. New `GET /api/viz`
+  snapshot; sprites from `website/tools/render/viz_sprites.py`.
+- iOS: an unsigned `.ipa` for AltStore, SideStore and Sideloadly, built by
+  `apps/ios/make-ipa.sh` or the manually started GitHub workflow `ios-ipa.yml`
+  (also on `ios-v*` tags); app icon asset catalog, iPad orientations, version
+  numbers in `Info.plist`; build, install and cost notes (GitHub, Scaleway Mac
+  mini) in `docs/ios-build.md`. The Rust core is linked statically and the
+  build checks the executable.
+- Pairing (spec 68): the offer lists every usable local address, best first
+  (private, then public, then tunnel addresses; loopback, link-local and
+  container bridges skipped), and carries them all in the pairing link. Joining
+  tries the typed address, the link's addresses, then a search of the local
+  network from every interface, with visible progress and an error that names
+  what was tried and why it failed.
+- Forwarding (spec 70): a device attached to a folder, also with selective
+  sync and holding no files, carries blocks other devices wrote to the
+  storages it can write when the folder's copy rules still need them (checked
+  by hash, written as packs, read back and claimed); leases on the storages
+  keep two forwarders from writing the same blocks. New `varsto forward`,
+  `/api/forward` and a forward activity kind. The attach dialog asks for full
+  or selective sync and the direction; `POST /api/folder/attach` and
+  `varsto folder attach` take a mode (`--mode send-only|receive-only`).
+- Android and phones: photos and videos already on the phone are backed up,
+  newest first, when a camera folder is added.
+- Website: a French translation of every translated page and a language
+  switcher; all screenshots are refreshed on every build, in English, Finnish
+  and Swedish, plus a full-screen visualization shot; deploying refuses pages
+  that still say no binaries are published.
+
+### Fixed
+
+- Draining and placement: a storage that a folder is written to cannot be
+  drained, a folder cannot be placed on a drained storage, stale storage
+  locations leave the view after a drain, and the Placement dialog shows the
+  folder's real placement with places tied to the ticked storages.
+- Storages: every device lists the vault's storages, and the same bucket,
+  remote or directory cannot be added twice. Phones add S3 and rclone
+  storages only (a local directory is refused by design); peers are no longer
+  listed as storages.
+- Thumbnails are made for storages added later, and an early, bounded thumbnail
+  pass runs for existing folders before the upload.
+- Overview counts, paths and device names in the interface.
+- Printing the recovery package works in the interface and in the macOS
+  window; clicking the macOS Dock icon keeps the window.
+- Android: Back goes through the page first (it closes a dialog or returns to
+  the previous view before leaving the app), and the on-screen keyboard
+  shrinks the page instead of covering fields.
+- Verification: blocks stored within the larger of the verification window
+  and 24 hours are "verification pending" instead of a violation; copy-count
+  rules are unchanged.
+- Responsiveness (spec 71): read-only API routes are answered on their own
+  threads and, while a sync holds the state, from the last kept answer marked
+  stale; the upkeep after a sync lets go of the state between steps;
+  `Engine::status` reads the ledger once (6.2 s to 0.7 s on a vault of 50 000
+  files). The page asks each background read once at a time, draws the summary
+  once, draws file lists 300 rows at a time without redrawing equal answers,
+  and is never reloaded when the service is busy or restarts.
+- `varsto reset` clears the vault marker and restarts a running service;
+  `varsto update` starts a running service again after replacing the binary.
+- Smaller: the musl fallback build works when `musl-gcc` is absent; two test
+  races in CI.
 
 ## [0.0.1-alpha.14] - 2026-10-14
 
@@ -418,6 +509,7 @@ make the core idea real (spec 1 to 9).
 - `fsck --verify` re-hashes every referenced object and reports claims the
   storage cannot back.
 
+[0.0.1-alpha.15]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.15
 [0.0.1-alpha.14]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.14
 [0.0.1-alpha.13]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.13
 [0.0.1-alpha.12]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.12

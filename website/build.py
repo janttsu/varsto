@@ -38,7 +38,7 @@ ALPHA = (
 REPO = "https://github.com/janttsu/varsto"
 # The last tagged release. Update it when tagging a release: the pages say
 # "released" with this value, while {{VERSION}} follows Cargo.toml (main).
-RELEASED_VERSION = "0.0.1-alpha.14"
+RELEASED_VERSION = "0.0.1-alpha.15"
 RELEASE_KEY = ROOT / "release-key.pub"
 # The daily channel has its own key; it signs only daily/latest/SHA256SUMS.
 DAILY_KEY = ROOT / "daily-key.pub"
