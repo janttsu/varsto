@@ -790,7 +790,8 @@
         if (!snap) { demo = true; }
         afterData();
       })
-      .then(function () { pollTimer = setTimeout(poll, errCount ? Math.min(8000, 1000 * (1 + errCount)) : (document.visibilityState === "hidden" ? 4000 : 1000)); });
+      // Not while the page is hidden: showing it again asks at once.
+      .then(function () { if (document.visibilityState === "hidden") { return; } pollTimer = setTimeout(poll, errCount ? Math.min(8000, 1000 * (1 + errCount)) : 1000); });
   }
   function afterData() { dirty = true; renderPanels(); schedule(0); }
 

@@ -189,8 +189,10 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
             token: st.token.clone(),
             traffic: st.traffic.clone(),
             state: state.clone(),
+            reads: Arc::default(),
         }
     };
+    let reads = fixed.reads.clone();
     let (tx, rx) = std::sync::mpsc::channel::<Request>();
     let worker = std::thread::Builder::new()
         .name("http-api".into())
@@ -208,6 +210,11 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
                     log::error!(method = method, path = url; "api handler panicked");
                     Err(anyhow::anyhow!("handler panicked"))
                 });
+                let path = url.split('?').next().unwrap_or("");
+                if method != "GET" && crate::readcache::drops_answers(path) {
+                    // Reads computed while it ran may predate the change.
+                    reads.lock().unwrap_or_else(|e| e.into_inner()).invalidate();
+                }
                 let status = STATUS.with(|s| s.get());
                 match result {
                     Ok(()) => log::debug!(method = method, path = url, status = status, ms = t.ms(); "api request"),
@@ -224,11 +231,123 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
         match handle_unlocked(&fixed, request) {
             Ok(None) => {}
             Ok(Some(request)) => {
+                let Some(request) = read_elsewhere(&fixed, request) else {
+                    continue;
+                };
+                // A change is coming: no cached answer from before it (a
+                // sync or a check keeps them until it has been answered).
+                let change = *request.method() != Method::Get
+                    && crate::readcache::drops_answers(
+                        request.url().split('?').next().unwrap_or(""),
+                    );
+                if change {
+                    fixed
+                        .reads
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .invalidate();
+                }
                 if tx.send(request).is_err() {
                     break;
                 }
             }
             Err(e) => log::warn!("request failed: {e:#}"),
+        }
+    }
+}
+
+/// Reads answered on threads of their own, at most this many at a time.
+const MAX_READERS: usize = 32;
+static READERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A GET of a route that only reads (`readcache::ROUTES`), with the session
+/// token: answered on a thread of its own, so that it neither waits behind
+/// the changes queued for the worker nor, while a sync holds the state, for
+/// the sync (the last answer is sent, marked stale). Anything else is handed
+/// back for the worker.
+fn read_elsewhere(fixed: &Fixed, request: Request) -> Option<Request> {
+    use std::sync::atomic::Ordering;
+    let path = request.url().split('?').next().unwrap_or("");
+    if *request.method() != Method::Get
+        || !crate::readcache::cacheable(path)
+        || !header_token_ok(&request, &fixed.token)
+    {
+        return Some(request);
+    }
+    if READERS.fetch_add(1, Ordering::SeqCst) >= MAX_READERS {
+        READERS.fetch_sub(1, Ordering::SeqCst);
+        return Some(request);
+    }
+    let (state, reads) = (fixed.state.clone(), fixed.reads.clone());
+    let spawned = std::thread::Builder::new()
+        .name("http-read".into())
+        .spawn(move || {
+            struct Done;
+            impl Drop for Done {
+                fn drop(&mut self) {
+                    READERS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _done = Done;
+            let url = loggable_url(request.url());
+            let t = varsto_core::logging::Timer::start();
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                serve_read(&state, &reads, request)
+            }));
+            match r {
+                Ok(Ok(how)) => log::debug!(method = "GET", path = url, answer = how, ms = t.ms(); "api request"),
+                Ok(Err(e)) => log::warn!(method = "GET", path = url, ms = t.ms(); "api request failed: {e:#}"),
+                Err(_) => log::error!(method = "GET", path = url; "api read handler panicked"),
+            }
+        });
+    if spawned.is_err() {
+        READERS.fetch_sub(1, Ordering::SeqCst);
+        log::warn!("cannot start a reader thread");
+    }
+    None
+}
+
+/// Answer a read: fresh when the state is free within
+/// `readcache::FRESH_WAIT`, else the last answer of the same address.
+fn serve_read(
+    state: &Shared,
+    reads: &Mutex<crate::readcache::ReadCache>,
+    request: Request,
+) -> Result<&'static str> {
+    use crate::readcache::{self, Got};
+    let url = request.url().to_string();
+    let (path, query) = url.split_once('?').unwrap_or((url.as_str(), ""));
+    // The address without the token parameters (none are accepted anyway).
+    let key = loggable_url(&url);
+    match readcache::lock_or_cached(state, reads, &key, readcache::FRESH_WAIT) {
+        Got::Fresh(mut st) => {
+            let generation = reads.lock().unwrap_or_else(|e| e.into_inner()).generation();
+            let result = api(&mut st, Method::Get, path, query, &json!({}));
+            drop(st);
+            match result {
+                Ok(v) => {
+                    let body = Arc::new(v.to_string());
+                    reads.lock().unwrap_or_else(|e| e.into_inner()).store(
+                        &key,
+                        generation,
+                        body.clone(),
+                        std::time::Instant::now(),
+                    );
+                    request.respond(json_text(200, body.as_str()))?;
+                }
+                Err(e) => {
+                    request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?
+                }
+            }
+            Ok("fresh")
+        }
+        Got::Cached(age, body) => {
+            request.respond(
+                json_text(200, &readcache::mark_stale(&body, age))
+                    .with_header(header("X-Varsto-Stale", "1"))
+                    .with_header(header("X-Varsto-Age-Ms", &age.as_millis().to_string())),
+            )?;
+            Ok("cached")
         }
     }
 }
@@ -266,6 +385,8 @@ struct Fixed {
     token: String,
     traffic: Arc<varsto_core::p2p::Traffic>,
     state: Shared,
+    /// The last answers of the reads (`readcache`), emptied by every change.
+    reads: Arc<Mutex<crate::readcache::ReadCache>>,
 }
 
 /// Answer a request that needs no state, or hand it back for the worker.
@@ -419,8 +540,21 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                     &json!({"error": "missing or wrong token; reopen the start URL"}),
                 ))?;
             } else {
-                let v = crate::viz::snapshot(&fixed.state, &fixed.traffic);
-                request.respond(json_response(200, &v))?;
+                // The ledger passes behind it take a while on a big vault:
+                // not on this thread, which answers the page's assets.
+                let (state, traffic) = (fixed.state.clone(), fixed.traffic.clone());
+                let spawned =
+                    std::thread::Builder::new()
+                        .name("http-viz".into())
+                        .spawn(move || {
+                            let v = crate::viz::snapshot(&state, &traffic);
+                            if let Err(e) = request.respond(json_response(200, &v)) {
+                                log::debug!("viz answer not sent: {e}");
+                            }
+                        });
+                if spawned.is_err() {
+                    log::warn!("cannot start the viz thread");
+                }
             }
         }
         "/api/p2p/traffic" | "/api/progress" | "/api/activity" => {
@@ -544,8 +678,13 @@ fn api_plain(status: u16, msg: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 fn json_response(status: u16, value: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
+    json_text(status, &value.to_string())
+}
+
+/// A JSON answer already serialized.
+fn json_text(status: u16, body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     STATUS.with(|s| s.set(status));
-    Response::from_string(value.to_string())
+    Response::from_string(body)
         .with_status_code(status)
         .with_header(header("Content-Type", "application/json"))
         .with_header(header("Cache-Control", "no-store"))
@@ -3254,6 +3393,12 @@ mod tests {
 
     /// A real server on a free port with a locked (engine-less) state.
     fn test_server() -> (u16, String, tempfile::TempDir) {
+        let (port, token, tmp, _) = test_server_state();
+        (port, token, tmp)
+    }
+
+    /// [`test_server`] and its state, for a test that holds it.
+    fn test_server_state() -> (u16, String, tempfile::TempDir, Shared) {
         let tmp = tempfile::tempdir().unwrap();
         let (server, bound) = bind(0).unwrap();
         let token = random_hex();
@@ -3268,12 +3413,108 @@ mod tests {
             link: None,
         }));
         let server = Arc::new(server);
+        let kept = state.clone();
         std::thread::spawn(move || serve_arc(server, state));
         (
             bound.rsplit(':').next().unwrap().parse().unwrap(),
             token,
             tmp,
+            kept,
         )
+    }
+
+    #[test]
+    fn reads_are_answered_while_a_long_operation_holds_the_state() {
+        let (port, token, _tmp, state) = test_server_state();
+        let h = [("X-Varsto-Token", token.as_str())];
+        // Once answered fresh, the service summary is kept.
+        let (st, head, fresh) = raw(port, "GET", "/api/service", &h, "");
+        assert_eq!(st, 200);
+        assert!(!head.contains("x-varsto-stale"));
+        // A sync (here: the test) holds the state for two seconds.
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let holder = {
+            let state = state.clone();
+            std::thread::spawn(move || {
+                let _g = state.lock().unwrap();
+                held_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            })
+        };
+        held_rx.recv().unwrap();
+        let t = std::time::Instant::now();
+        let (st, head, body) = raw(port, "GET", "/api/service", &h, "");
+        let took = t.elapsed();
+        assert_eq!(st, 200);
+        assert!(
+            took < std::time::Duration::from_millis(1000),
+            "took {took:?}"
+        );
+        assert!(head.contains("x-varsto-stale: 1"), "{head}");
+        assert!(head.contains("x-varsto-age-ms:"));
+        let v: Value = serde_json::from_str(&body).unwrap();
+        let f: Value = serde_json::from_str(&fresh).unwrap();
+        assert_eq!(v["stale"], true);
+        assert!(v["stale_ms"].as_u64().is_some());
+        assert_eq!(v["running"], f["running"]);
+        // Several reads at once do not queue behind each other either.
+        let many: Vec<_> = (0..4)
+            .map(|_| {
+                let token = token.clone();
+                std::thread::spawn(move || {
+                    let t = std::time::Instant::now();
+                    let h = [("X-Varsto-Token", token.as_str())];
+                    let st = raw(port, "GET", "/api/service", &h, "").0;
+                    (st, t.elapsed())
+                })
+            })
+            .collect();
+        for m in many {
+            let (st, took) = m.join().unwrap();
+            assert_eq!(st, 200);
+            assert!(
+                took < std::time::Duration::from_millis(1000),
+                "took {took:?}"
+            );
+        }
+        // The page's assets and the activity are not held up meanwhile.
+        let t = std::time::Instant::now();
+        assert_eq!(raw(port, "GET", "/app.js", &[], "").0, 200);
+        assert_eq!(raw(port, "GET", "/api/activity?mine=1", &h, "").0, 200);
+        assert!(t.elapsed() < std::time::Duration::from_millis(1000));
+        holder.join().unwrap();
+        // Free again: fresh.
+        let (st, head, _) = raw(port, "GET", "/api/service", &h, "");
+        assert_eq!(st, 200);
+        assert!(!head.contains("x-varsto-stale"));
+    }
+
+    #[test]
+    fn a_change_through_the_api_drops_the_cached_reads() {
+        let (port, token, _tmp, state) = test_server_state();
+        let h = [("X-Varsto-Token", token.as_str())];
+        assert_eq!(raw(port, "GET", "/api/state", &h, "").0, 200);
+        // Any request that is not a GET may have changed something (this
+        // one is refused, which does not matter).
+        assert_eq!(raw(port, "POST", "/api/no-such-change", &h, "{}").0, 400);
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let holder = {
+            let state = state.clone();
+            std::thread::spawn(move || {
+                let _g = state.lock().unwrap();
+                held_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(800));
+            })
+        };
+        held_rx.recv().unwrap();
+        // Nothing cached any more: the read waits for the state, and its
+        // answer is fresh.
+        let t = std::time::Instant::now();
+        let (st, head, _) = raw(port, "GET", "/api/state", &h, "");
+        assert_eq!(st, 200);
+        assert!(!head.contains("x-varsto-stale"));
+        assert!(t.elapsed() >= std::time::Duration::from_millis(500));
+        holder.join().unwrap();
     }
 
     /// One raw request; returns (status, lowercase head, body).

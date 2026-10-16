@@ -1,5 +1,8 @@
 {
  "strings": {
+  "Reconnecting to the Varsto service…": "Ansluter till Varsto-tjänsten igen…",
+  "The service is busy: showing what it last reported": "Tjänsten är upptagen: det som den senast rapporterade visas",
+  "Show more files": "Visa fler filer",
   "At least 12 characters": "Minst 12 tecken",
   "'s request?": "s begäran?",
   ") is cut off at once: their ledger entries from now on are ignored, the other devices refuse their peer connections, and the vault gets new keys that only the remaining devices receive. What they could read until now they can still read, and their storage credentials work until you change them at the provider. Remove and wipe also orders their devices to delete their keys, sync state and folder contents the next time they reach a storage. The log records who did this. This cannot be undone.": ") stängs ute omedelbart: deras poster i liggaren ignoreras från och med nu, de andra enheterna vägrar deras peer-anslutningar och valvet får nya nycklar som bara de återstående enheterna tar emot. Det de hittills har kunnat läsa kan de fortfarande läsa, och deras inloggningsuppgifter till lagringsplatserna fungerar tills du ändrar dem hos leverantören. Ta bort och rensa beordrar dessutom deras enheter att radera sina nycklar, sitt synkroniseringstillstånd och mapparnas innehåll nästa gång de når en lagringsplats. Loggen registrerar vem som gjorde detta. Detta kan inte ångras.",

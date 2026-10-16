@@ -106,6 +106,8 @@
   <div class="alpha"><svg class="icon"><use href="#i-warn"/></svg><span>Alpha software: not for production data. Keep your own backups.</span></div>
 
   <div id="workbar" class="workbar" role="progressbar" aria-label="Working"></div>
+  <!-- The service is busy or restarting: the page stays and fills in again. -->
+  <div id="connnote" class="connnote hidden" role="status" aria-live="polite"></div>
   <!-- This device's long tasks (5 s and more): what, how far, when ready. -->
   <div id="taskbar" class="taskbar hidden" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-live="off">
     <div class="tb-line"><span id="tb-text" class="tb-text"></span><span id="tb-meta" class="tb-meta" data-no-i18n></span></div>

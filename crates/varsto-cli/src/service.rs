@@ -2174,23 +2174,18 @@ pub fn run(opts: Options) -> Result<()> {
                         }
                     }
                     snapshot_syncs = st.service.syncs; // the snapshot above is current
-                    let st = &mut *st;
                     let upkeep = varsto_core::logging::Timer::start();
-                    if let Some(e) = st.engine.as_mut() {
-                        st.service.ledger_after_sync(e);
-                        st.service.auto_verify_if_due(e);
-                        st.service.scrub_if_due(e);
-                        st.service.repair_if_due(e);
-                        st.service.drains_if_due(e);
-                        st.service.backups_if_due(e);
-                        st.service.trash_if_due(e);
-                        st.service.restic_if_due(e);
-                        st.service.moves_if_due(e, true);
-                        st.service.suggest_disks(e);
-                        if let Err(err) = e.publish_device_details(st.service.last_sync_utc) {
-                            log::info!("device details not published: {err:#}");
+                    // One step at a time, with the state let go in between:
+                    // the interface's requests waiting for it get their turn
+                    // (each step can take a while on a big vault).
+                    for step in UPKEEP_STEPS {
+                        st = relock(st, &state);
+                        let st = &mut *st;
+                        if let Some(e) = st.engine.as_mut() {
+                            step(&mut st.service, e);
                         }
                     }
+                    st = relock(st, &state);
                     log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, drains, backups, trash, restic, disk suggestions, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
@@ -2290,6 +2285,41 @@ pub fn boot_url(f: &ServiceFile) -> Result<String> {
         .ok_or_else(|| anyhow!("the service gave no start code"))?
         .to_string();
     Ok(format!("{base}/?boot={code}"))
+}
+
+/// The service's upkeep after a sync, in order (ledger, verify, scrub,
+/// repair, drains, backups, trash, restic, moves, disk suggestions, device
+/// details); each runs with the state taken anew.
+type UpkeepStep = fn(&mut ServiceState, &mut varsto_core::engine::Engine);
+const UPKEEP_STEPS: &[UpkeepStep] = &[
+    |s, e| s.ledger_after_sync(e),
+    |s, e| s.auto_verify_if_due(e),
+    |s, e| s.scrub_if_due(e),
+    |s, e| s.repair_if_due(e),
+    |s, e| s.drains_if_due(e),
+    |s, e| s.backups_if_due(e),
+    |s, e| s.trash_if_due(e),
+    |s, e| s.restic_if_due(e),
+    |s, e| {
+        s.moves_if_due(e, true);
+    },
+    |s, e| s.suggest_disks(e),
+    |s, e| {
+        if let Err(err) = e.publish_device_details(s.last_sync_utc) {
+            log::info!("device details not published: {err:#}");
+        }
+    },
+];
+
+/// Let go of the state for a moment and take it again: a thread waiting for
+/// it (a request of the interface) gets it first.
+fn relock<'a, T>(
+    guard: std::sync::MutexGuard<'a, T>,
+    m: &'a std::sync::Mutex<T>,
+) -> std::sync::MutexGuard<'a, T> {
+    drop(guard);
+    std::thread::sleep(Duration::from_millis(2));
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Minimal HTTP client for talking to the local service (no extra dependency).

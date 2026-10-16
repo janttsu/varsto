@@ -27,6 +27,7 @@ mod logcmd;
 mod mcp;
 mod mcp_keys;
 mod placing;
+mod readcache;
 mod restic;
 mod service;
 mod sse;

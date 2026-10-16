@@ -5853,13 +5853,28 @@ impl Engine {
 
     fn policy_check_at_inner(&self, now_utc: i64) -> Result<Vec<PolicyReport>> {
         let view = self.view()?;
+        self.policy_reports(&view, now_utc, |id| {
+            self.load_state(id).map(std::borrow::Cow::Owned)
+        })
+    }
+
+    /// The policy check on a view and folder states the caller has.
+    fn policy_reports<'s, F>(
+        &self,
+        view: &LedgerView,
+        now_utc: i64,
+        state_of: F,
+    ) -> Result<Vec<PolicyReport>>
+    where
+        F: Fn(&FolderId) -> Result<std::borrow::Cow<'s, FolderState>>,
+    {
         let mut ctx = self.policy_ctx();
         let mut reports = Vec::new();
         for (rec, _) in self.folders() {
             let Some(policy) = rec.effective_policy() else {
                 continue;
             };
-            let state = self.load_state(&rec.folder_id)?;
+            let state = state_of(&rec.folder_id)?;
             let mut seen = BTreeSet::new();
             let mut facts = Vec::new();
             for file in state.files.values().filter(|f| !f.deleted) {
@@ -5867,7 +5882,7 @@ impl Engine {
                     if !seen.insert(cr.chunk.clone()) {
                         continue;
                     }
-                    facts.push(self.chunk_facts(&mut ctx, &view, &rec.folder_id, &cr.chunk));
+                    facts.push(self.chunk_facts(&mut ctx, view, &rec.folder_id, &cr.chunk));
                 }
             }
             let mut report = crate::policy::evaluate(
@@ -5878,11 +5893,11 @@ impl Engine {
                 &ctx.unknown,
                 now_utc,
             );
-            self.disk_group_findings(&rec, &state, &view, &ctx.pools, &mut report);
+            self.disk_group_findings(&rec, &state, view, &ctx.pools, &mut report);
             reports.push(report);
         }
         // Why a policy may not be met: a storage at its quota or leaving.
-        let notes = self.storage_notes(&view);
+        let notes = self.storage_notes(view);
         for r in reports.iter_mut().filter(|r| {
             matches!(
                 r.state,
@@ -6912,11 +6927,26 @@ impl Engine {
     // ----- reporting ----------------------------------------------------------
 
     pub fn status(&self) -> Result<StatusReport> {
+        // One view and one read of each folder's state for the whole report
+        // (the protection and the policy check below use them too): on a big
+        // vault each costs a good part of a second.
         let view = self.view()?;
-        let mut protection = self.protection()?;
+        let mut states: BTreeMap<FolderId, FolderState> = BTreeMap::new();
+        for (rec, _) in self.folders() {
+            let st = self.load_state(&rec.folder_id)?;
+            states.insert(rec.folder_id.clone(), st);
+        }
+        let state_of = |id: &FolderId| -> Result<std::borrow::Cow<'_, FolderState>> {
+            Ok(match states.get(id) {
+                Some(s) => std::borrow::Cow::Borrowed(s),
+                None => std::borrow::Cow::Owned(self.load_state(id)?),
+            })
+        };
+        let reports = self.policy_reports(&view, util::now_utc(), state_of).ok();
+        let mut protection = self.protection_with(&view, reports.as_deref(), state_of)?;
         let mut folders = Vec::new();
         for (rec, mount) in self.folders() {
-            let state = self.load_state(&rec.folder_id)?;
+            let state = state_of(&rec.folder_id)?;
             let mut chunks = BTreeSet::new();
             let mut bytes = 0u64;
             let mut files = 0u64;

@@ -119,21 +119,38 @@ impl Engine {
     /// durability policy state. One pass over the ledger view.
     pub fn protection(&self) -> Result<BTreeMap<String, Protection>> {
         let view = self.view()?;
-        let policy_states: BTreeMap<String, String> = self
-            .policy_check()
-            .map(|reports| {
-                reports
-                    .into_iter()
-                    .map(|r| {
-                        let s = serde_json::to_value(r.state)
-                            .ok()
-                            .and_then(|v| v.as_str().map(str::to_string))
-                            .unwrap_or_default();
-                        (r.folder, s)
-                    })
-                    .collect()
+        let reports = self
+            .policy_reports(&view, util::now_utc(), |id| {
+                self.load_state(id).map(std::borrow::Cow::Owned)
             })
-            .unwrap_or_default();
+            .ok();
+        self.protection_with(&view, reports.as_deref(), |id| {
+            self.load_state(id).map(std::borrow::Cow::Owned)
+        })
+    }
+
+    /// [`Engine::protection`] from a view, policy reports and folder states
+    /// the caller already has (`status` reads each of them once).
+    pub(super) fn protection_with<'s, F>(
+        &self,
+        view: &LedgerView,
+        reports: Option<&[PolicyReport]>,
+        state_of: F,
+    ) -> Result<BTreeMap<String, Protection>>
+    where
+        F: Fn(&FolderId) -> Result<std::borrow::Cow<'s, FolderState>>,
+    {
+        let policy_states: BTreeMap<String, String> = reports
+            .unwrap_or_default()
+            .iter()
+            .map(|r| {
+                let s = serde_json::to_value(r.state)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_default();
+                (r.folder.clone(), s)
+            })
+            .collect();
         let classes = self.storage_classes();
         let carriers: HashSet<&str> = self
             .config
@@ -144,7 +161,7 @@ impl Engine {
             .collect();
         let mut out = BTreeMap::new();
         for (rec, mount) in self.folders() {
-            let state = self.load_state(&rec.folder_id)?;
+            let state = state_of(&rec.folder_id)?;
             let mut chunks: BTreeMap<&ChunkId, u64> = BTreeMap::new();
             for f in state.files.values().filter(|f| !f.deleted) {
                 for c in &f.chunks {

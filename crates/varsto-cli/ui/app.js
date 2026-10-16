@@ -115,8 +115,36 @@
     return function () { stop = true; transferFollowers = transferFollowers.filter(function (f) { return f !== show; }); };
   }
   var transferFollowers = [];
+  // Background reads in flight, by address: a poll that comes while the same
+  // read is still on its way waits for that answer instead of asking again
+  // (a sync can hold the service, and stacked requests would fill the
+  // browser's few connections to it).
+  var inflight = {};
   function api(method, path, body) {
     var b = pressed(); var loud = !!b || method !== "GET";
+    if (!loud) {
+      if (inflight[path]) { return inflight[path]; }
+      var p = apiCall(method, path, body, null, false);
+      inflight[path] = p;
+      var drop = function () { if (inflight[path] === p) { delete inflight[path]; } };
+      p.then(drop, drop);
+      return p;
+    }
+    return apiCall(method, path, body, b, loud);
+  }
+  // The line under the title while the service is busy (answers from before
+  // it got busy) or cannot be reached (restarting): the page stays as it is
+  // and fills in again by itself.
+  var connKind = "ok";
+  function connState(kind) {
+    if (kind === connKind) { return; }
+    connKind = kind;
+    var n = $("connnote"); if (!n) { return; }
+    n.classList.toggle("hidden", kind === "ok");
+    n.dataset.kind = kind;
+    n.textContent = kind === "down" ? "Reconnecting to the Varsto service\u2026" : kind === "busy" ? "The service is busy: showing what it last reported" : "";
+  }
+  function apiCall(method, path, body, b, loud) {
     if (b) { markBusy(b, true); }
     if (loud) { workBar(true); }
     var unfollow = b && /^\/api\/(fetch|paths|sync|view)/.test(path) ? followDownload(b) : null;
@@ -126,13 +154,19 @@
     var what = method + " " + path.split("?")[0];
     return fetch(path, { method: method, headers: { "X-Varsto-Token": token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
       .then(function (r) {
+        var stale = r.headers.get("X-Varsto-Stale") === "1";
         return r.text().then(function (t) {
           var j = null; try { j = t ? JSON.parse(t) : {}; } catch (x) { j = null; }
+          connState(stale ? "busy" : "ok");
           if (!r.ok) { throw new Error((j && j.error) || ("The Varsto service answered " + r.status + " to " + what)); }
           if (j === null) { throw new Error("The Varsto service sent an unreadable answer to " + what); }
+          // The answer as sent: a list or summary that did not change is
+          // not drawn again (see loadFiles, refreshStatus).
+          if (j && typeof j === "object") { try { Object.defineProperty(j, "__raw", { value: stale ? null : t }); Object.defineProperty(j, "__stale", { value: stale }); } catch (x) { /* frozen */ } }
           return j;
         });
       }, function (e) {
+        connState("down");
         throw new Error("Could not reach the Varsto service (" + what + "): " + e.message + ". It may be restarting or busy; try again in a moment.");
       })
       .then(function (j) { done(); return j; }, function (e) { done(); throw e; });
@@ -1371,8 +1405,30 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
 
   // `known`: a status the last request already returned (no second round trip,
   // which would wait while the service syncs).
-  function refreshStatus(known) {
-    return (known && known.folders ? Promise.resolve(known) : api("GET", "/api/status")).then(function (s) {
+  // One at a time: asked again while one is on its way, it runs once more
+  // after it (for a change made meanwhile), however often it was asked.
+  // `background` (a poll or an event, not something you did): the same
+  // summary as last time is not drawn again.
+  var statusIn = null, statusAgain = null, statusAgainLoud = false, statusRaw = null;
+  function refreshStatus(known, background) {
+    if (known && known.folders) { return drawStatus(Promise.resolve(known), false); }
+    if (statusIn) {
+      if (!background) { statusAgainLoud = true; }
+      if (!statusAgain) { statusAgain = statusIn.then(function () { var bg = !statusAgainLoud; statusAgain = null; statusAgainLoud = false; return refreshStatus(null, bg); }); }
+      return statusAgain;
+    }
+    var p = drawStatus(api("GET", "/api/status"), !!background);
+    statusIn = p;
+    var clear = function () { if (statusIn === p) { statusIn = null; } };
+    p.then(clear, clear);
+    return p;
+  }
+  function drawStatus(got, background) {
+    return got.then(function (s) {
+      // The same summary as last time, or one from before the service got
+      // busy: nothing to draw again, and the lists keep their place.
+      if (lastStatus && (s.__stale || (background && s.__raw && s.__raw === statusRaw))) { return; }
+      statusRaw = s.__raw || null;
       lastStatus = s;
       setTimeout(function () { helpAfterStatus(s); }, 0);
       setTimeout(function () { if (window.varstoFolders) { window.varstoFolders.update(s); } }, 0);
@@ -2659,7 +2715,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   var lastSyncs = null;
   function renderService(sv) {
     if (lastSyncs !== null && sv.syncs !== lastSyncs && busyCount === 0 && lastStatus) {
-      refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }).catch(function () {});
+      refreshStatus(null, true).then(function () { if (currentPage === "files") { loadFiles(); } }).catch(function () {});
     }
     lastSyncs = sv.syncs;
     var state = sv.running ? (sv.paused ? "paused" : "running") : "stopped";
@@ -3047,7 +3103,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     return words.every(function (w) { return hay.indexOf(w) >= 0; });
   }
   var filterTimer = null;
-  $("files-filter").addEventListener("input", function () { clearTimeout(filterTimer); filterTimer = setTimeout(loadFiles, 250); });
+  $("files-filter").addEventListener("input", function () { clearTimeout(filterTimer); filterTimer = setTimeout(refilterFiles, 250); });
   function clearSelection() { selectedFile = null; document.querySelectorAll("#files tbody tr").forEach(function (r) { r.classList.remove("selected"); }); $("filedetails").classList.add("hidden"); document.querySelector(".files-layout").classList.remove("with-details"); updateToolbar(); }
   $("fd-close").onclick = clearSelection;
   function updateToolbar() {
@@ -3228,12 +3284,39 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       });
     }).catch(function (e) { alertBox(e.message); });
   };
+  // What the file list shows: the folder, the answer it was drawn from, the
+  // filter and how many rows are drawn. A big folder is drawn a few hundred
+  // rows at a time as you scroll, and an answer equal to the drawn one (the
+  // list asked again after a sync) changes nothing on screen.
+  var FILES_CHUNK = 300;
+  var filesShown = { folder: null, raw: null, words: null, count: 0, rows: null };
+  var filesMoreSeen = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) { if (en.isIntersecting && en.target.__more) { filesMoreSeen.unobserve(en.target); en.target.__more(); } });
+  }, { rootMargin: "600px" });
   function loadFiles() {
     var folder = $("filesfolder").value; if (!folder) { return; }
     filesLoadedFor = folder;
-    var keep = selectedFile ? selectedFile.path : null;
     api("GET", "/api/files?folder=" + enc(folder)).then(function (rows) {
+      if ($("filesfolder").value !== folder) { return; }
+      drawFiles(folder, rows, false);
+    }).catch(function (e) { log("error: " + e.message); });
+  }
+  // The filter changed: the rows already here, without asking again.
+  function refilterFiles() {
+    var folder = $("filesfolder").value;
+    if (folder && filesShown.folder === folder && filesShown.rows) { drawFiles(folder, filesShown.rows, true); } else { loadFiles(); }
+  }
+  function drawFiles(folder, rows, refilter) {
+    var keep = selectedFile ? selectedFile.path : null;
+    (function () {
+      var all = rows;
       var words = ($("files-filter").value || "").toLowerCase().split(/\s+/).filter(Boolean);
+      // The filter and the empty folders made here (not in the answer).
+      var wkey = words.join(" ") + "\u0000" + (newDirs[folder] || []).join("\u0000");
+      var same = filesShown.folder === folder;
+      if (!refilter && same && (rows.__stale || (rows.__raw && rows.__raw === filesShown.raw && wkey === filesShown.words))) { return; }
+      var keepCount = same ? filesShown.count : 0;
+      filesShown = { folder: folder, raw: rows.__stale ? filesShown.raw : (rows.__raw || null), words: wkey, count: 0, rows: all };
       var filtered = words.length > 0;
       if (filtered) { rows = rows.filter(function (f) { return matchesFilter(f, words); }); }
       var tb = $("files").querySelector("tbody"); tb.innerHTML = "";
@@ -3257,7 +3340,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       multi.rows = rows;
       Object.keys(multi.sel).forEach(function (p) { var still = rows.filter(function (r) { return r.path === p; })[0]; if (still) { multi.sel[p] = still; } else { delete multi.sel[p]; } });
       $("files").classList.toggle("compact", compact);
-      rows.forEach(function (f) {
+      function fileRow(f) {
         var tr = document.createElement("tr"); tr.dataset.path = f.path;
         if (compact) {
           tr.className = "mrow";
@@ -3300,10 +3383,28 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var vi = viewable.indexOf(f);
         tr.onclick = vi >= 0 ? function () { openViewer(folder, viewable, vi); } : function () { if (selectedFile && selectedFile.path === f.path && tr.classList.contains("selected")) { clearSelection(); } else { selectFile(f, tr); } };
         if (keep && f.path === keep) { reselect = { f: f, tr: tr }; }
-      });
+      }
+      // The first rows (as many as were drawn before, and the selected file);
+      // the rest as the end of the list comes into view.
+      var shown = 0, keepAt = -1;
+      if (keep) { for (var k = 0; k < rows.length; k++) { if (rows[k].path === keep) { keepAt = k; break; } } }
+      function more(n) {
+        var end = Math.min(rows.length, shown + n);
+        for (; shown < end; shown++) { fileRow(rows[shown]); }
+        if (filesShown.rows === all) { filesShown.count = shown; }
+        if (shown < rows.length) {
+          var tr = el("tr", "files-more"); var td = el("td"); td.colSpan = 5;
+          var b = el("button", "secondary", "Show more files"); b.type = "button";
+          var go = function () { if (!tr.parentNode) { return; } tr.remove(); more(FILES_CHUNK); renderSel(); };
+          b.onclick = go; td.appendChild(b); td.appendChild(el("span", "muted small", " " + shown + " / " + rows.length));
+          tr.appendChild(td); tb.appendChild(tr);
+          if (filesMoreSeen) { tr.__more = go; filesMoreSeen.observe(tr); }
+        }
+      }
+      more(Math.max(FILES_CHUNK, keepCount, keepAt + 1));
       if (reselect) { selectFile(reselect.f, reselect.tr); } else { clearSelection(); }
       renderSel();
-    }).catch(function (e) { log("error: " + e.message); });
+    })();
   }
   $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); if (!$("recentchanges").classList.contains("hidden")) { loadRecentChanges(); } };
   $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { log("error: " + e.message); }); };
@@ -3999,7 +4100,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   // Several events in a row ask once.
   function serviceSoon() { if (evsSoon) { return; } evsSoon = setTimeout(function () { evsSoon = null; pollService(); }, 300); }
-  function statusSoon() { if (evsStatusSoon) { return; } evsStatusSoon = setTimeout(function () { evsStatusSoon = null; if (busyCount === 0) { refreshStatus().catch(function () {}); } }, 500); }
+  function statusSoon() { if (evsStatusSoon) { return; } evsStatusSoon = setTimeout(function () { evsStatusSoon = null; if (busyCount === 0) { refreshStatus(null, true).catch(function () {}); } }, 500); }
   document.addEventListener("visibilitychange", streamUpdate);
 
   // Recovery package: what to keep outside your devices and how to restore,

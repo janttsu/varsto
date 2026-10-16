@@ -1,5 +1,8 @@
 {
  "strings": {
+  "Reconnecting to the Varsto service…": "Yhdistetään Varsto-palveluun uudelleen…",
+  "The service is busy: showing what it last reported": "Palvelu on kiireinen: näytetään sen viimeksi kertomat tiedot",
+  "Show more files": "Näytä lisää tiedostoja",
   "At least 12 characters": "Vähintään 12 merkkiä",
   "'s request?": ":n pyyntö?",
   ") is cut off at once: their ledger entries from now on are ignored, the other devices refuse their peer connections, and the vault gets new keys that only the remaining devices receive. What they could read until now they can still read, and their storage credentials work until you change them at the provider. Remove and wipe also orders their devices to delete their keys, sync state and folder contents the next time they reach a storage. The log records who did this. This cannot be undone.": ") katkaistaan heti: heidän kirjanpitomerkintänsä jätetään tästä lähtien huomiotta, muut laitteet hylkäävät heidän vertaisyhteytensä ja holvi saa uudet avaimet, jotka vain jäljelle jäävät laitteet saavat. Sen, mitä he ovat tähän asti voineet lukea, he voivat yhä lukea, ja heidän tallennuspaikkojen tunnuksensa toimivat, kunnes vaihdat ne palveluntarjoajalla. Poista ja tyhjennä käskee lisäksi heidän laitteitaan poistamaan avaimensa, synkronoinnin tilan ja kansioiden sisällön, kun ne seuraavan kerran tavoittavat tallennuspaikan. Loki kirjaa, kuka tämän teki. Tätä ei voi perua.",
