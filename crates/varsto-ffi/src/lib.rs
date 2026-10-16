@@ -40,6 +40,8 @@ mod sse;
 mod update;
 #[path = "../../varsto-cli/src/view.rs"]
 mod view;
+#[path = "../../varsto-cli/src/viz.rs"]
+mod viz;
 
 static HOME: Mutex<Option<PathBuf>> = Mutex::new(None);
 
