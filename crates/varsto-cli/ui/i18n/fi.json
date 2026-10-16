@@ -1694,7 +1694,21 @@
   "Ejecting": "Irrotus",
   "average copies per block": "kopioita lohkoa kohti keskimäärin",
   "Check for updates every day": "Päivitykset tarkistetaan päivittäin",
-  "Where Varsto can install a new version by itself (Windows) it does, after checking the Varsto release signature; elsewhere it tells you.": "Missä Varsto voi asentaa uuden version itse (Windows), se tekee sen tarkistettuaan Varston julkaisuallekirjoituksen; muualla se kertoo asiasta."
+  "Where Varsto can install a new version by itself (Windows) it does, after checking the Varsto release signature; elsewhere it tells you.": "Missä Varsto voi asentaa uuden version itse (Windows), se tekee sen tarkistettuaan Varston julkaisuallekirjoituksen; muualla se kertoo asiasta.",
+  "Its address, shown under the code (optional)": "Sen osoite, joka näkyy koodin alla (valinnainen)",
+  "If this address does not work, Varsto tries the other addresses of the QR code and then looks for the device on the network.": "Jos tämä osoite ei toimi, Varsto kokeilee QR-koodin muita osoitteita ja etsii sitten laitetta verkosta.",
+  "Looking for the device on the network …": "Etsitään laitetta verkosta …",
+  "Could not pair": "Parinmuodostus ei onnistunut",
+  "Could not reach the device showing the code. Check that both devices are on the same Wi-Fi network, that the router does not isolate wireless clients (guest network, client isolation) and that no VPN or firewall is in the way.": "Koodin näyttävään laitteeseen ei saatu yhteyttä. Tarkista, että molemmat laitteet ovat samassa Wi-Fi-verkossa, ettei reititin eristä langattomia laitteita toisistaan (vierasverkko, asiakaseristys) ja ettei VPN tai palomuuri ole tiellä.",
+  "Tried": "Kokeiltu",
+  "Network search": "Verkkohaku",
+  "nothing answered": "kukaan ei vastannut",
+  "found the device but could not connect to it": "laite löytyi, mutta siihen ei saatu yhteyttä",
+  "no answer": "ei vastausta",
+  "refused": "hylkäsi yhteyden",
+  "unreachable": "ei tavoitettavissa",
+  "connection closed": "yhteys katkesi",
+  "not an address": "ei ole osoite"
  },
  "patterns": [
   [
@@ -2326,6 +2340,10 @@
   [
    "^(\\d+) blocks · (.+)$",
    "$1 lohkoa · $2"
+  ],
+  [
+   "^Trying (.+) …$",
+   "Kokeillaan $1 …"
   ]
  ],
  "review": [

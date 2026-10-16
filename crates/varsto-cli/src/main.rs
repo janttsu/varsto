@@ -4988,29 +4988,26 @@ fn run(cli: &Cli) -> Result<()> {
                     code,
                     address,
                 } => {
-                    // The link of the other device's QR code carries the code and its addresses.
                     // The link of the other device's QR code carries the code and
-                    // its addresses: discovery first, then each address.
-                    let (code, mut tries) = match varsto_core::qr::Link::from_text(code) {
-                        Ok(varsto_core::qr::Link::Pair { code, addresses }) => (
-                            code,
-                            std::iter::once(None)
-                                .chain(addresses.into_iter().map(Some))
-                                .collect::<Vec<_>>(),
-                        ),
-                        _ => (code.clone(), vec![None]),
+                    // all its candidate addresses, best first. Order of tries:
+                    // --address, the link's addresses, then the LAN search.
+                    let (code, offered) = match varsto_core::qr::Link::from_text(code) {
+                        Ok(varsto_core::qr::Link::Pair { code, addresses }) => (code, addresses),
+                        _ => (code.clone(), Vec::new()),
                     };
-                    if address.is_some() {
-                        tries = vec![address.clone()];
-                    }
                     let pass = passphrase()?;
-                    let mut result = Err(anyhow!("the other device was not found"));
-                    for a in &tries {
-                        result = varsto_core::pair::receive(&code, name, a.as_deref());
-                        if result.is_ok() {
-                            break;
-                        }
-                    }
+                    let result = varsto_core::pair::receive_with_progress(
+                        &code,
+                        name,
+                        address.as_deref(),
+                        &offered,
+                        &mut |step| match step {
+                            varsto_core::pair::Step::Trying(a) => eprintln!("trying {a} ..."),
+                            varsto_core::pair::Step::Looking => {
+                                eprintln!("looking for the device on the network ...")
+                            }
+                        },
+                    );
                     let bundle = result?;
                     let (engine, notes) = Engine::join_paired(&home, name, &pass, &bundle)?;
                     println!(
