@@ -1633,6 +1633,7 @@
   "at risk": "vaarassa",
   "violated": "rikottu",
   "stored, not yet verified": "tallennettu, ei vielä tarkistettu",
+  "stored, verification pending": "tallennettu, tarkistus odottaa",
   "only on this device": "vain tällä laitteella",
   "missing": "puuttuu",
   "no policy": "ei sääntöä",

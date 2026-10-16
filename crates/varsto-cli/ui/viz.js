@@ -728,6 +728,8 @@
       var total = f.verified_blocks + f.unverified_blocks + f.local_only_blocks + f.missing_blocks;
       var r = row(f.name, bytes(f.bytes), "", null);
       if (lvl) { r.firstChild.firstChild.appendChild(tag(T(f.policy_state === "ok" ? "policy met" : f.policy_state === "at_risk" ? "at risk" : "violated"), lvl)); }
+      // New data is given time to be verified: neutral, not an alert.
+      if (f.policy_state === "ok" && f.blocks_verification_pending > 0) { r.firstChild.firstChild.appendChild(tag(T("stored, verification pending"), "")); }
       r.appendChild(bar2([{ v: f.verified_blocks, c: "var(--vz-ok)", t: T("verified") }, { v: f.unverified_blocks, c: "var(--vz-info)", t: T("stored, not yet verified") }, { v: f.local_only_blocks, c: "#9aa7b6", t: T("only on this device") }, { v: f.missing_blocks, c: "var(--vz-bad)", t: T("missing") }], total));
       var sub = [f.policy || T("no policy"), f.oldest_verification_days !== null && f.oldest_verification_days !== undefined ? T("oldest check") + " " + f.oldest_verification_days + " " + T("d") : ""].filter(Boolean).join(" · ");
       r.appendChild(el("div", "l2", sub));

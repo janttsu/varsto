@@ -1852,11 +1852,11 @@ impl Engine {
             .into_iter()
             .find(|r| r.folder == rec.name);
         if let Some(p) = &policy {
-            if p.state != crate::policy::PolicyState::Ok {
+            if !p.fully_met() {
                 v.reasons.push(format!(
                     "the folder's durability policy is not met yet ({}): {}",
                     p.policy.describe(),
-                    p.reasons.join("; ")
+                    p.why_not_met()
                 ));
             }
         }
@@ -2042,15 +2042,11 @@ impl Engine {
                         &pctx.unknown,
                         now,
                     );
-                    if r.state != crate::policy::PolicyState::Ok {
+                    if !r.fully_met() {
                         problem = Some(format!(
                             "waiting for the policy ({}): {}",
                             p.describe(),
-                            if r.reasons.is_empty() {
-                                r.warnings.join("; ")
-                            } else {
-                                r.reasons.join("; ")
-                            }
+                            r.why_not_met()
                         ));
                     }
                 }

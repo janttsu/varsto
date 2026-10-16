@@ -651,10 +651,22 @@ fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
     };
     a.set_policy("docs", Some(policy.clone())).unwrap();
     // Only the writer has seen the copy: not independently verified yet.
+    // New data has a grace: stored just now, verification pending, no alert.
     let r = a.policy_check().unwrap();
     assert_eq!(r.len(), 1);
+    assert_eq!(r[0].state, PolicyState::Ok, "{:?}", r[0].reasons);
+    assert_eq!(r[0].chunks_verification_pending, 1);
+    assert_eq!(r[0].chunks_unverified_in_window, 0);
+    assert!(!r[0].fully_met());
+    // Still inside the 30-day window after 29 days; past it, unverified
+    // data violates the policy as before.
+    let t0 = varsto_core::util::now_utc();
+    let r = a.policy_check_at(t0 + 29 * 86_400).unwrap();
+    assert_eq!(r[0].state, PolicyState::Ok);
+    let r = a.policy_check_at(t0 + 31 * 86_400).unwrap();
     assert_eq!(r[0].state, PolicyState::Violated, "{:?}", r[0].reasons);
     assert_eq!(r[0].chunks_unverified_in_window, 1);
+    assert_eq!(r[0].chunks_verification_pending, 0);
 
     // Another device joins, adopts the policy through the registry and verifies the storage.
     let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();

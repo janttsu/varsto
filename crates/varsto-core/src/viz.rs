@@ -85,6 +85,9 @@ pub struct FolderViz {
     pub policy_warnings: Vec<String>,
     pub blocks_short_of_copies: u64,
     pub blocks_unverified_in_window: u64,
+    /// Blocks stored recently and not yet verified (neutral, within the grace).
+    #[serde(default)]
+    pub blocks_verification_pending: u64,
     pub oldest_verification_days: Option<i64>,
     /// Blocks with no kept copy on any storage.
     pub unprotected_blocks: u64,

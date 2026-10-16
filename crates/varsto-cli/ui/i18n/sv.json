@@ -1633,6 +1633,7 @@
   "at risk": "i riskzonen",
   "violated": "bruten",
   "stored, not yet verified": "lagrat, ännu inte verifierat",
+  "stored, verification pending": "lagrat, verifiering väntar",
   "only on this device": "bara på den här enheten",
   "missing": "saknas",
   "no policy": "ingen regel",

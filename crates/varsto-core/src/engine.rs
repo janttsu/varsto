@@ -763,6 +763,16 @@ type OpenedStorages = HashMap<String, (StorageSpec, std::sync::Arc<dyn Storage>)
 
 /// Threads that write objects during a push, and how many encrypted
 /// blocks may wait for them.
+/// The thumbnail pass of one sync stops after this many pictures or this
+/// much time, whichever comes first; the next sync continues (the made ones
+/// are remembered in the folder state). A folder added with thousands of
+/// pictures then neither holds the service nor the UI for minutes.
+const THUMBS_PER_PASS: usize = 200;
+const THUMBS_PASS_TIME: std::time::Duration = std::time::Duration::from_secs(20);
+/// The early pass, before the upload of a big folder: a first screenful.
+const THUMBS_EARLY_PER_PASS: usize = 48;
+const THUMBS_EARLY_TIME: std::time::Duration = std::time::Duration::from_secs(8);
+
 const UPLOADERS: usize = 8;
 const UPLOAD_QUEUE: usize = 16;
 /// At least this much encrypted data may wait for or be with the uploaders
@@ -3872,8 +3882,18 @@ impl Engine {
             self.notify_peers_changed();
             log::debug!("push {}: file list published before the upload", rec.name);
         }
+        // A folder added with many pictures shows its first thumbnails
+        // before the (possibly hours long) upload, not only after it.
+        report.thumbnails = self.make_thumbnails(
+            &rec,
+            &root,
+            &mut state,
+            THUMBS_EARLY_PER_PASS,
+            THUMBS_EARLY_TIME,
+        )?;
         self.upload_missing(&rec, &root, &state, &mut report)?;
-        report.thumbnails = self.make_thumbnails(&rec, &root, &mut state)?;
+        report.thumbnails +=
+            self.make_thumbnails(&rec, &root, &mut state, THUMBS_PER_PASS, THUMBS_PASS_TIME)?;
         if let Some(seq) = self.publish_manifest(&rec, &mut state)? {
             report.manifest_seq = Some(seq);
         }
@@ -4210,11 +4230,17 @@ impl Engine {
     }
 
     /// Encrypted thumbnails for image and video files that have none yet (F-046).
+    ///
+    /// Bounded: at most `limit` pictures and `budget` of time per call (a
+    /// low-priority background pass; the rest follows on the next sync). With
+    /// no storage to put them on nothing is made and nothing is marked done.
     fn make_thumbnails(
         &mut self,
         rec: &FolderRecord,
         root: &Path,
         state: &mut FolderState,
+        limit: usize,
+        budget: std::time::Duration,
     ) -> Result<u64> {
         if state.thumbs_rev < 2 {
             let videos: Vec<String> = state
@@ -4233,6 +4259,9 @@ impl Engine {
             .into_iter()
             .filter(|(s, _)| !s.is_carrier())
             .collect();
+        if storages.is_empty() {
+            return Ok(0);
+        }
         self.replicate_thumbnails(rec, state, &storages);
         let videos_here = thumbs::video_tool_available();
         let candidates: Vec<(String, String)> = state
@@ -4253,7 +4282,12 @@ impl Engine {
         let meta = fk.meta.clone();
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         let mut made = 0u64;
+        let started = std::time::Instant::now();
+        let mut attempts = 0usize;
         for (path, hash) in candidates {
+            if attempts >= limit || started.elapsed() >= budget {
+                break;
+            }
             // Without a tool for videos (a phone, a computer without ffmpeg)
             // they wait: the app around the service may hand in a frame
             // (`store_thumbnail`), or ffmpeg is installed later.
@@ -4296,6 +4330,7 @@ impl Engine {
                 }
                 thumbs::make_with(&disk, &path, &self.config.thumbnails)
             };
+            attempts += 1;
             let Some(bytes) = made_here else {
                 state.thumbs_done.insert(hash); // cannot make one; do not retry every time
                 continue;
@@ -5947,10 +5982,15 @@ impl Engine {
         chunk: &ChunkId,
     ) -> crate::policy::ChunkFacts {
         let mut copies = Vec::new();
+        let mut stored_utc = 0i64;
         if let Some(record) = view.locate(folder, chunk) {
             for (name, loc) in &record.storages {
                 if loc.claimed_by.is_empty() || ctx.carriers.contains(name) {
                     continue;
+                }
+                // When the block was first stored: the earliest claim.
+                if loc.claimed_utc > 0 && (stored_utc == 0 || loc.claimed_utc < stored_utc) {
+                    stored_utc = loc.claimed_utc;
                 }
                 let place = if name.starts_with("replica:") {
                     "replica".to_string()
@@ -5981,7 +6021,7 @@ impl Engine {
                 copies.push((name.clone(), place, verified, verified_utc));
             }
         }
-        crate::policy::ChunkFacts { copies }
+        crate::policy::ChunkFacts { copies, stored_utc }
     }
 
     /// The vault key (hex) for the recovery kit. Only an unlocked owner

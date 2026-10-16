@@ -350,6 +350,7 @@ impl Engine {
                         (n.clone(), place, false, 0)
                     })
                     .collect(),
+                stored_utc: 0,
             });
         }
         if let Some(p) = rec

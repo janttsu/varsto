@@ -791,6 +791,7 @@ impl Engine {
                     rules,
                     &[ChunkFacts {
                         copies: after.clone(),
+                        stored_utc: 0,
                     }],
                     &BTreeMap::new(),
                     &[],
