@@ -475,6 +475,7 @@ DAILY_I18N = {
         "build": 'Latest build <strong>{id}</strong>, {date}; version string {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
         "cols": ("Platform", "Download", "Size", "Built from", "SHA-256"),
         "dated": "dated copy",
+        "build_word": "build",
         "main": 'The main line at commit <a href="{repo}/commit/{c}">{c}</a>.',
         "prs": "Open pull requests merged on top: {list}.",
         "note": "",
@@ -485,23 +486,37 @@ DAILY_I18N = {
         "build": 'Uusin versio <strong>{id}</strong>, {date}; versiotunnus {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
         "cols": ("Alusta", "Lataus", "Koko", "Rakennettu commitista", "SHA-256"),
         "dated": "päivätty kopio",
+        "build_word": "versio",
         "main": 'Päähaara commitissa <a href="{repo}/commit/{c}">{c}</a>.',
         "prs": "Päälle liitetyt avoimet pull requestit: {list}.",
         "note": "Lisäksi pieniä CI-korjauksia.",
         "ci": 'CI-ajo: <a href="{url}">{url}</a>',
         "gaps": {
-            "unsigned": "Mitään ei ole allekirjoitettu: ei julkaisuallekirjoitusta eikä Applen tai Microsoftin koodinallekirjoitusta. Tarkistussummat paljastavat vain vioittuneen latauksen.",
+            "unsigned": "Les versions n’ont ni signature de version ni signature de code Apple ou Microsoft. Seule la liste de sommes de contrôle est signée, par une clé quotidienne distincte qui ne vaut que pour le canal quotidien.",
             "not-format-2": "Muotoa 2 (tietueiden uudistus) ei ole mukana; kun se tulee, näillä versioilla luodut holvit täytyy luoda uudelleen.",
             "os-warnings": "macOS, Windows ja iOS varoittavat allekirjoittamattomasta ohjelmistosta; macOS:ssä avaus onnistuu hiiren oikealla painikkeella ja Avaa, Windowsissa SmartScreen pyytää vahvistusta.",
             "windows-ci-only": "Windows-asennusohjelma on savutestattu vain CI:ssä (asennus, päivitys, korjaus, vanhempaan versioon palaamisen esto, poisto), ei oikealla koneella.",
             "ios-untested": "iOS-ipa:a ei ole ajettu oikealla laitteella. Asenna se AltStorella, SideStorella tai Sideloadlyllä.",
             "ui-strings": "Osa sovelluksen käyttöliittymän teksteistä on vielä kääntämättä; ne kirjataan lokiin.",
+            "windows-ios-previous": "Windows et iOS viennent toujours de la version précédente 20261016-316c579 ; ils n’ont pas été reconstruits cette fois.",
+            "grace-default": "Le délai de grâce avant d’abandonner un stockage en retard (paquet E) est de 30 jours par défaut.",
+            "devices-unverified": "Le code plein écran Kotlin, Swift et Windows et le correctif d’appairage n’ont pas été vérifiés sur de vrais appareils.",
+            "first-daily-update": "La première mise à jour avec --daily exige un binaire qui contient déjà la fonction : installez cette version à la main une fois, ensuite varsto update --daily prend le relais.",
+            "windows-ios-previous": "Windows och iOS kommer fortfarande från det föregående bygget 20261016-316c579; de byggdes inte om den här omgången.",
+            "grace-default": "Respitiden innan en lagringsplats som har halkat efter ges upp (paket E) är som standard 30 dagar.",
+            "devices-unverified": "Kotlin-, Swift- och Windows-helskärmskoden samt parningsrättningen har inte verifierats på riktiga enheter.",
+            "first-daily-update": "Den första uppdateringen med --daily kräver en binär som redan har funktionen, så installera det här bygget för hand en gång; därefter kan varsto update --daily ta över.",
+            "windows-ios-previous": "Windows ja iOS ovat edelleen edellisestä versiosta 20261016-316c579; niitä ei rakennettu tällä kierroksella.",
+            "grace-default": "Määräaika, jonka jälkeen jälkeen jäänyt tallennuspaikka jätetään (paketti E), on oletuksena 30 päivää.",
+            "devices-unverified": "Kotlin-, Swift- ja Windows-kokoruutukoodia sekä pariutuskorjausta ei ole varmistettu oikeilla laitteilla.",
+            "first-daily-update": "Ensimmäinen --daily-päivitys vaatii ohjelman, jossa ominaisuus jo on, joten asenna tämä versio kerran käsin; sen jälkeen varsto update --daily hoitaa loput.",
         },
     },
     "sv": {
         "build": 'Senaste bygget <strong>{id}</strong>, {date}; versionssträng {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
         "cols": ("Plattform", "Nedladdning", "Storlek", "Byggd från", "SHA-256"),
         "dated": "daterad kopia",
+        "build_word": "bygge",
         "main": 'Huvudgrenen vid commit <a href="{repo}/commit/{c}">{c}</a>.',
         "prs": "Öppna pull requests som lagts ovanpå: {list}.",
         "note": "Dessutom små CI-rättningar.",
@@ -519,6 +534,7 @@ DAILY_I18N = {
         "build": 'Dernière version <strong>{id}</strong>, {date} ; chaîne de version {version}. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>',
         "cols": ("Plateforme", "Téléchargement", "Taille", "Construit depuis", "SHA-256"),
         "dated": "copie datée",
+        "build_word": "version",
         "main": 'La branche principale au commit <a href="{repo}/commit/{c}">{c}</a>.',
         "prs": "Pull requests ouvertes fusionnées par-dessus : {list}.",
         "note": "Plus de petites corrections de CI.",
@@ -545,7 +561,7 @@ def daily_blocks(lang: str, depth: int) -> dict[str, str]:
     rows = "\n".join(
         f'<tr><th scope="row">{e(p["label"])}</th>'
         f'<td><a href="{pre}daily/latest/{e(p["latest"])}">{e(p["latest"])}</a><br>'
-        f'<span class="dl-meta"><a href="{pre}daily/builds/{e(cur["id"])}/{e(p["file"])}">{t["dated"]}</a></span></td>'
+        f'<span class="dl-meta"><a href="{pre}daily/builds/{e(p.get("build", cur["id"]))}/{e(p["file"])}">{t["dated"]}</a> · {t["build_word"]} <code>{e(p.get("build", cur["id"]))}</code></span></td>'
         f'<td>{p["size"] / 1048576:.1f} MB</td>'
         f'<td><a href="{REPO}/commit/{e(p["commit"])}"><code>{e(p["commit"])}</code></a></td>'
         f'<td><code class="sum">{p["sha256"]}</code></td></tr>'

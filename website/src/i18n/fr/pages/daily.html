@@ -2,15 +2,15 @@
 title: Versions quotidiennes
 nav: Downloads
 output: daily/index.html
-description: Versions de développement non signées de Varsto, issues de la branche principale. Pas des versions officielles, pas pour des données de production, et jamais installées par varsto update.
+description: Versions de développement de Varsto, issues de la branche principale, avec une liste de sommes de contrôle signée par une clé quotidienne distincte. Pas des versions officielles, pas pour des données de production.
 ---
     <h1>Versions quotidiennes</h1>
     <div class="daily-warn" role="note">
       <p><strong>Ce sont des versions de développement issues de la branche principale, pas des versions officielles.</strong></p>
       <ul>
-        <li>Elles ne sont pas signées et n’ont subi aucun test de publication. Ne les utilisez pas pour des données de production.</li>
+        <li>Ce ne sont pas des versions officielles et elles n’ont subi aucun test de publication. Elles n’ont ni signature de version ni signature de code Apple ou Microsoft. Ne les utilisez pas pour des données de production.</li>
         <li>Le format de stockage peut changer d’une version à l’autre sans aucune migration. Le format 2 exigera de recréer les coffres.</li>
-        <li><code>varsto update</code> ne les installe jamais et ne consulte pas cette page. Pour passer à une version quotidienne plus récente, téléchargez-la de nouveau.</li>
+        <li><code>varsto update --daily</code> installe la dernière version quotidienne de votre plateforme (les versions en ligne de commande pour Linux et Windows ; l’application macOS et l’APK Android s’installent à la main). <code>varsto update</code> seul reste sur les versions officielles et n’installe jamais une version quotidienne.</li>
         <li>Conservez vos propres sauvegardes.</li>
       </ul>
       <p>Vous cherchez quelque chose de fiable ? Utilisez plutôt les <a href="{{L}}downloads/">téléchargements stables</a>.</p>
@@ -20,10 +20,10 @@ description: Versions de développement non signées de Varsto, issues de la bra
     <h2>Vérifier</h2>
     <p>Placez <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> à côté des fichiers téléchargés (les noms du tableau sont les noms fixes) et exécutez</p>
     <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-    <p>Omettez <code>--ignore-missing</code> si vous avez téléchargé tous les fichiers. Cette liste n’est pas signée ; elle montre seulement qu’un téléchargement est complet et intact.</p>
+    <p>Omettez <code>--ignore-missing</code> si vous avez téléchargé tous les fichiers. La liste est signée par une clé quotidienne distincte (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, clé publique <a href="{{P}}daily-key.pub">daily-key.pub</a>) que <code>varsto update --daily</code> vérifie. La clé quotidienne ne vaut que pour le canal quotidien : elle n’est jamais acceptée pour une version officielle, et la clé des versions officielles n’est jamais acceptée pour une version quotidienne.</p>
     <h2>Contenu</h2>
     {{DAILY_INCLUDED}}
-    <p>Le fichier iOS peut provenir d’un commit plus récent que les autres ; le tableau indique le commit de chaque fichier.</p>
+    <p>Chaque plateforme est publiée dès que son fichier est prêt, les lignes peuvent donc venir de versions différentes ; le tableau indique la version et le commit de chaque fichier.</p>
     <h2>Lacunes connues</h2>
     {{DAILY_GAPS}}
     <h2>Versions précédentes</h2>

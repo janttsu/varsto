@@ -27,6 +27,16 @@ Upload (never with --delete, never touching downloads/ or testbuilds/):
 Then regenerate and deploy the site page (python3 website/build.py) so that
 /daily/ shows the new build.
 
+Incremental mode (--add-platforms): the folder holds the files of only some
+platforms of the build (say, the macOS dmg that finished first). Those
+platforms are added to (or replaced in) daily.json under the new build id; the
+other platforms keep the files and the build they already had (each platform
+entry names its own "build"), and the previous current build is not moved to
+the history unless the build id is new. --out then holds only the new files and
+their symlinks, but SHA256SUMS (daily/latest and the dated one) and
+latest.json always cover every platform, so an upload without --delete never
+loses another platform's link. Run it once per platform as each one is ready.
+
 Example:
   make_daily.py --src ~/builds/20261016-316c579 --build-id 20261016-316c579 \\
       --date 2026-10-16 --main-commit 651a3fd --prs 39,41,44 --out /tmp/daily-out
@@ -117,6 +127,8 @@ def main() -> int:
     ap.add_argument("--ci-run", default="", help="URL of the CI run")
     ap.add_argument("--out", required=True, type=Path, help="directory to write the server layout into")
     ap.add_argument("--daily-json", type=Path, default=DAILY_JSON)
+    ap.add_argument("--add-platforms", action="store_true",
+                    help="incremental: add the platforms found in --src, keep the others as they are")
     ap.add_argument("--keep", type=int, default=7, help="dated builds kept on the server")
     a = ap.parse_args()
 
@@ -136,6 +148,20 @@ def main() -> int:
         })
     if not platforms:
         sys.exit("no build files found")
+    for p in platforms:
+        p["build"] = a.build_id
+
+    if a.add_platforms:
+        oldcur = old.get("current")
+        if not oldcur:
+            sys.exit("--add-platforms needs an existing current build in daily.json")
+        keys = {p["key"] for p in platforms}
+        carried = [{**q, "build": q.get("build", oldcur["id"])} for q in oldcur["platforms"] if q["key"] not in keys]
+        order = [k for k, *_ in PLATFORMS]
+        new_platforms = platforms
+        platforms = sorted(carried + platforms, key=lambda p: order.index(p["key"]))
+    else:
+        new_platforms = platforms
 
     current = {
         "id": a.build_id, "date": a.date, "version": a.version,
@@ -166,13 +192,14 @@ def main() -> int:
     ldir = root / "latest"
     bdir.mkdir(parents=True, exist_ok=True)
     ldir.mkdir(parents=True, exist_ok=True)
-    for p in platforms:
+    for p in new_platforms:
         link_or_copy(a.src / p["file"], bdir / p["file"])
-    (bdir / "SHA256SUMS").write_text("".join(f'{p["sha256"]}  {p["file"]}\n' for p in platforms))
-    (bdir / "index.html").write_text(build_index(current))
+    own = [p for p in platforms if p["build"] == a.build_id]
+    (bdir / "SHA256SUMS").write_text("".join(f'{p["sha256"]}  {p["file"]}\n' for p in own))
+    (bdir / "index.html").write_text(build_index({**current, "platforms": own}))
     for stale in ldir.iterdir():
         stale.unlink()
-    for p in platforms:
+    for p in new_platforms:
         (ldir / p["latest"]).symlink_to(f'../builds/{a.build_id}/{p["file"]}')
     (ldir / "SHA256SUMS").write_text("".join(f'{p["sha256"]}  {p["latest"]}\n' for p in platforms))
     latest = dict(data["channel"])
@@ -181,7 +208,7 @@ def main() -> int:
         "sha256sums_url": f"{SITE_URL}/daily/latest/SHA256SUMS",
         "platforms": [
             {**p, "url": f'{SITE_URL}/daily/latest/{p["latest"]}',
-             "dated_url": f'{SITE_URL}/daily/builds/{a.build_id}/{p["file"]}'}
+             "dated_url": f'{SITE_URL}/daily/builds/{p["build"]}/{p["file"]}'}
             for p in platforms
         ],
     }
