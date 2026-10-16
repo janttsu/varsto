@@ -117,7 +117,9 @@ class CameraUpload(private val context: Context, private val progress: (String?)
         if (s.wifiOnly && !onWifi()) return setStatus("waiting", "Waiting for Wi-Fi")
         if (s.chargingOnly && !charging()) return setStatus("waiting", "Waiting for the charger")
         val items = newItems(s)
-        AppLog.d("camera", "scan: ${items.size} new item(s) for folder ${s.folder}")
+        var oldLeft = items.count { it.old }
+        Settings.backfillPending(context, oldLeft)
+        AppLog.d("camera", "scan: ${items.size} item(s) for folder ${s.folder} ($oldLeft from before camera upload was turned on)")
         if (items.isEmpty()) return setStatus("idle", null)
         val api = Api.connect(context) ?: return setStatus("waiting", "Waiting for the Varsto service")
         val state = JSONObject(api.get("/api/state"))
@@ -146,6 +148,7 @@ class CameraUpload(private val context: Context, private val progress: (String?)
             if (s.wifiOnly && !onWifi()) return setStatus("waiting", "Waiting for Wi-Fi")
             if (s.chargingOnly && !charging()) return setStatus("waiting", "Waiting for the charger")
             progress(VarstoService.localized(context).getString(R.string.camera_uploading, n + 1, items.size, s.folder))
+            if (item.old) { oldLeft--; Settings.backfillPending(context, oldLeft) }
             if (item.size > MAX_UPLOAD) {
                 AppLog.w("camera", "skipped ${item.name}: ${item.size} bytes is over the upload limit")
                 remember(item.key)
@@ -205,7 +208,7 @@ class CameraUpload(private val context: Context, private val progress: (String?)
     }
 
     /** One photo or video waiting for upload. */
-    private class Item(val key: String, val uri: Uri, val name: String, val size: Long, val dir: String)
+    private class Item(val key: String, val uri: Uri, val name: String, val size: Long, val dir: String, val added: Long, val old: Boolean)
 
     private fun collections(): List<Uri> = listOf(
         MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -225,9 +228,14 @@ class CameraUpload(private val context: Context, private val progress: (String?)
                 MediaStore.Images.ImageColumns.DATE_TAKEN,
             )
             cols += if (Build.VERSION.SDK_INT >= 29) MediaStore.MediaColumns.RELATIVE_PATH else MediaStore.MediaColumns.DATA
+            // Items from before camera upload was turned on are only wanted when the user asked
+            // to back up what is already on the phone (photos and videos are chosen separately),
+            // from the chosen date on (0 = everything).
+            val backfill = if (kind == "image") s.backfill else s.backfillVideos
+            val from = if (backfill) s.backfillSince else s.since
             var where = "${MediaStore.MediaColumns.DATE_ADDED} >= ?"
             if (Build.VERSION.SDK_INT >= 29) where += " AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
-            context.contentResolver.query(uri, cols.toTypedArray(), where, arrayOf(s.since.toString()),
+            context.contentResolver.query(uri, cols.toTypedArray(), where, arrayOf(minOf(from, s.since).toString()),
                 "${MediaStore.MediaColumns.DATE_ADDED} ASC")?.use { c ->
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
@@ -240,11 +248,13 @@ class CameraUpload(private val context: Context, private val progress: (String?)
                     val taken = c.getLong(4).takeIf { it > 0 } ?: (added * 1000)
                     val cal = Calendar.getInstance().apply { timeInMillis = taken }
                     val dir = "%04d/%02d".format(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1)
-                    out += Item(key, ContentUris.withAppendedId(uri, id), name, c.getLong(2), dir)
+                    out += Item(key, ContentUris.withAppendedId(uri, id), name, c.getLong(2), dir, added, added < s.since)
                 }
             }
         }
-        return out
+        // New items first, oldest first as before; the backlog after them, newest first,
+        // so an interrupted first upload has already saved the most recent memories.
+        return out.sortedWith(compareBy<Item> { it.old }.thenBy { if (it.old) -it.added else it.added })
     }
 
     /** Camera pictures (DCIM), and screenshots when asked for; other apps' images are left out. */
@@ -292,6 +302,11 @@ class CameraUpload(private val context: Context, private val progress: (String?)
         val screenshots: Boolean,
         /** Items added before this moment (seconds) are not "new". */
         val since: Long,
+        /** Also upload photos (videos) that were on the phone before this was turned on. */
+        val backfill: Boolean = false,
+        val backfillVideos: Boolean = false,
+        /** Backlog items added before this moment (seconds) are left out; 0 = everything. */
+        val backfillSince: Long = 0,
     ) {
         companion object {
             private const val PREFS = "camera_upload"
@@ -302,6 +317,7 @@ class CameraUpload(private val context: Context, private val progress: (String?)
                     p.getBoolean("enabled", false), p.getString("folder", "") ?: "",
                     p.getBoolean("wifi_only", false), p.getBoolean("charging_only", false),
                     p.getBoolean("screenshots", false), p.getLong("since", 0),
+                    p.getBoolean("backfill", false), p.getBoolean("backfill_videos", false), p.getLong("backfill_since", 0),
                 )
             }
 
@@ -316,6 +332,10 @@ class CameraUpload(private val context: Context, private val progress: (String?)
                     .putBoolean("wifi_only", json.optBoolean("wifi_only"))
                     .putBoolean("charging_only", json.optBoolean("charging_only"))
                     .putBoolean("screenshots", json.optBoolean("screenshots"))
+                    .putBoolean("backfill", json.optBoolean("backfill"))
+                    .putBoolean("backfill_videos", json.optBoolean("backfill_videos"))
+                    .putLong("backfill_since", json.optLong("backfill_since"))
+                    .putString("backfill_range", json.optString("backfill_range", "all"))
                     .apply()
             }
 
@@ -323,6 +343,11 @@ class CameraUpload(private val context: Context, private val progress: (String?)
                 c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                     .putString("state", state).putString("message", message ?: "")
                     .putLong("checked", System.currentTimeMillis() / 1000).apply()
+            }
+
+            /** How many items from before camera upload was turned on still wait. */
+            fun backfillPending(c: Context, n: Int) {
+                c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt("backfill_pending", n).apply()
             }
 
             fun recordUploads(c: Context, n: Int) {
@@ -340,6 +365,9 @@ class CameraUpload(private val context: Context, private val progress: (String?)
                     .put("enabled", s.enabled).put("folder", s.folder)
                     .put("wifi_only", s.wifiOnly).put("charging_only", s.chargingOnly)
                     .put("screenshots", s.screenshots).put("since", s.since)
+                    .put("backfill", s.backfill).put("backfill_videos", s.backfillVideos)
+                    .put("backfill_since", s.backfillSince).put("backfill_range", p.getString("backfill_range", "all"))
+                    .put("backfill_pending", p.getInt("backfill_pending", 0))
                     .put("permission", hasPermission(c))
                     .put("state", p.getString("state", "idle")).put("message", p.getString("message", ""))
                     .put("uploaded", p.getLong("uploaded", 0)).put("last_upload", p.getLong("last_upload", 0))

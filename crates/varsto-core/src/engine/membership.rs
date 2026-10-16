@@ -1212,6 +1212,27 @@ impl Engine {
     }
 
     /// Every full device of the vault this device knows, revoked ones marked.
+    /// Every device this one knows a name for (itself, the enrolled devices,
+    /// and devices only the ledger names): one name per id, used wherever a
+    /// device is shown, so the same id never appears under two names.
+    pub fn known_device_names(&self) -> Vec<(DeviceId, String)> {
+        let mut out: BTreeMap<DeviceId, String> = BTreeMap::new();
+        if let Ok(view) = self.view() {
+            for (id, name) in &view.devices {
+                if !name.is_empty() {
+                    out.insert(id.clone(), name.clone());
+                }
+            }
+        }
+        for (id, rec) in &self.devices.devices {
+            if !rec.name.is_empty() {
+                out.insert(id.clone(), rec.name.clone());
+            }
+        }
+        out.insert(self.vault.device_id.clone(), self.vault.device_name.clone());
+        out.into_iter().collect()
+    }
+
     pub fn devices_list(&self) -> Vec<DeviceInfo> {
         let me = &self.vault.device_id;
         let mut out = vec![DeviceInfo {

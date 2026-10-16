@@ -373,3 +373,29 @@ fn locking_deletes_nothing_and_exports_are_removed() {
         s.notes
     );
 }
+
+/// Camera upload streams a picture in and frees its blocks as soon as a storage has them:
+/// the thumbnail must exist by then, and a thumbnail that could not be made while the
+/// blocks were away is made again once they are back (it was marked done for good before).
+#[test]
+fn streamed_pictures_keep_a_thumbnail_after_their_blocks_are_freed() {
+    let s = setup();
+    let (mut b, _home, dir) = phone(&s, true);
+    b.sync(None).unwrap();
+    let mut jpg = Vec::new();
+    image::RgbImage::from_fn(900, 600, |x, y| image::Rgb([x as u8, y as u8, 9]))
+        .write_to(
+            &mut std::io::Cursor::new(&mut jpg),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+    let w = b.block_writer("docs").unwrap().expect("encrypted here");
+    let staged = w.write(std::io::Cursor::new(jpg)).unwrap();
+    b.commit_staged("docs", "2026/10/IMG_1.jpg", staged)
+        .unwrap();
+    b.sync(None).unwrap();
+    b.free_file("docs", "2026/10/IMG_1.jpg").unwrap();
+    b.sync(None).unwrap();
+    assert!(b.thumbnail("docs", "2026/10/IMG_1.jpg").unwrap().is_some());
+    assert!(files(&dir).is_empty());
+}

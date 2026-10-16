@@ -1267,6 +1267,15 @@ fn storage_from_input(
     ))
 }
 
+/// Phones keep their vault in cloud storage only: a local directory, a
+/// disk pool or a transferrer (a removable disk) makes no sense on a phone.
+fn storage_kind_allowed(kind: &str, on_phone: bool) -> Result<()> {
+    if on_phone && !matches!(kind, "s3" | "rclone") {
+        bail!("this device can only add S3-compatible buckets and rclone remotes as storages");
+    }
+    Ok(())
+}
+
 fn mobile() -> bool {
     std::env::var_os("VARSTO_MOBILE").is_some()
 }
@@ -1703,6 +1712,13 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 .engine
                 .as_mut()
                 .ok_or_else(|| anyhow!("vault is locked"))?;
+            // One name per device id everywhere: the traffic view learns the vault's names
+            // whenever the interface asks for devices or where the data is.
+            if matches!(path, "/api/devices" | "/api/data/locations") {
+                let names = engine.known_device_names();
+                st.traffic
+                    .learn_names(names.iter().map(|(d, n)| (d, n.as_str())));
+            }
             api_unlocked(engine, service, method2, path, query, input)
         }
     }
@@ -2036,7 +2052,9 @@ fn api_unlocked(
                 .get("carrier")
                 .and_then(|c| c.as_bool())
                 .unwrap_or(false);
-            match opt(input, "kind").as_deref().unwrap_or("local-dir") {
+            let kind = opt(input, "kind").unwrap_or_else(|| "local-dir".into());
+            storage_kind_allowed(&kind, mobile())?;
+            match kind.as_str() {
                 "s3" => {
                     let class = opt(input, "storage_class").filter(|c| !c.trim().is_empty());
                     let cold = cold
@@ -3172,6 +3190,17 @@ fn api_unlocked(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn phones_accept_only_s3_and_rclone_storages() {
+        for k in ["s3", "rclone"] {
+            assert!(super::storage_kind_allowed(k, true).is_ok());
+        }
+        for k in ["local-dir", "pool", "anything"] {
+            assert!(super::storage_kind_allowed(k, true).is_err(), "{k}");
+            assert!(super::storage_kind_allowed(k, false).is_ok(), "{k}");
+        }
+    }
+
     use super::*;
 
     /// A real server on a free port with a locked (engine-less) state.

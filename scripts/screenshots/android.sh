@@ -41,12 +41,13 @@ api() {
 }
 echo "== vault through the service API"
 api /api/init '{"name":"phone","passphrase":"correct horse battery staple"}'
-api /api/storage '{"kind":"local-dir","name":"phone-box","path":"/data/data/in.soderlund.varsto/files/storage","place":"home"}'
+# A phone refuses local-directory storages (only S3 and rclone are allowed,
+# see storage_kind_allowed), and CI has no bucket to reach, so this vault
+# lives on the phone alone: no storage is added and nothing is synced.
 api /api/folder '{"name":"Notes"}'
 api /api/write '{"folder":"Notes","path":"shopping.md","text":"- oat milk\n- rye bread\n- coffee\n"}'
 api /api/write '{"folder":"Notes","path":"ideas.md","text":"# Ideas\n\nA walk along the river on Saturday.\n"}'
 api /api/write '{"folder":"Notes","path":"travel/lyon.md","text":"Train 08:12, hotel near Bellecour.\n"}'
-api /api/sync '{}'
 sleep 8
 state="$(curl -fsS "http://127.0.0.1:18790/api/state" -H "Host: 127.0.0.1:$port" -H "X-Varsto-Token: $token")"
 echo "$state" | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s.get("has_vault"), "no vault"; print("== state: vault", s.get("device_name") or "", "unlocked" if s.get("unlocked") else "locked")'

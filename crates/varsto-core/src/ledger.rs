@@ -1766,6 +1766,12 @@ impl LedgerView {
                         .entry((folder.clone(), chunk.clone()))
                         .or_default();
                     rec.set_object(object, stamp());
+                    // Older versions recorded blocks fetched from a peer as verified at
+                    // "peer:<device>", which is no storage: ignored (it listed the device twice
+                    // and counted as a kept copy).
+                    if storage.starts_with("peer:") {
+                        continue;
+                    }
                     let loc = rec.storages.entry(storage.clone()).or_default();
                     loc.verified_by.insert(batch.device.clone());
                     loc.verified_utc = loc.verified_utc.max(batch.created_utc);
@@ -2715,5 +2721,34 @@ mod tests {
             .make_checkpoint(&device, 21, key_for, &key, KEY_LEDGER, &signer)
             .unwrap();
         assert_eq!(third.ingest_checkpoint(forged).unwrap(), Ingest::Fork);
+    }
+
+    /// A block fetched from a peer was once recorded as verified at the "storage"
+    /// `peer:<device>`; that is no storage and must not show up as one.
+    #[test]
+    fn peer_fetches_are_not_storage_copies() {
+        let x = device_id_for(&SigningKey::generate().public());
+        let folder = FolderId::from_bytes(&[1]);
+        let chunk = ChunkId::from_bytes(&[2, 7]);
+        let object = ObjectName::from_bytes(&[3, 9]);
+        let mut view = LedgerView::default();
+        view.apply(&Batch {
+            device: x.clone(),
+            seq: 1,
+            prev: None,
+            lamport: 1,
+            created_utc: 0,
+            events: vec![Event::ChunkVerified {
+                folder: folder.clone(),
+                chunk: chunk.clone(),
+                object,
+                storage: "peer:d5ffec12".into(),
+            }],
+            seen: BTreeMap::new(),
+        });
+        assert!(view
+            .chunks
+            .values()
+            .all(|c| !c.storages.contains_key("peer:d5ffec12")));
     }
 }

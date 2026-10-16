@@ -185,8 +185,19 @@
   // Load the file list of the chosen folder unless it is already shown.
   function ensureFiles() { var f = $("filesfolder").value; if (f && filesLoadedFor !== f) { loadFiles(); } }
   var phoneMq = window.matchMedia ? window.matchMedia("(max-width: 600px)") : null;
+  // Android keeps the app's own files under /data/.../<application id>/files/: shown without that
+  // technical prefix ("Varsto/Camera"), never with the application id in it.
+  function displayPath(p) { return typeof p === "string" ? p.replace(/^\/data\/(?:user\/\d+|data)\/[^/]+\/files\//, "") : p; }
   function isMobile() { return appState.mobile || !!(phoneMq && phoneMq.matches); }
-  function applyMobile() { document.body.dataset.mobile = isMobile() ? "1" : "0"; }
+  // On a phone shell (Android, iOS) a storage can only be a bucket or an rclone remote:
+  // a directory, a disk pool or a transferrer make no sense there (the service refuses them too).
+  function applyPhoneStorageKinds() {
+    var sel = $("storagekind"); if (!sel || !appState.mobile) { return; }
+    Array.prototype.slice.call(sel.options).forEach(function (o) { if (o.value !== "s3" && o.value !== "rclone") { o.remove(); } });
+    if (sel.value !== "s3" && sel.value !== "rclone") { sel.value = "s3"; }
+    if (sel.onchange) { sel.onchange.call(sel); }
+  }
+  function applyMobile() { document.body.dataset.mobile = isMobile() ? "1" : "0"; applyPhoneStorageKinds(); }
   if (phoneMq && phoneMq.addEventListener) { phoneMq.addEventListener("change", function () { applyMobile(); nav(currentPage); }); }
   applyMobile();
 
@@ -378,6 +389,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   var legacyPages = { folders: "files", sharing: "shared" };
   function pageTitle(p) { return titles[p] || "Overview"; }
   var currentPage = (function () { try { var p = sessionStorage.getItem("varsto-page"); p = legacyPages[p] || p; return titles[p] ? p : "overview"; } catch (e) { return "overview"; } })();
+  var pageStack = [], navFromBack = false;
   function nav(page) {
     page = legacyPages[page] || page;
     if (!titles[page]) { page = "overview"; }
@@ -385,6 +397,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "help" && document.body.dataset.view !== "app" && document.body.dataset.view !== "loading") { preHelpOpen(true); $("prehelp").scrollIntoView({ block: "start", behavior: "smooth" }); return; }
     if (page === "more" && !isMobile()) { page = "settings"; }
     if (page !== "policies") { policyReturn = null; } else if (!policyEdited()) { policyReturn = null; policyButtons(); }
+    if (page !== currentPage && !navFromBack) { pageStack.push(currentPage); if (pageStack.length > 30) { pageStack.shift(); } }
     currentPage = page;
     try { sessionStorage.setItem("varsto-page", page); } catch (e) {}
     document.querySelectorAll(".page").forEach(function (d) { d.classList.toggle("hidden", d.dataset.page !== page); });
@@ -407,6 +420,25 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "settings") { loadLogs(); }
     window.scrollTo(0, 0);
   }
+  // A field that gets focus is scrolled into view once the on-screen keyboard has made room
+  // (the Android shell resizes the page for the keyboard).
+  document.addEventListener("focusin", function (ev) {
+    var f = ev.target;
+    if (!f || !/^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) || f.type === "checkbox" || f.type === "radio") { return; }
+    [250, 600].forEach(function (ms) { setTimeout(function () { if (document.activeElement === f && f.scrollIntoView) { f.scrollIntoView({ block: "center", behavior: "smooth" }); } }, ms); });
+  });
+  // The shell's Back button (Android) asks the page first: it closes what is open, steps back
+  // to the previous page and only when nothing is left to go back to returns false, so the
+  // shell may leave the app.
+  window.varstoBack = function () {
+    if (modalResolve) { closeDialog("cancel"); return true; }
+    if (scan) { closeScanner(null); return true; }
+    if (viewer.open) { closeViewer(false); return true; }
+    if (document.body.dataset.view !== "app") { return false; }
+    if (currentPage === "files" && $("filesmain").dataset.screen === "folder") { showFolderList(); return true; }
+    if (pageStack.length) { navFromBack = true; try { nav(pageStack.pop()); } finally { navFromBack = false; } return true; }
+    return false;
+  };
   // Buttons inside pages that lead to another page.
   document.querySelectorAll("button[data-nav]:not(.nav-item):not(.more-item)").forEach(function (b) { b.addEventListener("click", function () { nav(b.dataset.nav); }); });
   document.querySelectorAll(".nav-item[data-nav], .more-item[data-nav]").forEach(function (b) {
@@ -836,7 +868,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       });
     };
     var first = f.path
-      ? dialog({ title: "Remove " + f.name + "?", text: "Stop syncing it on this device only (the files stay in " + f.path + "), or remove it from the vault on every device.", ok: "Stop syncing here", extra: "Remove from the vault\u2026" }).then(function (r) {
+      ? dialog({ title: "Remove " + f.name + "?", text: "Stop syncing it on this device only (the files stay in " + displayPath(f.path) + "), or remove it from the vault on every device.", ok: "Stop syncing here", extra: "Remove from the vault\u2026" }).then(function (r) {
           if (!r) { return null; }
           if (r.action === "extra") { return vaultWide(); }
           busy(true);
@@ -1344,7 +1376,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (f.path) { var o2 = document.createElement("option"); o2.value = f.name; o2.textContent = f.name; o2.dataset.selective = f.selective ? "1" : "0"; fsel.appendChild(o2); }
 
         // Sidebar tree under Files.
-        var li = el("li"); var tbtn = el("button", "tree-item" + (f.path ? "" : " detached")); tbtn.type = "button"; tbtn.dataset.folder = f.name; tbtn.title = f.path || "Not attached on this device";
+        var li = el("li"); var tbtn = el("button", "tree-item" + (f.path ? "" : " detached")); tbtn.type = "button"; tbtn.dataset.folder = f.name; tbtn.title = displayPath(f.path) || "Not attached on this device";
         tbtn.appendChild(icon("folders")); tbtn.appendChild(el("span", "tree-name", f.name));
         if (!f.path) { var dot = el("i", "tree-dot"); dot.title = "Not attached on this device"; tbtn.appendChild(dot); }
         tbtn.onclick = function () { if (f.path) { openFolder(f.name); } else { offerAttach(f); } };
@@ -1364,7 +1396,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           shared++;
           var sli = el("li"); var sic = el("span", "li-icon"); sic.appendChild(icon("sharing")); sli.appendChild(sic);
           var sbody = el("div", "li-body"); var stitle = el("div", "li-title", f.name); stitle.appendChild(pill("accent", "shared")); if (f.read_only) { stitle.appendChild(pill("grey", "read only")); } sbody.appendChild(stitle);
-          sbody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes) + (f.path ? " · " + f.path : ""))); sli.appendChild(sbody);
+          sbody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes) + (f.path ? " · " + displayPath(f.path) : ""))); sli.appendChild(sbody);
           var sa = el("div", "li-actions");
           var smw = el("li", "sub-row hidden"); var sm = el("ul", "list sub-list"); smw.appendChild(sm);
           var smb = el("button", "secondary", "Members"); smb.type = "button";
@@ -2708,7 +2740,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function updateFilesHead() {
     var f = folderByName($("filesfolder").value);
-    $("files-sub").textContent = f ? [f.path, f.files + " file" + (f.files === 1 ? "" : "s"), fmtBytes(f.bytes), f.selective ? "selective sync" : null, f.shared ? "shared" : null].filter(Boolean).join(" · ") : "";
+    $("files-sub").textContent = f ? [displayPath(f.path), f.files + " file" + (f.files === 1 ? "" : "s"), fmtBytes(f.bytes), f.selective ? "selective sync" : null, f.shared ? "shared" : null].filter(Boolean).join(" · ") : "";
     if (f && isMobile()) { $("files-sub").textContent = [f.files + " file" + (f.files === 1 ? "" : "s"), fmtBytes(f.bytes), f.selective ? "selective sync" : null].filter(Boolean).join(" · "); }
     var w = whereLine(f); $("files-where").textContent = w; $("files-where").classList.toggle("hidden", !w);
     // Selective sync is the same choice in every folder; in a folder kept
@@ -4258,7 +4290,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if ((g.alternatives || []).length) { out.push("", actTr("Without Varsto").toUpperCase()); steps(g.alternatives, false); }
     return out.join("\n") + "\n";
   }
-  $("rg-print").onclick = function () { window.print(); };
+  // The web views of the apps ignore window.print(): the macOS app listens for a message, the Android app has a bridge.
+  $("rg-print").onclick = function () {
+    try {
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.varstoPrint) { window.webkit.messageHandlers.varstoPrint.postMessage("print"); return; }
+      if (droid && droid.printPage) { droid.printPage(); return; }
+    } catch (e) { log("print: " + e.message); }
+    window.print();
+  };
   $("rg-reload").onclick = loadGuide;
   $("rg-download").onclick = function () {
     if (!lastGuide) { return; }
@@ -4827,12 +4866,26 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var nw = document.createElement("option"); nw.value = camNew; nw.textContent = "New folder…"; sel.appendChild(nw);
     sel.value = cs.folder || (names.indexOf("Camera") >= 0 ? "Camera" : camNew);
     $("cam-on").checked = cs.enabled; $("cam-wifi").checked = cs.wifi_only; $("cam-charging").checked = cs.charging_only; $("cam-shots").checked = cs.screenshots;
+    $("cam-old-photos").checked = !!cs.backfill; $("cam-old-videos").checked = !!cs.backfill_videos;
+    $("cam-range-row").classList.toggle("hidden", !(cs.backfill || cs.backfill_videos));
+    $("cam-range").value = cs.backfill_range || "all";
+    $("cam-since").classList.toggle("hidden", $("cam-range").value !== "date");
+    if (cs.backfill_range === "date" && cs.backfill_since) { $("cam-since").value = new Date(cs.backfill_since * 1000).toISOString().slice(0, 10); }
     var line = !cs.enabled ? "Off." : !cs.permission ? "Access to photos and videos is not allowed; turn camera upload off and on again to allow it." : cs.message ? cs.message + "." : "On: new photos and videos go to " + cs.folder + ".";
+    var bl = $("cam-backlog"); var waiting = cs.enabled && cs.backfill_pending > 0;
+    bl.classList.toggle("hidden", !waiting); bl.textContent = waiting ? cs.backfill_pending + " older photos and videos are waiting to be uploaded, newest first." : "";
     if (cs.uploaded) { line += " " + cs.uploaded + " uploaded so far" + (cs.last_upload ? ", last on " + new Date(cs.last_upload * 1000).toLocaleString() : "") + "."; }
     $("cam-state").textContent = line;
   }
+  // The start of the range of older photos and videos to upload, in seconds (0 = everything).
+  function camBackfillSince() {
+    var r = $("cam-range").value;
+    if (r === "date") { var d = Date.parse($("cam-since").value); return isNaN(d) ? 0 : Math.floor(d / 1000); }
+    if (r === "3" || r === "12") { var t = new Date(); t.setMonth(t.getMonth() - (+r)); return Math.floor(t.getTime() / 1000); }
+    return 0;
+  }
   function saveCamera(enabled) {
-    droid.setCameraUpload(JSON.stringify({ enabled: enabled, folder: $("cam-folder").value === camNew ? "" : $("cam-folder").value, wifi_only: $("cam-wifi").checked, charging_only: $("cam-charging").checked, screenshots: $("cam-shots").checked }));
+    droid.setCameraUpload(JSON.stringify({ enabled: enabled, folder: $("cam-folder").value === camNew ? "" : $("cam-folder").value, wifi_only: $("cam-wifi").checked, charging_only: $("cam-charging").checked, screenshots: $("cam-shots").checked, backfill: $("cam-old-photos").checked, backfill_videos: $("cam-old-videos").checked, backfill_range: $("cam-range").value, backfill_since: camBackfillSince() }));
     refreshCamera();
   }
   // A new folder for the uploads (kept encrypted on the phone, like any folder added here).
@@ -4857,7 +4910,16 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     cameraFolder().then(function (name) {
       if (!name) { $("cam-on").checked = false; return refreshCamera(); }
       refreshCamera(); $("cam-folder").value = name; $("cam-on").checked = true;
-      if (droid.hasMediaAccess()) { saveCamera(true); return; }
+      return dialog({ title: "Back up what is already on this phone?", text: "Camera upload always takes new photos and videos. It can also upload the ones already here, newest first, in the background; you can change this under Camera upload.", fields: [{ name: "old", label: "Older items", checks: [["photos", "Photos already on this phone", true], ["videos", "Videos already on this phone (they can be large)", false]] }], ok: "Continue", cancel: "Not now" }).then(function (a) {
+        var on = a && a.values.old ? a.values.old.split(",") : [];
+        $("cam-old-photos").checked = on.indexOf("photos") >= 0; $("cam-old-videos").checked = on.indexOf("videos") >= 0;
+        if (droid.hasMediaAccess()) { saveCamera(true); return; }
+        return askMedia(name);
+      });
+    }).catch(function (e) { $("cam-on").checked = false; alertBox(e.message); });
+  };
+  function askMedia(name) {
+    return Promise.resolve().then(function () {
       return dialog({ title: "Allow access to photos and videos?", text: "Camera upload reads new photos and videos on this phone and uploads them to " + name + ", encrypted. Varsto only reads them: the originals are never changed or deleted. Android asks you next.", ok: "Continue" }).then(function (r) {
         if (!r) { $("cam-on").checked = false; return; }
         camPending = function () { saveCamera(true); };
@@ -4869,6 +4931,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if ($("cam-folder").value === camNew) { cameraFolder().then(function (name) { refreshCamera(); if (name) { $("cam-folder").value = name; saveCamera($("cam-on").checked); } }).catch(function (e) { alertBox(e.message); }); return; }
     saveCamera($("cam-on").checked);
   };
+  ["cam-old-photos", "cam-old-videos", "cam-range", "cam-since"].forEach(function (id) { $(id).onchange = function () { saveCamera($("cam-on").checked); }; });
   ["cam-wifi", "cam-charging", "cam-shots"].forEach(function (id) { $(id).onchange = function () { saveCamera($("cam-on").checked); }; });
   $("allfilesbtn").onclick = function () { if (droid) { try { droid.requestAllFilesAccess(); } catch (e) { alertBox(e.message); } } else { alertBox("Only the Android app can ask for this permission."); } };
   // The shell calls this when the activity resumes (back from the settings screen); browsers get visibilitychange.
