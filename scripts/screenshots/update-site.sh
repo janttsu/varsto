@@ -5,13 +5,14 @@
 #   scripts/screenshots/update-site.sh <run id>        # that run (e.g. a release tag's run)
 #   scripts/screenshots/update-site.sh --dir <dir>     # finalize.py output from elsewhere
 # Copies the pictures into website/public/assets/img/screenshots, sets their
-# width and height on the Screenshots page (and its Finnish and Swedish
-# copies; the localized browser-UI sets in screenshots-fi/ and screenshots-sv/,
-# which the Finnish and Swedish pages use, are made by hand with
-# ui-shots.py --lang and finalize.py, and are left as they are: the patterns
-# below match only the .../screenshots/<name>.png paths), states the version, commit and
-# date they were captured from, and rebuilds the site (deploy separately with
-# website/deploy.sh).
+# width and height on the Screenshots pages of every language, states the
+# version, commit and date they were captured from, and rebuilds the site
+# (deploy separately with website/deploy.sh). The CI package has the
+# subdirectories en/ (-> assets/img/screenshots), fi/ and sv/ (-> screenshots-fi,
+# screenshots-sv) and viz/viz-tv.png (-> assets/img/viz-tv.png) and sizes per
+# set in shots.json; a flat directory (finalize.py without --pack) is the en set.
+# The web server does the same from the published package
+# (ops/site/screenshots-sync.py); this script is for the repository's copy.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 repo="${GITHUB_REPO:-janttsu/varsto}"
@@ -48,8 +49,17 @@ def stamp(lang, version, commit, date, source, esc=lambda s: s):
     return '<span class="shots-meta">' + text.format(
         v=esc(version), c=f" (commit {esc(commit[:7])})" if commit else "", d=esc(date),
         s=f", {esc(source)}" if source else "") + "</span>"
-for name in meta["sizes"]:
-    shutil.copyfile(src / f"{name}.png", dest / f"{name}.png")
+sizes = meta["sizes"]
+if sizes and not all(isinstance(v, dict) for v in sizes.values()):
+    sizes = {"en": sizes}  # flat package
+DIRS = {"en": "screenshots", "fi": "screenshots-fi", "sv": "screenshots-sv", "viz": ""}
+img = dest.parent
+for group, table in sizes.items():
+    sub = src / group if (src / group).is_dir() else src
+    out = img / DIRS[group] if DIRS[group] else img
+    out.mkdir(parents=True, exist_ok=True)
+    for name in table:
+        shutil.copyfile(sub / f"{name}.png", out / f"{name}.png")
 for lang, page in [("en", pages / "pages/screenshots.html"),
                    ("fi", pages / "i18n/fi/pages/screenshots.html"),
                    ("sv", pages / "i18n/sv/pages/screenshots.html"),
@@ -57,11 +67,13 @@ for lang, page in [("en", pages / "pages/screenshots.html"),
     if not page.exists():
         continue
     html = page.read_text()
-    for name, (w, h) in sorted(meta["sizes"].items()):
-        pat = re.compile(r'(src="(?:\.\./|\{\{P\}\})*assets/img/screenshots/' + re.escape(name) + r'\.png"[^>]*?) width="\d+" height="\d+"')
-        html, n = pat.subn(rf'\1 width="{w}" height="{h}"', html)
-        if lang == "en":
-            print(f"{name}.png {w}x{h}" + ("" if n else "  (not on the page)"))
+    for group, table in sorted(sizes.items()):
+        for name, (w, h) in sorted(table.items()):
+            rel = f"{DIRS[group]}/{name}" if DIRS[group] else name
+            pat = re.compile(r'(src="(?:\.\./|\{\{P\}\})*assets/img/' + re.escape(rel) + r'\.png"[^>]*?) width="\d+" height="\d+"')
+            html, n = pat.subn(rf'\1 width="{w}" height="{h}"', html)
+            if lang == "en":
+                print(f"{rel}.png {w}x{h}" + ("" if n else "  (not on the page)"))
     s = stamp(lang, meta["version"], meta.get("commit", ""), meta["date"], meta.get("source", ""))
     html, n = re.subn(r'<span class="shots-meta">.*?</span>', lambda _: s, html, flags=re.S)
     if not n:

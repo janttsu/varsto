@@ -119,14 +119,27 @@ when a listed file is missing or differs, and notes files that are not listed.
 
 ## Screenshots
 
-CI photographs every platform on every build (`scripts/screenshots`: an
-invented demo vault, the interface in Chromium, the Linux and Windows desktops,
-the Android emulator, the macOS window, the iOS Simulator) and collects the
-pictures in the website's names and sizes (`finalize.py`, artifact
-`screenshots`). Pushes to `main` and tags publish them on the rolling
-pre-release `screenshots-latest`; the web server pulls them every 15 minutes
-(`ops/site`). `scripts/screenshots/update-site.sh [run id | --dir DIR]` copies
-a run's (or a local test's) pictures into the repository's copy of the site.
+Every build refreshes all website pictures, for every platform and language,
+with no manual step. CI photographs (`scripts/screenshots`: an invented demo
+vault; the interface in Chromium three times, English, Finnish and Swedish
+(`ui-shots.py --lang`); the full-screen visualization TV scene in 4K, exported
+at 1920 px as `viz-tv.png` (`viz-shots.py`, `website/tools/screenshots/viz_tv_scene.py`);
+the Linux and Windows desktops, the Android emulator, the macOS window, the iOS
+Simulator) and the `screenshots` job packs everything (`finalize.py --pack`,
+artifact `screenshots`) as `en/`, `fi/`, `sv/`, `viz/` and `shots.json`
+(sizes per set, version, commit, date, run). Pushes to `main` and tags publish
+the tarball on the rolling pre-release `screenshots-latest`; the web server
+pulls it every 15 minutes (`ops/site/screenshots-sync.py`), writes `en/` to
+`assets/img/screenshots/`, `fi/` and `sv/` to `screenshots-fi/` and
+`screenshots-sv/`, `viz-tv.png` to `assets/img/`, and patches width, height,
+cache hash and caption into the English, Finnish, Swedish and French
+Screenshots pages. The server's timer and command are unchanged; a flat tarball
+from an older build is still read as the English set. The fixture dry run
+`python3 -I ops/site/tests/test_screenshots_sync.py` checks the parsing and
+patching (CI runs it). A set missing from a run (for example the visualization
+render failed, which does not fail the build) keeps the website's previous
+picture. `scripts/screenshots/update-site.sh [run id | --dir DIR]` copies a
+run's (or a local test's) pictures into the repository's copy of the site.
 
 ## Daily builds: signing and publishing
 
