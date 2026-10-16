@@ -72,12 +72,12 @@ fn random_hex() -> String {
 /// A new one-time code that `POST /api/session` exchanges for the session
 /// token within a minute.
 pub fn mint_boot_code() -> String {
-    mint_boot_code_at(std::time::Instant::now())
+    mint_boot_code_in(&GRANTS, std::time::Instant::now())
 }
 
-fn mint_boot_code_at(now: std::time::Instant) -> String {
+fn mint_boot_code_in(grants: &Mutex<Grants>, now: std::time::Instant) -> String {
     let code = random_hex();
-    let mut g = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut g = grants.lock().unwrap_or_else(|e| e.into_inner());
     g.boot.retain(|_, t| *t > now);
     while g.boot.len() >= GRANTS_MAX {
         let Some(k) = g.boot.keys().next().cloned() else {
@@ -90,8 +90,8 @@ fn mint_boot_code_at(now: std::time::Instant) -> String {
 }
 
 /// Use a bootstrap code: true once, and only before it expires.
-fn redeem_boot_code_at(code: &str, now: std::time::Instant) -> bool {
-    let mut g = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+fn redeem_boot_code_in(grants: &Mutex<Grants>, code: &str, now: std::time::Instant) -> bool {
+    let mut g = grants.lock().unwrap_or_else(|e| e.into_inner());
     g.boot.retain(|_, t| *t > now);
     g.boot.remove(code).is_some()
 }
@@ -320,7 +320,7 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
             .ok()
             .and_then(|_| serde_json::from_str::<Value>(&body).ok())
             .and_then(|v| v["boot"].as_str().map(str::to_string));
-        let ok = code.is_some_and(|c| redeem_boot_code_at(&c, std::time::Instant::now()));
+        let ok = code.is_some_and(|c| redeem_boot_code_in(&GRANTS, &c, std::time::Instant::now()));
         if ok {
             request.respond(json_response(200, &json!({"token": fixed.token})))?;
         } else {
@@ -3271,18 +3271,28 @@ mod tests {
 
     #[test]
     fn expired_boot_code_is_refused() {
+        // A store of its own: redeeming "in the future" purges every code
+        // that would have expired by then, which must not touch the codes
+        // other tests are using at the same time.
+        let grants = Mutex::new(Grants {
+            boot: std::collections::BTreeMap::new(),
+            tickets: std::collections::BTreeMap::new(),
+        });
         let now = std::time::Instant::now();
-        let code = mint_boot_code_at(now);
-        assert!(!redeem_boot_code_at(
+        let code = mint_boot_code_in(&grants, now);
+        assert!(!redeem_boot_code_in(
+            &grants,
             &code,
             now + BOOT_TTL + std::time::Duration::from_secs(1)
         ));
-        let code = mint_boot_code_at(now);
-        assert!(redeem_boot_code_at(
+        let code = mint_boot_code_in(&grants, now);
+        assert!(redeem_boot_code_in(
+            &grants,
             &code,
             now + std::time::Duration::from_secs(30)
         ));
-        assert!(!redeem_boot_code_at(
+        assert!(!redeem_boot_code_in(
+            &grants,
             &code,
             now + std::time::Duration::from_secs(31)
         ));
