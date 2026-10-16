@@ -1541,6 +1541,12 @@ pub struct Config {
     /// get one PUT per object, the others HEAD-then-PUT.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub conditional_writes: std::collections::BTreeMap<String, bool>,
+    /// Forwarding other devices' blocks to the storages (`engine::forward`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::engine::ForwardSettings::is_default"
+    )]
+    pub forward: crate::engine::ForwardSettings,
 }
 
 /// A backup taken on this device (local, never published).

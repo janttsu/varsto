@@ -23,6 +23,10 @@ During alpha development, storage formats may change without migration paths. On
 
 Device-local files only (alpha-0-format.md section 67): `update-state-daily.json` and `update-channel.json` in the device directory. Earlier versions ignore them. The download site gains `daily/latest/SHA256SUMS.sig`, signed with a separate daily key.
 
+## Forwarding (alpha-0-format.md section 70; storage format unchanged)
+
+New objects `vault/forward-leases/<folder>/<slot>.json` (plain JSON leases, deleted by their holder or once they lapse), a device-local `forward` block in `config.json` and `state/forward.json`. No new ledger event: forwarded copies are `chunk_stored` claims as before. Earlier versions ignore the leases (they never forward, so they never write the same blocks twice through forwarding) and read the claims as usual.
+
 ## Service, transport and storage hardening after 0.0.1-alpha.13 (format version 1 unchanged)
 
 Additive fields and local files only (alpha-0-format.md section 60): `check_hex` in the `strongroom` block of a folder record, `mac_hex` in a disk pool's `.varsto-disk.json`, and the device-local files `mcp-keys-used.json` and `update-state.json`. Earlier versions ignore the fields and read the same records. Three things need a hand: a Strongroom enrolled before this change has no key check (key-by-hand operations refuse it) and was enrolled without the PIN prompt, which changes the secret the security key derives, so enrol it again; a disk marker without a MAC is added one when the disk is attached, and a copy of a marker is not adopted without `varsto disk add`; and an updater needs `manifest.json.minisig` next to `manifest.json` on the download site.

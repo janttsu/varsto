@@ -1708,7 +1708,17 @@
   "refused": "hylkäsi yhteyden",
   "unreachable": "ei tavoitettavissa",
   "connection closed": "yhteys katkesi",
-  "not an address": "ei ole osoite"
+  "not an address": "ei ole osoite",
+  "Keep on this device": "Säilytys tällä laitteella",
+  "Full sync: download and keep every file": "Täysi synkronointi: lataa ja säilytä kaikki tiedostot",
+  "Selective sync: placeholders, files only when opened or pinned": "Valikoiva synkronointi: paikkamerkit, tiedostot vain avattaessa tai kiinnitettäessä",
+  "With selective sync this device keeps no files, but it still passes new files of the other devices on to the storages it has.": "Valikoivassa synkronoinnissa tämä laite ei säilytä tiedostoja, mutta se välittää silti muiden laitteiden uudet tiedostot eteenpäin tallennuspaikkoihin, joihin sillä on pääsy.",
+  "Direction": "Suunta",
+  "Both ways": "Molempiin suuntiin",
+  "Send only: never apply other devices' changes here": "Vain lähetys: muiden laitteiden muutoksia ei koskaan tuoda tänne",
+  "Receive only: never publish changes made here": "Vain vastaanotto: täällä tehtyjä muutoksia ei koskaan julkaista",
+  "Forwarding blocks to the storages for «{s}»": "Välittää lohkoja tallennuspaikkoihin: «{s}»",
+  "Forwarding": "Välitys"
  },
  "patterns": [
   [

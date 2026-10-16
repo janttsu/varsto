@@ -3752,7 +3752,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "trash_move": "Moving deleted files of folder «{s}» to the trash storage",
     "drain": "Draining storage «{s}»",
     "drain.records": "Copying the records off storage «{s}»",
-    "history_restore": "Restoring an earlier version of a file of folder «{s}»"
+    "history_restore": "Restoring an earlier version of a file of folder «{s}»",
+    "forward": "Forwarding blocks to the storages for «{s}»"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }
@@ -4830,9 +4831,18 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   // A folder of the vault that is not on this device: attach that same folder
   // (never create a new one). Phones ask only how to keep it, desktops where.
+  // How to keep a folder attached here (section 70): every file, or
+  // placeholders until a file is opened or pinned. Either way this device
+  // also forwards the other devices' blocks to its storages.
+  function keepField() {
+    var sel = $("attachfolder").querySelector("input[name=selective]").checked;
+    return { name: "keep", label: "Keep on this device", value: sel ? "selective" : "full",
+      options: [["full", "Full sync: download and keep every file"], ["selective", "Selective sync: placeholders, files only when opened or pinned"]],
+      hint: "With selective sync this device keeps no files, but it still passes new files of the other devices on to the storages it has." };
+  }
   function offerAttach(f) {
     if (isMobile()) {
-      dialog({ title: "Add " + f.name + " to this phone?", text: "This folder is on your other devices. It syncs here under the same name.", ok: "Encrypted on this phone", extra: "Plain files" }).then(function (r) {
+      dialog({ title: "Add " + f.name + " to this phone?", text: "This folder is on your other devices. It syncs here under the same name.", fields: [keepField()], ok: "Encrypted on this phone", extra: "Plain files" }).then(function (r) {
         if (!r) { return; }
         var plain = r.action === "extra";
         if (plain && !hasAllFiles()) {
@@ -4840,17 +4850,22 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           alertBox("Android asks for all files access first. Allow it on the settings screen, come back and tap the folder again.");
           return;
         }
-        attachFolder(f.name, "", plain);
+        attachFolder(f.name, "", plain, { selective: r.values.keep === "selective" });
       });
       return;
     }
-    dialog({ title: "Attach " + f.name + " on this device?", text: "This folder is on your other devices. It syncs into this directory under the same name.", fields: [{ name: "path", label: "Directory on this device", value: joinRoot(f.name) }], ok: "Attach" }).then(function (r) {
-      if (r) { attachFolder(f.name, (r.values.path || "").trim()); }
+    dialog({ title: "Attach " + f.name + " on this device?", text: "This folder is on your other devices. It syncs into this directory under the same name.", fields: [
+      { name: "path", label: "Directory on this device", value: joinRoot(f.name) },
+      keepField(),
+      { name: "mode", label: "Direction", value: "normal", options: [["normal", "Both ways"], ["send-only", "Send only: never apply other devices' changes here"], ["receive-only", "Receive only: never publish changes made here"]] }
+    ], ok: "Attach" }).then(function (r) {
+      if (r) { attachFolder(f.name, (r.values.path || "").trim(), undefined, { selective: r.values.keep === "selective", mode: r.values.mode }); }
     });
   }
-  function attachFolder(nameOrId, path, plain) {
+  function attachFolder(nameOrId, path, plain, how) {
     var form = $("attachfolder");
-    var d = { name_or_id: nameOrId, selective: form.querySelector("input[name=selective]").checked };
+    var d = { name_or_id: nameOrId, selective: how && how.selective !== undefined ? how.selective : form.querySelector("input[name=selective]").checked };
+    if (how && how.mode && how.mode !== "normal") { d.mode = how.mode; }
     if (path && !isMobile()) { d.path = path; }
     if (appState.mobile) { d.plain = plain === undefined ? modeOf(form) === "plain" : plain; }
     busy(true);

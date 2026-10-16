@@ -57,6 +57,7 @@ mod drain;
 mod fetch;
 mod folder_rules;
 mod folder_safety;
+mod forward;
 mod guide;
 mod help;
 mod history;
@@ -104,6 +105,10 @@ pub use folder_rules::IgnoreInfo;
 pub use folder_safety::{
     paused_error, ChangeKind, DiscardReport, FolderChanges, FolderPaused, HeldDeletions,
     HeldSummary, PauseKind, RevertReport, FOLDER_MARKER,
+};
+pub use forward::{
+    ForwardFolder, ForwardOptions, ForwardReport, ForwardSettings, ForwardStatus, LEASE_SLOT_SECS,
+    LEASE_WORK_SECS,
 };
 pub use help::{help_without_vault, HelpObserved};
 pub use history::{
