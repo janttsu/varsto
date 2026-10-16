@@ -81,8 +81,20 @@ jobs:
           python3 -m pip install --quiet --break-system-packages playwright pillow
           python3 -m playwright install --with-deps chromium >/dev/null
           DEMO_HOME=/home/aino scripts/screenshots/demo-vault.sh "$VARSTO_BIN" "$RUNNER_TEMP/demo"
-      - name: Screenshots of the interface
-        run: python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots
+      - name: Screenshots of the interface (English, Finnish, Swedish)
+        run: |
+          # Three runs against the same demo vault, one directory per language
+          # (the website shows each language's pictures on its own pages).
+          python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots
+          python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots-fi --lang fi
+          python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots-sv --lang sv
+      - name: Screenshot of the full-screen visualization (TV scene, 4K)
+        # The invented TV scene in 4K; finalize.py scales it to the website's
+        # 1920 px viz-tv.png. A failed render keeps the website's last picture.
+        continue-on-error: true
+        run: |
+          python3 website/tools/screenshots/viz_tv_scene.py "$RUNNER_TEMP/viz-tv-scene.json"
+          ONLY=viz-tv-4k VIZ_SCENE="$RUNNER_TEMP/viz-tv-scene.json" python3 scripts/screenshots/viz-shots.py "$RUNNER_TEMP/demo" dist/shots-viz
       - name: Screenshots of the Linux desktop (tray, own window)
         run: scripts/screenshots/linux-desktop.sh "$VARSTO_BIN" "$RUNNER_TEMP/demo" dist/shots
       - name: Stop the demo
@@ -109,6 +121,24 @@ jobs:
         with:
           name: shots-linux
           path: dist/shots
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux-fi
+          path: dist/shots-fi
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux-sv
+          path: dist/shots-sv
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux-viz
+          path: dist/shots-viz
           if-no-files-found: warn
 
   windows:
@@ -410,12 +440,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: art
+      - name: Dry run of the website sync (fixture package, no network)
+        run: python3 -I ops/site/tests/test_screenshots_sync.py
       - name: Website names and sizes
         run: |
           python3 -m pip install --quiet --break-system-packages pillow
           version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
-          python3 scripts/screenshots/finalize.py art dist/screenshots --version "$version" --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --source "GitHub Actions run ${{ github.run_number }}"
+          # One package for the website: en/ fi/ sv/ viz/ and shots.json with the
+          # sizes per set (artifact folders shots-linux-fi/-sv/-viz are the
+          # localized and visualization pictures, everything else is en/).
+          python3 scripts/screenshots/finalize.py art dist/screenshots --pack --version "$version" \
+            --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --source "GitHub Actions run ${{ github.run_number }}" --run "${{ github.run_number }}"
           cat dist/screenshots/shots.json
       - uses: actions/upload-artifact@v4
         with:

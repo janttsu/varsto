@@ -6,7 +6,9 @@ Sources:
 - website/src/pages/*.html   page bodies with a small front matter (title, nav, description)
 - website/src/posts/*.md     blog posts (front matter: title, date, summary)
 - repository Markdown files  rendered into docs/ with pandoc (GitHub-flavoured Markdown)
-- website/public/downloads/SHA256SUMS  if present, becomes the download table
+- website/public/downloads/SHA256SUMS  if present, becomes the download table; without it the
+  live site's list is read, read-only (DOWNLOADS_SOURCE_URL, default https://varsto.net/downloads/,
+  empty turns this off)
 
 No inline scripts or styles are emitted (strict CSP). Run from anywhere:
     python3 website/build.py
@@ -338,24 +340,85 @@ ICONS = {
 }
 
 
+_REMOTE_SET: dict | None = None
+
+
+def remote_download_set() -> dict | None:
+    """The live site's current download set, read-only, for a checkout that has
+    none of its own (the binaries and SHA256SUMS are not in the repository).
+    DOWNLOADS_SOURCE_URL names the directory (default https://varsto.net/downloads/);
+    set it to an empty string to turn the fallback off. Returns
+    {"sums": text, "manifest": dict, "sizes": {name: bytes}} or None when it
+    cannot be fetched or does not look like a download set."""
+    global _REMOTE_SET
+    if _REMOTE_SET is not None:
+        return _REMOTE_SET or None
+    _REMOTE_SET = {}
+    base = os.environ.get("DOWNLOADS_SOURCE_URL", f"{SITE_URL}/downloads/")
+    if not base:
+        return None
+    base = base.rstrip("/") + "/"
+    import urllib.request
+
+    def fetch(name: str, method: str = "GET"):
+        req = urllib.request.Request(base + name, method=method, headers={"User-Agent": "varsto-website-build"})
+        return urllib.request.urlopen(req, timeout=20)
+
+    try:
+        with fetch("SHA256SUMS") as r:
+            sums = r.read(1 << 20).decode()
+        try:
+            with fetch("manifest.json") as r:
+                manifest = json.loads(r.read(1 << 20).decode())
+        except Exception:
+            manifest = {}
+        line = re.compile(r"^[0-9a-f]{64}  \*?[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
+        lines = [ln for ln in sums.splitlines() if ln.strip()]
+        if not lines or not all(line.match(ln) for ln in lines):
+            raise ValueError("SHA256SUMS is not a checksum list")
+        sizes = {}
+        for ln in lines:
+            name = ln.split(maxsplit=1)[1].lstrip("*")
+            try:
+                with fetch(name, "HEAD") as r:
+                    sizes[name] = int(r.headers.get("Content-Length", 0))
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"warning: cannot read the live download set from {base}: {e}", file=sys.stderr)
+        return None
+    print(f"download set read from {base} ({len(lines)} files, read-only)")
+    _REMOTE_SET = {"sums": sums, "manifest": manifest if isinstance(manifest, dict) else {}, "sizes": sizes}
+    return _REMOTE_SET
+
+
 def downloads_table(depth: int) -> str:
     sums = OUT / "downloads" / "SHA256SUMS"
     manifest = OUT / "downloads" / "manifest.json"
-    if not sums.exists():
+    remote = None if sums.exists() else remote_download_set()
+    if not sums.exists() and not remote:
         return '<p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>'
-    notes = json.loads(manifest.read_text()) if manifest.exists() else {}
+    if remote:
+        notes, sums_text = remote["manifest"], remote["sums"]
+    else:
+        notes, sums_text = (json.loads(manifest.read_text()) if manifest.exists() else {}), sums.read_text()
     files = []
-    for line in sums.read_text().splitlines():
+    for line in sums_text.splitlines():
         if not line.strip():
             continue
         digest, name = line.split(maxsplit=1)
         name = name.lstrip("*")
-        size = (OUT / "downloads" / name).stat().st_size if (OUT / "downloads" / name).exists() else 0
+        if remote:
+            size = remote["sizes"].get(name, 0)
+        else:
+            size = (OUT / "downloads" / name).stat().st_size if (OUT / "downloads" / name).exists() else 0
         files.append((name, digest, size))
     version = notes.get("_version", "")
     pre = "../" * depth
 
     def human(n: int) -> str:
+        if not n:
+            return ""
         return f"{n / 1048576:.1f} MB" if n >= 1048576 else f"{n // 1024} KB"
 
     cards = []
