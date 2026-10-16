@@ -346,7 +346,7 @@ def s_strongroom():
     check("vault-secrets" in names, f"desktop does not know the strongroom: {names}")
     # Without the key the desktop cannot open it.
     r = v("vl-desktop", "folder attach vault-secrets /home/varsto/sr2", json_out=False, check_rc=False)
-    files = run("vl-desktop", "find ~/sr2 -type f ! -name '*.varsto-placeholder' 2>/dev/null | wc -l").stdout.strip()
+    files = run("vl-desktop", "find ~/sr2 -type f ! -name '*.varsto-placeholder' ! -name '.varsto-folder' 2>/dev/null | wc -l").stdout.strip()
     check(files == "0", f"desktop has {files} plain files of a strongroom it cannot unlock")
 
 
@@ -879,6 +879,9 @@ def s_staged_move():
     dl("folder add ddocs /home/varsto/dl-docs", json_out=False)
     # The pool is filled by the job only, not by pushes or disk fills.
     dl("folder placement ddocs --storage box", json_out=False)
+    # The default policy wants a copy in external storage, which the box is: a
+    # move off it would break the policy. This move is the point of the scenario.
+    dl("policy set ddocs --min-copies 1", json_out=False)
     dl("push ddocs")
     want = run(DL_VM, "cd ~/dl-docs && find . -type f | sort | xargs sha256sum | sha256sum").stdout.split()[0]
 
@@ -889,6 +892,7 @@ def s_staged_move():
     check(before > 0, "the box holds nothing after the push")
     # No disk yet: the job is recorded and waits for one.
     r = dl("move ddocs --from box --to dshelf --yes")
+    check(isinstance(r, dict) and "job" in r, f"move without a disk gave no job: {r}")
     job = r["job"]
     check(job["state"] == "open" and job["waiting"]["kind"] == "disk" and job["bytes_done"] == 0, f"first run: {job}")
     st = dl("move status")
@@ -1747,13 +1751,104 @@ PY""")
     v("vl-laptop", "sync media")
     seen["alpha14_member_sync"] = outcome(v14("vl-work", "sync", home=home, check_rc=False))
 
+# ----- forwarding, the live board and pairing with a wrong address ----------------------------
+
+@scenario("forwarding-and-viz")
+def s_forward():
+    """Spec 70: the "phone" (pub, reachable) writes a camera folder but its only
+    storage, the hub bucket, is at its quota, so no block goes anywhere. The
+    laptop keeps the folder selective (placeholders only) and has a storage in
+    the place "cloud" that the folder's policy wants a copy in: `forward run`
+    carries the phone's blocks from the phone, as a peer, to that storage. The
+    live board (`GET /api/viz`) of the running service answers meanwhile."""
+    s_reset()
+    run("vl-pub", "rm -rf ~/data/camera ~/sel-cam ~/cloud", check_rc=False)
+    run("vl-laptop", "rm -rf ~/sel-cam ~/cloud", check_rc=False)
+    v("vl-pub", "init --name phone")
+    v("vl-pub", f"storage add-s3 hub --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                f"--access-key-id {lab.S3['key']} --place home", json_out=False)
+    v("vl-pub", "storage quota hub --bytes 1", json_out=False)
+    run("vl-pub", "mkdir -p ~/data/camera && for i in 1 2 3; do head -c 700000 /dev/urandom > ~/data/camera/pic$i.jpg; done")
+    v("vl-pub", "folder add camera /home/varsto/data/camera", json_out=False)
+    v("vl-pub", "policy set camera --min-copies 1 --place cloud=1", json_out=False)
+    pushed = v("vl-pub", "push camera", check_rc=False)
+    check("quota" in json.dumps(pushed), f"the phone's push did not meet the quota: {pushed}")
+    check(not bucket_packs(), f"the hub is at its quota but holds {len(bucket_packs())} packs")
+    kit = v("vl-pub", "recovery kit", json_out=False)
+    words = " ".join(re.findall(r"\d+\. (\w+)", kit.split("SHARES")[0]))
+    v("vl-laptop", f"join --name laptop --s3-bucket {BUCKET} --s3-endpoint {lab.S3['endpoint']} --s3-insecure-http "
+                   f"--s3-access-key-id {lab.S3['key']} --storage-name hub", env=f"VARSTO_VAULT_KEY={shlex.quote(words)}")
+    v("vl-laptop", "storage add-local cloud /home/varsto/cloud --place cloud", json_out=False)
+    v("vl-laptop", "folder attach camera /home/varsto/sel-cam --selective", json_out=False)
+    v("vl-laptop", "sync")
+    stun = " ".join(f"--stun {x}" for x in lab.STUN)
+    v("vl-pub", f"p2p enable {stun} --public 198.51.100.20:17893", json_out=False)
+    v("vl-laptop", f"p2p enable {stun}", json_out=False)
+    for vm in ("vl-pub", "vl-laptop"):
+        start_service(vm)
+    try:
+        viz = api("vl-laptop", "GET", "/api/viz")
+        check(isinstance(viz, dict) and "_raw" not in viz and viz, f"/api/viz: {str(viz)[:200]}")
+        CTX["viz_keys"] = sorted(viz)[:12]
+        # The service forwards by itself after a sync; the rendezvous records
+        # travel through the bucket first, so give it a few rounds.
+        shown = {}
+        for _ in range(16):
+            shown = v("vl-laptop", "forward show")
+            if shown.get("total_blocks", 0) >= 3:
+                break
+            time.sleep(10)
+        CTX["forward"] = {k: shown.get(k) for k in ("total_blocks", "total_bytes", "last_error")}
+        check(shown.get("total_blocks", 0) >= 3, f"nothing forwarded: {json.dumps(shown)[:600]}")
+        # A second run finds nothing left to carry: every block was written once.
+        again = v("vl-laptop", "forward run")
+        check(again.get("blocks", 0) == 0 and not again.get("work_left"), f"forwarding again: {json.dumps(again)[:400]}")
+        cloud_packs = int(run("vl-laptop", "find ~/cloud/packs -type f | wc -l").stdout)
+        check(cloud_packs > 0, "the cloud storage holds no pack after forwarding")
+        real = int(run("vl-laptop", "find ~/sel-cam -type f ! -name '*.varsto-placeholder' ! -name '.varsto-folder' | wc -l").stdout)
+        check(real == 0, f"the forwarding device kept {real} files")
+        # The cloud storage is the laptop's alone, so only the laptop can tell the policy is met.
+        pol = v("vl-laptop", "policy check", check_rc=False)
+        check(outcome(pol)[0] == 0, f"the policy is still violated on the laptop after forwarding: {pol}")
+        fsck = v("vl-laptop", "fsck --verify")
+        check(not fsck["chunks_missing"] and not fsck.get("objects_corrupt"), f"fsck --verify after forwarding: {fsck}")
+        check("camera" in json.dumps(api("vl-laptop", "GET", "/api/viz")), "the live board does not know the folder")
+    finally:
+        for vm in ("vl-pub", "vl-laptop"):
+            run(vm, "pkill -x varsto; true", check_rc=False)
+
+
+@scenario("pair-wrong-address-falls-back")
+def s_pair_fallback():
+    """`pair join --address` with an address nobody answers on: the new device
+    falls back to finding the offer on the LAN and joins."""
+    s_reset()
+    v("vl-laptop", "init --name laptop")
+    v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                   f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
+    run("vl-laptop", f"{ENV} nohup varsto pair offer > ~/pair.log 2>&1 &")
+    code = None
+    for _ in range(30):
+        m = re.search(r"Pairing code: (\d{3}-\d{3}-\d{3})", run("vl-laptop", "cat ~/pair.log").stdout)
+        if m:
+            code = m.group(1)
+            break
+        time.sleep(0.5)
+    check(code, "no pairing code: " + run("vl-laptop", "cat ~/pair.log").stdout[-300:])
+    out = v("vl-desktop", f"pair join --name desktop --code {code} --address 10.78.1.99:4", json_out=False)
+    check("joined vault" in out, out[-400:])
+    time.sleep(1)
+    check("Sent the vault to desktop" in run("vl-laptop", "cat ~/pair.log").stdout, "the offer did not report the pairing")
+    st = v("vl-desktop", "status")
+    check(len(st.get("devices", [])) == 2, f"desktop sees {st.get('devices')}")
+
 
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale,
              s_backup, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_scrub, s_restic, s_ledger_loss,
-             s_ledger_withhold, s_upgrade]
+             s_ledger_withhold, s_upgrade, s_forward, s_pair_fallback]
 
 
 def main():
