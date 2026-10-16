@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! The Windows window: single instance, WebView2 view, saved geometry.
 
-use crate::{geometry, service};
+use crate::{geometry, service, shell};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::platform::windows::{IconExtWindows, WindowBuilderExtWindows, WindowExtWindows};
-use tao::window::{Icon, WindowBuilder};
+use tao::window::{Fullscreen, Icon, WindowBuilder};
 use windows_sys::Win32::Foundation::{GetLastError, BOOL, ERROR_ALREADY_EXISTS, HWND, LPARAM};
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -193,6 +193,8 @@ fn is_local(url: &str) -> bool {
 enum Ev {
     Navigate(String),
     Failed(String),
+    /// The page asked for the whole window in full screen (or back).
+    Fullscreen(bool),
 }
 
 fn failed_html(why: &str) -> String {
@@ -254,6 +256,7 @@ fn window(home: &Path) -> Result<(), String> {
     let state_file = state_dir().join("window.json");
     let event_loop = EventLoopBuilder::<Ev>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    let ipc_proxy = event_loop.create_proxy();
 
     let monitors: Vec<geometry::Monitor> = event_loop
         .available_monitors()
@@ -324,6 +327,12 @@ fn window(home: &Path) -> Result<(), String> {
             _ => PermissionResponse::Deny,
         })
         .with_clipboard(true)
+        // The visualization page asks for real full screen: the window itself, not only the page in it.
+        .with_ipc_handler(move |req| {
+            if let Some(on) = shell::fullscreen_request(req.body()) {
+                let _ = ipc_proxy.send_event(Ev::Fullscreen(on));
+            }
+        })
         .build(&window)
         .map_err(|e| e.to_string())?;
 
@@ -376,9 +385,18 @@ fn window(home: &Path) -> Result<(), String> {
             Event::UserEvent(Ev::Failed(why)) => {
                 let _ = webview.load_html(&failed_html(&why));
             }
+            Event::UserEvent(Ev::Fullscreen(on)) => {
+                window.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
+                let _ = webview.evaluate_script(&shell::fullscreen_notice(on));
+                let _ = webview.focus();
+            }
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
-                    if !window.is_maximized() && !window.is_minimized() {
+                    // A full-screen size is not the window's own: keep the last normal placement.
+                    if window.fullscreen().is_none()
+                        && !window.is_maximized()
+                        && !window.is_minimized()
+                    {
                         if let Ok(p) = window.outer_position() {
                             let s = window.inner_size();
                             normal = geometry::Geometry {

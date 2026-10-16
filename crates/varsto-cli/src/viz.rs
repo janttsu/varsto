@@ -116,12 +116,11 @@ const SPRITES: &[(&str, &[u8])] = sprites![
     "monitor",
     "nas",
     "nas-warn",
-    "disk",
-    "disk-busy",
-    "disk-off",
-    "disk-bad",
     "shelf",
     "dock",
+    "dock-disk",
+    "dock-disk-busy",
+    "dock-disk-bad",
     "usb",
     "cloud",
     "bucket",
@@ -254,11 +253,67 @@ mod tests {
         assert!(
             !js.contains("eval(") && !js.contains("innerHTML") && !js.contains("document.write")
         );
-        assert_eq!(SPRITES.len(), 18 * 4);
+        assert_eq!(SPRITES.len(), 17 * 4);
         for (path, bytes) in SPRITES {
             assert_eq!(&bytes[..4], b"RIFF", "{path}");
             assert!(bytes.len() > 500, "{path}");
         }
+    }
+
+    /// The pure rules of the page (particle speed, stable flow labels) hold: run
+    /// `scripts/test/viz-rules.test.js` with node when node is installed.
+    #[test]
+    fn page_rules_hold_in_node() {
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/test/viz-rules.test.js");
+        match std::process::Command::new("node").arg(&script).output() {
+            Ok(out) => assert!(
+                out.status.success(),
+                "viz rules failed:\n{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+            Err(_) => eprintln!("node is not installed: the viz rules were not run"),
+        }
+    }
+
+    /// Full screen asks the shell it runs in for the window's own full-screen mode, and
+    /// every shell answers: the names the page uses are the ones the shells define.
+    #[test]
+    fn full_screen_bridges_match_the_shells() {
+        let js = include_str!("../ui/viz.js");
+        let css = include_str!("../ui/viz.css");
+        for needle in [
+            "VarstoAndroid.setFullscreen",
+            "messageHandlers.varstoShell",
+            "varsto:fullscreen:",
+            "window.varstoShellFullscreen",
+            "requestFullscreen",
+            "popstate",
+            "\"Escape\"",
+        ] {
+            assert!(js.contains(needle), "viz.js lacks {needle}");
+        }
+        for needle in ["100dvh", "100dvw", "viz-fullscreen", "cursor: none"] {
+            assert!(css.contains(needle), "viz.css lacks {needle}");
+        }
+        let android = include_str!(
+            "../../../apps/android/app/src/main/java/in/soderlund/varsto/MainActivity.kt"
+        );
+        assert!(
+            android.contains("fun setFullscreen(on: Boolean)")
+                && android.contains("BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE")
+        );
+        let mac = include_str!("../../../apps/macos/VarstoMenuBar/main.swift");
+        assert!(
+            mac.contains("\"varstoShell\"")
+                && mac.contains("toggleFullScreen")
+                && mac.contains("windowDidExitFullScreen")
+        );
+        let win = include_str!("../../varsto-window/src/app.rs");
+        assert!(win.contains("with_ipc_handler") && win.contains("set_fullscreen"));
+        let shell = include_str!("../../varsto-window/src/shell.rs");
+        assert!(shell.contains("varsto:fullscreen:1") && shell.contains("varstoShellFullscreen"));
     }
 
     /// Every word the page puts on the screen has a Finnish and a Swedish
