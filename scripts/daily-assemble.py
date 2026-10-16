@@ -86,13 +86,16 @@ def main() -> None:
     for key, pattern, stable in PLATFORMS:
         shutil.copyfile(one(a.art, pattern), a.out / stable)
         entries.append((key, stable))
+    # The screenshots artifact is the packed website layout: en/, fi/, sv/,
+    # viz/ and shots.json, possibly with loose files beside them. Keep the
+    # layout in the tarball.
     shots = a.art / "screenshots"
-    if not (shots.is_dir() and any(shots.glob("*.png"))):
+    files = sorted(p for p in shots.rglob("*") if p.is_file()) if shots.is_dir() else []
+    if not any(p.suffix == ".png" for p in files):
         sys.exit(f"no screenshots below {shots}")
     with tarfile.open(a.out / SCREENSHOTS, "w:gz") as t:
-        for p in sorted(shots.iterdir()):
-            if p.is_file():
-                t.add(p, arcname=p.name)
+        for p in files:
+            t.add(p, arcname=str(p.relative_to(shots)))
     entries.append(("screenshots", SCREENSHOTS))
 
     platforms = []
