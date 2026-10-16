@@ -312,6 +312,8 @@ def rewrite_links(body: str, slug_by_name: dict[str, str], docs_prefix: str = ""
     return re.sub(r'href="([^"#]+)(#[^"]*)?"', repl, body)
 
 
+IOS_NOT_YET = "Not downloadable yet: the app shell is in the repository (apps/ios) and needs a Mac with Xcode to build. The unsigned .ipa comes with the next release."
+
 PLATFORMS = [
     # (title, icon, matcher for the primary file, matchers for alternatives, status line)
     ("Linux", "linux", lambda n: n.endswith("-x86_64-unknown-linux-musl.tar.gz"), [],
@@ -323,8 +325,8 @@ PLATFORMS = [
      "x86_64 installer. Installs for your user without administrator rights (or for everyone): Start menu and desktop icons, Varsto in its own window, the background service and tray at login, automatic updates. Run it again to upgrade or repair; your data stays. Not code-signed, so SmartScreen may ask you to confirm. Built and smoke-tested on Windows Server 2025 in CI; not yet through the manual checklist on a real machine."),
     ("Android", "android", lambda n: n.endswith("-android-debug.apk"), [],
      "Debug-signed APK for sideloading: allow the install when the phone asks. Runs the same core as a foreground service. Tested in the Android 15 emulator only."),
-    ("iOS", "ios", None, [],
-     "Not downloadable yet: the app shell is in the repository (apps/ios) and needs a Mac with Xcode to build."),
+    ("iOS", "ios", lambda n: n.endswith("-ios-unsigned.ipa"), [],
+     "Unsigned .ipa for iPhone and iPad: it does not install by itself. Sideload it with AltStore, SideStore or Sideloadly (they sign it with your own Apple ID; see docs/ios-build.md). Built by CI on a Mac runner; not yet run on a real device."),
     ("Source", "source", lambda n: n.endswith("-source.tar.gz"), [],
      "Git archive of the tagged release. Build with a stable Rust toolchain: cargo build --release."),
 ]
@@ -429,13 +431,15 @@ def downloads_table(depth: int) -> str:
         icon_svg = f'<svg class="dl-icon" viewBox="0 0 24 24" aria-hidden="true">{ICONS[icon]}</svg>'
         if main:
             name, digest, size = main
-            label = ("Download Varsto.app (Apple Silicon)" if not name.endswith("-lite.zip") else "Download Varsto.app (interim, Apple Silicon)") if title == "macOS" else "Download the Windows installer" if title == "Windows" else f"Download for {html.escape(title)}"
+            label = "Download the unsigned .ipa" if title == "iOS" else ("Download Varsto.app (Apple Silicon)" if not name.endswith("-lite.zip") else "Download Varsto.app (interim, Apple Silicon)") if title == "macOS" else "Download the Windows installer" if title == "Windows" else f"Download for {html.escape(title)}"
             button = (f'<a class="dl-primary" href="{pre}downloads/{html.escape(name)}">{label}</a>'
                       f'<p class="dl-meta">{html.escape(name)}<br>{human(size)} · <span class="sum" title="{digest}">SHA-256 {digest[:12]}…</span></p>')
         elif title == "Source":
             button = f'<a class="dl-primary" href="{pre}downloads/">Source</a>'
         else:
             button = f'<a class="dl-primary dl-disabled" href="{pre}docs/">Not available yet</a>'
+            if title == "iOS":  # a release without an .ipa (the live set before this one is published)
+                status = IOS_NOT_YET
         alt_links = []
         for label, matcher in alts:
             hit = next(((n, d, sz) for n, d, sz in files if matcher(n)), None)

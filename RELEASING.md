@@ -109,6 +109,12 @@ Silicon. CI never holds the release key.
    `SHA256SUMS`, signs it, uploads `SHA256SUMS` and `SHA256SUMS.sig` to the
    GitHub release (the second channel) and publishes it, puts the run's
    screenshots on the website and deploys the site.
+   The unsigned iOS `.ipa` is built by its own workflow (`ios-ipa.yml`, a
+   macOS runner) and is not in the CI download set: the script uses the
+   workflow run on the tag, starts one with `release_tag` set to the tag when
+   there is none and waits for it, then adds the `.ipa` to `SHA256SUMS` and
+   `manifest.json` before signing. It stops with an error if the `.ipa` is
+   missing.
 4. `website/deploy.sh` refuses to publish a `SHA256SUMS` whose signature does
    not verify against `release-key.pub` (`scripts/sign-release.sh --verify`).
 

@@ -1785,6 +1785,26 @@ mod tests {
     }
 
     #[test]
+    fn the_ios_package_is_never_picked_by_the_updater() {
+        let names = [
+            "Varsto-9.9.9-ios-unsigned.ipa",
+            "varsto-9.9.9-android-debug.apk",
+        ];
+        for (target, bundle, setup) in [
+            ("x86_64-unknown-linux-musl", false, false),
+            ("aarch64-apple-darwin", false, false),
+            ("aarch64-apple-darwin", true, false),
+            ("x86_64-pc-windows-gnu", false, true),
+        ] {
+            assert_eq!(
+                pick_archive(names.iter().copied(), "9.9.9", target, bundle, setup),
+                None,
+                "{target}"
+            );
+        }
+    }
+
+    #[test]
     fn a_portable_windows_copy_is_told_to_run_the_installer_once() {
         let check = Check {
             current: "0.0.1-alpha.14".into(),

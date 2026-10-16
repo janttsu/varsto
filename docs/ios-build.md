@@ -32,6 +32,13 @@ gh run download <run id> --repo janttsu/varsto --name Varsto-ios-unsigned --dir 
 Pushing a tag `ios-v<anything>` does the same and attaches the file to a draft
 pre-release of that tag. The run's summary repeats the install steps.
 
+For a release, `website/publish-ci-release.sh v<version>` finds the run of this
+workflow on the release tag (or starts it with `ref` and `release_tag` set to
+the tag and waits), downloads `Varsto-ios-unsigned`, adds the `.ipa` to the
+download set (`SHA256SUMS` and `manifest.json`) before signing, and the
+downloads page then offers it as the iOS download. The desktop updater ignores
+it; an iOS install is updated by sideloading the newer `.ipa`.
+
 Cost: GitHub-hosted standard runners are free and unlimited for public
 repositories ([runner docs](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
 checked 2026-10-15). The `macos-15` runner is an arm64 M1 with 3 cores, 7 GB

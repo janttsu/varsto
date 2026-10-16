@@ -16,7 +16,7 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
-Nothing yet.
+- The unsigned iOS `.ipa` joins the release download set (`publish-ci-release.sh` adds it to `SHA256SUMS` and `manifest.json`) and gets a download card on the website.
 
 ## [0.0.1-alpha.15] - 2026-10-16
 
