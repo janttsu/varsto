@@ -36,10 +36,19 @@ build_target() {
       if [ "$have_zig" != 1 ]; then echo "!! cargo-zigbuild missing, cannot build $t" >&2; return 1; fi
       cargo zigbuild --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *musl*)
-      # musl-gcc when present (Debian/Ubuntu musl-tools); a glibc gcc with the
-      # distribution's default _FORTIFY_SOURCE emits __memcpy_chk, which musl lacks.
-      export CC_x86_64_unknown_linux_musl="${CC_x86_64_unknown_linux_musl:-$(command -v musl-gcc || echo gcc)}"
-      export CFLAGS_x86_64_unknown_linux_musl="${CFLAGS_x86_64_unknown_linux_musl:--U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0}"
+      # musl-gcc when present (Debian/Ubuntu musl-tools). Otherwise the host gcc:
+      # its distribution default _FORTIFY_SOURCE emits __memcpy_chk, which musl
+      # lacks, and its default C23 mode breaks linking against musl, so the
+      # fallback uses gnu17 and turns fortify off.
+      if musl_cc="$(command -v musl-gcc)"; then
+        musl_cflags="-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
+      else
+        musl_cc=gcc
+        musl_cflags="-std=gnu17 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
+      fi
+      export CC_x86_64_unknown_linux_musl="${CC_x86_64_unknown_linux_musl:-$musl_cc}"
+      export CFLAGS_x86_64_unknown_linux_musl="${CFLAGS_x86_64_unknown_linux_musl:-$musl_cflags}"
+      echo "   musl C compiler: $CC_x86_64_unknown_linux_musl (CFLAGS: $CFLAGS_x86_64_unknown_linux_musl)"
       cargo build --release --target "$t" -p varsto-cli 2>&1 | grep -vE "^\s+(Compiling|Downloaded|Downloading)" | tail -40 ;;
     *windows-gnu*)
       export CC_x86_64_pc_windows_gnu="${CC_x86_64_pc_windows_gnu:-x86_64-w64-mingw32-gcc}" AR_x86_64_pc_windows_gnu="${AR_x86_64_pc_windows_gnu:-x86_64-w64-mingw32-ar}"
