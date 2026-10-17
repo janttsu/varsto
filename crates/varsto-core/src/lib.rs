@@ -38,6 +38,8 @@ pub mod ledger3;
 pub mod ledger_heads;
 pub mod logging;
 pub mod manifest;
+#[cfg(feature = "format3")]
+pub mod manifest3;
 pub mod media;
 #[cfg(feature = "format3")]
 pub mod membership3;
