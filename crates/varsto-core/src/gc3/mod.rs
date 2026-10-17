@@ -298,6 +298,55 @@ impl<T: References + ?Sized> References for &T {
     }
 }
 
+/// WP7's references of a folder (`trash3::Refs`: manifests, unexpired
+/// trash and history, unexpired snapshots) as [`References`]: the set is
+/// computed once; a writer is behind while the view announces manifest or
+/// trash records of it past what was applied, or unexpired snapshots of it
+/// that are not loaded yet.
+pub struct FolderReferences<'a> {
+    pub refs: &'a crate::trash3::Refs<'a>,
+    set: HashSet<ObjectBin>,
+}
+
+impl<'a> FolderReferences<'a> {
+    pub fn new(refs: &'a crate::trash3::Refs<'a>) -> FolderReferences<'a> {
+        FolderReferences {
+            set: refs.set(),
+            refs,
+        }
+    }
+}
+
+impl References for FolderReferences<'_> {
+    fn is_referenced(&self, object: &ObjectBin) -> bool {
+        self.set.contains(object)
+    }
+    fn behind(
+        &self,
+        view: &LedgerView,
+        folder: &FolderBin,
+        writers: &[DeviceBin],
+    ) -> Vec<DeviceBin> {
+        let r = self.refs;
+        let snaps: BTreeSet<DeviceBin> = r
+            .snapshots
+            .map(|(s, v)| s.wanted(v, r.now).into_iter().map(|w| w.device).collect())
+            .unwrap_or_default();
+        writers
+            .iter()
+            .filter(|w| {
+                r.manifests
+                    .is_some_and(|m| stream_behind(view, Kind::Manifest, folder, w, m.applied(w)))
+                    || r.trash.is_some_and(|(t, _, _)| {
+                        stream_behind(view, Kind::Trash, folder, w, t.applied(w))
+                    })
+                    || snaps.contains(*w)
+            })
+            .copied()
+            .collect()
+    }
+}
+
 /// Everything is referenced: nothing is marked or collected (the stand-in
 /// until every reference kind is wired).
 #[derive(Clone, Copy, Debug, Default)]

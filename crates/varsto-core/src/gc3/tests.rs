@@ -1640,3 +1640,34 @@ fn standing_follows_roles() {
     assert!(!writers.contains(&w.id(2)) && !writers.contains(&w.id(3)));
     assert_eq!(w.readers().len(), 4);
 }
+
+#[test]
+fn wp7_references_count_like_the_manifests_and_wait_for_unread_writers() {
+    let (a, b) = (0, 1);
+    let mut w = World::new(&[Class::Owner, Class::Owner]);
+    let blocks = photo(&mut w);
+    w.push(a, &[("photo.jpg", &blocks)], &[hot()]);
+    let writers = w.writers();
+    let o = crate::crypto::hash(&blocks[0]);
+    {
+        let refs = crate::trash3::Refs {
+            manifests: Some(&w.devs[b].manifests),
+            trash: None,
+            snapshots: None,
+            now: w.now,
+        };
+        let fr = FolderReferences::new(&refs);
+        assert!(!fr.is_referenced(&o), "B has not read A's manifest");
+        assert_eq!(fr.behind(&w.view, &FOLDER, &writers), vec![w.id(a)]);
+    }
+    w.pull_records(b);
+    let refs = crate::trash3::Refs {
+        manifests: Some(&w.devs[b].manifests),
+        trash: None,
+        snapshots: None,
+        now: w.now,
+    };
+    let fr = FolderReferences::new(&refs);
+    assert!(fr.is_referenced(&o));
+    assert!(fr.behind(&w.view, &FOLDER, &writers).is_empty());
+}
