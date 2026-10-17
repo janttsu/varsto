@@ -7,7 +7,7 @@
   "use strict";
   var LABEL_PATIENCE = 3;   // seconds a label may overlap something before it moves to another place
   // The pure rules (function declarations, hoisted) are exposed even without the page, for the tests of scripts/test/viz-rules.test.js.
-  window.varstoVizRules = { particleSpeed: particleSpeed, flowKey: flowKey, labelRank: labelRank, labelNeedsMove: labelNeedsMove, stickyWidth: stickyWidth, LABEL_PATIENCE: LABEL_PATIENCE };
+  window.varstoVizRules = { nextView: nextView, ageSeconds: ageSeconds, hasStorages: hasStorages, particleSpeed: particleSpeed, flowKey: flowKey, labelRank: labelRank, labelNeedsMove: labelNeedsMove, stickyWidth: stickyWidth, LABEL_PATIENCE: LABEL_PATIENCE };
   var page = document.querySelector('.page[data-page="viz"]');
   if (!page) { return; }
 
@@ -67,11 +67,11 @@
 
   // ---------------------------------------------------------------- state
   var skew = 0;                 // server clock minus ours, seconds
-  var snap = null, demo = false, status = "wait", lastOk = 0, errCount = 0;
+  var snap = null, phase = "loading", lastLive = 0, offline = false, errCount = 0;   // phase: loading | live | stale | error | locked (see nextView)
   var active = false, dirty = true, raf = 0, timer = 0, pollTimer = 0, abort = null;
   var mode = "auto";
   try { var m0 = localStorage.getItem("varsto-viz-bg"); if (m0 === "light" || m0 === "black" || m0 === "auto") { mode = m0; } } catch (e) { /* not kept */ }
-  var root, canvas, ctx, stage, side, bar, panels = {}, chipsBox, resEl, statusEl, dotEl, demoTag, fsBtn;
+  var root, canvas, ctx, stage, side, bar, panels = {}, chipsBox, resEl, statusEl, dotEl, noteEl, fsBtn;
   var W = 1, H = 1, dpr = 1, cssW = 1, cssH = 1;
   // The part of the canvas the board may use: all of it, or in the full-screen view of a wide screen the canvas minus the bar, the chips and the side panel drawn over it.
   var area = { x: 0, y: 0, w: 1, h: 1 };
@@ -109,7 +109,23 @@
     return st.w;
   }
 
-  // ---------------------------------------------------------------- demo data (nothing real)
+  // What the page shows, as a pure state machine. Until the first real answer there is nothing to draw (phase "loading"): never
+  // example content. `ev` is {ok: true, j: answer} or {ok: false}. A failed or "stale" answer keeps the last real data but is
+  // marked stale (drawn dimmed with its age); a failure without any data is an error with a retry. A locked vault has no data.
+  function nextView(prev, ev, now) {
+    if (ev.ok) {
+      var j = ev.j;
+      if (!j || !j.unlocked) { return { phase: "locked", snap: null, lastLive: 0, offline: false }; }
+      if (j.stale) { return { phase: "stale", snap: j, lastLive: prev.lastLive || now, offline: false }; }
+      return { phase: "live", snap: j, lastLive: now, offline: false };
+    }
+    if (prev.snap) { return { phase: "stale", snap: prev.snap, lastLive: prev.lastLive, offline: true }; }
+    return { phase: "error", snap: null, lastLive: 0, offline: false };
+  }
+  function ageSeconds(lastLive, now) { return lastLive ? Math.max(0, Math.round((now - lastLive) / 1000)) : 0; }
+  function hasStorages(j) { return !!(j && j.storages && j.storages.length); }
+
+  // ---------------------------------------------------------------- scene for the screenshot harness (nothing real; reachable only when the harness sets the flag, see the end of the file)
   function demoSnap() {
     var t = Date.now() / 1000;
     return {
@@ -179,8 +195,8 @@
     var main = el("div", "viz-main");
     stage = el("div", "viz-stage");
     canvas = el("canvas"); canvas.setAttribute("role", "img"); canvas.setAttribute("aria-label", T("Live picture of where Varsto keeps your data and what moves now"));
-    demoTag = el("div", "viz-demo hidden", T("Demo data"));
-    stage.appendChild(canvas); stage.appendChild(demoTag);
+    noteEl = el("div", "viz-note hidden"); noteEl.setAttribute("role", "status");
+    stage.appendChild(canvas); stage.appendChild(noteEl);
     side = el("aside", "viz-side");
     ["jobs", "disks", "protect", "health", "cost"].forEach(function (k) { panels[k] = el("section", "viz-card"); side.appendChild(panels[k]); });
     main.appendChild(stage); main.appendChild(side);
@@ -541,7 +557,13 @@
   function hits(r) { for (var i = 0; i < placed.length; i++) { var q = placed[i]; if (r.x < q.x + q.w + 4 && r.x + r.w + 4 > q.x && r.y < q.y + q.h + 2 && r.y + r.h + 2 > q.y) { return true; } } return false; }
   function draw(t) {
     if (!ctx) { return; }
-    var sn = snap || demoSnap(); curSn = sn;
+    if (!snap) {
+      // Nothing real has arrived (yet): an empty board, never example content.
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
+      curSn = null; layout = null; layoutKey = ""; anyMotion = false; placed = [];
+      return;
+    }
+    var sn = snap; curSn = sn;
     var dark = isDark(), pal = palette(dark);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -791,9 +813,12 @@
 
   function renderPanels() {
     if (!root) { return; }
-    var sn = snap || demoSnap();
-    // Chips.
+    updateStatus();
+    root.classList.toggle("viz-nodata", !snap);
     chipsBox.textContent = "";
+    if (!snap) { Object.keys(panels).forEach(function (k) { panels[k].textContent = ""; }); return; }
+    var sn = snap;
+    // Chips.
     var rx = 0, tx = 0;
     (sn.flows || []).forEach(function (f) { if (f.kind === "upload") { tx += f.bps || 0; } else if (f.kind === "download") { rx += f.bps || 0; } });
     var jobs = sn.jobs || [], alerts = sn.alerts || [], worst = sn.health ? sn.health.overall : "ok";
@@ -879,13 +904,31 @@
     if (side) { fitSide(overlayFull()); }
   }
   function updateStatus() {
-    var s = demo ? "demo" : status;
-    dotEl.dataset.s = s;
-    statusEl.txt.textContent = s === "live" ? T("Live") : s === "stale" ? T("Service busy: showing the last data") : s === "demo" ? T("Demo data") : s === "error" ? T("No answer from the service") : T("Loading");
-    demoTag.classList.toggle("hidden", !demo);
+    var age = ageSeconds(lastLive, Date.now());
+    var ageText = age > 0 ? " · " + dur(age) + " " + T("ago") : "";
+    dotEl.dataset.s = phase === "loading" || phase === "locked" ? "wait" : phase;
+    statusEl.txt.textContent = phase === "live" ? T("Live")
+      : phase === "stale" ? T(offline ? "No answer from the service" : "Service busy: showing the last data") + ageText
+      : phase === "error" ? T("No answer from the service") : phase === "locked" ? "" : T("Loading");
+    root.classList.toggle("viz-dim", phase === "stale");
+    // The note over the board: loading, error with retry, locked, or an honest empty vault.
+    var msg = "", retry = false;
+    if (phase === "loading") { msg = T("Loading…"); }
+    else if (phase === "error") { msg = T("No answer from the service"); retry = true; }
+    else if (phase === "locked") { msg = T("The vault is locked. Unlock it to see the picture."); }
+    else if (snap && !hasStorages(snap)) { msg = T("No storage added yet. Add one to see where your data goes."); }
+    noteEl.dataset.k = phase === "live" || phase === "stale" ? "empty" : phase;
+    noteEl.textContent = msg;
+    if (retry) {
+      var b = el("button", "viz-btn", T("Try again")); b.type = "button";
+      b.onclick = function () { errCount = 0; phase = "loading"; renderPanels(); poll(); };
+      noteEl.appendChild(b);
+    }
+    noteEl.classList.toggle("hidden", !msg);
   }
 
   // ---------------------------------------------------------------- data
+  function applyView(v) { phase = v.phase; snap = v.snap; lastLive = v.lastLive; offline = v.offline; }
   function poll() {
     clearTimeout(pollTimer);
     if (!active) { return; }
@@ -895,17 +938,15 @@
     fetch("/api/viz", { headers: { "X-Varsto-Token": token() }, signal: abort ? abort.signal : undefined, cache: "no-store" })
       .then(function (r) { if (!r.ok) { throw new Error("http " + r.status); } return r.json(); })
       .then(function (j) {
-        errCount = 0; lastOk = Date.now();
+        errCount = 0;
         skew = j.utc ? j.utc - (t0 + Date.now()) / 2000 : 0;
-        var has = j.unlocked && ((j.devices && j.devices.length) || (j.storages && j.storages.length));
-        demo = !has; snap = has ? j : null;
-        status = j.stale ? "stale" : "live";
+        applyView(nextView({ snap: snap, lastLive: lastLive }, { ok: true, j: j }, Date.now()));
         afterData();
       })
       .catch(function (e) {
         if (e && e.name === "AbortError") { return; }
-        errCount++; status = "error";
-        if (!snap) { demo = true; }
+        errCount++;
+        applyView(nextView({ snap: snap, lastLive: lastLive }, { ok: false }, Date.now()));
         afterData();
       })
       // Not while the page is hidden: showing it again asks at once.
@@ -936,7 +977,10 @@
   function activate() {
     if (!root) { buildDom(); loadManifest(); }
     if (active) { return; }
-    active = true; loadManifest(); detectDisplay(); renderPanels(); poll(); dirty = true; schedule(0);
+    active = true;
+    // What was drawn the last time the page was open may be old (or from before a lock): start from nothing until the first answer.
+    applyView({ phase: "loading", snap: null, lastLive: 0, offline: false }); errCount = 0; layout = null; layoutKey = "";
+    loadManifest(); detectDisplay(); renderPanels(); poll(); dirty = true; schedule(0);
   }
   function deactivate() {
     active = false; clearTimeout(pollTimer); clearTimeout(timer); timer = 0;
@@ -953,6 +997,8 @@
   document.addEventListener("visibilitychange", function () { if (active && document.visibilityState === "visible") { dirty = true; poll(); schedule(0); } });
   sync();
   // Exposed for tests: the snapshot the page draws and a way to feed one in.
-  window.varstoViz = { state: function () { return { pseudoFull: pseudoFull, inFull: inFull(), labels: JSON.parse(JSON.stringify(labels)), phases: JSON.parse(JSON.stringify(phases)) }; },
-    feed: function (j) { snap = j; demo = !j; status = "live"; afterData(); }, demo: demoSnap };
+  window.varstoViz = { state: function () { return { pseudoFull: pseudoFull, inFull: inFull(), labels: JSON.parse(JSON.stringify(labels)), phases: JSON.parse(JSON.stringify(phases)), phase: phase } ; } };
+  // Only the screenshot harness sets this flag (before the page loads, from the browser driver). No URL parameter, storage value or
+  // data from the service can switch it on, and nothing else in this file refers to the scene.
+  if (window.__VARSTO_VIZ_TEST === true) { window.varstoViz.demo = demoSnap; window.varstoViz.feed = function (j) { applyView({ phase: "live", snap: j, lastLive: Date.now(), offline: false }); afterData(); }; }
 })();

@@ -65,6 +65,8 @@ with sync_playwright() as p:
         if os.environ.get("VIZ_UI"):  # develop the page without rebuilding: serve viz.js and viz.css from this directory
             for f, ct in (("viz.js", "text/javascript"), ("viz.css", "text/css")):
                 pg.route("**/" + f, (lambda f, ct: lambda route, _request=None: route.fulfill(status=200, content_type=ct, path=os.path.join(os.environ["VIZ_UI"], f)))(f, ct))
+        # The page's scene hook (varstoViz.demo / feed) exists only when this flag is set before the page loads.
+        pg.add_init_script("window.__VARSTO_VIZ_TEST = true;")
         pg.goto(boot_url())
         pg.wait_for_selector("body[data-view='app']", timeout=30000)
         pg.evaluate(f"localStorage.setItem('varsto-viz-bg', '{mode}'); sessionStorage.setItem('varsto-page', 'viz');")
