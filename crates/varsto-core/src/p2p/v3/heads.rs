@@ -113,6 +113,7 @@ impl HeadsAnswer {
 
 /// The local ledger as the peer-to-peer side sees it. Implemented by the
 /// format-3 ledger store when the engine switches over (work package 12).
+// WP12: implement over ledger3::LedgerStore (`head`, `get`).
 pub trait BatchSource: Send + Sync {
     /// The newest batch held of every full device (this one included).
     fn heads(&self) -> Vec<HeadRef>;
@@ -248,6 +249,7 @@ pub fn check_fetched<T: RecordBody>(
 
 /// Where batches fetched from peers go: the ledger store, which checks the
 /// chain and keeps them as from any source but does not push them.
+// WP12: implement over ledger3::LedgerStore (`head`, `ingest`).
 pub trait BatchSink {
     /// The seq of the newest batch held of `device` (0: none).
     fn head(&self, device: &Id16) -> u64;
