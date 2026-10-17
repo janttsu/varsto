@@ -76,6 +76,16 @@ pub struct LedgerBehind {
     /// Pulls in a row that found it so; from `WITHHOLD_PULLS` on, a
     /// storage may be withholding batches and `warnings` says so.
     pub pulls: u32,
+    /// Where the gap was learned from: `acks` (another device's signed
+    /// acknowledgement), `peer` (a head statement a peer sent over
+    /// peer-to-peer, section 74) or `pending` (batches wait for a
+    /// predecessor that no storage offered).
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+fn default_source() -> String {
+    "acks".into()
 }
 
 /// Pulls in a row a gap must survive before it is reported as a storage
@@ -215,6 +225,10 @@ pub(super) struct Alarm {
     no_ledger: bool,
     repairing: bool,
     lost_checked_utc: Option<i64>,
+    /// The newest head statement of every peer (`ledger/heads-seen.json`).
+    pub(super) heads: crate::ledger_heads::HeadsSeen,
+    /// When the peers were last asked for their statements.
+    pub(super) heads_asked: Option<std::time::Instant>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -228,7 +242,10 @@ impl Alarm {
     pub(super) fn at_open(e: &Engine, pending_lost: bool) -> Alarm {
         let me = &e.vault.device_id;
         let head = e.ledger.head(me);
-        let mut a = Alarm::default();
+        let mut a = Alarm {
+            heads: crate::ledger_heads::HeadsSeen::load(&e.home),
+            ..Alarm::default()
+        };
         if e.removal.is_some() {
             // A removed device signs nothing anyway.
             return a;
@@ -556,10 +573,17 @@ impl Engine {
             .iter()
             .filter(|b| b.pulls >= WITHHOLD_PULLS)
             .map(|b| {
-                format!(
-                    "a storage may be withholding ledger batches of {} (held up to #{}, another device holds #{})",
-                    b.name, b.held, b.seen
-                )
+                if b.source == "peer" {
+                    format!(
+                        "a storage may be withholding or rolling back ledger batches of {} (a peer holds #{}, the storages give #{})",
+                        b.name, b.seen, b.held
+                    )
+                } else {
+                    format!(
+                        "a storage may be withholding ledger batches of {} (held up to #{}, another device holds #{})",
+                        b.name, b.held, b.seen
+                    )
+                }
             })
             .collect();
         let junk: u64 = a.watch.junk.values().map(|k| k.len() as u64).sum();

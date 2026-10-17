@@ -1511,6 +1511,7 @@
   "Bucket": "Bucket",
   "Status": "Status",
   "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.": "En lagringsplats kan hålla inne liggarbatcher från {device}: en annan enhet har nyare batcher som ingen lagringsplats har gett den här enheten.",
+  "A storage may be withholding or rolling back ledger batches of {device}: another device holds newer ones that no storage gives this device.": "En lagringsplats kan hålla inne eller rulla tillbaka liggarbatcher från {device}: en annan enhet har nyare batcher som ingen lagringsplats ger den här enheten.",
   "Staged move of folder": "Stegvis flytt av mappen",
   "left to move": "kvar att flytta",
   "need a second place": "behöver en kopia på en annan plats",

@@ -29,4 +29,6 @@ Status of the documents that will define formats and protocols. Sections 32 to 6
 
 Storage format version history (which releases read which formats): see [format-versions.md](format-versions.md).
 
+Storage format 3 (planned, not implemented): pack-level ledger, folder block maps, signed records, base + delta manifests and padded packs. Binding design: [format-3-design.md](format-3-design.md).
+
 Failure model (what fails and what does not): see [../failure-model.md](../failure-model.md).

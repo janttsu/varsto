@@ -14,7 +14,7 @@ publish = false
 software-key = []
 # Storage format 3 (docs/spec/format-3-design.md), built up work package
 # by work package; off until the format switches over.
-format3 = ["dep:postcard"]
+format3 = ["dep:postcard", "dep:smallvec"]
 
 [dependencies]
 anyhow.workspace = true
@@ -59,6 +59,7 @@ sha1 = "0.10"
 md-5 = "0.10"
 blake2 = "0.10"
 postcard = { version = "1", default-features = false, features = ["use-std"], optional = true }
+smallvec = { version = "1.13", features = ["serde", "union"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

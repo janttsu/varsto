@@ -46,7 +46,7 @@ pub const ALPN: &[u8] = b"varsto-p2p/1";
 pub const PUNCH_MAGIC: [u8; 8] = *b"VARSTOPU";
 pub const CERT_FILE: &str = "p2p-cert.der";
 pub const KEY_FILE: &str = "p2p-key.der";
-const MAX_HEAD: usize = 8 * 1024;
+const MAX_HEAD: usize = 32 * 1024;
 /// Objects are at most one chunk plus overhead; relays copy whole bodies.
 const MAX_BODY: usize = 64 * 1024 * 1024;
 /// Streams a peer may have open on one connection (the fetch window is 32).

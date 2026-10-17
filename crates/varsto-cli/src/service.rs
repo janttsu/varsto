@@ -479,10 +479,17 @@ impl ServiceState {
 
     /// Keep the ledger's state; a new state is an event.
     fn set_ledger_health(&mut self, h: varsto_core::engine::LedgerHealth) {
-        if self.ledger_health.as_ref().map(|o| o.state.as_str()) != Some(h.state.as_str()) {
+        // A new state, or new warnings (a storage that may be withholding or
+        // rolling back batches, section 74), is an event.
+        let changed = self
+            .ledger_health
+            .as_ref()
+            .map(|o| (o.state.as_str(), &o.warnings))
+            != Some((h.state.as_str(), &h.warnings));
+        if changed {
             varsto_core::events::publish(
                 "ledger.health",
-                json!({"state": h.state, "text": h.describe()}),
+                json!({"state": h.state, "text": h.describe(), "warnings": h.warnings}),
             );
         }
         self.ledger_health = Some(h);
