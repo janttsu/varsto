@@ -63,4 +63,37 @@ assert.strictEqual(R.stickyWidth(w, 90, 2), 120, "does not shrink for a number o
 assert.strictEqual(R.stickyWidth(w, 110, 5), 120);
 assert.strictEqual(R.stickyWidth(w, 90, 12), 90, "shrinks after ten seconds of being narrower");
 
+// ---- what the page shows: nothing invented, ever (spec section 64)
+const none = { snap: null, lastLive: 0 };
+const live = { unlocked: true, devices: [{ id: "d1" }], storages: [{ name: "x" }] };
+// loading -> data
+let v = R.nextView(none, { ok: true, j: live }, 1000);
+assert.deepStrictEqual([v.phase, v.snap === live, v.lastLive, v.offline], ["live", true, 1000, false]);
+// loading -> error (no data, nothing drawn), and a later answer recovers
+v = R.nextView(none, { ok: false }, 1000);
+assert.deepStrictEqual([v.phase, v.snap], ["error", null]);
+v = R.nextView(v, { ok: true, j: live }, 2000);
+assert.strictEqual(v.phase, "live");
+// live -> failed request: the last real data stays, marked stale (offline), its age keeps counting from the last live answer
+let x = R.nextView(v, { ok: false }, 9000);
+assert.deepStrictEqual([x.phase, x.snap === live, x.lastLive, x.offline], ["stale", true, 2000, true]);
+assert.strictEqual(R.ageSeconds(x.lastLive, 9000), 7);
+// an answer the service marks stale is stale, not live, and does not refresh the age
+x = R.nextView(v, { ok: true, j: Object.assign({ stale: true }, live) }, 5000);
+assert.deepStrictEqual([x.phase, x.lastLive, x.offline], ["stale", 2000, false]);
+// stale without an earlier live answer still has an age base
+assert.strictEqual(R.nextView(none, { ok: true, j: Object.assign({ stale: true }, live) }, 7000).lastLive, 7000);
+// a fresh answer clears the stale state
+assert.strictEqual(R.nextView(x, { ok: true, j: live }, 6000).phase, "live");
+// locked vault: no data at all, whatever was drawn before
+x = R.nextView(v, { ok: true, j: { unlocked: false } }, 3000);
+assert.deepStrictEqual([x.phase, x.snap], ["locked", null]);
+// an unreadable answer is never data
+assert.strictEqual(R.nextView(none, { ok: true, j: null }, 1).snap, null);
+// empty vault (unlocked, no storages) is data, and says so honestly
+assert.strictEqual(R.hasStorages({ unlocked: true, devices: [{ id: "d1" }], storages: [] }), false);
+assert.strictEqual(R.hasStorages(live), true);
+assert.strictEqual(R.nextView(none, { ok: true, j: { unlocked: true, devices: [{ id: "d1" }], storages: [] } }, 1).phase, "live");
+assert.strictEqual(R.ageSeconds(0, 5000), 0);
+
 console.log("viz rules: ok");

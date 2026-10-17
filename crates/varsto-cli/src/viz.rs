@@ -277,6 +277,56 @@ mod tests {
         }
     }
 
+    /// The example scene of the page (used for the screenshots) is reachable only through the
+    /// harness flag: every mention of it sits on the flagged line, nothing falls back to it, and
+    /// no URL parameter or stored value is read for it.
+    #[test]
+    fn page_has_no_demo_scene_entry_points() {
+        let js = include_str!("../ui/viz.js");
+        let flag = "window.__VARSTO_VIZ_TEST === true";
+        let uses: Vec<&str> = js
+            .lines()
+            .filter(|l| l.contains("demoSnap") && !l.trim_start().starts_with("function demoSnap"))
+            .collect();
+        assert_eq!(uses.len(), 1, "demoSnap used once: {uses:?}");
+        assert!(uses[0].contains(flag), "the only use is behind the flag");
+        for bad in [
+            "|| demoSnap",
+            "snap || ",
+            "demo = !",
+            "Demo data",
+            "__vizScene",
+            "location.search",
+            "URLSearchParams",
+            "location.hash",
+        ] {
+            assert!(!js.contains(bad), "viz.js must not contain {bad:?}");
+        }
+        assert_eq!(
+            js.matches("feed:").count() + js.matches(".feed =").count(),
+            1,
+            "one feed hook"
+        );
+        assert!(
+            js.contains("window.varstoViz.feed = ")
+                && js
+                    .lines()
+                    .any(|l| l.contains(flag) && l.contains("varstoViz.feed"))
+        );
+        // The scene is not read from storage: the only keys the page reads are the background mode and the token.
+        for line in js
+            .lines()
+            .filter(|l| l.contains("localStorage.getItem") || l.contains("sessionStorage.getItem"))
+        {
+            assert!(
+                line.contains("varsto-viz-bg") || line.contains("varsto-token"),
+                "unexpected storage read: {line}"
+            );
+        }
+        // Until the first answer nothing is drawn: draw() returns before it builds a model without data.
+        assert!(js.contains("if (!snap) {\n      // Nothing real has arrived"));
+    }
+
     /// Full screen asks the shell it runs in for the window's own full-screen mode, and
     /// every shell answers: the names the page uses are the ones the shells define.
     #[test]
