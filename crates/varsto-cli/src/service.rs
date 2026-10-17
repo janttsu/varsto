@@ -6,8 +6,9 @@
 //! Unlocking: the service starts locked unless the passphrase comes from the
 //! `VARSTO_PASSPHRASE` environment variable, the macOS login keychain
 //! (`security find-generic-password -s varsto -a <home>`, where the menu-bar
-//! app can store it) or the Linux desktop keyring (`secret-tool`, stored by
-//! `varsto service remember`). The desktop page and any command line that
+//! app can store it), or whatever `varsto service remember` used on Linux:
+//! the desktop keyring, `systemd-creds` or the kernel keyring (spec section
+//! 72). The desktop page and any command line that
 //! asks for the passphrase unlock it as well.
 
 use crate::desktop::{self, Shared, State};
@@ -1544,55 +1545,9 @@ pub fn passphrase_from_system(home: &Path) -> Option<String> {
             return Some(p);
         }
     }
-    #[cfg(target_os = "macos")]
-    {
-        let out = std::process::Command::new("security")
-            .args([
-                "find-generic-password",
-                "-s",
-                "varsto",
-                "-a",
-                &home.display().to_string(),
-                "-w",
-            ])
-            .output()
-            .ok()?;
-        if out.status.success() {
-            let p = String::from_utf8_lossy(&out.stdout)
-                .trim_end_matches('\n')
-                .to_string();
-            if !p.is_empty() {
-                return Some(p);
-            }
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        // The desktop keyring (GNOME Keyring, KWallet) through libsecret's tool.
-        // A locked keyring makes secret-tool wait for an unlock window,
-        // which never appears without a desktop session: give up after a
-        // while instead of hanging the service at start.
-        if let Ok(out) = run_secret_tool(
-            &[
-                "lookup",
-                "service",
-                "varsto",
-                "home",
-                &home.display().to_string(),
-            ],
-            None,
-            SECRET_TOOL_LOOKUP_TIMEOUT,
-        ) {
-            let p = String::from_utf8_lossy(&out.stdout)
-                .trim_end_matches('\n')
-                .to_string();
-            if out.status.success() && !p.is_empty() {
-                return Some(p);
-            }
-        }
-    }
-    let _ = home;
-    None
+    // systemd-creds, the kernel keyring, the desktop keyring or the macOS
+    // login keychain, whichever `remember` used (see `remember.rs`).
+    crate::remember::load(home)
 }
 
 /// Whether the desktop keyring's default collection is locked (Linux,
@@ -1631,176 +1586,16 @@ pub fn has_display() -> bool {
         || std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
 }
 
-/// What `remember` says when no desktop keyring can be used here.
-#[cfg(target_os = "linux")]
-const NO_DESKTOP_REMEMBER: &str = "`varsto service remember` needs a desktop session: no keyring can be reached from this session (over SSH, for example). Instead, set the VARSTO_PASSPHRASE environment variable for the service, or unlock it with `varsto unlock`";
-
-/// No desktop keyring can be reached from this process: no display, and
-/// either a remote login (SSH) or no session bus.
-#[cfg(target_os = "linux")]
-fn no_desktop_keyring() -> bool {
-    if has_display() {
-        return false;
-    }
-    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
-    set("SSH_CONNECTION") || set("SSH_TTY") || !set("DBUS_SESSION_BUS_ADDRESS")
-}
-
-#[cfg(target_os = "linux")]
-const TIMED_OUT: &str = "secret-tool timed out";
-/// Long enough to type a password into an unlock window.
-#[cfg(target_os = "linux")]
-const SECRET_TOOL_STORE_TIMEOUT: Duration = Duration::from_secs(90);
-#[cfg(target_os = "linux")]
-const SECRET_TOOL_LOOKUP_TIMEOUT: Duration = Duration::from_secs(20);
-
-/// Run `secret-tool` with `args`, feeding `stdin`, and kill it after
-/// `timeout`. Output is read on threads so a full pipe cannot stall it.
-#[cfg(target_os = "linux")]
-fn run_secret_tool(
-    args: &[&str],
-    stdin: Option<&[u8]>,
-    timeout: Duration,
-) -> Result<std::process::Output> {
-    use std::io::{Read, Write};
-    use std::process::{Command, Stdio};
-    let mut child = Command::new("secret-tool")
-        .args(args)
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("secret-tool (libsecret) is not installed")?;
-    if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
-        pipe.write_all(data)?;
-    }
-    let mut out_pipe = child.stdout.take().expect("piped");
-    let mut err_pipe = child.stderr.take().expect("piped");
-    let out_t = std::thread::spawn(move || {
-        let mut b = Vec::new();
-        let _ = out_pipe.read_to_end(&mut b);
-        b
-    });
-    let err_t = std::thread::spawn(move || {
-        let mut b = Vec::new();
-        let _ = err_pipe.read_to_end(&mut b);
-        b
-    });
-    let start = Instant::now();
-    let status = loop {
-        if let Some(st) = child.try_wait()? {
-            break st;
-        }
-        if start.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(anyhow!(TIMED_OUT));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
-    Ok(std::process::Output {
-        status,
-        stdout: out_t.join().unwrap_or_default(),
-        stderr: err_t.join().unwrap_or_default(),
-    })
-}
-
-/// Keep the passphrase in the system keyring so the background service
-/// unlocks itself after a restart (macOS login keychain; on Linux the
-/// desktop keyring through `secret-tool`).
+/// Keep the passphrase where the background service finds it after a
+/// restart, in the first store that works (see `remember.rs`); the text
+/// names the store used.
 pub fn remember_passphrase(home: &Path, pass: &str) -> Result<String> {
-    #[cfg(target_os = "linux")]
-    use std::io::Write;
-    let account = home.display().to_string();
-    #[cfg(target_os = "macos")]
-    {
-        // `security -i` reads its commands from standard input, so the
-        // passphrase is in no process argument (`ps` shows arguments of every
-        // process of the user). Inside a command, double quotes and
-        // backslashes are escaped.
-        use std::io::Write;
-        if pass.contains(['\n', '\r']) {
-            return Err(anyhow!(
-                "the passphrase has a line break; it cannot be kept in the keychain"
-            ));
-        }
-        let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
-        let mut child = std::process::Command::new("security")
-            .arg("-i")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
-        {
-            let mut stdin = child
-                .stdin
-                .take()
-                .ok_or_else(|| anyhow!("security: no stdin"))?;
-            writeln!(
-                stdin,
-                "add-generic-password -U -s varsto -a {} -w {}",
-                quote(&account),
-                quote(pass)
-            )?;
-        }
-        let out = child.wait_with_output()?;
-        // The interactive mode answers on stdout/stderr with the command's
-        // errors; its exit code is 0 after end of input unless the command failed.
-        if !out.status.success() || String::from_utf8_lossy(&out.stderr).contains("security:") {
-            return Err(anyhow!(
-                "security: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ));
-        }
-        return Ok("kept in the login keychain".into());
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if no_desktop_keyring() {
-            return Err(anyhow!(NO_DESKTOP_REMEMBER));
-        }
-        let _ = std::io::stdout().flush();
-        eprintln!("Storing it in your keyring. If a window asks to unlock the keyring, enter your login password there.");
-        let out = match run_secret_tool(
-            &[
-                "store",
-                "--label=Varsto",
-                "service",
-                "varsto",
-                "home",
-                &account,
-            ],
-            Some(pass.as_bytes()),
-            SECRET_TOOL_STORE_TIMEOUT,
-        ) {
-            Ok(out) => out,
-            Err(e) if e.to_string() == TIMED_OUT => {
-                return Err(anyhow!(
-                    "the keyring did not answer within {} seconds. {}",
-                    SECRET_TOOL_STORE_TIMEOUT.as_secs(),
-                    NO_DESKTOP_REMEMBER
-                ))
-            }
-            Err(e) => return Err(e),
-        };
-        if !out.status.success() {
-            return Err(anyhow!(
-                "secret-tool could not store it: {}. {}",
-                String::from_utf8_lossy(&out.stderr).trim(),
-                NO_DESKTOP_REMEMBER
-            ));
-        }
-        return Ok("kept in your keyring".into());
-    }
-    #[allow(unreachable_code)]
-    {
-        let _ = (account, pass);
-        Err(anyhow!("no system keyring support on this platform"))
-    }
+    crate::remember::remember(home, pass)
+}
+
+/// Remove the remembered passphrase from every store.
+pub fn forget_passphrase(home: &Path) -> Result<String> {
+    crate::remember::forget(home)
 }
 
 /// Unlock a running service that is locked, with a passphrase the command

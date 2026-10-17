@@ -16,6 +16,7 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+- `varsto service remember` now works without a desktop session (over SSH, on servers). It tries the desktop keyring, then `systemd-creds encrypt --user` (an encrypted `passphrase.cred` in the device directory, read by the service at start, survives a restart), then the Linux kernel keyring (until the computer restarts), and says which one it used; when none works the error lists what was tried. New `varsto service forget` removes the passphrase from whichever store holds it, and `varsto service status` shows where it is remembered (spec 72).
 - The unsigned iOS `.ipa` joins the release download set (`publish-ci-release.sh` adds it to `SHA256SUMS` and `manifest.json`) and gets a download card on the website.
 
 ## [0.0.1-alpha.15] - 2026-10-16
