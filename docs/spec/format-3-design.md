@@ -43,7 +43,7 @@ A holder of K3 alone (a device joined with the vault words and not yet approved 
 
 Unchanged from format 2, stated briefly: keyed content-defined chunker with size tiers (`chunking: 2`; under 1 MiB one block; 1–32 MiB avg 1 MiB, 256 KiB–4 MiB; 32 MiB–1 GiB avg 4 MiB, 1–16 MiB; from 1 GiB avg 8 MiB, 2–16 MiB; unknown size: 1 MiB tier); chunk id = keyed BLAKE3(K11, plaintext); `pack(plain)` = method byte (0 raw, 1 zstd 3) || payload, zstd tried only when a 64 KiB level-1 probe saves at least 5 %; chunk object = `nonce (24) || ciphertext || tag (16)` under K14 with the derived nonce; chunk AAD = aad("chunk", [vault, folder, epoch u32, chunk id, plaintext length u64, packed length u64]); object name = BLAKE3(chunk object); a reader checks the nonce against the packed bytes, the plaintext against the chunk id, and the object against its name. One function seals (`chunk_seal::seal_chunk`), one opens.
 
-**Pack layout.** `packs/<xx>/<pack id hex>`: member objects back to back from offset 0, then padding, nothing else (no header, no trailer, no index). Pack id = BLAKE3 of all bytes including the padding. Padding is bytes from the OS CSPRNG. The pack length is exactly one **size class**: 1, 4, 16 or 64 MiB on hot, local, pool and transferrer storages; 1, 4, 16, 64 or 256 MiB on cold storages (MiB = 2^20). A reader refuses a pack, a `pack_stored` event or a map pack reference whose length is not a class (`"pack <id> has length <n>, not a size class"`), and `storage::MAX_PACK` becomes exactly 256 MiB. Members never overlap, never cross the end of the members area, and a member's length is at most `MAX_CHUNK_SIZE + 1 + 40` (16 MiB + method byte + nonce and tag).
+**Pack layout.** `packs/<xx>/<pack id hex>`: member objects back to back from offset 0, then padding, nothing else (no header, no trailer, no index). Pack id = BLAKE3 of all bytes including the padding. Padding is bytes from the OS CSPRNG. The pack length is exactly one **size class**: 256 KiB, 1, 4, 16 or 64 MiB on hot, local, pool and transferrer storages; the same plus 256 MiB on cold storages (KiB = 2^10, MiB = 2^20). A reader refuses a pack, a `pack_stored` event or a map pack reference whose length is not a class (`"pack <id> has length <n>, not a size class"`), and `storage::MAX_PACK` becomes exactly 256 MiB. Members never overlap, never cross the end of the members area, and a member's length is at most `MAX_CHUNK_SIZE + 1 + 40` (16 MiB + method byte + nonce and tag).
 
 **Choosing the class.** A pack builder collects members in a buffer per **target set** (the set of storages a group of blocks goes to, so one pack is written byte-identical to every storage of the set and has one id there; packs for cold storages are built separately because their class limit differs). It closes a pack when the next member would pass the largest class of the set, filling first-fit-decreasing from the buffer so that full packs are at least 98 % members; the last pack of a push, an import, a repair or a rewrite takes the smallest class its members fit in. The padding of a pack is therefore below 3/4 of its class, and below 2 % for every pack but the last of an operation. Reason for random padding rather than zeros: a zero tail would show where members end to anyone holding the pack.
 
@@ -51,7 +51,7 @@ Unchanged from format 2, stated briefly: keyed content-defined chunker with size
 
 **Writing.** Put-if-absent; S3 multipart in 16 MiB parts above 64 MiB; HEAD before PUT finds a pack that is there. Packs are written before the map record that lists them and before the batch that claims them (section 3, "Writer").
 
-Reservation (padding cost of small pushes): a push of one small edit costs a 1 MiB pack on every storage of its target set. With the service syncing a frequently saved document every few minutes, a hot storage gains up to ~300 MiB a day per such file before compaction (section 3, "Compaction") folds them; on S3 with request and per-object costs this is visible. Implemented as decided; the compaction rule bounds the steady state, but a smaller first class (64 KiB or 256 KiB) would cut the transient cost at a modest loss in size hiding.
+Cost of small pushes: a push of one small edit costs a 256 KiB pack on every storage of its target set. With the service syncing a frequently saved document every few minutes, a hot storage gains up to ~75 MiB a day per such file (a quarter of what a 1 MiB first class would cost) before compaction (section 3, "Compaction") folds them; the compaction rule bounds the steady state. A storage learns from a 256 KiB pack only that its members total at most 256 KiB.
 
 ## 3. Folder block map
 
@@ -70,7 +70,7 @@ BlockMap {
   entries: Vec<MapEntry>,    // base: every live place this writer wrote; delta: places added since seq-1
   marks: Vec<Mark>,          // dead / undead / lost marks on places of any writer of the folder
 }
-PackRef  { id: [u8;32], class: u8 }   // class: 0=1 MiB, 1=4, 2=16, 3=64, 4=256
+PackRef  { id: [u8;32], class: u8 }   // class: 0=256 KiB, 1=1 MiB, 2=4, 3=16, 4=64, 5=256 (cold only)
 MapEntry { object: [u8;32], chunk: [u8;32], pack: u32, offset: u32, len: u32, plain_len: u32, epoch: u32, flags: u8 }
 Mark     { object: [u8;32], pack: [u8;32], offset: u32, kind: u8 }   // 1 dead, 2 undead, 3 lost
 ```
@@ -174,11 +174,13 @@ SignedRecord (postcard, after the 4 magic bytes "VSR3") {
   format: u16 = 3, kind: u8, vault: [16], scope: [16] (zeros = vault-wide), device: [16],
   seq: u64, part: u16, parts: u16, key_id: String, body_hash: [32], sig_alg: u8 (1 = ed25519+ml-dsa-65),
   sig: Vec<u8>,   // 64 + 3309 bytes, over aad("record-signature", [kind, vault, scope, device, seq, part, parts, key_id, body_hash])
-  body: Vec<u8>,  // nonce || AEAD ciphertext || tag; plaintext = zstd(postcard(body struct))
+  body: Vec<u8>,  // nonce || AEAD ciphertext || tag; plaintext = len: u32 || zstd(postcard(body struct)) || padding
 }
 body AAD = aad(<kind name>, [vault, scope, device, seq u64, part u16, parts u16, key_id])
 body_hash = BLAKE3(body)
 ```
+
+**Padding.** The body plaintext is `len: u32 (little-endian) || zstd(postcard(body)) || random padding`, where `len` is the length of the zstd part and the padding is CSPRNG bytes chosen so that the length of `body` (nonce, ciphertext and tag) is a multiple of 64 KiB below 4 MiB and a multiple of 1 MiB from 4 MiB up. A reader takes `len` bytes after the length field and ignores the rest; a `len` that passes the end of the plaintext is junk. A record part is still at most 32 MiB of `body`. This applies to every kind, batches and checkpoints included.
 
 Storage name: `<stream prefix>/<seq 16 digits>-<part 4 digits>.rec`; MAX_PART_BODY = 32 MiB, MAX_PARTS = 1024, read limit per part 33 MiB. Kinds and their streams:
 
@@ -235,9 +237,9 @@ Manifest { folder, device, seq, lamport, created_utc, base: u64, prev: [32],
            removed: Vec<String> }      // delta only: paths that left the view (normally never: deletions are FileStates with deleted = true)
 ```
 
-`FileState` keeps its format-2 fields (path, version vector, deleted, size, mtime, content hash, chunks as (chunk id, object, size, epoch), modified_by, modified_clock, meta, chunking) and gains `held: bool` (section 4). Encoding is postcard + zstd with device ids in version vectors interned through a per-record table `devices: Vec<[16]>`. A base is written at the 64th delta after the previous base, or when the deltas since the base reach 1/4 of its bytes. Readers reconstruct a writer's view as base + deltas in order (`prev` checked) and merge it with the section 7 rules, unchanged: applying only the changed entries of a delta gives the same result as merging the full view, because unchanged entries were merged before. Pruning: a writer deletes records below its newest base once every reader of the folder has acknowledged the batch that announced that base (section 25's rule with "base" in place of "manifest").
+`FileState` keeps its format-2 fields (path, version vector, deleted, size, mtime, content hash, chunks as (chunk id, object, size, epoch), modified_by, modified_clock, meta, chunking) and gains `held: bool` (section 4). Encoding is postcard + zstd with device ids in version vectors interned through a per-record table `devices: Vec<[16]>`. A new base is written when both hold: at least 64 deltas since the previous base, and the deltas' bytes reach at least 1/16 of the base's bytes; a base is forced at 1024 deltas. Worst case at 1 M files (base ~350 MB, written to every hot metadata storage): small publishes never meet the size condition, so a base is rewritten once per 1024 publishes (~340 KB per publish averaged) and a joining reader reads the base plus at most 1024 deltas totalling under ~22 MB; publishes that each rewrite most entries (a mass metadata change) meet the size condition at once, so a base follows after 64 deltas and a joining reader reads at most the base plus 64 such deltas (up to ~64 × 350 MB in the extreme where every delta touches every file). Base bytes written are at most 16 times the delta bytes they replace. Readers reconstruct a writer's view as base + deltas in order (`prev` checked) and merge it with the section 7 rules, unchanged: applying only the changed entries of a delta gives the same result as merging the full view, because unchanged entries were merged before. Pruning: a writer deletes records below its newest base once every reader of the folder has acknowledged the batch that announced that base (section 25's rule with "base" in place of "manifest").
 
-Reservation (manifest base size): with 1 M files a base is ~350 MB (paths compress, the ~4.3 hashes per file do not), written to every hot metadata storage. "A base every 64 publishes" then costs about 5.5 MB per publish averaged, which for a service that publishes every few minutes on a busy folder is several GB a day per device. Implemented as decided (count or size, whichever first); the suggested alternative is the count rule "64 deltas and at least 1/16 of the base's bytes", which keeps chains short for small folders and stops large ones from rewriting their base for a handful of changes.
+Why both conditions: with 1 M files a base is ~350 MB (paths compress, the ~4.3 hashes per file do not); a count rule alone would rewrite it every 64 publishes, several GB a day per device on a busy folder, while small folders still get short chains.
 
 **Trash and history.** Stream `trash/<folder>/<device>/`, kind `trash`, announced. Body: `{folder, device, seq, lamport, base, prev, entries: Vec<TrashEntry>, removals: Vec<Removal>, versions: Vec<HistoryEntry>, forget: Vec<[u8;16] entry id>}`. Base = the device's whole record (what the format-2 record held); delta = entries, removals and versions added since seq − 1 plus ids the writer forgot (the 7-days-past-expiry rule). Base every 64 deltas or at 1/4 of the base's bytes; pruning as manifests. The union-and-removal semantics of sections 43 and 50 are unchanged; ids recompute as before. `<utc>`-named records disappear.
 
@@ -274,13 +276,11 @@ A member never writes registry kinds, epochs, revocations, `storage_retired`, sn
 
 ## 10. What each party can learn
 
-- **The storage**: vault id; device ids and how often each writes (record names carry device and sequence, never time); folder ids and the number of writer streams per folder; pack sizes as size classes only, how many packs and when they appear and go; record sizes (manifests, maps, trash: roughly proportional to file counts and changes, not padded: Reservation below); that a folder has grants to KEM keys of other vaults' devices. Not: file names, file sizes, file counts per pack, where a block starts or ends, chunk ids, object names of blocks (only pack ids), whether a known file is present.
+- **The storage**: vault id; device ids and how often each writes (record names carry device and sequence, never time); folder ids and the number of writer streams per folder; pack sizes as size classes only, how many packs and when they appear and go; record sizes padded to 64 KiB steps below 4 MiB and 1 MiB steps above (section 5), so manifests, maps and trash records show file and block counts and the size of changes only at that granularity; that a folder has grants to KEM keys of other vaults' devices. Not: file names, file sizes, file counts per pack, where a block starts or ends, chunk ids, object names of blocks (only pack ids), whether a known file is present.
 - **A holder of K3 only**: everything the storage learns, plus device names, folder names, settings and participants, which storage holds which pack, bytes per folder, record announcements (kind, seq, size) and peer addresses. Never chunk ids, object names, block places or contents.
 - **A member of a shared folder**: everything of that folder (K10): file names, contents, maps; the folder's places in packs; nothing of other folders (their packs are listed on the storage, nothing more).
 - **A replica**: pack ids, sizes, its own claims; it copies packs whole and needs no folder key.
 - **A peer** (a full device of the vault): what any full device knows; over the wire an eavesdropper learns nothing (TLS 1.3).
-
-Reservation (record sizes): manifests, maps and trash records are compressed but not padded, so their sizes track the number of files and blocks per folder and per change. Padding them to size classes would cost little; it is outside the lead's change 4 and not specified here.
 
 ## 11. Migration
 
