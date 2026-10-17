@@ -373,6 +373,13 @@ impl SigningKey {
         }
         out
     }
+    /// The Ed25519 part alone (64 bytes), for messages that must stay small
+    /// and only suggest something a stronger check then confirms (format-3
+    /// LAN beacons, design section 8).
+    pub fn sign_ed25519(&self, msg: &[u8]) -> [u8; ED_SIG_LEN] {
+        use ed25519_dalek::Signer as _;
+        self.ed.sign(msg).to_bytes()
+    }
 }
 
 /// Device public key: Ed25519 key followed by the ML-DSA-65 key (32 + 1952
@@ -444,6 +451,14 @@ impl VerifyingKey {
             (SIG_ALG, None) => bail!("legacy device key cannot verify a hybrid signature"),
             (other, _) => bail!("unsupported signature algorithm {other}"),
         }
+    }
+    /// Check a signature of `SigningKey::sign_ed25519` (the Ed25519 part
+    /// only; see there for where that is enough).
+    pub fn verify_ed25519(&self, msg: &[u8], sig: &[u8]) -> Result<()> {
+        if sig.len() != ED_SIG_LEN {
+            bail!("signature must be 64 bytes");
+        }
+        self.verify_ed(msg, sig)
     }
     fn verify_ed(&self, msg: &[u8], sig: &[u8]) -> Result<()> {
         let arr: [u8; ED_SIG_LEN] = sig.try_into().unwrap();
