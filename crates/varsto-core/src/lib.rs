@@ -33,6 +33,7 @@ pub mod ignore_rules;
 pub mod import;
 pub mod kem;
 pub mod ledger;
+pub mod ledger_heads;
 pub mod logging;
 pub mod manifest;
 pub mod media;
