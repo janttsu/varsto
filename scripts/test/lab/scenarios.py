@@ -303,7 +303,9 @@ def s_repair():
     check(len(packs) >= 2, f"{len(packs)} packs in the bucket, need 2")
     victim, gone = packs[-1], packs[0]
     data = bytearray(victim.read_bytes())
-    data[len(data) // 2] ^= 0xFF
+    # Packs end in random padding (size classes): a byte in the middle may
+    # lie in the padding, so damage one near the start, inside a block.
+    data[4096] ^= 0xFF
     victim.write_bytes(bytes(data))
     gone.unlink()
     # rclone serve s3 lists from a 5 s directory cache and drops the
@@ -1284,7 +1286,7 @@ def s_scrub():
     check(packs, "no pack in the bucket")
     victim = packs[-1]  # one flipped byte damages the one block it lies in
     data = bytearray(victim.read_bytes())
-    data[len(data) // 3] ^= 0xFF
+    data[4096] ^= 0xFF  # inside a block: a pack ends in random padding
     victim.write_bytes(bytes(data))
     time.sleep(6)  # rclone serve s3 lists from a 5 s directory cache
     rot = """

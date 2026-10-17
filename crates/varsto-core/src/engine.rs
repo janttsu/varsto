@@ -4116,12 +4116,18 @@ impl Engine {
                     let job = std::sync::Arc::new(job);
                     for i in to {
                         let size = job.ct.len() as u64;
-                        collected[i].0.push(job.clone());
-                        collected[i].1 += size;
                         let target = storages_ref[i].1.pack_target().max(1) as u64;
-                        if collected[i].1 >= target && !send_to(&mut collected, i) {
+                        // A pack never passes the target (the top size class):
+                        // what is collected goes out before a block that
+                        // would not fit.
+                        if !collected[i].0.is_empty()
+                            && collected[i].1 + size > target
+                            && !send_to(&mut collected, i)
+                        {
                             return false;
                         }
+                        collected[i].0.push(job.clone());
+                        collected[i].1 += size;
                     }
                     true
                 };
