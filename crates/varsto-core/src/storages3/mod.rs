@@ -24,7 +24,7 @@
 //! - [`moves`]: data moves and staged moves at pack granularity.
 //! - [`drain`]: draining or removing a storage, and quota usage, in packs.
 //! - [`carriers`]: transferrer targeting and emptying from the `held`
-//!   flags of manifests (a callback until `manifest3` is wired).
+//!   flags of manifests (`manifest3::HeldIndex`, or any callback).
 //!
 //! Interpretations of the design (for review):
 //! - A whole pack copied by anyone other than its writer is claimed with a
@@ -54,8 +54,8 @@ pub mod replica;
 mod tests;
 
 pub use carriers::{
-    carrier_delivered, carrier_destinations, carrier_targets, carrier_wants, delivered_packs,
-    drop_events, ObjectHolders,
+    carrier_delivered, carrier_destinations, carrier_destinations_held, carrier_targets,
+    carrier_wants, delivered_packs, drop_events, ObjectHolders,
 };
 pub use copies::{
     block_copies, block_copy_details, block_facts, file_copies, file_facts, object_bin, BlockCopy,

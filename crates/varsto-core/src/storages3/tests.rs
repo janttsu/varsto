@@ -920,6 +920,17 @@ fn a_move_that_keeps_the_source_or_meets_a_bad_pack_drops_nothing() {
         .iter()
         .any(|e| matches!(e, Event::PackDropped(_))));
     assert_eq!(kept.report.packs_dropped, 0);
+    // An interrupted move: the ledger shows P1 dropped from the source but
+    // its bytes are still there; the next run finds and deletes them.
+    env.apply(
+        ME,
+        run.events
+            .iter()
+            .filter(|e| matches!(e, Event::PackDropped(_)))
+            .cloned()
+            .collect(),
+    );
+    assert_eq!(leftovers(&env.view, "hot", &*hot).unwrap(), vec![p1.id]);
     // A run may be limited; the report says more is left.
     let one = MoveOptions {
         max_packs: 1,
@@ -1254,4 +1265,76 @@ fn a_transferrer_takes_what_no_other_device_has_and_empties_when_delivered() {
     let d = carrier_destinations(&configured, &|d| *d == OTHER);
     assert_eq!(d["usb"], vec![OTHER]);
     assert!(!d.contains_key("any"));
+}
+
+#[test]
+fn transferrers_read_the_held_flags_of_the_manifests() {
+    use crate::manifest3::{Chunk3, FileEntry, FolderManifests, WriterView};
+    let mut env = Env::new();
+    env.store("usb");
+    let p = env.publish_pack(&[1000, 1000], &["usb"]);
+    let chunk = |i: usize| Chunk3 {
+        chunk: p.members[i].1.chunk,
+        object: p.object(i),
+        size: 900,
+        epoch: 0,
+    };
+    let entry = |path: &str, i: usize, held: bool| FileEntry {
+        path: path.into(),
+        version: BTreeMap::new(),
+        deleted: false,
+        size: 900,
+        mtime: 0,
+        content_hash: Some([i as u8; 32]),
+        chunks: vec![chunk(i)],
+        modified_by: ME,
+        modified_clock: 1,
+        meta: None,
+        chunking: 2,
+        held,
+    };
+    let view_of = |dev: DeviceBin, files: Vec<FileEntry>| WriterView {
+        device: dev,
+        seq: 1,
+        base: 1,
+        files: files.into_iter().map(|f| (f.path.clone(), f)).collect(),
+        ..Default::default()
+    };
+    let mut fm = FolderManifests::new(FOLDER);
+    // This device holds both files; OTHER holds the first only.
+    fm.insert_view(view_of(ME, vec![entry("a", 0, true), entry("b", 1, true)]));
+    fm.insert_view(view_of(
+        OTHER,
+        vec![entry("a", 0, true), entry("b", 1, false)],
+    ));
+    let held = fm.held_index();
+    let dest: &[DeviceBin] = &[OTHER];
+    assert!(!carrier_wants(&held, &p.object(0), &ME, None));
+    assert!(carrier_wants(&held, &p.object(1), &ME, Some(dest)));
+    assert!(gone_from_usb(&env, &held, Some(dest)).is_empty());
+    // OTHER receives the second file too: the transferrer is emptied.
+    fm.insert_view(view_of(
+        OTHER,
+        vec![entry("a", 0, true), entry("b", 1, true)],
+    ));
+    let held = fm.held_index();
+    assert_eq!(gone_from_usb(&env, &held, Some(dest)), vec![p.id]);
+    // Destinations are those that use the folder.
+    let configured: BTreeMap<String, Vec<DeviceBin>> =
+        [("usb".to_string(), vec![OTHER, [9; 16]])].into();
+    assert_eq!(
+        carrier_destinations_held(&configured, &held)["usb"],
+        vec![OTHER]
+    );
+    // The references drains and garbage collection start from.
+    let refs = fm.reference_set();
+    assert!(refs.contains(&p.object(0)) && refs.contains(&p.object(1)));
+}
+
+fn gone_from_usb(
+    env: &Env,
+    held: &crate::manifest3::HeldIndex,
+    dests: Option<&[DeviceBin]>,
+) -> Vec<PackId> {
+    delivered_packs(&env.view, &env.table, &FOLDER, "usb", held, &ME, dests).unwrap()
 }

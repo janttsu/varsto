@@ -7,10 +7,11 @@
 //!
 //! "Device D holds object O" was the ledger event `chunk_on_device`; in
 //! format 3 it is a flag in the device's own newest manifest (`held` on
-//! the file entry, design section 4). Until `manifest3` is wired, the
-//! question is a callback ([`ObjectHolders`]): the devices whose newest
-//! manifest names the object with `held`. A transferrer holds whole packs,
-//! so a pack is emptied from it when every live member is delivered.
+//! the file entry, design section 4). The question is [`ObjectHolders`]:
+//! the devices whose newest manifest names the object with `held`;
+//! `manifest3::HeldIndex` answers it, and so does any callback. A
+//! transferrer holds whole packs, so a pack is emptied from it when every
+//! live member is delivered.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -30,6 +31,23 @@ impl<F: Fn(&ObjectBin) -> Vec<DeviceBin>> ObjectHolders for F {
     fn holders(&self, object: &ObjectBin) -> Vec<DeviceBin> {
         self(object)
     }
+}
+
+/// The holders `manifest3` reads from every writer's newest manifest
+/// (`held` flags, design section 4).
+impl ObjectHolders for crate::manifest3::HeldIndex {
+    fn holders(&self, object: &ObjectBin) -> Vec<DeviceBin> {
+        crate::manifest3::HeldIndex::holders(self, object).to_vec()
+    }
+}
+
+/// [`carrier_destinations`] for a folder whose manifests are read: a
+/// destination uses the folder when it published a manifest of it.
+pub fn carrier_destinations_held(
+    configured: &BTreeMap<String, Vec<DeviceBin>>,
+    held: &crate::manifest3::HeldIndex,
+) -> HashMap<String, Vec<DeviceBin>> {
+    carrier_destinations(configured, &|d| held.uses(d))
 }
 
 /// Per transferrer with destinations: those of them that use the folder
