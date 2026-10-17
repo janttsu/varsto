@@ -279,3 +279,42 @@ fn refused_sources() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("overlap"), "{err:#}");
 }
+
+#[test]
+fn many_small_files_share_packs_of_size_classes() {
+    let mut lab = lab();
+    for i in 0..40u64 {
+        fs::write(
+            lab.src.join(format!("note{i}.bin")),
+            pseudo_random(3000 + 100 * i as usize, 50 + 2 * i),
+        )
+        .unwrap();
+    }
+    let r = import(&mut lab);
+    assert!(r.imported_files >= 43, "{r:#?}");
+    let packs: Vec<u64> = walkdir::WalkDir::new(lab.root.join("storage/packs"))
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().is_file()
+                && varsto_core::packs::pack_of_key(
+                    &e.path()
+                        .strip_prefix(lab.root.join("storage"))
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                )
+                .is_some()
+        })
+        .map(|e| e.metadata().unwrap().len())
+        .collect();
+    // 40 files are not 40 packs (one pack of each content would show the
+    // sizes of the files), and every pack has the size of a class.
+    assert!(!packs.is_empty() && packs.len() <= 3, "{packs:?}");
+    for len in &packs {
+        assert!(
+            [256u64 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20].contains(len),
+            "{len}"
+        );
+    }
+}
