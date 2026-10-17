@@ -78,11 +78,15 @@ pub mod scrub;
 pub mod scrub3;
 pub mod share;
 pub mod snapshot;
+#[cfg(feature = "format3")]
+pub mod snapshot3;
 pub mod staged_move;
 pub mod storage;
 pub mod storage_settings;
 pub mod strongroom;
 pub mod thumbs;
+#[cfg(feature = "format3")]
+pub mod trash3;
 pub mod util;
 pub mod vault;
 pub mod viz;
