@@ -77,7 +77,7 @@ impl PackLoc {
             && self.len > 0
             && self.len <= MAX_OBJECT
             && self.pack_len <= crate::storage::MAX_PACK
-            && is_class(self.pack_len)
+            && (cfg!(not(feature = "format3")) || is_class(self.pack_len))
             && self
                 .offset
                 .checked_add(self.len)
@@ -289,6 +289,9 @@ impl Reader<'_> {
             len: self.u64()?,
             pack_len: self.u64()?,
         };
+        // Format 2 reads packs of any length (older builds wrote none
+        // padded); a format 3 reader refuses the rest.
+        #[cfg(feature = "format3")]
         if !is_class(l.pack_len) {
             bail!(
                 "pack {} has length {}, not a size class",
@@ -690,9 +693,11 @@ impl PackStore {
         }
     }
 
-    /// The largest whole pack read here: the top size class.
+    /// The largest whole pack read here: the top size class, plus the block by
+    /// which a pack of an older build may pass it.
     fn pack_limit(&self) -> u64 {
-        top_class(self.target) as u64
+        // A pack of an older build passes the top class by one block object.
+        (top_class(self.target) as u64 + MAX_OBJECT).min(crate::storage::MAX_PACK)
     }
 
     /// A storage that holds blocks only (a disk pool): no tombstone lists.
@@ -1003,7 +1008,7 @@ impl PackStore {
             }
             at += len;
         }
-        padded_len(at as usize, self.target) as u64 == pack_len
+        at == pack_len || padded_len(at as usize, self.target) as u64 == pack_len
     }
 
     /// Rewrite the hot packs here that are more than half dead and whose
@@ -1647,6 +1652,52 @@ mod tests {
     }
 
     #[test]
+    fn a_pack_of_an_older_build_is_read_verified_and_collected() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(2);
+        let s = store(t.path(), &c, HOT_TARGET);
+        // A pack as earlier builds wrote it: members only, no padding.
+        let objs = objects(&[1000, 1000, 500]);
+        let mut bytes = Vec::new();
+        let mut spans = Vec::new();
+        for (o, b) in &objs {
+            spans.push((o.clone(), bytes.len() as u64, b.len() as u64));
+            bytes.extend_from_slice(b);
+        }
+        let id = hex::encode(crate::crypto::hash(&bytes));
+        s.inner.put_if_absent(&pack_key(&id), &bytes).unwrap();
+        for (o, offset, len) in spans {
+            c.learn(
+                &o,
+                PackLoc {
+                    pack: id.clone(),
+                    offset,
+                    len,
+                    pack_len: bytes.len() as u64,
+                },
+            );
+        }
+        for (o, b) in &objs {
+            assert_eq!(s.get(&chunk_key(o)).unwrap().as_deref(), Some(b.as_slice()));
+        }
+        let loc = s.pack_location(&objs[0].0).unwrap();
+        assert!(loc.valid() && loc.pack_len == 2500);
+        let whole = s.inner.get(&pack_key(&id)).unwrap().unwrap();
+        assert_eq!(hex::encode(crate::crypto::hash(&whole)), id);
+        // Two of three blocks die: more than half, so it is rewritten (padded).
+        s.delete(&chunk_key(&objs[0].0)).unwrap();
+        s.delete(&chunk_key(&objs[1].0)).unwrap();
+        let moved = s.collect_garbage(&|_| true).unwrap();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].1.pack_len, 256 << 10);
+        assert!(!s.inner.exists(&pack_key(&id)).unwrap());
+        assert_eq!(
+            s.get(&chunk_key(&objs[2].0)).unwrap().as_deref(),
+            Some(objs[2].1.as_slice())
+        );
+    }
+
+    #[test]
     fn blocks_of_any_size_round_trip_through_packs() {
         let t = tempfile::tempdir().unwrap();
         let c = ctx(2);
@@ -1989,7 +2040,8 @@ mod tests {
             decode_tombstones(&encode_tombstones(&tombs).unwrap()).unwrap(),
             tombs
         );
-        // A place whose pack is no size class is refused with a reason.
+        // A place whose pack is no size class is read in format 2 and
+        // refused, with a reason, by a format 3 reader.
         let odd = vec![Tombstone {
             loc: PackLoc {
                 pack_len: 100,
@@ -1997,11 +2049,16 @@ mod tests {
             },
             object: "cd".repeat(32),
         }];
-        let err = decode_tombstones(&encode_tombstones(&odd).unwrap()).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("has length 100, not a size class"),
-            "{err:#}"
-        );
+        let read = decode_tombstones(&encode_tombstones(&odd).unwrap());
+        if cfg!(feature = "format3") {
+            let err = read.unwrap_err();
+            assert!(
+                format!("{err:#}").contains("has length 100, not a size class"),
+                "{err:#}"
+            );
+        } else {
+            assert_eq!(read.unwrap(), odd);
+        }
         // A body of the other kind, or one naming a place past the pack.
         assert!(decode_tombstones(&encode_index(&entries).unwrap()).is_err());
         let bad = vec![Tombstone {
