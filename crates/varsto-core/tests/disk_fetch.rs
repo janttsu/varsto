@@ -140,19 +140,20 @@ fn a_fill_keeps_files_whole_and_splits_only_to_use_the_last_space() {
     let (mut a, _) = setup(
         &lab,
         &[
-            ("big.bin", 70_000, 1),
-            ("mid.bin", 50_000, 3),
-            ("small.bin", 20_000, 5),
+            ("big.bin", 700_000, 1),
+            ("mid.bin", 500_000, 3),
+            ("small.bin", 200_000, 5),
         ],
     );
-    // 100 kB above the reserve: big and small fit whole; mid does not fit
-    // after big, so it is the one split to use the space that is left.
-    let d1 = lab.mount("d1", 100_000);
+    // 1.1 MB above the reserve, which a pack of the 1 MiB class fills: big
+    // and small fit whole; mid does not fit after big, so it is the one
+    // split to use the space that is left.
+    let d1 = lab.mount("d1", 1_100_000);
     let (_, fill) = a
         .disk_add_with(&d1, "shelf", "d1", "", &mut |_| {})
         .unwrap();
     assert_eq!((fill.files_whole, fill.files_split), (2, 1), "{fill:?}");
-    assert!(fill.bytes <= 100_000);
+    assert!(fill.bytes <= 1_100_000);
     // The next disk takes the rest of mid.bin, whole.
     let d2 = lab.mount("d2", 10 * GIB);
     let (_, fill) = a
@@ -161,7 +162,7 @@ fn a_fill_keeps_files_whole_and_splits_only_to_use_the_last_space() {
     assert_eq!((fill.files_whole, fill.files_split), (1, 0), "{fill:?}");
     // With room for everything nothing is split.
     let lab = Lab::new();
-    let (mut a, _) = setup(&lab, &[("big.bin", 70_000, 1), ("mid.bin", 50_000, 3)]);
+    let (mut a, _) = setup(&lab, &[("big.bin", 700_000, 1), ("mid.bin", 500_000, 3)]);
     let d = lab.mount("d", GIB);
     let (_, fill) = a.disk_add_with(&d, "shelf", "d", "", &mut |_| {}).unwrap();
     assert_eq!((fill.files_whole, fill.files_split), (2, 0));
@@ -299,10 +300,11 @@ impl PlanDriver for Shelf<'_> {
 #[test]
 fn a_file_on_two_disks_is_fetched_disk_by_disk_byte_identical() {
     let lab = Lab::new();
-    let (mut a, docs) = setup(&lab, &[("film.bin", 200_000, 29)]);
+    let (mut a, docs) = setup(&lab, &[("film.bin", 600_000, 29)]);
     let original = fs::read(docs.join("film.bin")).unwrap();
-    // The file is larger than d1's room: split over d1 and d2.
-    let d1 = lab.mount("d1", 120_000);
+    // The file is larger than d1's room (one 256 KiB pack): split over d1
+    // and d2.
+    let d1 = lab.mount("d1", 300_000);
     let (_, f1) = a
         .disk_add_with(&d1, "shelf", "d1", "", &mut |_| {})
         .unwrap();

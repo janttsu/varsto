@@ -30,6 +30,7 @@ use crate::import::{
 use crate::util::plural;
 use sha2::Digest;
 use std::io::Read;
+use std::sync::Arc;
 
 const PREFIX: &str = "vault/imports/";
 /// Save state, ledger events and book at least this often during a run.
@@ -37,9 +38,9 @@ const SAVE_EVERY_SECS: u64 = 20;
 const SAVE_EVERY_ITEMS: u64 = 500;
 /// Publish the folder's manifest and the book at least this often.
 const PUBLISH_EVERY_SECS: u64 = 600;
-/// Packs being written per imported file (each up to `packs::HOT_TARGET`
-/// bytes, so at most four of them are in memory with the one being filled
-/// and the one queued).
+/// Packs being written at a time (each up to `packs::HOT_TARGET` bytes, so
+/// at most four of them are in memory with the one being filled and the
+/// one queued). The blocks of many imported contents share packs.
 const IMPORT_UPLOADERS: usize = 2;
 /// How many examples of each kind a report names.
 const EXAMPLES: usize = 25;
@@ -269,7 +270,7 @@ struct IngestCtx {
     folder: FolderId,
     vault: VaultId,
     fk: FolderKeys,
-    storages: OpenStorages,
+    storages: Arc<OpenStorages>,
     targets: WriteTargets,
     view: LedgerView,
     /// Storages left out for the rest of the run (a pool with no disk).
@@ -296,7 +297,16 @@ struct Ingested {
     chunks: Vec<ChunkRef>,
     sha256: Option<String>,
     verified: bool,
-    events: Vec<Event>,
+    /// (chunk index, storage indexes) of each block queued for a pack.
+    wants: Vec<(usize, Vec<usize>)>,
+}
+
+/// A content read and placed in the folder whose blocks are still being
+/// written: it counts as imported once they are.
+struct Queued {
+    /// Index into the list of groups.
+    group: usize,
+    done: Ingested,
 }
 
 /// Reads through, feeding the hashes and an optional copy.
@@ -329,25 +339,57 @@ impl Read for Tap<'_> {
     }
 }
 
-/// Blocks of one content written together, as packs (`crate::packs`).
+/// Blocks waiting for a pack. Blocks of many contents are collected into
+/// one job, as a push does; `put_pack` writes it as packs per storage.
 #[derive(Default)]
 struct Job {
-    /// (chunk index, object, bytes, storage indexes)
-    blocks: Vec<(usize, ObjectName, Vec<u8>, Vec<usize>)>,
+    /// (content that wants it, object, bytes, storage indexes)
+    blocks: Vec<(u64, ObjectName, Vec<u8>, Vec<usize>)>,
     bytes: usize,
+}
+
+/// Why a block did not get written, kept apart from `anyhow` so that it can
+/// be handed to every content that wanted the block.
+#[derive(Clone)]
+enum BlockError {
+    Pool(PoolError),
+    Other(String),
+}
+
+impl BlockError {
+    fn of(e: &anyhow::Error) -> BlockError {
+        match pool::pool_error(e) {
+            Some(pe) => BlockError::Pool(pe.clone()),
+            None => BlockError::Other(format!("{e:#}")),
+        }
+    }
+
+    fn error(&self) -> anyhow::Error {
+        match self {
+            BlockError::Pool(pe) => anyhow::Error::new(pe.clone()),
+            BlockError::Other(m) => anyhow!("{m}"),
+        }
+    }
+}
+
+type BlockResult = Result<(), BlockError>;
+
+enum Written {
+    Block(ObjectName, usize, BlockResult),
+    JobDone,
 }
 
 impl Job {
     /// Write the blocks to each storage that wants any of them: one
-    /// outcome per (chunk index, storage index).
-    fn write(&self, storages: &OpenStorages) -> Vec<(usize, usize, Result<bool>)> {
+    /// outcome per (object, storage index).
+    fn write(&self, storages: &OpenStorages) -> Vec<(ObjectName, usize, BlockResult)> {
         let mut wanted: BTreeSet<usize> = BTreeSet::new();
         for (_, _, _, t) in &self.blocks {
             wanted.extend(t.iter().copied());
         }
         let mut out = Vec::new();
         for t in wanted {
-            let mine: Vec<&(usize, ObjectName, Vec<u8>, Vec<usize>)> = self
+            let mine: Vec<&(u64, ObjectName, Vec<u8>, Vec<usize>)> = self
                 .blocks
                 .iter()
                 .filter(|(_, _, _, ts)| ts.contains(&t))
@@ -357,19 +399,16 @@ impl Job {
                 .map(|(_, o, ct, _)| (o.as_str().to_string(), ct.as_slice()))
                 .collect();
             match storages[t].1.put_pack(&members) {
-                Ok(flags) => {
-                    for ((index, ..), new) in mine.iter().zip(flags) {
-                        out.push((*index, t, Ok(new)));
+                Ok(_) => {
+                    for (_, o, ..) in &mine {
+                        out.push((o.clone(), t, Ok(())));
                     }
                 }
                 Err(e) => {
                     // One error for the pack, the same for each block of it.
-                    for (index, ..) in &mine {
-                        let copy = match pool::pool_error(&e) {
-                            Some(pe) => anyhow::Error::new(pe.clone()),
-                            None => anyhow!("{e:#}"),
-                        };
-                        out.push((*index, t, Err(copy)));
+                    let err = BlockError::of(&e);
+                    for (_, o, ..) in &mine {
+                        out.push((o.clone(), t, Err(err.clone())));
                     }
                 }
             }
@@ -378,10 +417,152 @@ impl Job {
     }
 }
 
-/// Chunk, encrypt and store one content, checking its hash. Nothing of it
-/// counts (no events, no file) unless the whole content matched.
+/// Collects the blocks of all imported contents into packs (up to
+/// `packs::HOT_TARGET` bytes each) and writes them on two threads while the
+/// next one fills: two packs written at a time, one queued, one filling.
+/// A pack goes out when it is full, and at `flush`; a content is settled
+/// (its blocks recorded as stored) once every pack that holds a block of it
+/// is written.
+struct PackWriter {
+    tx: Option<std::sync::mpsc::SyncSender<Job>>,
+    rx: std::sync::mpsc::Receiver<Written>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+    job: Job,
+    sent: u64,
+    finished: u64,
+    /// (object, storage index) -> how its write went (a write that went
+    /// through counts even when another write of the same block failed).
+    results: HashMap<(ObjectName, usize), BlockResult>,
+}
+
+impl PackWriter {
+    fn new(storages: Arc<OpenStorages>) -> PackWriter {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Job>(1);
+        let rx = Arc::new(std::sync::Mutex::new(rx));
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<Written>();
+        let workers = (0..IMPORT_UPLOADERS)
+            .map(|_| {
+                let (rx, done_tx, storages) = (rx.clone(), done_tx.clone(), storages.clone());
+                std::thread::spawn(move || loop {
+                    let job: Job = match rx.lock().unwrap().recv() {
+                        Ok(j) => j,
+                        Err(_) => break,
+                    };
+                    for (o, t, r) in job.write(&storages) {
+                        let _ = done_tx.send(Written::Block(o, t, r));
+                    }
+                    let _ = done_tx.send(Written::JobDone);
+                })
+            })
+            .collect();
+        PackWriter {
+            tx: Some(tx),
+            rx: done_rx,
+            workers,
+            job: Job::default(),
+            sent: 0,
+            finished: 0,
+            results: HashMap::new(),
+        }
+    }
+
+    /// Queue a block for the storages in `targets`; the pack goes out when
+    /// it is full.
+    fn add(
+        &mut self,
+        owner: u64,
+        object: ObjectName,
+        ct: Vec<u8>,
+        targets: Vec<usize>,
+    ) -> Result<()> {
+        // A pack never passes the top size class: what is collected goes
+        // out before a block that would not fit.
+        if !self.job.blocks.is_empty() && self.job.bytes + ct.len() > crate::packs::HOT_TARGET {
+            self.dispatch()?;
+        }
+        self.job.bytes += ct.len();
+        self.job.blocks.push((owner, object, ct, targets));
+        Ok(())
+    }
+
+    fn dispatch(&mut self) -> Result<()> {
+        if self.job.blocks.is_empty() {
+            return Ok(());
+        }
+        let job = std::mem::take(&mut self.job);
+        let tx = self
+            .tx
+            .as_ref()
+            .ok_or_else(|| anyhow!("the writers are gone"))?;
+        tx.send(job)
+            .map_err(|_| anyhow!("the pack writers stopped"))?;
+        self.sent += 1;
+        Ok(())
+    }
+
+    fn take(&mut self, m: Written) {
+        match m {
+            Written::JobDone => self.finished += 1,
+            Written::Block(o, t, r) => {
+                let slot = self.results.entry((o, t)).or_insert(r.clone());
+                if slot.is_err() && r.is_ok() {
+                    *slot = r;
+                }
+            }
+        }
+    }
+
+    /// Take the outcomes that have arrived.
+    fn poll(&mut self) {
+        while let Ok(m) = self.rx.try_recv() {
+            self.take(m);
+        }
+    }
+
+    /// Write what is collected, even if it is less than a pack, and wait
+    /// until every pack is written.
+    fn flush(&mut self) -> Result<()> {
+        self.dispatch()?;
+        while self.finished < self.sent {
+            match self.rx.recv() {
+                Ok(m) => self.take(m),
+                Err(_) => bail!("the pack writers stopped"),
+            }
+        }
+        self.poll();
+        Ok(())
+    }
+
+    /// A content turned out damaged: its blocks not sent yet are not
+    /// written (blocks of other contents stay).
+    fn forget(&mut self, owner: u64) {
+        let job = &mut self.job;
+        job.blocks.retain(|(w, ..)| *w != owner);
+        job.bytes = job.blocks.iter().map(|(_, _, ct, _)| ct.len()).sum();
+    }
+
+    fn result(&self, object: &ObjectName, t: usize) -> Option<&BlockResult> {
+        self.results.get(&(object.clone(), t))
+    }
+}
+
+impl Drop for PackWriter {
+    fn drop(&mut self) {
+        self.tx = None;
+        for w in self.workers.drain(..) {
+            let _ = w.join();
+        }
+    }
+}
+
+/// Chunk and encrypt one content and queue its blocks for the writer,
+/// checking its hash. Nothing of it counts (no events, no file) unless the
+/// whole content matched and `settle_content` found its blocks written.
+#[allow(clippy::too_many_arguments)]
 fn ingest(
     ctx: &mut IngestCtx,
+    writer: &mut PackWriter,
+    owner: u64,
     reader: &mut dyn Read,
     size_hint: Option<u64>,
     check: Option<&Check>,
@@ -413,116 +594,83 @@ fn ingest(
     };
     let mut hasher = KeyedHasher::new(&ctx.fk.hash);
     let mut chunks: Vec<ChunkRef> = Vec::new();
+    // (chunk index, storage indexes) of the blocks queued
+    let mut wants: Vec<(usize, Vec<usize>)> = Vec::new();
     let mut read_error: Option<String> = None;
-    // (chunk index, storage index, outcome)
-    let mut results: Vec<(usize, usize, Result<bool>)> = Vec::new();
     {
         let ctx_ref = &*ctx;
         let storages = &ctx_ref.storages;
-        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<Job>(1);
-        let job_rx = std::sync::Mutex::new(job_rx);
-        let (done_tx, done_rx) = std::sync::mpsc::channel::<(usize, usize, Result<bool>)>();
-        std::thread::scope(|s| -> Result<()> {
-            let job_tx = job_tx;
-            for _ in 0..IMPORT_UPLOADERS {
-                let (job_rx, done_tx) = (&job_rx, done_tx.clone());
-                s.spawn(move || loop {
-                    let job = match job_rx.lock().unwrap().recv() {
-                        Ok(j) => j,
-                        Err(_) => break,
-                    };
-                    for r in job.write(storages) {
-                        let _ = done_tx.send(r);
-                    }
-                });
-            }
-            drop(done_tx);
-            let mut job = Job::default();
-            let chunker =
-                Chunker::new(std::io::BufReader::with_capacity(1 << 20, &mut tap), params)?;
-            for chunk in chunker {
-                let chunk = match chunk {
-                    Ok(c) => c,
-                    Err(e) => {
-                        read_error = Some(format!("read error: {e}"));
-                        break;
-                    }
-                };
-                hasher.update(&chunk);
-                let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&ctx_ref.fk.hash, &chunk));
-                let mut ct: Option<Vec<u8>> = None;
-                let (object, epoch) = match ctx_ref.known.get(&chunk_id) {
-                    Some(c) if c.size == chunk.len() as u64 => (c.object.clone(), c.epoch),
-                    _ => {
-                        let e = ctx_ref.fk.epoch;
-                        let sealed = crate::chunk_seal::seal_chunk(
-                            &ctx_ref.fk,
-                            &ctx_ref.vault,
-                            &chunk_id,
-                            e,
-                            &chunk,
-                        )?;
-                        let o = ObjectName::from_bytes(&crypto::hash(&sealed));
-                        ct = Some(sealed);
-                        (o, e)
-                    }
-                };
-                let record = ctx_ref
-                    .view
-                    .locate(&ctx_ref.folder, &chunk_id)
-                    .filter(|r| r.object == object);
-                let targets: Vec<usize> = storages
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, (spec, _))| {
-                        !spec.is_carrier()
-                            && !ctx_ref.unavailable.contains(spec.name())
-                            && ctx_ref.targets.wants(spec.name(), record)
-                            && !record.is_some_and(|r| {
-                                r.storages
-                                    .get(spec.name())
-                                    .is_some_and(|l| !l.claimed_by.is_empty())
-                            })
-                            && !ctx_ref
-                                .stored
-                                .contains(&(object.clone(), spec.name().to_string()))
-                    })
-                    .map(|(i, _)| i)
-                    .collect();
-                let index = chunks.len();
-                chunks.push(ChunkRef {
-                    chunk: chunk_id.clone(),
-                    object: object.clone(),
-                    size: chunk.len() as u64,
-                    epoch,
-                });
-                if !targets.is_empty() {
-                    let ct = match ct {
-                        Some(c) => c,
-                        None => crate::chunk_seal::seal_chunk(
-                            &ctx_ref.fk,
-                            &ctx_ref.vault,
-                            &chunk_id,
-                            epoch,
-                            &chunk,
-                        )?,
-                    };
-                    job.bytes += ct.len();
-                    job.blocks.push((index, object, ct, targets));
-                    if job.bytes >= crate::packs::HOT_TARGET
-                        && job_tx.send(std::mem::take(&mut job)).is_err()
-                    {
-                        break;
-                    }
+        let chunker = Chunker::new(std::io::BufReader::with_capacity(1 << 20, &mut tap), params)?;
+        for chunk in chunker {
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    read_error = Some(format!("read error: {e}"));
+                    break;
                 }
+            };
+            hasher.update(&chunk);
+            let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&ctx_ref.fk.hash, &chunk));
+            let mut ct: Option<Vec<u8>> = None;
+            let (object, epoch) = match ctx_ref.known.get(&chunk_id) {
+                Some(c) if c.size == chunk.len() as u64 => (c.object.clone(), c.epoch),
+                _ => {
+                    let e = ctx_ref.fk.epoch;
+                    let sealed = crate::chunk_seal::seal_chunk(
+                        &ctx_ref.fk,
+                        &ctx_ref.vault,
+                        &chunk_id,
+                        e,
+                        &chunk,
+                    )?;
+                    let o = ObjectName::from_bytes(&crypto::hash(&sealed));
+                    ct = Some(sealed);
+                    (o, e)
+                }
+            };
+            let record = ctx_ref
+                .view
+                .locate(&ctx_ref.folder, &chunk_id)
+                .filter(|r| r.object == object);
+            let targets: Vec<usize> = storages
+                .iter()
+                .enumerate()
+                .filter(|(_, (spec, _))| {
+                    !spec.is_carrier()
+                        && !ctx_ref.unavailable.contains(spec.name())
+                        && ctx_ref.targets.wants(spec.name(), record)
+                        && !record.is_some_and(|r| {
+                            r.storages
+                                .get(spec.name())
+                                .is_some_and(|l| !l.claimed_by.is_empty())
+                        })
+                        && !ctx_ref
+                            .stored
+                            .contains(&(object.clone(), spec.name().to_string()))
+                })
+                .map(|(i, _)| i)
+                .collect();
+            chunks.push(ChunkRef {
+                chunk: chunk_id.clone(),
+                object: object.clone(),
+                size: chunk.len() as u64,
+                epoch,
+            });
+            if !targets.is_empty() {
+                let ct = match ct {
+                    Some(c) => c,
+                    None => crate::chunk_seal::seal_chunk(
+                        &ctx_ref.fk,
+                        &ctx_ref.vault,
+                        &chunk_id,
+                        epoch,
+                        &chunk,
+                    )?,
+                };
+                wants.push((chunks.len() - 1, targets.clone()));
+                writer.add(owner, object, ct, targets)?;
             }
-            if !job.blocks.is_empty() {
-                let _ = job_tx.send(job);
-            }
-            drop(job_tx);
-            results.extend(done_rx.iter());
-            Ok(())
-        })?;
+        }
     }
     let count = tap.count;
     let check_hex = tap.check.take().map(|h| h.finish_hex());
@@ -534,31 +682,6 @@ fn ingest(
     }
     if let Some(e) = copy_error {
         return Err(anyhow!("write the local copy: {e}"));
-    }
-    // What the storages said.
-    let mut storage_error: Option<anyhow::Error> = None;
-    let mut written: Vec<(usize, usize)> = Vec::new();
-    let mut ok: Vec<(usize, usize)> = Vec::new();
-    for (index, t, r) in results {
-        match r {
-            Ok(new) => {
-                if new {
-                    written.push((index, t));
-                }
-                ok.push((index, t));
-            }
-            Err(e)
-                if matches!(
-                    pool::pool_error(&e),
-                    Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
-                ) =>
-            {
-                ctx.unavailable.insert(ctx.storages[t].0.name().to_string());
-            }
-            Err(e) => {
-                storage_error.get_or_insert(e);
-            }
-        }
     }
     let wrong = if let Some(e) = read_error {
         Some(IngestOutcome::ReadFailed(e))
@@ -576,16 +699,58 @@ fn ingest(
         }
     };
     if let Some(w) = wrong {
-        // Objects this content alone put on the storages go again.
-        for (index, t) in written {
-            let _ = ctx.storages[t]
-                .1
-                .delete(&chunk_storage_key(&chunks[index].object));
-        }
-        if let Some(e) = storage_error {
-            return Err(e);
-        }
+        // Blocks of this content not yet sent are not written; one already
+        // in a written pack stays there, claimed by no one.
+        writer.forget(owner);
         return Ok(w);
+    }
+    for c in &chunks {
+        ctx.known
+            .entry(c.chunk.clone())
+            .or_insert_with(|| c.clone());
+    }
+    Ok(IngestOutcome::Ok(Ingested {
+        hash: hex::encode(hasher.finalize()),
+        size: count,
+        chunks,
+        sha256: sha,
+        verified,
+        wants,
+    }))
+}
+
+/// A content whose blocks are all written (or refused): the events that
+/// record it, or `None` while a pack with one of its blocks is still being
+/// written. A storage that failed is an error.
+fn settle_content(
+    ctx: &mut IngestCtx,
+    writer: &PackWriter,
+    done: &Ingested,
+) -> Result<Option<Vec<Event>>> {
+    let mut outcomes: Vec<(usize, usize, &BlockResult)> = Vec::new();
+    for (index, t) in done
+        .wants
+        .iter()
+        .flat_map(|(index, ts)| ts.iter().map(move |t| (*index, *t)))
+    {
+        match writer.result(&done.chunks[index].object, t) {
+            Some(r) => outcomes.push((index, t, r)),
+            None => return Ok(None),
+        }
+    }
+    let chunks = &done.chunks;
+    let mut storage_error: Option<anyhow::Error> = None;
+    let mut ok: Vec<(usize, usize)> = Vec::new();
+    for (index, t, r) in outcomes {
+        match r {
+            Ok(()) => ok.push((index, t)),
+            Err(BlockError::Pool(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })) => {
+                ctx.unavailable.insert(ctx.storages[t].0.name().to_string());
+            }
+            Err(e) => {
+                storage_error.get_or_insert(e.error());
+            }
+        }
     }
     if let Some(e) = storage_error {
         return Err(e);
@@ -601,8 +766,8 @@ fn ingest(
             folder: ctx.folder.clone(),
             chunk: c.chunk.clone(),
             object: c.object.clone(),
-            storage: name,
             size: c.size,
+            storage: name,
             pack: None,
         });
     }
@@ -627,18 +792,8 @@ fn ingest(
         } else if !elsewhere {
             bail!("no storage took the blocks: check that a storage is reachable (and that a pool has a disk attached)");
         }
-        ctx.known
-            .entry(c.chunk.clone())
-            .or_insert_with(|| c.clone());
     }
-    Ok(IngestOutcome::Ok(Ingested {
-        hash: hex::encode(hasher.finalize()),
-        size: count,
-        chunks,
-        sha256: sha,
-        verified,
-        events,
-    }))
+    Ok(Some(events))
 }
 
 fn push_example(list: &mut Vec<Note>, count: &mut u64, note: Note) {
@@ -1222,7 +1377,7 @@ impl Engine {
             folder: rec.folder_id.clone(),
             vault: self.vault.vault_id.clone(),
             fk,
-            storages: self.open_storages(false)?,
+            storages: Arc::new(self.open_storages(false)?),
             targets: self.write_targets(&rec),
             view: self.view()?,
             unavailable: BTreeSet::new(),
@@ -1232,6 +1387,9 @@ impl Engine {
             small_chunker: (self.chunker != ChunkerParams::DEFAULT).then_some(self.chunker),
             full: !selective,
         };
+        let mut writer = PackWriter::new(ctx.storages.clone());
+        let mut queue: std::collections::VecDeque<Queued> = Default::default();
+        let mut owner = 0u64;
         let want_sha = source.wants_source_hash();
         let instance = info.instance.clone();
         let mut run = RunRecord {
@@ -1301,11 +1459,21 @@ impl Engine {
                             }
                         }
                         let copy = (!selective).then_some(tmp_copy.as_path());
-                        let outcome =
-                            ingest(&mut ctx, reader, g.size, g.check.as_ref(), want_sha, copy);
+                        owner += 1;
+                        let outcome = ingest(
+                            &mut ctx,
+                            &mut writer,
+                            owner,
+                            reader,
+                            g.size,
+                            g.check.as_ref(),
+                            want_sha,
+                            copy,
+                        );
                         let outcome = match outcome {
                             Ok(o) => o,
                             Err(e) => {
+                                writer.forget(owner);
                                 let _ = fs::remove_file(&tmp_copy);
                                 stop_error = Some(e.context(format!("import {}", first.path)));
                                 return Ok(Verdict::Stop);
@@ -1361,7 +1529,6 @@ impl Engine {
                                 Ok(Verdict::Imported)
                             }
                             IngestOutcome::Ok(done) => {
-                                self.pending.extend(done.events.iter().cloned());
                                 let applied = self.apply_ingested(
                                     &mut state,
                                     &root_path,
@@ -1374,48 +1541,66 @@ impl Engine {
                                     meta_settings,
                                 );
                                 if let Err(e) = applied {
+                                    writer.forget(owner);
                                     let _ = fs::remove_file(&tmp_copy);
                                     stop_error = Some(e);
                                     return Ok(Verdict::Stop);
                                 }
-                                book.imported.insert(
-                                    g.id.clone(),
-                                    Imported {
-                                        hash: done.hash.clone(),
-                                        size: done.size,
-                                        utc: util::now_utc(),
-                                        from: instance.clone(),
-                                        verified: done.verified,
-                                        sha256: done.sha256.clone(),
-                                    },
+                                queue.push_back(Queued { group: i, done });
+                                writer.poll();
+                                let mut settled = self.settle_imports(
+                                    &mut ctx,
+                                    &writer,
+                                    &mut queue,
+                                    &group_list,
+                                    &items,
+                                    &mut book,
+                                    &mut report,
+                                    &mut run,
+                                    &task,
+                                    &instance,
                                 );
-                                book.missing_holders.remove(&g.id);
-                                report.imported_ids += 1;
-                                report.imported_files += g.paths.len() as u64;
-                                report.imported_bytes += done.size;
-                                if !done.verified {
-                                    report.unverified_ids += 1;
-                                }
-                                run.imported += 1;
-                                run.imported_bytes += done.size;
-                                task.advance(done.size);
                                 since_save += 1;
-                                if since_save >= SAVE_EVERY_ITEMS
-                                    || last_save.elapsed().as_secs() >= SAVE_EVERY_SECS
+                                if settled.is_ok()
+                                    && (since_save >= SAVE_EVERY_ITEMS
+                                        || last_save.elapsed().as_secs() >= SAVE_EVERY_SECS)
                                 {
-                                    let publish =
-                                        last_publish.elapsed().as_secs() >= PUBLISH_EVERY_SECS;
-                                    if let Err(e) =
-                                        self.import_checkpoint(&rec, &mut state, &book, publish)
-                                    {
-                                        stop_error = Some(e);
-                                        return Ok(Verdict::Stop);
+                                    // What is recorded must be stored: the
+                                    // packs collected so far are written,
+                                    // however small, before the checkpoint.
+                                    settled = writer.flush().and_then(|_| {
+                                        self.settle_imports(
+                                            &mut ctx,
+                                            &writer,
+                                            &mut queue,
+                                            &group_list,
+                                            &items,
+                                            &mut book,
+                                            &mut report,
+                                            &mut run,
+                                            &task,
+                                            &instance,
+                                        )
+                                    });
+                                    if settled.is_ok() {
+                                        let publish =
+                                            last_publish.elapsed().as_secs() >= PUBLISH_EVERY_SECS;
+                                        if let Err(e) =
+                                            self.import_checkpoint(&rec, &mut state, &book, publish)
+                                        {
+                                            stop_error = Some(e);
+                                            return Ok(Verdict::Stop);
+                                        }
+                                        if publish {
+                                            last_publish = std::time::Instant::now();
+                                        }
+                                        since_save = 0;
+                                        last_save = std::time::Instant::now();
                                     }
-                                    if publish {
-                                        last_publish = std::time::Instant::now();
-                                    }
-                                    since_save = 0;
-                                    last_save = std::time::Instant::now();
+                                }
+                                if let Err(e) = settled {
+                                    stop_error = Some(e);
+                                    return Ok(Verdict::Stop);
                                 }
                                 Ok(Verdict::Imported)
                             }
@@ -1426,7 +1611,25 @@ impl Engine {
             source.deliver(&wanted, &mut sink)
         };
         let _ = fs::remove_file(&tmp_copy);
-        // Whatever happened, keep what was done.
+        // The last pack is written, and the contents whose blocks are in it
+        // are recorded; whatever happened, keep what was done.
+        let flushed = writer.flush().and_then(|_| {
+            self.settle_imports(
+                &mut ctx,
+                &writer,
+                &mut queue,
+                &group_list,
+                &items,
+                &mut book,
+                &mut report,
+                &mut run,
+                &task,
+                &instance,
+            )
+        });
+        if let Err(e) = flushed {
+            stop_error.get_or_insert(e);
+        }
         let unread: Vec<&Group> = group_list
             .iter()
             .filter(|g| !book.imported.contains_key(&g.id) && !missing.contains_key(&g.id))
@@ -1471,6 +1674,59 @@ impl Engine {
         delivered?;
         saved?;
         Ok(report)
+    }
+
+    /// Record the contents at the head of the queue whose blocks are written:
+    /// their events, the book and the report. Stops at the first content a
+    /// pack of which is still being written.
+    #[allow(clippy::too_many_arguments)]
+    fn settle_imports(
+        &mut self,
+        ctx: &mut IngestCtx,
+        writer: &PackWriter,
+        queue: &mut std::collections::VecDeque<Queued>,
+        group_list: &[&Group],
+        items: &[ListedItem],
+        book: &mut ImportBook,
+        report: &mut ImportReport,
+        run: &mut RunRecord,
+        task: &activity::Guard,
+        instance: &str,
+    ) -> Result<()> {
+        while let Some(q) = queue.front() {
+            let g = group_list[q.group];
+            let events = settle_content(ctx, writer, &q.done)
+                .map_err(|e| e.context(format!("import {}", items[g.paths[0]].path)))?;
+            let Some(events) = events else {
+                break;
+            };
+            let Some(Queued { done, .. }) = queue.pop_front() else {
+                break;
+            };
+            self.pending.extend(events);
+            book.imported.insert(
+                g.id.clone(),
+                Imported {
+                    hash: done.hash.clone(),
+                    size: done.size,
+                    utc: util::now_utc(),
+                    from: instance.to_string(),
+                    verified: done.verified,
+                    sha256: done.sha256.clone(),
+                },
+            );
+            book.missing_holders.remove(&g.id);
+            report.imported_ids += 1;
+            report.imported_files += g.paths.len() as u64;
+            report.imported_bytes += done.size;
+            if !done.verified {
+                report.unverified_ids += 1;
+            }
+            run.imported += 1;
+            run.imported_bytes += done.size;
+            task.advance(done.size);
+        }
+        Ok(())
     }
 
     /// Make the paths of one imported content files of the folder.
