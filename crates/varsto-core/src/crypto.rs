@@ -79,7 +79,13 @@ impl SecretKey {
     /// The context string is `<prefix>/<purpose>`; identifiers are fed into the
     /// key material with explicit lengths so that tuples cannot collide.
     pub fn derive(&self, purpose: &str, scope: &[&[u8]]) -> SecretKey {
-        let context = format!("{CONTEXT_PREFIX}/{purpose}");
+        self.derive_with_prefix(CONTEXT_PREFIX, purpose, scope)
+    }
+
+    /// `derive` under another context prefix: format 3 derives with
+    /// `e2ee-sync-format/3` (`docs/spec/format-3-design.md`, notation).
+    pub fn derive_with_prefix(&self, prefix: &str, purpose: &str, scope: &[&[u8]]) -> SecretKey {
+        let context = format!("{prefix}/{purpose}");
         let mut material = Vec::with_capacity(32 + scope.len() * 20);
         material.extend_from_slice(&self.0);
         for s in scope {
@@ -132,12 +138,18 @@ pub fn hash(data: &[u8]) -> [u8; 32] {
 /// Fields are length-prefixed; the format version and the algorithm identifier
 /// are always included first.
 pub fn aad(object_type: &str, fields: &[&[u8]]) -> Vec<u8> {
+    aad_for_format(crate::FORMAT_VERSION, object_type, fields)
+}
+
+/// `aad` for a given storage format version: format 3 records
+/// (`crate::record`) bind version 3 while the vault format is still 2.
+pub fn aad_for_format(format: u16, object_type: &str, fields: &[&[u8]]) -> Vec<u8> {
     let mut out = Vec::new();
     let push = |out: &mut Vec<u8>, b: &[u8]| {
         out.extend_from_slice(&(b.len() as u32).to_le_bytes());
         out.extend_from_slice(b);
     };
-    push(&mut out, &crate::FORMAT_VERSION.to_le_bytes());
+    push(&mut out, &format.to_le_bytes());
     push(&mut out, AEAD_ALG.as_bytes());
     push(&mut out, object_type.as_bytes());
     for f in fields {

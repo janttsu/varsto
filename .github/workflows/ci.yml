@@ -78,6 +78,13 @@ jobs:
         run: cargo deny check
       - name: Tests
         run: cargo test --workspace 2>&1 | tee test.log
+      # Storage format 3 is built up behind the `format3` feature
+      # (docs/spec/format-3-design.md): keep it compiling, lint-free and
+      # tested until it becomes the default.
+      - name: Clippy with the format3 feature
+        run: cargo clippy --workspace --all-targets --features varsto-core/format3,varsto-cli/format3,varsto-ffi/format3 -- -D warnings
+      - name: Tests of varsto-core with the format3 feature
+        run: cargo test -p varsto-core --features format3 --lib
       - name: Site tooling (daily-sync.py against a fake release)
         run: python3 -I -m unittest discover -s ops/site -p 'test_*.py'
       - name: Linux package and Windows programs

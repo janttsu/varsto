@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
+//! WP1 integration: replace with varsto_core::record (`crate::record`, merged
+//! from PR #74) in WP12; until then this stub stays and is not mixed with it.
 //! WP1 integration: this module stands in for the signed record envelope of
 //! `docs/spec/format-3-design.md` section 5, which work package 1 builds as
 //! `crate::record` (branch `f3-records`). It follows section 5 field for
