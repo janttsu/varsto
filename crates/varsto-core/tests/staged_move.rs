@@ -77,9 +77,9 @@ impl Lab {
         let docs = root.join("docs");
         fs::create_dir_all(docs.join("sub")).unwrap();
         fs::create_dir_all(docs.join("other")).unwrap();
-        fs::write(docs.join("sub/x.bin"), pseudo_random(200_000, 1)).unwrap();
-        fs::write(docs.join("sub/y.bin"), pseudo_random(200_000, 2)).unwrap();
-        fs::write(docs.join("other/z.bin"), pseudo_random(200_000, 3)).unwrap();
+        fs::write(docs.join("sub/x.bin"), pseudo_random(6_000_000, 1)).unwrap();
+        fs::write(docs.join("sub/y.bin"), pseudo_random(6_000_000, 2)).unwrap();
+        fs::write(docs.join("other/z.bin"), pseudo_random(6_000_000, 3)).unwrap();
         a.add_folder("docs", &docs).unwrap();
         a.set_policy("docs", None).unwrap();
         // The pool is not written by pushes or disk fills: only the job fills it.
@@ -170,7 +170,7 @@ fn run(e: &mut Engine, id: &str) -> varsto_core::engine::MoveJobRun {
 fn a_folder_moves_to_the_pool_one_disk_at_a_time() {
     let (lab, mut a) = Lab::new(1);
     let (blocks, bytes) = total_blocks(&a);
-    assert!(blocks > 64, "{blocks} blocks: more than one group");
+    assert!(bytes > 16 << 20, "{bytes} bytes: more than one group");
     assert_eq!(on(&a, "box"), (blocks, bytes));
     let third = bytes / 3 + 20_000;
 
@@ -398,7 +398,7 @@ fn pause_resume_and_cancel_leave_the_data_consistent() {
     a.disk_add(&d1, "shelf", "data-01").unwrap();
     let (job, _) = a.move_job_start(&request("docs")).unwrap();
 
-    // One group of 64 blocks, then stop.
+    // One group (up to 15 MiB, one pack), then stop.
     let r = a
         .move_job_run(
             &job.id,
@@ -410,7 +410,7 @@ fn pause_resume_and_cancel_leave_the_data_consistent() {
     assert_eq!(r.job.state, JobState::Open);
     assert!(r.report.stopped_early);
     let (moved, moved_bytes) = on(&a, "shelf");
-    assert_eq!(moved, 64);
+    assert!(moved > 0 && moved < blocks, "{moved} of {blocks}");
     assert_eq!(r.job.bytes_done, moved_bytes);
 
     // Paused jobs do not run; resume opens them again.
@@ -454,7 +454,7 @@ fn a_job_resumes_after_the_engine_is_dropped_between_groups() {
         )
         .unwrap();
     let (moved, moved_bytes) = on(&a, "shelf");
-    assert_eq!(moved, 64);
+    assert!(moved > 0 && moved < blocks, "{moved} of {blocks}");
     assert_eq!(r.job.bytes_done, moved_bytes);
     drop(a);
 

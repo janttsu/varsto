@@ -23,9 +23,6 @@ use crate::placement::{MoveReport, MoveRequest, Placement, PlacementInfo, Placem
 use crate::policy::{ChunkFacts, PolicyState};
 use std::sync::Arc;
 
-/// Blocks moved per ledger batch: their drops are sealed and pushed before
-/// any of them is deleted from the old storage.
-const MOVE_GROUP: usize = 64;
 /// How many kept blocks a report lists by name.
 const KEPT_EXAMPLES: usize = 10;
 
@@ -1047,7 +1044,12 @@ impl Engine {
         // Staged: blocks of this size and larger found no room on `to`.
         let mut full_at: Option<u64> = None;
         let mut disks_used: BTreeSet<String> = BTreeSet::new();
-        for (groups_done, group) in items.chunks(MOVE_GROUP).enumerate() {
+        // Groups of up to 15 MiB are written as one pack each; their drops are
+        // sealed and pushed before any of them is deleted from the old storage.
+        for (groups_done, group) in crate::packs::byte_groups(&items, |i| i.size)
+            .into_iter()
+            .enumerate()
+        {
             if ex.max_groups.is_some_and(|m| groups_done >= m) {
                 report.stopped_early = true;
                 break;
