@@ -657,7 +657,7 @@ fn attachment(name: &str) -> String {
 fn html(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(body)
         .with_header(header("Content-Type", "text/html; charset=utf-8"))
-        .with_header(header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
+        .with_header(header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
         .with_header(header("X-Content-Type-Options", "nosniff"))
         .with_header(header("Referrer-Policy", "no-referrer"))
         .with_header(header("Cache-Control", "no-store"))
@@ -3813,6 +3813,109 @@ mod tests {
         );
         assert_eq!(
             raw(port, "GET", t, &[("X-Varsto-Token", &token)], "").0,
+            404
+        );
+    }
+
+    /// A GET with the token; returns (status, lowercase head, raw body).
+    fn get_bytes(port: u16, token: &str, target: &str) -> (u16, String, Vec<u8>) {
+        use std::io::{Read, Write};
+        let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        c.set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let req = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nX-Varsto-Token: {token}\r\n\r\n");
+        c.write_all(req.as_bytes()).unwrap();
+        let mut out = Vec::new();
+        let _ = c.read_to_end(&mut out);
+        let at = out
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("a complete response");
+        let head = String::from_utf8_lossy(&out[..at]).to_lowercase();
+        let status = head
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        (status, head, out[at + 4..].to_vec())
+    }
+
+    /// The page may show pictures from blob: addresses: thumbnails are fetched
+    /// with the session header and shown from a blob (an `img` cannot send a
+    /// header), so a policy without `blob:` in `img-src` blanks every one.
+    #[test]
+    fn the_page_policy_lets_thumbnail_blobs_load() {
+        let (port, _token, _tmp) = test_server();
+        let (st, head, _) = raw(port, "GET", "/", &[], "");
+        assert_eq!(st, 200);
+        let csp = head
+            .lines()
+            .find(|l| l.starts_with("content-security-policy:"))
+            .expect("a content security policy");
+        let img = csp
+            .split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with("img-src"))
+            .expect("an img-src directive");
+        assert!(img.split(' ').any(|s| s == "blob:"), "{img}");
+        assert!(img.split(' ').any(|s| s == "'self'"), "{img}");
+        // Still no remote pictures.
+        assert!(!img.contains("http"), "{img}");
+    }
+
+    /// `/api/thumb` answers real JPEGs of the right size, again and again
+    /// (every request reads the storage; nothing empty is ever kept).
+    #[test]
+    fn thumb_endpoint_serves_decodable_pictures() {
+        let (port, token, tmp, state) = test_server_state();
+        let root = tmp.path();
+        let (mut engine, _) = Engine::init(&root.join("dev"), "laptop", "pass phrase 123").unwrap();
+        engine
+            .add_storage(StorageSpec::LocalDir {
+                name: "box".into(),
+                path: root.join("box"),
+                cold: false,
+                carrier: false,
+                place: String::new(),
+                min_free: None,
+            })
+            .unwrap();
+        let pics = root.join("pics");
+        std::fs::create_dir_all(&pics).unwrap();
+        engine.add_folder("pics", &pics).unwrap();
+        image::RgbImage::from_fn(640, 480, |x, y| image::Rgb([x as u8, y as u8, 40]))
+            .save(pics.join("a b.png"))
+            .unwrap();
+        image::RgbImage::from_fn(300, 500, |x, y| image::Rgb([y as u8, x as u8, 90]))
+            .save(pics.join("c.jpg"))
+            .unwrap();
+        engine.push("pics").unwrap();
+        state.lock().unwrap().engine = Some(engine);
+        for (path, w, h) in [("a%20b.png", 256, 192), ("c.jpg", 154, 256)] {
+            let target = format!("/api/thumb?folder=pics&path={path}");
+            for round in 0..3 {
+                let (st, head, body) = get_bytes(port, &token, &target);
+                assert_eq!(st, 200, "{path} round {round}");
+                assert!(head.contains("content-type: image/jpeg"), "{head}");
+                assert!(
+                    head.contains(&format!("content-length: {}", body.len())),
+                    "{head}"
+                );
+                assert!(body.len() > 200, "{path}: {} bytes", body.len());
+                assert_eq!(&body[..2], &[0xff, 0xd8]);
+                let img = image::load_from_memory(&body).unwrap().to_rgb8();
+                assert!(
+                    (img.width() as i64 - w).abs() <= 1 && (img.height() as i64 - h).abs() <= 1,
+                    "{path}: {}x{}",
+                    img.width(),
+                    img.height()
+                );
+            }
+        }
+        // Not a picture: no thumbnail, and an honest 404 (the page then
+        // shows its placeholder).
+        assert_eq!(
+            get_bytes(port, &token, "/api/thumb?folder=pics&path=nope.png").0,
             404
         );
     }

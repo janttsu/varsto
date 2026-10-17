@@ -8,6 +8,7 @@
 //! an answer older than its own change.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 
@@ -19,6 +20,18 @@ const MAX_ENTRIES: usize = 128;
 /// half of it is not kept (the file list of a folder of 50 000 files is
 /// about 18 MiB).
 const MAX_BYTES: usize = 64 << 20;
+
+/// Bumped by [`invalidate_all`]: the service's own work (not an API request)
+/// changed what the reads show, e.g. a device joined.
+static EXTERNAL: AtomicU64 = AtomicU64::new(0);
+
+/// Forget every kept answer of every cache: something the service did on
+/// its own (a new device turned up, the peer table changed) makes the
+/// answers from before wrong, and a poll that finds the state busy must not
+/// be given them.
+pub fn invalidate_all() {
+    EXTERNAL.fetch_add(1, Ordering::SeqCst);
+}
 
 /// The GET routes that only read the state and are answered from the cache
 /// while it is busy. Routes that take something away (`/api/link`), talk to
@@ -102,13 +115,28 @@ pub struct ReadCache {
     entries: HashMap<String, Entry>,
     bytes: usize,
     generation: u64,
+    /// The value of `EXTERNAL` the entries were kept under.
+    external: u64,
 }
 
 impl ReadCache {
     /// Changes when the cache is emptied: an answer computed before that is
     /// not kept.
-    pub fn generation(&self) -> u64 {
+    pub fn generation(&mut self) -> u64 {
+        self.follow_external();
         self.generation
+    }
+
+    /// Empty the cache when `invalidate_all` was called since it was used.
+    fn follow_external(&mut self) {
+        self.follow_external_at(EXTERNAL.load(Ordering::SeqCst));
+    }
+
+    fn follow_external_at(&mut self, now: u64) {
+        if now != self.external {
+            self.external = now;
+            self.invalidate();
+        }
     }
 
     /// Forget every answer (something was changed).
@@ -122,6 +150,7 @@ impl ReadCache {
     /// `generation` was read or the answer is too large. Returns whether it
     /// was kept.
     pub fn store(&mut self, key: &str, generation: u64, body: Arc<String>, now: Instant) -> bool {
+        self.follow_external();
         if generation != self.generation || body.len() > MAX_BYTES / 2 {
             return false;
         }
@@ -151,7 +180,8 @@ impl ReadCache {
     }
 
     /// The last answer of `key` and its age.
-    pub fn get(&self, key: &str, now: Instant) -> Option<(Duration, Arc<String>)> {
+    pub fn get(&mut self, key: &str, now: Instant) -> Option<(Duration, Arc<String>)> {
+        self.follow_external();
         self.entries
             .get(key)
             .map(|e| (now.saturating_duration_since(e.at), e.body.clone()))
@@ -232,7 +262,26 @@ mod tests {
         // An answer computed before the change is not kept.
         assert!(!c.store("/api/status", g, Arc::new("{}".into()), now));
         assert!(c.get("/api/status", now).is_none());
-        assert!(c.store("/api/status", c.generation(), Arc::new("{}".into()), now));
+        let g = c.generation();
+        assert!(c.store("/api/status", g, Arc::new("{}".into()), now));
+    }
+
+    #[test]
+    fn work_of_the_service_itself_empties_the_answers() {
+        // `invalidate_all` bumps a process-wide number that every cache
+        // follows (checked here with explicit numbers: the real one is shared
+        // with the tests running beside this one).
+        let mut c = ReadCache::default();
+        let now = Instant::now();
+        let g = c.generation();
+        assert!(c.store("/api/devices", g, Arc::new("{\"devices\":[1]}".into()), now));
+        assert!(c.get("/api/devices", now).is_some());
+        c.follow_external_at(c.external); // nothing happened
+        assert!(c.get("/api/devices", now).is_some());
+        c.follow_external_at(c.external + 1); // a device turned up
+        assert!(c.get("/api/devices", now).is_none());
+        // An answer computed before that is not kept either.
+        assert!(!c.store("/api/devices", g, Arc::new("{}".into()), now));
     }
 
     #[test]

@@ -2972,7 +2972,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var folder = $("filesfolder").value; var fs = folderByName(folder);
     var d = $("filedetails"); d.classList.remove("hidden"); document.querySelector(".files-layout").classList.add("with-details");
     var pv = $("fd-preview"); pv.innerHTML = "";
-    if (f.media) { var im = document.createElement("img"); im.alt = ""; im.onerror = function () { im.remove(); pv.appendChild(icon("image")); }; pv.appendChild(im); thumbSrc(im, folder, f.path); } else { pv.appendChild(icon("files")); }
+    if (f.media) { var im = document.createElement("img"); im.alt = showName(f.path.split("/").pop()); im.onerror = function () { im.remove(); pv.appendChild(icon("image")); }; pv.appendChild(im); thumbSrc(im, folder, f.path); } else { pv.appendChild(icon("files")); }
     $("fd-name").textContent = showName(f.path);
     var st = $("fd-state"); st.innerHTML = ""; st.appendChild(stateSquare(f)); st.appendChild(document.createTextNode(fileStateLabel(f)));
     $("fd-size").textContent = fmtBytes(f.size);
@@ -3351,7 +3351,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           var cell = document.createElement("td"); var row = el("div", "mrow-in");
           var pick = el("span", "mrow-pick"); pick.setAttribute("aria-hidden", "true"); row.appendChild(pick);
           var media = el("span", "mrow-thumb");
-          if (f.media) { var mi = document.createElement("img"); mi.alt = ""; mi.loading = "lazy"; mi.onerror = function () { mi.replaceWith(icon("image")); }; media.appendChild(mi); thumbSrc(mi, folder, f.path); } else { media.appendChild(icon("files")); }
+          if (f.media) { var mi = document.createElement("img"); mi.alt = showName(f.path.split("/").pop()); mi.loading = "lazy"; mi.onerror = function () { mi.replaceWith(icon("image")); }; media.appendChild(mi); thumbSrc(mi, folder, f.path); } else { media.appendChild(icon("files")); }
           row.appendChild(media);
           var slash = f.path.lastIndexOf("/");
           var body = el("div", "mrow-body");
@@ -3373,7 +3373,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         function td(t, cls, label) { var d = document.createElement("td"); d.textContent = t; if (cls) { d.className = cls; } if (label) { d.dataset.label = label; } tr.appendChild(d); }
         var nameCell = document.createElement("td"); var wrap = el("span", "file-name");
         wrap.appendChild(stateSquare(f));
-        if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = ""; im.loading = "lazy"; im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); thumbSrc(im, folder, f.path); }
+        if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = showName(f.path.split("/").pop()); im.loading = "lazy"; im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); thumbSrc(im, folder, f.path); }
         else { var fi = el("span", "file-icon"); fi.appendChild(icon("files")); wrap.appendChild(fi); }
         var fname = el("span", null, showName(f.path)); fname.setAttribute("data-no-i18n", ""); wrap.appendChild(fname);
         if (f.analysis) { var ap = pill(f.analysis_stale ? "risk" : "accent", f.analysis_stale ? "Analysis stale" : "Analysed"); ap.title = f.analysis.slice(0, 200); ap.classList.add("analysis-pill"); wrap.appendChild(ap); }
@@ -4112,6 +4112,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     on("sync.started", function () {});
     ["move.waiting", "move.done", "policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "folder.paused", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
     on("config.changed", function () { serviceSoon(); statusSoon(); });
+    // A device joined, or the peers changed: the device list and the peers page follow at once.
+    ["devices.changed", "peers.changed"].forEach(function (k) { on(k, function () { serviceSoon(); statusSoon(); if (currentPage === "peers") { loadP2p(); } }); });
     on("notification", function (d) { if (d.title) { log(d.title + ": " + (d.body || "")); } });
   }
   // This device's tasks changed: the bar at the top and the Now card.

@@ -39,7 +39,6 @@ html.viz-fullscreen body > :not(.viz) { display: none !important; }
 .viz-dot { width: .65em; height: .65em; border-radius: 50%; background: var(--vz-muted); display: inline-block; }
 .viz-dot[data-s="live"] { background: var(--vz-ok); box-shadow: 0 0 0 3px rgba(31, 169, 113, .22); }
 .viz-dot[data-s="stale"] { background: var(--vz-warn); }
-.viz-dot[data-s="demo"] { background: var(--vz-info); }
 .viz-dot[data-s="error"] { background: var(--vz-bad); }
 
 .viz-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5em, 1fr)); gap: 8px; }
@@ -56,7 +55,11 @@ html.viz-fullscreen body > :not(.viz) { display: none !important; }
 .viz[data-bg="auto"] .viz-stage { background: linear-gradient(135deg, var(--vz-surface-2), var(--vz-bg)); }
 .viz.is-full .viz-stage, .viz.pseudo-full .viz-stage { aspect-ratio: auto; height: calc(var(--vz-vh) - 8.5em); min-height: 0; }
 .viz-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.viz-demo { position: absolute; left: 12px; top: 12px; background: var(--vz-info); color: #fff; border-radius: 999px; padding: .2em .8em; font-size: .8em; font-weight: 600; }
+.viz-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 80%; text-align: center; color: var(--vz-muted); display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.viz-note[data-k="empty"] { top: auto; bottom: 14px; transform: translateX(-50%); background: var(--vz-surface); border: 1px solid var(--vz-border); border-radius: 12px; padding: .5em 1em; }
+.viz-note[data-k="error"] { color: var(--vz-bad); }
+.viz-nodata .viz-chips, .viz-nodata .viz-side { display: none; }
+.viz-dim .viz-stage canvas, .viz-dim .viz-chips, .viz-dim .viz-side { opacity: .5; }
 .viz-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .viz.is-full .viz-side, .viz.pseudo-full .viz-side { max-height: calc(var(--vz-vh) - 8.5em); overflow: auto; }
 .viz-card { background: var(--vz-surface); border: 1px solid var(--vz-border); border-radius: 1em; padding: .7em .86em; min-width: 0; }
