@@ -33,6 +33,8 @@ pub mod ignore_rules;
 pub mod import;
 pub mod kem;
 pub mod ledger;
+#[cfg(feature = "format3")]
+pub mod ledger3;
 pub mod logging;
 pub mod manifest;
 pub mod media;
