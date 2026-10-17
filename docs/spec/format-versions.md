@@ -25,6 +25,10 @@ Alpha-0-format.md section 74. A peer-to-peer message (`/p2p/heads`, the head sta
 
 Alpha-0-format.md section 75. Builds with the `format3` feature carry the format-3 peer records (`vault/peers/<device>/<seq>-0000.rec`, SignedRecords), TLS-only TCP, connection-bound tokens, signed beacons, the format-3 pairing hello and the head exchange with proofs (`ledger/watch.json`), but nothing switches to them before the format does: every build still reads, writes and speaks format 2.
 
+## Format 3 folder membership for people, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 76. Commands, local API routes, event-stream events (`folder.request`, `folder.changed`, `pair.ask`) and a pairing question for the format-3 membership records of section 6 of the design. No stored format changes: builds with the feature write `request`, `grant`, `folder`, `share-epoch` and `escrow` SignedRecords only when a person runs those commands, and no build reads them for anything else before the format flips.
+
 ## Release rules
 
 1. Tag every alpha release (`v0.0.1-alpha.N`) with the source commit and binaries. Tags `v0.0.1-alpha.3` and `v0.0.1-alpha.9` do not exist: those releases were folded into the next tag (`v0.0.1-alpha.4` and `v0.0.1-alpha.10`).
