@@ -229,6 +229,33 @@ pub fn build(
     (id, bytes, locs)
 }
 
+/// Place items of `sizes` bytes first-fit decreasing into bins of at most
+/// `limit` bytes (an item larger than `limit` gets a bin of its own). Each
+/// bin lists item indexes in their original order (blocks of a file stay
+/// next to each other inside a pack). Pushes, rewrites, compaction and
+/// repairs fill packs this way.
+pub fn first_fit_decreasing(sizes: &[usize], limit: usize) -> Vec<Vec<usize>> {
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(sizes[i]));
+    let mut bins: Vec<(Vec<usize>, usize)> = Vec::new();
+    for i in order {
+        let n = sizes[i];
+        match bins.iter_mut().find(|(_, used)| *used + n <= limit) {
+            Some((members, used)) => {
+                members.push(i);
+                *used += n;
+            }
+            None => bins.push((vec![i], n)),
+        }
+    }
+    bins.into_iter()
+        .map(|(mut idx, _)| {
+            idx.sort_unstable();
+            idx
+        })
+        .collect()
+}
+
 /// A pack this process wrote, not yet listed in a pack index.
 #[derive(Clone, Debug)]
 pub struct NewPack {
@@ -998,23 +1025,8 @@ impl PackStore {
     /// of what is left takes the smallest class it fits.
     fn write_packs(&self, fresh: &[(String, &[u8])]) -> Result<()> {
         let limit = self.target.min(top_class(self.target));
-        let mut order: Vec<usize> = (0..fresh.len()).collect();
-        order.sort_by_key(|&i| std::cmp::Reverse(fresh[i].1.len()));
-        let mut bins: Vec<(Vec<usize>, usize)> = Vec::new();
-        for i in order {
-            let n = fresh[i].1.len();
-            match bins.iter_mut().find(|(_, used)| *used + n <= limit) {
-                Some((members, used)) => {
-                    members.push(i);
-                    *used += n;
-                }
-                None => bins.push((vec![i], n)),
-            }
-        }
-        for (mut idx, _) in bins {
-            // The order of the push inside a pack (blocks of a file next
-            // to each other).
-            idx.sort_unstable();
+        let sizes: Vec<usize> = fresh.iter().map(|(_, b)| b.len()).collect();
+        for idx in first_fit_decreasing(&sizes, limit) {
             let group: Vec<(String, &[u8])> = idx.iter().map(|&i| fresh[i].clone()).collect();
             let (id, data, members) = build(&group, self.target);
             self.inner.put_if_absent(&pack_key(&id), &data)?;

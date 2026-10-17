@@ -29,6 +29,8 @@ pub mod engine;
 pub mod events;
 pub mod freespace;
 pub mod fsmeta;
+#[cfg(feature = "format3")]
+pub mod gc3;
 pub mod help;
 pub mod ids;
 pub mod ignore_rules;
