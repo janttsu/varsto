@@ -45,6 +45,8 @@ pub const ALPN: &[u8] = b"varsto-p2p/1";
 /// A punch datagram: eight bytes nobody answers; it only creates a NAT mapping.
 pub const PUNCH_MAGIC: [u8; 8] = *b"VARSTOPU";
 pub const CERT_FILE: &str = "p2p-cert.der";
+/// The verb of the reachability self-probe (`Node::probe_self`).
+const PROBE_VERB: &str = "PROBE";
 pub const KEY_FILE: &str = "p2p-key.der";
 const MAX_HEAD: usize = 32 * 1024;
 /// Objects are at most one chunk plus overhead; relays copy whole bodies.
@@ -1008,13 +1010,42 @@ impl Node {
 
     /// Does our own public address lead back to us? True means other devices
     /// can connect directly, so the record may say `reachable`.
+    ///
+    /// The probe is a path of its own, not a request to a peer: a fresh
+    /// connection pinned to this device's own certificate (which `connect`
+    /// refuses for every other purpose), never kept or counted, carrying
+    /// one `PROBE <nonce>` that only a connection presenting our own
+    /// certificate may send and that the server answers by echoing the
+    /// nonce. Reaching our own listener through the public address and
+    /// getting our nonce back is the proof.
     pub fn probe_self(&self, addr: SocketAddr) -> bool {
-        let path = "/p2p/info";
-        let auth = auth_header(&self.serving.peer_key(), &self.serving.me, path);
-        matches!(
-            self.request(addr, &self.identity.sha256, path, &auth, false),
-            Ok((200, _))
-        )
+        let mut nonce = [0u8; 16];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut nonce);
+        let nonce = hex::encode(nonce);
+        let result = self.rt.block_on(async {
+            let cfg = self.client_config(&self.identity.sha256)?;
+            let connecting = self
+                .endpoint
+                .connect_with(cfg, addr, "varsto")
+                .with_context(|| format!("connect {addr}"))?;
+            let conn = tokio::time::timeout(CONNECT_TIMEOUT, connecting)
+                .await
+                .map_err(|_| anyhow!("self-probe {addr}: no answer"))??;
+            let r = request_on(&conn, PROBE_VERB, &nonce, "").await;
+            conn.close(0u32.into(), b"probed");
+            r
+        });
+        match result {
+            Ok((200, body)) => body == nonce.as_bytes(),
+            Ok((status, _)) => {
+                log(&format!("self-probe {addr}: answered {status}"));
+                false
+            }
+            Err(e) => {
+                log(&format!("self-probe {addr}: {e:#}"));
+                false
+            }
+        }
     }
 
     /// Register with the relay `relay` (a reachable device of the vault):
@@ -1149,6 +1180,8 @@ async fn serve_connection(conn: quinn::Connection, sv: Arc<Serving>, via: Option
     // A client holding this device's own certificate is this device (or a
     // copy of its identity): not a peer, so the connection is dropped.
     if via.is_none() && hash.as_deref() == Some(sv.own_cert.as_str()) {
+        // The one thing it may do is the reachability self-probe.
+        answer_self_probe(&conn).await;
         conn.close(0u32.into(), b"self");
         return;
     }
@@ -1162,6 +1195,27 @@ async fn serve_connection(conn: quinn::Connection, sv: Arc<Serving>, via: Option
             let _ = serve_stream(send, recv, conn, hash, sv, via).await;
         });
     }
+}
+
+/// On a connection that presented our own certificate: answer one
+/// `PROBE <nonce>` by echoing the nonce; anything else gets a refusal.
+async fn answer_self_probe(conn: &quinn::Connection) {
+    let Ok(Ok((mut send, mut recv))) =
+        tokio::time::timeout(CONNECT_TIMEOUT, conn.accept_bi()).await
+    else {
+        return;
+    };
+    let Ok(Ok(head)) = tokio::time::timeout(REQUEST_TIMEOUT, recv.read_to_end(MAX_HEAD)).await
+    else {
+        return;
+    };
+    let (status, body) = match parse_request(&head) {
+        Ok((verb, nonce, _)) if verb == PROBE_VERB && nonce.len() == 32 => {
+            (200, nonce.into_bytes())
+        }
+        _ => (403, super::SELF_ANSWER.to_vec()),
+    };
+    let _ = write_response(&mut send, status, &body).await;
 }
 
 async fn serve_stream(
@@ -1314,6 +1368,52 @@ mod tests {
         assert_eq!(a.sha256.len(), 64);
         assert_eq!(a.sha256, Identity::fingerprint(&a.cert));
         assert_ne!(Identity::generate().unwrap().sha256, a.sha256);
+    }
+
+    #[test]
+    fn the_self_probe_reaches_us_while_dialling_our_own_certificate_stays_refused() {
+        let id = Identity::generate().unwrap();
+        let own = id.sha256.clone();
+        let node = Node::start(
+            "127.0.0.1:0".parse().unwrap(),
+            id,
+            DeviceId::random(),
+            SecretKey::random(),
+            Arc::default(),
+            Arc::default(),
+        )
+        .unwrap();
+        let addr = node.local_addr;
+        assert!(node.probe_self(addr), "our own listener answers the probe");
+        assert_eq!(
+            node.connections_opened(),
+            0,
+            "the probe is no peer connection"
+        );
+        // An ordinary request pinned to our own certificate is refused.
+        let e = node
+            .request(addr, &own, "/p2p/info", "x", false)
+            .err()
+            .unwrap();
+        assert!(e.to_string().contains("own"), "{e:#}");
+        // Nothing answers at an address where we do not listen.
+        let gone = UdpSocket::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        assert!(!node.probe_self(gone));
+        // Another device's listener does not echo our probe: it refuses our
+        // certificate (unknown to it), so the probe fails.
+        let other = Node::start(
+            "127.0.0.1:0".parse().unwrap(),
+            Identity::generate().unwrap(),
+            DeviceId::random(),
+            SecretKey::random(),
+            Arc::default(),
+            Arc::default(),
+        )
+        .unwrap();
+        assert!(!node.probe_self(other.local_addr));
     }
 
     #[test]

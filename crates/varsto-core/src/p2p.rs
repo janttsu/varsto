@@ -1086,19 +1086,21 @@ impl TcpPool {
         }
     }
 
-    /// GET `path` from `addr` on a kept connection, or a new one.
+    /// GET `path` from `addr` on a kept connection, or a new one. `auth`
+    /// makes the token of each attempt: a token is good once, and the peer
+    /// may have spent the first one on a kept connection that then dropped.
     pub fn get(
         &self,
         addr: SocketAddr,
         path: &str,
-        auth: &str,
+        auth: &dyn Fn() -> String,
         timeout: Duration,
     ) -> Result<(u16, Vec<u8>)> {
         // A kept connection the peer closed meanwhile (restart, idle
-        // timeout) fails: then ask again on a fresh one.
+        // timeout) fails: then ask again on a fresh one, with a fresh token.
         if let Some(Ok((status, body, keep))) = self
             .take(addr)
-            .map(|s| exchange(s, addr, path, auth, timeout))
+            .map(|s| exchange(s, addr, path, &auth(), timeout))
         {
             if let Some(s) = keep {
                 self.give_back(addr, s);
@@ -1107,7 +1109,7 @@ impl TcpPool {
         }
         let s = TcpStream::connect_timeout(&addr, timeout)?;
         s.set_nodelay(true)?;
-        let (status, body, keep) = exchange(s, addr, path, auth, timeout)?;
+        let (status, body, keep) = exchange(s, addr, path, &auth(), timeout)?;
         if let Some(s) = keep {
             self.give_back(addr, s);
         }
@@ -1423,7 +1425,19 @@ impl Peers {
 
     fn try_tcp(&self, addr: SocketAddr, path: &str, auth: &str) -> Result<(u16, Vec<u8>)> {
         let pool = self.pool.lock().unwrap().clone();
-        let result = pool.get(addr, path, auth, self.timeout);
+        // The first attempt uses the token made for this request; a retry
+        // on a new connection makes its own.
+        let first = std::cell::Cell::new(Some(auth.to_string()));
+        let result = pool.get(
+            addr,
+            path,
+            &|| {
+                first
+                    .take()
+                    .unwrap_or_else(|| auth_header(&self.key, &self.me, path))
+            },
+            self.timeout,
+        );
         self.debug(&format!(
             "tcp {addr} {path} -> {}",
             match &result {
@@ -2063,7 +2077,7 @@ mod tests {
         let pool = TcpPool::default();
         for _ in 0..3 {
             let (status, body) = pool
-                .get(addr, "/p2p/info", "x", Duration::from_secs(2))
+                .get(addr, "/p2p/info", &|| "x".into(), Duration::from_secs(2))
                 .unwrap();
             assert_eq!((status, body.as_slice()), (503, b"locked".as_slice()));
         }
@@ -2123,7 +2137,7 @@ mod tests {
         // ... while an ordinary request, whole in one piece, is answered.
         let pool = TcpPool::default();
         let (status, _) = pool
-            .get(addr, "/p2p/info", "x", Duration::from_secs(2))
+            .get(addr, "/p2p/info", &|| "x".into(), Duration::from_secs(2))
             .unwrap();
         assert_eq!(status, 503);
         // The trickling ones are closed at the deadline, not after the idle time.
@@ -2148,6 +2162,56 @@ mod tests {
         drop(trickling);
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         th.join().unwrap();
+    }
+
+    #[test]
+    fn a_retry_after_a_dropped_kept_connection_carries_a_fresh_token() {
+        // A peer that answers the first request with keep-alive, spends the
+        // token of the second and drops the connection without answering,
+        // then answers on a new connection only to a token it has not seen.
+        let key = SecretKey::random();
+        let me = DeviceId::random();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let k2 = key.clone();
+        let peer = std::thread::spawn(move || {
+            let read_head = |s: &mut TcpStream| -> String {
+                let mut buf = Vec::new();
+                let mut b = [0u8; 1];
+                while !buf.ends_with(b"\r\n\r\n") {
+                    if s.read(&mut b).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    buf.push(b[0]);
+                }
+                let head = String::from_utf8_lossy(&buf).to_string();
+                head.lines()
+                    .find_map(|l| l.strip_prefix("X-Varsto-Peer: "))
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            };
+            let answer = |s: &mut TcpStream, status: u16| {
+                write!(s, "HTTP/1.1 {status} X\r\nContent-Length: 2\r\n\r\nok").unwrap();
+            };
+            let (mut c1, _) = listener.accept().unwrap();
+            let t = read_head(&mut c1);
+            let ok = verify_auth(&k2, &t, "/p2p/info").is_some();
+            answer(&mut c1, if ok { 200 } else { 403 });
+            let t = read_head(&mut c1);
+            assert!(verify_auth(&k2, &t, "/p2p/info").is_some());
+            drop(c1); // the token is spent, no answer
+            let (mut c2, _) = listener.accept().unwrap();
+            let t = read_head(&mut c2);
+            let ok = verify_auth(&k2, &t, "/p2p/info").is_some();
+            answer(&mut c2, if ok { 200 } else { 403 });
+        });
+        let peers = Peers::new(key.clone(), me.clone(), Vec::new());
+        let auth = || auth_header(&key, &me, "/p2p/info");
+        assert_eq!(peers.try_tcp(addr, "/p2p/info", &auth()).unwrap().0, 200);
+        let (status, _) = peers.try_tcp(addr, "/p2p/info", &auth()).unwrap();
+        assert_eq!(status, 200, "the retry on a new connection is accepted");
+        peer.join().unwrap();
     }
 
     #[test]
