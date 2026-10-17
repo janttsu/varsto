@@ -274,6 +274,10 @@ pub struct Inputs {
     /// that stayed over several pulls).
     #[serde(default)]
     pub ledger_withheld: Vec<String>,
+    /// Devices whose newer batches a peer holds while no storage gives
+    /// them (section 74): withheld or rolled back.
+    #[serde(default)]
+    pub ledger_rolled_back: Vec<String>,
     pub repair_queued: u64,
     pub repair_losses: u64,
     pub scrub_damaged: u64,
@@ -999,6 +1003,17 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
             "warn",
             tx(
                 "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.",
+                &[("device", d.clone())],
+            ),
+        );
+    }
+    for d in &i.ledger_rolled_back {
+        att(
+            h,
+            &format!("ledger-withheld:{d}"),
+            "warn",
+            tx(
+                "A storage may be withholding or rolling back ledger batches of {device}: another device holds newer ones that no storage gives this device.",
                 &[("device", d.clone())],
             ),
         );

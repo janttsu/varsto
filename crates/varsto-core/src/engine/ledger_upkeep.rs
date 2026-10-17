@@ -714,6 +714,9 @@ impl Engine {
         let me = self.vault.device_id.clone();
         let mut devices: Vec<DeviceId> = dir.keys().cloned().collect();
         devices.sort();
+        // What peers say they hold (section 74); the pull below asks the
+        // storages for it.
+        self.exchange_heads();
         let mut forks = BTreeSet::new();
         let (mut malformed, mut refused) = (0u64, 0u64);
         for (spec, backend) in self.metadata_storages(false)? {
@@ -859,7 +862,8 @@ impl Engine {
         refused: u64,
     ) {
         let me = self.vault.device_id.clone();
-        let mut lacking: BTreeMap<DeviceId, (u64, u64)> = BTreeMap::new();
+        // device -> (held, seen, source)
+        let mut lacking: BTreeMap<DeviceId, (u64, u64, &'static str)> = BTreeMap::new();
         for (reader, acks) in &view.acks {
             if reader == &me {
                 continue;
@@ -875,21 +879,32 @@ impl Engine {
                 };
                 let held = self.ledger.head(dev).seq;
                 if seen > held {
-                    let e = lacking.entry(dev.clone()).or_insert((held, 0));
+                    let e = lacking.entry(dev.clone()).or_insert((held, 0, "acks"));
                     e.1 = e.1.max(seen);
+                }
+            }
+        }
+        // What a peer says it holds (head statements, section 74).
+        for (dev, reach) in self.peer_reach(dir) {
+            let held = self.ledger.head(&dev).seq;
+            if reach > held {
+                let e = lacking.entry(dev).or_insert((held, 0, "peer"));
+                if reach > e.1 {
+                    e.1 = reach;
+                    e.2 = "peer";
                 }
             }
         }
         for dev in dir.keys().filter(|d| **d != me) {
             if let Some(&waiting) = self.ledger.pending_seqs(dev).last() {
                 let held = self.ledger.head(dev).seq;
-                let e = lacking.entry(dev.clone()).or_insert((held, 0));
+                let e = lacking.entry(dev.clone()).or_insert((held, 0, "pending"));
                 e.1 = e.1.max(waiting);
             }
         }
         let watch = &mut self.ledger_alarm.watch;
         let before = std::mem::take(&mut watch.behind);
-        for (dev, (held, seen)) in lacking {
+        for (dev, (held, seen, source)) in lacking {
             let pulls = before
                 .get(&dev)
                 .map(|b| if b.held == held { b.pulls + 1 } else { 1 })
@@ -910,6 +925,7 @@ impl Engine {
                     held,
                     seen,
                     pulls,
+                    source: source.into(),
                 },
             );
         }

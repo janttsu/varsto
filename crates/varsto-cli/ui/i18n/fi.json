@@ -1511,6 +1511,7 @@
   "opening files in other apps is not available on this platform": "tiedostojen avaaminen muissa sovelluksissa ei ole käytettävissä tällä alustalla",
   "One key opens this Strongroom; if it is lost, so is the folder. Enroll a backup key and keep it somewhere safe.": "Yksi avain avaa tämän Strongroomin; jos se katoaa, katoaa myös kansio. Rekisteröi varaturva-avain ja säilytä se turvallisessa paikassa.",
   "A storage may be withholding ledger batches of {device}: another device holds newer ones that no storage gave this device.": "Tallennuspaikka saattaa pidättää laitteen {device} kirjanpitoeriä: toisella laitteella on uudempia eriä, joita mikään tallennuspaikka ei ole antanut tälle laitteelle.",
+  "A storage may be withholding or rolling back ledger batches of {device}: another device holds newer ones that no storage gives this device.": "Tallennuspaikka saattaa pidättää tai palauttaa vanhaan tilaan laitteen {device} kirjanpitoeriä: toisella laitteella on uudempia eriä, joita mikään tallennuspaikka ei anna tälle laitteelle.",
   "Staged move of folder": "Vaiheittainen siirto, kansio",
   "left to move": "siirrettävää jäljellä",
   "need a second place": "tarvitsevat kopion toiseen paikkaan",
