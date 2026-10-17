@@ -140,6 +140,17 @@ struct RelayFlow {
     last_ms: Option<u64>,
 }
 
+impl Inner {
+    fn is_me(&self, d: &DeviceId) -> bool {
+        self.me.as_ref().is_some_and(|(m, _)| m == d)
+    }
+
+    /// A relayed flow from a device to itself.
+    fn is_loop(&self, from: &DeviceId, to: &DeviceId) -> bool {
+        from == to
+    }
+}
+
 #[derive(Default, Debug)]
 struct Inner {
     me: Option<(DeviceId, String)>,
@@ -227,13 +238,11 @@ impl Traffic {
     /// A request to or from `peer` starts; it counts as active until the
     /// returned guard is dropped.
     pub fn begin(&self, peer: &DeviceId) -> Active<'_> {
-        self.inner
-            .lock()
-            .unwrap()
-            .peers
-            .entry(peer.clone())
-            .or_default()
-            .active += 1;
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.is_me(peer) {
+            inner.peers.entry(peer.clone()).or_default().active += 1;
+        }
+        drop(inner);
         Active {
             traffic: self,
             key: ActiveKey::Peer(peer.clone()),
@@ -242,13 +251,15 @@ impl Traffic {
 
     /// Forwarding from `from` to `to` starts (this device is their relay).
     pub fn begin_relay(&self, from: &DeviceId, to: &DeviceId) -> Active<'_> {
-        self.inner
-            .lock()
-            .unwrap()
-            .relays
-            .entry((from.clone(), to.clone()))
-            .or_default()
-            .active += 1;
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.is_loop(from, to) {
+            inner
+                .relays
+                .entry((from.clone(), to.clone()))
+                .or_default()
+                .active += 1;
+        }
+        drop(inner);
         Active {
             traffic: self,
             key: ActiveKey::Relay(from.clone(), to.clone()),
@@ -283,6 +294,10 @@ impl Traffic {
     ) {
         let sec = now_ms / 1000;
         let mut inner = self.inner.lock().unwrap();
+        // This device is never its own peer: nothing is counted for it.
+        if inner.is_me(peer) {
+            return;
+        }
         let f = inner.peers.entry(peer.clone()).or_default();
         match dir {
             Direction::In => {
@@ -324,6 +339,9 @@ impl Traffic {
     ) {
         let sec = now_ms / 1000;
         let mut inner = self.inner.lock().unwrap();
+        if inner.is_loop(from, to) {
+            return;
+        }
         let f = inner.relays.entry((from.clone(), to.clone())).or_default();
         f.series.add(sec, bytes);
         f.total += bytes;
@@ -348,7 +366,7 @@ impl Traffic {
             ..Default::default()
         };
         let mut peers: Vec<PeerTraffic> = Vec::new();
-        for (d, f) in &inner.peers {
+        for (d, f) in inner.peers.iter().filter(|(d, _)| !inner.is_me(d)) {
             totals.rx_total += f.rx_total;
             totals.tx_total += f.tx_total;
             totals.objects_in += f.objects_in;
@@ -385,6 +403,7 @@ impl Traffic {
         let relays: Vec<RelayTraffic> = inner
             .relays
             .iter()
+            .filter(|((from, to), _)| !inner.is_loop(from, to))
             .map(|((from, to), f)| {
                 totals.relay_total += f.total;
                 totals.active += f.active;
@@ -653,5 +672,29 @@ mod tests {
             v["peers"][0]["rx_history"].as_array().unwrap().len(),
             HISTORY_SECS
         );
+    }
+
+    #[test]
+    fn nothing_is_counted_for_this_device_itself() {
+        let t = Traffic::new();
+        let (me, a) = (
+            DeviceId::from_bytes(&[1u8; 16]),
+            DeviceId::from_bytes(&[2u8; 16]),
+        );
+        t.set_me(&me, "phone");
+        t.learn_names([(&me, "phone"), (&a, "desk")]);
+        t.record_at(1_000, &me, Direction::In, 4000, true, "direct-lan", None);
+        t.record_at(1_000, &me, Direction::Out, 4000, true, "direct-lan", None);
+        t.record_relay_at(1_000, &a, &a, 100, false);
+        {
+            let _x = t.begin(&me);
+            let _y = t.begin_relay(&a, &a);
+            assert_eq!(t.report_at(1_500).totals.active, 0);
+        }
+        let r = t.report_at(2_000);
+        assert!(r.peers.iter().all(|p| p.device != me), "{:?}", r.peers);
+        assert!(r.relays.is_empty());
+        assert_eq!((r.totals.rx_total, r.totals.tx_total), (0, 0));
+        assert_eq!(r.totals.relay_total, 0);
     }
 }

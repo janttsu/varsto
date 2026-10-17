@@ -2976,6 +2976,16 @@ impl Engine {
         Ok(())
     }
 
+    /// Look for the device records other devices published since (a device
+    /// that just joined), without a sync: one listing per storage. True when
+    /// the vault's device list changed. The service asks every few seconds
+    /// after something that may have added a device and backs off.
+    pub fn refresh_devices(&mut self) -> Result<bool> {
+        let before = self.devices.devices.len();
+        self.pull_registry()?;
+        Ok(self.devices.devices.len() != before)
+    }
+
     fn pull_registry(&mut self) -> Result<()> {
         let reg_keys = self.registry_keys();
         let fr_keys = self.folder_record_keys();

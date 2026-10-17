@@ -130,6 +130,13 @@ pub struct ServiceState {
 /// batches of this device than it has.
 const LEDGER_CHECK_EVERY: Duration = Duration::from_secs(3600);
 
+/// How soon the service looks for a device that just joined: first after
+/// `WATCH_MIN`, then with growing gaps up to `WATCH_MAX`. The clock starts
+/// over when the service starts, the vault is unlocked, a pairing offer is
+/// taken up, a peer says it published something or a device turns up.
+const WATCH_MIN: Duration = Duration::from_secs(4);
+const WATCH_MAX: Duration = Duration::from_secs(60);
+
 /// Expired backup snapshots are looked for at most this often.
 const BACKUP_UPKEEP_EVERY: i64 = 6 * 3600;
 
@@ -905,6 +912,12 @@ struct P2p {
     portmap_on: Arc<AtomicBool>,
     portmap: Arc<Mutex<varsto_core::p2p::portmap::PortMapStatus>>,
     portmap_thread: Option<std::thread::JoinHandle<()>>,
+    /// Set by the beacon thread when a LAN address nobody had heard before
+    /// appeared: the peer table is rebuilt at once.
+    lan_new: Arc<AtomicBool>,
+    /// This device has announced itself (record published, snapshot made,
+    /// peers told) since the service started, before its first sync.
+    announced: AtomicBool,
 }
 
 /// Router port mapping is on in the settings, and not switched off for this
@@ -1020,7 +1033,8 @@ impl P2p {
 
         let lan_peers: Arc<Mutex<Vec<varsto_core::p2p::PeerAddr>>> =
             Arc::new(Mutex::new(Vec::new()));
-        let (lan2, stop3) = (lan_peers.clone(), stop.clone());
+        let lan_new = Arc::new(AtomicBool::new(false));
+        let (lan2, stop3, lan_new2) = (lan_peers.clone(), stop.clone(), lan_new.clone());
         match varsto_core::p2p::Beacon::new(tag, device, listen.port()) {
             Ok(beacon) => {
                 let _ = std::thread::Builder::new()
@@ -1033,7 +1047,9 @@ impl P2p {
                         while !stop3.load(std::sync::atomic::Ordering::Relaxed) {
                             beacon.announce();
                             for p in beacon.listen(Duration::from_secs(5)) {
-                                heard.insert(p.addr, (p, Instant::now()));
+                                if heard.insert(p.addr, (p, Instant::now())).is_none() {
+                                    lan_new2.store(true, Ordering::Relaxed);
+                                }
                             }
                             heard.retain(|_, (_, t)| t.elapsed() < Duration::from_secs(60));
                             *lan2.lock().unwrap() =
@@ -1097,7 +1113,68 @@ impl P2p {
             portmap_on,
             portmap,
             portmap_thread,
+            lan_new,
+            announced: AtomicBool::new(false),
         })
+    }
+
+    /// Ask every peer of the current table once, on a thread of its own, and
+    /// show the paths that worked.
+    fn probe_soon(&self, state: &Shared) {
+        let Some(peers) = self.peers.lock().unwrap().clone() else {
+            return;
+        };
+        let state = state.clone();
+        let _ = std::thread::Builder::new()
+            .name("p2p-probe".into())
+            .spawn(move || {
+                peers.probe();
+                {
+                    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+                    st.service.p2p_paths = peers.status();
+                }
+                crate::readcache::invalidate_all();
+                varsto_core::events::publish("peers.changed", json!({}));
+            });
+    }
+
+    /// Did a LAN device nobody had heard appear? Clears the flag.
+    fn take_lan_new(&self) -> bool {
+        self.lan_new.swap(false, Ordering::Relaxed)
+    }
+
+    /// Whether the rendezvous records on the storages differ from the ones
+    /// the peer table was built from (a device published or changed its
+    /// record): the table is then rebuilt.
+    fn records_changed(&self, st: &State) -> bool {
+        let Some(e) = st.engine.as_ref() else {
+            return false;
+        };
+        let Ok(now) = e.peer_record_list() else {
+            return false;
+        };
+        let known = self.records.lock().unwrap();
+        now.len() != known.len()
+            || now.iter().any(|r| {
+                known
+                    .iter()
+                    .find(|k| k.device == r.device)
+                    .is_none_or(|k| !k.same_as(r))
+            })
+    }
+
+    /// Say who this device is before the first sync, which on a device that
+    /// just joined can take a long time: publish the rendezvous record, make
+    /// the snapshot the others fetch from, and tell the peers to look.
+    /// Once per service run.
+    fn announce(&self, st: &mut State) {
+        if self.announced.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        self.refresh_after_sync(st);
+        if let Some(e) = st.engine.as_ref() {
+            e.notify_peers_changed();
+        }
     }
 
     /// Keep the peer-to-peer port forwarded on the home router (TCP and
@@ -1764,6 +1841,11 @@ pub fn run(opts: Options) -> Result<()> {
             .collect()
     };
     let mut local_stamp = stamp(&local_files);
+    // Looking for new devices between the syncs (see `WATCH_MIN`).
+    let mut watch_every = WATCH_MIN;
+    let mut next_watch = Instant::now() + WATCH_MIN;
+    let mut was_unlocked = false;
+    let mut paired_seen: Option<String> = None;
 
     while !QUIT.load(Ordering::SeqCst) {
         // Removable disks: notice what was attached or taken away.
@@ -1915,9 +1997,68 @@ pub fn run(opts: Options) -> Result<()> {
             std::thread::sleep(Duration::from_millis(300));
             break;
         }
-        // Another device published something (a folder, files): sync now.
+        // Another device published something (a folder, files, itself): sync
+        // now, and look for new devices soon.
         if varsto_core::p2p::take_change_heard() {
             state.lock().unwrap().service.sync_requested = true;
+            watch_every = WATCH_MIN;
+            next_watch = Instant::now();
+        }
+        // A new device between the syncs: the host of a pairing sees it
+        // join, a device on the LAN beacons, a device that joined with the
+        // vault key only shows in the storage's device records.
+        {
+            let mut st = state.lock().unwrap();
+            let unlocked_now = st.engine.is_some();
+            if unlocked_now && !was_unlocked {
+                watch_every = WATCH_MIN;
+                next_watch = Instant::now() + WATCH_MIN;
+            }
+            was_unlocked = unlocked_now;
+            let paired = st
+                .pair
+                .as_ref()
+                .and_then(|o| o.status().paired_with)
+                .filter(|w| paired_seen.as_ref() != Some(w));
+            if let Some(w) = paired {
+                // The new device is still joining: look soon and often.
+                paired_seen = Some(w);
+                watch_every = WATCH_MIN;
+                next_watch = Instant::now() + WATCH_MIN;
+            }
+            let lan_new = p2p.as_ref().is_some_and(|p| p.take_lan_new());
+            if unlocked_now && (lan_new || Instant::now() >= next_watch) {
+                next_watch = Instant::now() + watch_every;
+                watch_every = (watch_every * 2).min(WATCH_MAX);
+                let found = st.engine.as_mut().map(|e| e.refresh_devices());
+                let mut grew = false;
+                match found {
+                    Some(Ok(true)) => {
+                        grew = true;
+                        log::info!("a new device turned up in the vault; syncing now");
+                    }
+                    Some(Ok(false)) | None => {}
+                    Some(Err(e)) => log::debug!("device check failed: {e:#}"),
+                }
+                if let Some(p) = &p2p {
+                    if grew || lan_new || p.records_changed(&st) {
+                        p.refresh_before_sync(&mut st);
+                        crate::readcache::invalidate_all();
+                        varsto_core::events::publish("peers.changed", json!({}));
+                        // Ask the new table once, so that the first path to
+                        // a new device is known (and shown) at once.
+                        p.probe_soon(&state);
+                    }
+                }
+                if grew {
+                    crate::readcache::invalidate_all();
+                    st.service.request_sync();
+                    st.service.folders_changed = true;
+                    watch_every = WATCH_MIN;
+                    next_watch = Instant::now() + WATCH_MIN;
+                    varsto_core::events::publish("devices.changed", json!({}));
+                }
+            }
         }
         let due_change = last_change
             .map(|t| t.elapsed() >= debounce)
@@ -1938,6 +2079,9 @@ pub fn run(opts: Options) -> Result<()> {
             let interval = st.service.interval_secs;
             if let Some(p) = &p2p {
                 p.refresh_before_sync(&mut st);
+                // A device that has just joined may sync for a long time
+                // before it is done: say who it is first.
+                p.announce(&mut st);
             }
             if let Some(e) = st.engine.as_mut() {
                 e.expire_strongrooms();

@@ -695,6 +695,13 @@ fn handle_from_inner(
         Some(dev) if !snap.revoked.contains(&dev) => dev,
         _ => return (403, b"forbidden".to_vec(), None),
     };
+    // A request that carries this device's own id came from this device
+    // itself (an address of ours listed for another device, a stale record
+    // of our own): not a peer, never counted. The caller learns the address
+    // is its own from the body.
+    if dev == snap.device_id {
+        return (403, SELF_ANSWER.to_vec(), None);
+    }
     if path == "/p2p/activity" {
         // What this device is doing now; in an organization only for the
         // devices of the same user.
@@ -711,6 +718,9 @@ fn handle_from_inner(
     let (status, body) = answer(snap, path);
     (status, body, Some(dev))
 }
+
+/// The body of the refusal given to a request from this very device.
+pub(crate) const SELF_ANSWER: &[u8] = b"self";
 
 /// A whole object went over the wire (not an info answer or an error).
 pub(crate) fn is_object(path: &str, status: u16) -> bool {
@@ -1195,6 +1205,8 @@ pub struct Peers {
     /// Per device: how its object requests went (`ObjectStats`), so that
     /// peers that have what is asked, and answer fast, are asked first.
     objects: Mutex<BTreeMap<DeviceId, ObjectStats>>,
+    /// Addresses that proved to be this device itself: never tried again.
+    selfs: Mutex<std::collections::BTreeSet<SocketAddr>>,
 }
 
 crate::redacted_opaque!(Peers);
@@ -1239,9 +1251,15 @@ impl Peers {
         lan: &[PeerAddr],
         quic: Option<Arc<quic::Node>>,
     ) -> Self {
+        // A record carrying this device's own certificate is this device
+        // under another id (a re-joined install): never a peer.
+        let own_cert = quic.as_ref().map(|n| n.identity().sha256.clone());
         let mut infos: Vec<PeerInfo> = records
             .iter()
             .filter(|r| r.device != me)
+            .filter(|r| {
+                r.cert_sha256.is_empty() || own_cert.as_deref() != Some(r.cert_sha256.as_str())
+            })
             .map(PeerInfo::from_record)
             .collect();
         for p in lan.iter().filter(|p| p.device != me) {
@@ -1279,6 +1297,7 @@ impl Peers {
             traffic,
             pool: Mutex::default(),
             objects: Mutex::default(),
+            selfs: Mutex::default(),
         }
     }
 
@@ -1321,6 +1340,12 @@ impl Peers {
         *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
         *self.pool.lock().unwrap() = previous.pool.lock().unwrap().clone();
         *self.objects.lock().unwrap() = previous.objects.lock().unwrap().clone();
+        *self.selfs.lock().unwrap() = previous.selfs.lock().unwrap().clone();
+    }
+
+    /// Whether `addr` is known to be this device itself.
+    pub fn is_self_addr(&self, addr: SocketAddr) -> bool {
+        self.selfs.lock().unwrap().contains(&addr)
     }
 
     /// Peers worth asking now: unreachable ones rest for a minute, the ones
@@ -1402,9 +1427,29 @@ impl Peers {
                         bail!("resting after a failure");
                     }
                 }
-                self.try_tcp(*a, path, auth)
+                if self.is_self_addr(*a) {
+                    bail!("that address is this device itself");
+                }
+                let (status, body) = self.try_tcp(*a, path, auth)?;
+                if status == 403 && body == SELF_ANSWER {
+                    log(&format!("{a} answered as this very device; not used again"));
+                    self.selfs.lock().unwrap().insert(*a);
+                    bail!("that address is this device itself");
+                }
+                Ok((status, body))
             }
-            Route::Quic(a) => self.try_quic(*a, &p.cert_sha256, path, auth),
+            Route::Quic(a) => {
+                if self.is_self_addr(*a) {
+                    bail!("that address is this device itself");
+                }
+                let (status, body) = self.try_quic(*a, &p.cert_sha256, path, auth)?;
+                if status == 403 && body == SELF_ANSWER {
+                    log(&format!("{a} answered as this very device; not used again"));
+                    self.selfs.lock().unwrap().insert(*a);
+                    bail!("that address is this device itself");
+                }
+                Ok((status, body))
+            }
             Route::Registered(_) => self
                 .quic
                 .as_ref()
@@ -1440,7 +1485,20 @@ impl Peers {
                 }
             }
         }
-        let mut routes = order_routes(&p.tcp, if quic { &p.udp } else { &[] }, relays);
+        let selfs = self.selfs.lock().unwrap().clone();
+        let tcp: Vec<SocketAddr> = p
+            .tcp
+            .iter()
+            .filter(|a| !selfs.contains(a))
+            .copied()
+            .collect();
+        let udp: Vec<SocketAddr> = p
+            .udp
+            .iter()
+            .filter(|a| !selfs.contains(a))
+            .copied()
+            .collect();
+        let mut routes = order_routes(&tcp, if quic { &udp } else { &[] }, relays);
         // A peer that keeps its relay registration with us is reached on
         // that connection first: it is open already, and behind a symmetric
         // NAT nothing else reaches it from here.
@@ -1878,6 +1936,35 @@ mod tests {
         let (status, body) = ask(&snap, &other_user);
         assert_eq!(status, 403);
         assert!(!String::from_utf8_lossy(&body).contains("idle"));
+    }
+
+    #[test]
+    fn a_request_from_this_very_device_is_refused_and_never_counted() {
+        let key = SecretKey::random();
+        let (me, other) = (DeviceId::random(), DeviceId::random());
+        let snap = Snapshot {
+            vault_id: crate::ids::VaultId::random(),
+            device_id: me.clone(),
+            peer_key: key.clone(),
+            folder_keys: BTreeMap::new(),
+            pieces: BTreeMap::new(),
+            local_roots: Vec::new(),
+            packed: BTreeMap::new(),
+            revoked: Default::default(),
+            activity_audience: None,
+        };
+        for path in ["/p2p/info", "/p2p/activity", "/p2p/changed"] {
+            let (status, body, peer) =
+                handle_from(Some(&snap), path, &auth_header(&key, &me, path));
+            assert_eq!((status, body.as_slice(), peer), (403, SELF_ANSWER, None));
+        }
+        // Another device of the vault is answered and counted as before.
+        let (status, _, peer) = handle_from(
+            Some(&snap),
+            "/p2p/info",
+            &auth_header(&key, &other, "/p2p/info"),
+        );
+        assert_eq!((status, peer), (200, Some(other)));
     }
 
     #[test]

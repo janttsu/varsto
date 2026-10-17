@@ -393,6 +393,10 @@ pub fn compose(heavy: Option<&Heavy>, light: Option<&Light>, live: &LiveInput) -
     // Peer-to-peer traffic: bytes flowing between this device and its peers.
     for p in &live.traffic.peers {
         let id = p.device.to_string();
+        // Defensive: a device never exchanges traffic with itself.
+        if id == me {
+            continue;
+        }
         if p.rx_bps > 0 {
             flows.push(json!({"id": format!("p2p:{id}:rx"), "kind": "p2p", "from": node_dev(&id),
                 "to": node_dev(&me), "folder": "", "bps": p.rx_bps, "unit": "bytes", "rate": p.rx_bps,
@@ -405,7 +409,7 @@ pub fn compose(heavy: Option<&Heavy>, light: Option<&Light>, live: &LiveInput) -
         }
     }
     for r in &live.traffic.relays {
-        if r.bps > 0 {
+        if r.bps > 0 && r.from != r.to {
             flows.push(
                 json!({"id": format!("relay:{}:{}", r.from, r.to), "kind": "relay",
                 "from": node_dev(&r.from.to_string()), "to": node_dev(&r.to.to_string()),

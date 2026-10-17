@@ -4112,6 +4112,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     on("sync.started", function () {});
     ["move.waiting", "move.done", "policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "folder.paused", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
     on("config.changed", function () { serviceSoon(); statusSoon(); });
+    // A device joined, or the peers changed: the device list and the peers page follow at once.
+    ["devices.changed", "peers.changed"].forEach(function (k) { on(k, function () { serviceSoon(); statusSoon(); if (currentPage === "peers") { loadP2p(); } }); });
     on("notification", function (d) { if (d.title) { log(d.title + ": " + (d.body || "")); } });
   }
   // This device's tasks changed: the bar at the top and the Now card.

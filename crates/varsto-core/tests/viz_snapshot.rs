@@ -192,3 +192,39 @@ fn snapshot_without_data_is_empty_but_well_formed() {
     assert_eq!(v["disks"]["count"], 0);
     assert_eq!(v["health"]["overall"], "ok");
 }
+
+#[test]
+fn flows_of_a_device_with_itself_are_filtered() {
+    use varsto_core::ids::DeviceId;
+    use varsto_core::p2p::traffic::{PeerTraffic, RelayTraffic, TrafficReport};
+    let me = DeviceId::from_bytes(&[1u8; 16]);
+    let other = DeviceId::from_bytes(&[2u8; 16]);
+    let peer = |device: &DeviceId| PeerTraffic {
+        device: device.clone(),
+        rx_bps: 500,
+        tx_bps: 700,
+        ..Default::default()
+    };
+    let live = LiveInput {
+        now_utc: 1_000,
+        this_device: me.to_string(),
+        traffic: TrafficReport {
+            peers: vec![peer(&me), peer(&other)],
+            relays: vec![RelayTraffic {
+                from: other.clone(),
+                to: other.clone(),
+                bps: 9,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let v = viz::compose(None, None, &live);
+    let flows = v["flows"].as_array().unwrap();
+    assert_eq!(flows.len(), 2, "{flows:?}");
+    for f in flows {
+        assert_ne!(f["from"], f["to"], "{f}");
+        assert!(f["id"].as_str().unwrap().contains(&other.to_string()));
+    }
+}

@@ -497,6 +497,8 @@ async fn request_on(
 /// What the serving side needs, shared by every connection task.
 struct Serving {
     me: DeviceId,
+    /// Hash of this device's own certificate (see `serve_connection`).
+    own_cert: String,
     /// Changes when the vault key epoch changes (a device was revoked).
     peer_key: Mutex<SecretKey>,
     snapshot: Arc<Mutex<Option<Arc<Snapshot>>>>,
@@ -635,6 +637,7 @@ impl Node {
         )
         .context("quic endpoint")?;
         let serving = Arc::new(Serving {
+            own_cert: identity.sha256.clone(),
             me,
             peer_key: Mutex::new(peer_key),
             snapshot,
@@ -884,6 +887,9 @@ impl Node {
         }
         if expected.is_empty() {
             bail!("peer has no certificate hash yet");
+        }
+        if expected == self.identity.sha256 {
+            bail!("quic {addr}: that certificate is this device's own");
         }
         // A LAN address has no NAT between us: no punching, a short wait.
         let punch = punch && !super::is_lan(addr.ip());
@@ -1140,6 +1146,12 @@ impl std::fmt::Debug for Node {
 /// arriving there come from other devices through that relay.
 async fn serve_connection(conn: quinn::Connection, sv: Arc<Serving>, via: Option<DeviceId>) {
     let hash = peer_hash(&conn);
+    // A client holding this device's own certificate is this device (or a
+    // copy of its identity): not a peer, so the connection is dropped.
+    if via.is_none() && hash.as_deref() == Some(sv.own_cert.as_str()) {
+        conn.close(0u32.into(), b"self");
+        return;
+    }
     sv.served.lock().unwrap().insert(conn.stable_id());
     loop {
         let Ok((send, recv)) = conn.accept_bi().await else {
