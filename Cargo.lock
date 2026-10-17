@@ -4271,6 +4271,7 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "image",
+ "libc",
  "log",
  "mimalloc",
  "notify",

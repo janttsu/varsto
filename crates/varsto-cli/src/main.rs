@@ -28,6 +28,7 @@ mod mcp;
 mod mcp_keys;
 mod placing;
 mod readcache;
+mod remember;
 mod restic;
 mod service;
 mod sse;
@@ -1119,8 +1120,10 @@ enum ServiceCmd {
     },
     /// Stop starting at login.
     Uninstall,
-    /// Keep the passphrase in the system keyring so the service unlocks itself.
+    /// Keep the passphrase so the service unlocks itself after a restart: in the desktop keyring, else (also over SSH) encrypted with systemd-creds, else in the kernel keyring (until restart). Says which one was used.
     Remember,
+    /// Remove the remembered passphrase from every place `remember` may have put it.
+    Forget,
     /// Show whether the service is running and what it did last.
     Status,
     /// Ask the running service to quit.
@@ -4464,32 +4467,37 @@ fn run(cli: &Cli) -> Result<()> {
                 Engine::open(&home, &pass)?; // wrong passphrases are not stored
                 println!("{}", service::remember_passphrase(&home, &pass)?);
             }
+            ServiceCmd::Forget => println!("{}", service::forget_passphrase(&home)?),
             ServiceCmd::Status => match service::status(&home) {
-                Some((f, v)) => print(
-                    cli,
-                    &serde_json::json!({"pid": f.pid, "port": f.port, "version": f.version, "service": v}),
-                    |v| {
-                        format!(
-                            "running: pid {} port {} version {}; {}{}",
-                            v["pid"],
-                            v["port"],
-                            v["version"],
-                            v["service"],
-                            v["service"]["auto_verify_text"]
-                                .as_str()
-                                .map(|t| format!("\n{t}"))
-                                .unwrap_or_default()
-                                + &v["service"]["repair_text"]
+                Some((f, v)) => {
+                    let store = remember::where_remembered(&home);
+                    print(
+                        cli,
+                        &serde_json::json!({"pid": f.pid, "port": f.port, "version": f.version, "service": v, "passphrase_store": store.map(|s| s.id()), "passphrase_text": remember::status_text(store)}),
+                        |v| {
+                            format!(
+                                "running: pid {} port {} version {}; {}\n{}{}",
+                                v["pid"],
+                                v["port"],
+                                v["version"],
+                                v["service"],
+                                v["passphrase_text"].as_str().unwrap_or(""),
+                                v["service"]["auto_verify_text"]
                                     .as_str()
                                     .map(|t| format!("\n{t}"))
                                     .unwrap_or_default()
-                                + &v["service"]["scrub_text"]
-                                    .as_str()
-                                    .map(|t| format!("\n{t}"))
-                                    .unwrap_or_default()
-                        )
-                    },
-                )?,
+                                    + &v["service"]["repair_text"]
+                                        .as_str()
+                                        .map(|t| format!("\n{t}"))
+                                        .unwrap_or_default()
+                                    + &v["service"]["scrub_text"]
+                                        .as_str()
+                                        .map(|t| format!("\n{t}"))
+                                        .unwrap_or_default()
+                            )
+                        },
+                    )?
+                }
                 None => {
                     println!("not running");
                     std::process::exit(1);
@@ -6157,15 +6165,9 @@ fn after_command(cli: &Cli) {
     {
         use std::io::IsTerminal;
         let own = cli.home.is_none() && std::env::var_os("VARSTO_NO_INSTALL").is_none();
-        let locked_here = service::keyring_locked() == Some(true) && !service::has_display();
-        if setup && own && std::io::stdin().is_terminal() && locked_here && typed.is_some() {
-            // Asking would only lead to a store that waits for an unlock
-            // window that cannot appear in this session.
-            eprintln!("Your keyring is locked and this session has no desktop to unlock it, so the passphrase is not stored: after a restart the background service waits until any varsto command that asks for the passphrase unlocks it. To store it, run `varsto service remember` from your desktop session.");
-        }
-        if setup && own && std::io::stdin().is_terminal() && !locked_here {
+        if setup && own && std::io::stdin().is_terminal() {
             if let Some(pass) = &typed {
-                print!("Keep the passphrase in your keyring so background sync unlocks itself after a restart? [Y/n] ");
+                print!("Remember the passphrase on this computer so background sync unlocks itself after a restart? [Y/n] ");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 let mut answer = String::new();
                 let _ = std::io::stdin().read_line(&mut answer);
@@ -7077,7 +7079,7 @@ fn transfers(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
                 .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
                 .is_some_and(|v| v["has_vault"] == true && v["unlocked"] == false);
             if locked {
-                out.push_str("Background sync: LOCKED, waiting for the passphrase; nothing syncs until any varsto command that uses it runs (or `varsto service remember` keeps it in the keyring)\n");
+                out.push_str("Background sync: LOCKED, waiting for the passphrase; nothing syncs until any varsto command that uses it runs (or `varsto service remember` keeps it, in the keyring, with systemd-creds or in the kernel keyring)\n");
             }
             match &summary {
                 Some(_) if locked => {}
