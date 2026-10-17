@@ -16,6 +16,8 @@ pub mod activity;
 pub mod advice;
 pub mod autoverify;
 pub mod blockdev;
+#[cfg(feature = "format3")]
+pub mod blockmap;
 pub mod changes;
 pub mod chunk_seal;
 pub mod chunking;
@@ -75,6 +77,8 @@ pub mod snapshot3;
 pub mod staged_move;
 pub mod storage;
 pub mod storage_settings;
+#[cfg(feature = "format3")]
+pub mod storages3;
 pub mod strongroom;
 pub mod thumbs;
 #[cfg(feature = "format3")]

@@ -146,7 +146,9 @@ fn a_mostly_dead_pack_is_rewritten_and_every_device_still_reads() {
     let after = common::pack_files(&store);
     assert_eq!(after.len(), 1);
     assert_ne!(after[0].1, before[0].1, "the old pack went");
-    assert!(fs::metadata(&after[0].0).unwrap().len() * 4 < before_len);
+    // 1.2 MB of blocks sat in a 4 MiB pack; the live block sits in a 256 KiB one.
+    assert_eq!(before_len, 4 << 20);
+    assert_eq!(fs::metadata(&after[0].0).unwrap().len(), 256 << 10);
     // A device that joins now reads the moved block from the new pack.
     let mut b = Engine::join(&t.path().join("b"), "phone", PASS, &key, dir("box", &store)).unwrap();
     b.attach_folder("docs", &b_dir, false).unwrap();
@@ -157,4 +159,47 @@ fn a_mostly_dead_pack_is_rewritten_and_every_device_still_reads() {
     );
     // Nothing more to rewrite.
     assert_eq!(a.pack_upkeep().unwrap().blocks_moved, 0);
+}
+
+const MIB: u64 = 1 << 20;
+
+/// Pack sizes on a hot storage.
+fn is_size_class(len: u64) -> bool {
+    [MIB / 4, MIB, 4 * MIB, 16 * MIB, 64 * MIB].contains(&len)
+}
+
+#[test]
+fn pack_sizes_are_size_classes_not_the_size_of_the_push() {
+    let t = tempfile::tempdir().unwrap();
+    let (store, docs) = (t.path().join("s"), t.path().join("docs"));
+    let (mut a, _) = Engine::init(&t.path().join("a"), "laptop", PASS).unwrap();
+    a.add_storage(dir("box", &store)).unwrap();
+    a.add_folder("docs", &docs).unwrap();
+    // Three files of 1 MiB each: random, so they do not compress.
+    for i in 0..3u64 {
+        fs::write(
+            docs.join(format!("f{i}.bin")),
+            random(MIB as usize, 10 + 2 * i),
+        )
+        .unwrap();
+    }
+    a.sync(None).unwrap();
+    let packs = common::pack_files(&store);
+    assert!(!packs.is_empty());
+    let mut stored = 0;
+    for (path, id) in &packs {
+        let bytes = fs::read(path).unwrap();
+        stored += bytes.len() as u64;
+        assert!(is_size_class(bytes.len() as u64), "{} bytes", bytes.len());
+        // The id is the hash of all of it, padding included.
+        assert_eq!(hex::encode(varsto_core::crypto::hash(&bytes)), *id);
+    }
+    assert_ne!(stored, 3 * MIB, "the objects show the size of the push");
+    // Every block is still found in its place.
+    let blocks = common::blocks(&store);
+    assert!(blocks.len() >= 3);
+    for (_, _, loc) in &blocks {
+        assert!(is_size_class(loc.pack_len), "{loc:?}");
+    }
+    // The files come back through a second device.
 }

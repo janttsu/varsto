@@ -33,10 +33,9 @@ pub fn validate_key(key: &str) -> Result<()> {
 /// most `MAX_CHUNK_SIZE` plus its nonce, tag and header.
 pub const MAX_BLOCK_OBJECT: u64 = crate::manifest::MAX_CHUNK_SIZE + 64;
 /// Largest pack (`packs/<xx>/<id>`) a storage read returns, and the longest
-/// ranged read: the largest pack target (cold storages) plus one block
-/// object, by which the last member may pass the target. A `PackStore`
-/// reads its own whole packs with its configured target plus that slack.
-pub const MAX_PACK: u64 = crate::packs::COLD_TARGET as u64 + crate::packs::MAX_OBJECT;
+/// ranged read: the largest size class (256 MiB, cold storages). A `PackStore`
+/// reads its own whole packs up to its top size class.
+pub const MAX_PACK: u64 = crate::packs::COLD_TARGET as u64;
 /// Largest record (`vault/`, `manifests/`, `ledger/`, `org/`, ...) a storage
 /// read returns.
 pub const MAX_RECORD: u64 = 256 << 20;
