@@ -619,6 +619,14 @@ fn removing_a_full_device_starts_a_vault_epoch_and_folder_epochs() {
     // Its old vault key no longer joins.
     let n = Dev::new();
     assert!(Membership::join(VAULT, &st, &n.sign, &n.kem, keys.k3_0().unwrap().clone()).is_err());
+    // A full device's snapshot is allowed; the removed device's is not.
+    let backup: Id16 = [0x0b; 16];
+    assert!(mc
+        .record_trust()
+        .may_write(&ma.me, Kind::Snapshot, &backup, &meta(f, 1)));
+    assert!(!mc
+        .record_trust()
+        .may_write(&mb.me, Kind::Snapshot, &backup, &meta(f, 1)));
     // A viewer's manifest is refused by the role check.
     assert!(!mc
         .record_trust()
