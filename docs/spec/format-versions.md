@@ -21,6 +21,10 @@ During alpha development, storage formats may change without migration paths. On
 
 Alpha-0-format.md section 74. A peer-to-peer message (`/p2p/heads`, the head statement on `/p2p/changed`), one optional field `head` in the rendezvous record `vault/peers/<device>.enc` and the device-local file `ledger/heads-seen.json`. Batches, checkpoints and the storage layout are unchanged. Older versions answer `404` to the new path, skip the new record field and never read the file, so devices of different versions work together; only the newer ones compare heads.
 
+## Format 3 peers and transport, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 75. Builds with the `format3` feature carry the format-3 peer records (`vault/peers/<device>/<seq>-0000.rec`, SignedRecords), TLS-only TCP, connection-bound tokens, signed beacons, the format-3 pairing hello and the head exchange with proofs (`ledger/watch.json`), but nothing switches to them before the format does: every build still reads, writes and speaks format 2.
+
 ## Release rules
 
 1. Tag every alpha release (`v0.0.1-alpha.N`) with the source commit and binaries. Tags `v0.0.1-alpha.3` and `v0.0.1-alpha.9` do not exist: those releases were folded into the next tag (`v0.0.1-alpha.4` and `v0.0.1-alpha.10`).
