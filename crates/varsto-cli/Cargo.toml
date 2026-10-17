@@ -55,3 +55,4 @@ windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "W
 
 [dev-dependencies]
 serde_json.workspace = true
+image.workspace = true
