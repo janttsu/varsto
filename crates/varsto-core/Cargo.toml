@@ -13,7 +13,8 @@ publish = false
 # release binaries are built without it.
 software-key = []
 # Storage format 3 (docs/spec/format-3-design.md), built up work package
-# by work package; off until the format switches over.
+# by work package; off until the format switches over. Its readers refuse
+# a pack whose length is not a size class.
 format3 = ["dep:postcard", "dep:smallvec"]
 
 [dependencies]
