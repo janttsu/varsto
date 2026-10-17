@@ -73,6 +73,8 @@ pub mod snapshot;
 pub mod staged_move;
 pub mod storage;
 pub mod storage_settings;
+#[cfg(feature = "format3")]
+pub mod storages3;
 pub mod strongroom;
 pub mod thumbs;
 pub mod util;
