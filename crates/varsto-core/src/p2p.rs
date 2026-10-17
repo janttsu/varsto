@@ -178,6 +178,10 @@ pub struct Snapshot {
     /// organization the devices of the same user; `None` for every device
     /// of the vault.
     pub activity_audience: Option<std::collections::BTreeSet<DeviceId>>,
+    /// This device's signed ledger-head statement (`ledger_heads`, section
+    /// 74), served on `/p2p/heads` and in answer to `/p2p/changed`; empty
+    /// when there is none.
+    pub heads: Vec<u8>,
 }
 
 crate::redacted_opaque!(Snapshot);
@@ -357,7 +361,7 @@ pub struct Server {
 
 const CONN_IDLE: Duration = Duration::from_secs(30);
 const MAX_CONNS: usize = 256;
-const MAX_HEAD: usize = 16 * 1024;
+const MAX_HEAD: usize = 32 * 1024;
 /// A request head must arrive whole within this long of its first byte, and
 /// a new connection must start one within this long of being accepted
 /// (a slow trickle of bytes held a thread for the whole idle time).
@@ -715,7 +719,7 @@ fn handle_from_inner(
         let body = serde_json::to_vec(&crate::activity::local(&snap.device_id)).unwrap_or_default();
         return (200, body, Some(dev));
     }
-    let (status, body) = answer(snap, path);
+    let (status, body) = answer(snap, path, &dev);
     (status, body, Some(dev))
 }
 
@@ -737,10 +741,27 @@ pub fn take_change_heard() -> bool {
     CHANGE_HEARD.swap(false, std::sync::atomic::Ordering::SeqCst)
 }
 
-fn answer(snap: &Snapshot, path: &str) -> (u16, Vec<u8>) {
-    if path == "/p2p/changed" {
+fn answer(snap: &Snapshot, path: &str, from: &DeviceId) -> (u16, Vec<u8>) {
+    // `/p2p/changed`, bare or with the sender's signed head statement; the
+    // answer carries this device's own statement, so one message exchanges
+    // both (section 74). The statement is only kept for the engine to check.
+    if path == "/p2p/changed" || path.starts_with(crate::ledger_heads::CHANGED_PREFIX) {
+        if let Some(st) = crate::ledger_heads::HeadStatement::from_changed_path(path) {
+            if &st.sender == from {
+                crate::ledger_heads::hear(st);
+            }
+        }
         CHANGE_HEARD.store(true, std::sync::atomic::Ordering::SeqCst);
-        return (200, b"ok".to_vec());
+        if snap.heads.is_empty() {
+            return (200, b"ok".to_vec());
+        }
+        return (200, snap.heads.clone());
+    }
+    if path == "/p2p/heads" {
+        if snap.heads.is_empty() {
+            return (404, b"no statement".to_vec());
+        }
+        return (200, snap.heads.clone());
     }
     if path == "/p2p/info" {
         let body = serde_json::json!({
@@ -837,6 +858,12 @@ pub struct PeerRecord {
     pub mapped_tcp: Vec<SocketAddr>,
     #[serde(default)]
     pub mapped_udp: Vec<SocketAddr>,
+    /// The sender's own ledger head (seq and hash of the newest batch a
+    /// storage holds), as a head statement signed with its device key with
+    /// just that entry (section 74): devices that only meet through the
+    /// storage still compare their progress with what others published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<crate::ledger_heads::HeadStatement>,
 }
 
 impl PeerRecord {
@@ -901,10 +928,25 @@ impl PeerRecord {
     }
     /// Equal apart from the timestamp: nothing worth republishing.
     pub fn same_as(&self, other: &PeerRecord) -> bool {
+        // The head statement is signed afresh every time; only the head it
+        // names is a change.
+        let head = |r: &PeerRecord| {
+            r.head.as_ref().map(|h| {
+                h.heads
+                    .iter()
+                    .map(|e| (e.seq, e.hash.clone()))
+                    .collect::<Vec<_>>()
+            })
+        };
+        if head(self) != head(other) {
+            return false;
+        }
         let mut a = self.clone();
         let mut b = other.clone();
         a.updated_utc = 0;
         b.updated_utc = 0;
+        a.head = None;
+        b.head = None;
         a == b
     }
 }
@@ -1656,11 +1698,50 @@ impl Peers {
     /// changed files), so that it syncs now. Best effort: a peer that does
     /// not answer finds the change at its next interval anyway.
     pub fn notify_changed(&self) {
-        let path = "/p2p/changed";
+        self.notify_changed_with(None);
+    }
+
+    /// `notify_changed`, carrying this device's signed ledger-head statement
+    /// (section 74) when it fits a request path. The answer of a peer that
+    /// has one of its own is kept for the engine to check.
+    pub fn notify_changed_with(&self, statement: Option<&crate::ledger_heads::HeadStatement>) {
+        let path = statement
+            .and_then(|s| s.changed_path())
+            .unwrap_or_else(|| "/p2p/changed".to_string());
+        for p in self.ordered() {
+            let auth = auth_header(&self.key, &self.me, &path);
+            if let Some((200, body, _)) = self.fetch(&p, &path, &auth) {
+                self.hear_statement(&p.device, &body);
+            }
+        }
+    }
+
+    /// Keep a head statement a peer sent, when it is that peer's own.
+    fn hear_statement(&self, from: &DeviceId, body: &[u8]) {
+        if body == b"ok" {
+            return;
+        }
+        if let Ok(st) = crate::ledger_heads::HeadStatement::decode(body) {
+            if &st.sender == from {
+                crate::ledger_heads::hear(st);
+            }
+        }
+    }
+
+    /// Ask every peer for its signed ledger-head statement (`/p2p/heads`)
+    /// and keep what comes back for the engine to check (section 74).
+    /// Returns how many peers answered with one.
+    pub fn exchange_heads(&self) -> usize {
+        let path = "/p2p/heads";
+        let mut got = 0;
         for p in self.ordered() {
             let auth = auth_header(&self.key, &self.me, path);
-            let _ = self.fetch(&p, path, &auth);
+            if let Some((200, body, _)) = self.fetch(&p, path, &auth) {
+                self.hear_statement(&p.device, &body);
+                got += 1;
+            }
         }
+        got
     }
 
     /// One request to one peer, over the route that worked last: `None`
@@ -1882,6 +1963,7 @@ mod tests {
             packed: BTreeMap::new(),
             revoked: [gone.clone()].into_iter().collect(),
             activity_audience: None,
+            heads: Vec::new(),
         };
         let ask = |dev: &DeviceId| {
             handle(
@@ -1912,6 +1994,7 @@ mod tests {
             packed: BTreeMap::new(),
             revoked: Default::default(),
             activity_audience: None,
+            heads: Vec::new(),
         };
         let path = "/p2p/activity";
         let ask = |snap: &Snapshot, dev: &DeviceId| {
@@ -1952,6 +2035,7 @@ mod tests {
             packed: BTreeMap::new(),
             revoked: Default::default(),
             activity_audience: None,
+            heads: Vec::new(),
         };
         for path in ["/p2p/info", "/p2p/activity", "/p2p/changed"] {
             let (status, body, peer) =
@@ -2095,6 +2179,7 @@ mod tests {
             reachable: false,
             mapped_tcp: vec![],
             mapped_udp: vec![],
+            head: None,
         };
         let blob = rec.seal(&vault, &key).unwrap();
         let back = PeerRecord::open(&blob, &vault, &dev, &key).unwrap();

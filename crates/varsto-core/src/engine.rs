@@ -62,6 +62,7 @@ mod guide;
 mod help;
 mod history;
 mod imports;
+mod ledger_heads;
 mod ledger_recovery;
 mod ledger_upkeep;
 mod local_names;
@@ -6337,7 +6338,10 @@ impl Engine {
     /// published; on a thread of its own, so a slow peer holds nothing up.
     pub fn notify_peers_changed(&self) {
         if let Some(peers) = self.peers.clone() {
-            std::thread::spawn(move || peers.notify_changed());
+            // The message carries this device's signed ledger heads (and
+            // the answer the peer's), section 74.
+            let heads = self.head_statement();
+            std::thread::spawn(move || peers.notify_changed_with(heads.as_ref()));
         }
     }
 
@@ -6445,6 +6449,10 @@ impl Engine {
                 .cloned()
                 .collect(),
             activity_audience: self.activity_audience(),
+            heads: self
+                .head_statement()
+                .map(|s| s.encode())
+                .unwrap_or_default(),
         })
     }
 
@@ -6502,6 +6510,7 @@ impl Engine {
             reachable: !self.config.p2p.public_addrs.is_empty(),
             mapped_tcp: Vec::new(),
             mapped_udp: Vec::new(),
+            head: self.own_head_statement(),
         }
     }
 
@@ -6547,6 +6556,11 @@ impl Engine {
                 }) else {
                     continue;
                 };
+                // The head it carries is checked at the next ledger pull,
+                // whichever storage's copy is the newest.
+                if let Some(h) = rec.head.clone().filter(|h| h.sender == dev) {
+                    crate::ledger_heads::hear(h);
+                }
                 match out.iter_mut().find(|r| r.device == dev) {
                     Some(have) if have.updated_utc < rec.updated_utc => *have = rec,
                     Some(_) => {}

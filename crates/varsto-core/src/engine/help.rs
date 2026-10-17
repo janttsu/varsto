@@ -301,12 +301,13 @@ impl Engine {
             inputs.ledger_problem = Some(health.describe());
             inputs.ledger_command = health.suggestion.clone();
         }
-        inputs.ledger_withheld = health
+        let (peer_told, acks_told): (Vec<_>, Vec<_>) = health
             .behind
             .iter()
             .filter(|b| b.pulls >= ledger_recovery::WITHHOLD_PULLS)
-            .map(|b| b.name.clone())
-            .collect();
+            .partition(|b| b.source == "peer");
+        inputs.ledger_withheld = acks_told.iter().map(|b| b.name.clone()).collect();
+        inputs.ledger_rolled_back = peer_told.iter().map(|b| b.name.clone()).collect();
         let view = self.view()?;
         inputs.forked = self.forked_self || !view.forked.is_empty();
         let repair = observed
