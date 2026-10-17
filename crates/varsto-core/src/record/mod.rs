@@ -98,9 +98,14 @@ pub fn section9_allows(class: WriterClass, kind: Kind) -> bool {
     use Kind::*;
     match class {
         WriterClass::FullOwner => true,
+        // Snapshots are written by the backup's source device, a full
+        // device of the vault (sections 4 and 9); `snapshot_expired` and
+        // `backup_stopped` are full-only ledger events (WP3).
         WriterClass::FullVault => matches!(
             kind,
-            Peer | Epoch
+            Snapshot
+                | Peer
+                | Epoch
                 | Grant
                 | Revocation
                 | Policy

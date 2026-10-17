@@ -1166,6 +1166,22 @@ fn writers_refuse_what_readers_would_refuse() {
 }
 
 #[test]
+fn only_full_devices_write_snapshots() {
+    // Section 4: `snapshot_taken` comes from the backup's source device, a
+    // full device; section 9: members and replicas write no snapshots.
+    assert!(section9_allows(WriterClass::FullVault, Kind::Snapshot));
+    assert!(section9_allows(WriterClass::FullOwner, Kind::Snapshot));
+    for class in [
+        WriterClass::MemberEditor,
+        WriterClass::MemberViewer,
+        WriterClass::Replica,
+        WriterClass::Untrusted,
+    ] {
+        assert!(!section9_allows(class, Kind::Snapshot), "{class:?}");
+    }
+}
+
+#[test]
 fn no_single_flipped_byte_verifies() {
     let w = World::new();
     let stream = manifest_stream(w.a.id);
