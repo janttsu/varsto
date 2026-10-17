@@ -450,7 +450,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
     activityWatch();
-    if (page === "files") { ensureFiles(); }
+    if (page === "files") { ensureFiles(); f3Reload(); }
     if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
     if (page === "settings") { loadLogs(); }
     window.scrollTo(0, 0);
@@ -490,6 +490,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("version").textContent = st.version; $("version2").textContent = st.version;
       appState.mobile = !!st.mobile; appState.folder_root = st.folder_root || ""; appState.platform = st.platform || ""; joinKindForDevice();
       appState.plain_root = st.plain_root || ""; appState.plain_root_writable = st.plain_root_writable !== false;
+      appState.format3 = !!st.format3; if (appState.format3) { f3Reload(); }
       applyMobile();
       refreshAllFiles();
       if (st.removal && !removalShown) {
@@ -3578,9 +3579,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("pairinfo").textContent = s.paired_with ? "Sent the vault to " + s.paired_with + ". It appears among the devices after its first sync." : "The code is no longer valid (" + (s.closed_reason || "closed") + "). Choose Add a device for a new one.";
     if (s.paired_with) { log("added device " + s.paired_with); }
   }
-  function pollPair() { api("GET", "/api/pair/status").then(function (s) { if (s.code) { renderPair(s); if (s.open && !pairTimer) { pairTimer = setInterval(pollPair, 1500); } } }).catch(function () {}); }
+  function pollPair() { api("GET", "/api/pair/status").then(function (s) { if (s.code) { renderPair(s); if (s.open && !pairTimer) { pairTimer = setInterval(pollPair, 1500); } } if (s.ask) { f3PairAsk(s); } }).catch(function () {}); }
   if (token) { pollPair(); }
-  $("pairstart").onclick = function () { api("POST", "/api/pair/start", {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
+  $("pairstart").onclick = function () { api("POST", "/api/pair/start", f3Owned > 0 ? { format: 3 } : {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
   $("pairscan").onclick = function () { scanQr("pair").then(function (info) { if (info) { fillPair(info); } }); };
   $("sharetokenscan").onclick = function () {
     scanQr("token").then(function (info) { if (info) { $("acceptshare").querySelector("input[name=token]").value = info.text; log("scanned the sealed share token for " + info.folder); } });
@@ -4112,6 +4113,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     on("sync.started", function () {});
     ["move.waiting", "move.done", "policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "folder.paused", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
     on("config.changed", function () { serviceSoon(); statusSoon(); });
+    // A device asked for a folder, or membership changed on another device: the access card follows.
+    on("folder.request", function (d) { f3Reload(); if (d.device) { log(d.device + " asks for folder " + d.folder); } });
+    on("folder.changed", function () { f3Reload(); });
+    on("pair.ask", function () { pollPair(); });
     // A device joined, or the peers changed: the device list and the peers page follow at once.
     ["devices.changed", "peers.changed"].forEach(function (k) { on(k, function () { serviceSoon(); statusSoon(); if (currentPage === "peers") { loadP2p(); } }); });
     on("notification", function (d) { if (d.title) { log(d.title + ": " + (d.body || "")); } });
@@ -4127,6 +4132,158 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function serviceSoon() { if (evsSoon) { return; } evsSoon = setTimeout(function () { evsSoon = null; pollService(); }, 300); }
   function statusSoon() { if (evsStatusSoon) { return; } evsStatusSoon = setTimeout(function () { evsStatusSoon = null; if (busyCount === 0) { refreshStatus(null, true).catch(function () {}); } }, 500); }
   document.addEventListener("visibilitychange", streamUpdate);
+
+  // Folder access (storage format 3, design section 6): requests from other
+  // devices with the six words to compare, the members of each folder with
+  // their roles, removal, the missing recovery copies, and the pairing
+  // question. Shown only where the build has folder membership and a folder
+  // exists. Nothing is approved without the person ticking that the words
+  // match; the background service only lists requests.
+  var f3Owned = 0, f3Busy = false, f3Soon = null, f3Asked = "";
+  function f3Wanted() { return !!appState.format3 && document.body.dataset.view === "app"; }
+  function f3Reload() { if (f3Soon) { return; } f3Soon = setTimeout(function () { f3Soon = null; loadF3(); }, 250); }
+  function f3Role(r) { return r === "owner" ? "owner" : r === "viewer" ? "viewer" : "editor"; }
+  function f3Words(t) { var c = el("code", "f3-words", t); c.setAttribute("data-no-i18n", ""); return c; }
+  function f3Name(t) { var s = el("strong", null, t); s.setAttribute("data-no-i18n", ""); return s; }
+  function f3Done(p, what) {
+    return p.then(function (r) { if (what) { log(what); } return r; }).catch(function (e) { alertBox(e.message); }).then(function () { loadF3(); });
+  }
+  // The question every approval goes through.
+  function f3Approve(req) {
+    return dialog({
+      title: "Approve this device?",
+      text: "A device asks for access to this folder. Compare the six words below with the words shown on the requesting device (its folder request screen, or the output of varsto folder request). Approve only if they are the same.",
+      facts: [["Device", req.device], ["Folder", req.folder], ["Asks for", f3Role(req.role_wanted)], ["Six words", req.fingerprint]],
+      fields: [
+        { name: "role", label: "Role to give", options: [["editor", "Editor"], ["viewer", "Viewer"]], value: f3Role(req.role_wanted) },
+        { name: "match", label: "Confirmation", checks: [["yes", "The six words match on both devices"]] }
+      ],
+      ok: "Approve",
+      onopen: function (fs) {
+        var ok = $("modal-ok"), cb = fs.querySelector("input[type=checkbox]");
+        ok.disabled = true; cb.onchange = function () { ok.disabled = !cb.checked; };
+      }
+    }).then(function (r) {
+      if (!r || r.values.match !== "yes") { return null; }
+      return api("POST", "/api/folder/approve", { folder: req.folder_id, device: req.device_id, role: r.values.role, fingerprint: req.fingerprint, fingerprint_confirmed: true });
+    });
+  }
+  function f3RemoveDevice(f, m) {
+    return dialog({
+      title: "Remove this device from the folder?",
+      text: "This starts a new folder epoch: the folder gets a new key that this device never receives. It keeps what it has already read; nothing can recall that. The other devices get the new key at their next sync.",
+      facts: [["Device", m.device], ["Folder", f.folder]],
+      ok: "Remove", danger: true
+    }).then(function (r) { return r ? api("POST", "/api/folder/remove", { folder: f.folder_id, device: m.device_id, confirm: true }) : null; });
+  }
+  function f3Render(list, missing) {
+    var card = $("f3card");
+    f3Owned = list.filter(function (f) { return f.your_role === "owner"; }).length;
+    var any = list.length > 0 || missing.length > 0;
+    card.classList.toggle("hidden", !any);
+    var rec = $("f3recovery");
+    rec.classList.toggle("hidden", !missing.length);
+    if (missing.length) {
+      var names = {}; missing.forEach(function (m) { names[m.folder] = true; });
+      $("f3recovery-names").textContent = Object.keys(names).join(", ");
+    }
+    var box = $("f3folders"); box.innerHTML = "";
+    list.forEach(function (f) {
+      var sec = el("div", "f3-folder");
+      var head = el("h3", "f3-head"); head.appendChild(f3Name(f.folder));
+      head.appendChild(el("span", "muted small f3-you", f.your_role === "owner" ? "You are an owner" : f.your_role === "viewer" ? "You are a viewer" : f.your_role ? "You are an editor" : "You are not a participant"));
+      sec.appendChild(head);
+      var owner = f.your_role === "owner";
+      // Requests, with the words to compare.
+      if (owner || f.pending.length) {
+        sec.appendChild(el("h4", "field-caption", "Requests"));
+        var ul = el("ul", "list");
+        f.pending.forEach(function (r) {
+          var li = el("li", "f3-row");
+          var who = el("span", "f3-who"); who.appendChild(f3Name(r.device)); who.appendChild(el("span", "muted", r.role_wanted === "viewer" ? " asks to be a viewer" : " asks to be an editor")); who.appendChild(f3Words(r.fingerprint));
+          li.appendChild(who);
+          if (owner) {
+            var a = el("button", null, "Approve…"); a.type = "button"; a.onclick = function () { f3Done(f3Approve(r), "approved " + r.device + " for " + f.folder); };
+            var d = el("button", "secondary", "Deny"); d.type = "button"; d.onclick = function () { f3Done(api("POST", "/api/folder/deny", { folder: f.folder_id, device: r.device_id }), "denied " + r.device); };
+            li.appendChild(a); li.appendChild(d);
+          }
+          ul.appendChild(li);
+        });
+        sec.appendChild(ul);
+        if (!f.pending.length) { sec.appendChild(el("p", "muted small", "No requests are waiting.")); }
+      }
+      // Members.
+      sec.appendChild(el("h4", "field-caption", "Members"));
+      var ml = el("ul", "list");
+      f.participants.forEach(function (m) {
+        var li = el("li", "f3-row");
+        var who = el("span", "f3-who"); who.appendChild(f3Name(m.device));
+        if (m.this_device) { who.appendChild(el("span", "muted", "(this device)")); }
+        li.appendChild(who);
+        if (owner && !m.this_device) {
+          var sel = el("select"); sel.setAttribute("aria-label", "Role");
+          [["owner", "Owner"], ["editor", "Editor"], ["viewer", "Viewer"]].forEach(function (o) { var x = el("option", null, o[1]); x.value = o[0]; sel.appendChild(x); });
+          sel.value = m.role;
+          sel.onchange = function () { f3Done(api("POST", "/api/folder/role", { folder: f.folder_id, device: m.device_id, role: sel.value }), "changed the role of " + m.device); };
+          li.appendChild(sel);
+          var rm = el("button", "secondary", "Remove…"); rm.type = "button"; rm.onclick = function () { f3Done(f3RemoveDevice(f, m), "removed " + m.device + " from " + f.folder); };
+          li.appendChild(rm);
+        } else {
+          li.appendChild(pill("grey", f3Role(m.role)));
+        }
+        ml.appendChild(li);
+      });
+      sec.appendChild(ml);
+      if (f.denied.length) {
+        var dn = el("p", "muted small"); dn.appendChild(el("span", null, "Denied or removed:")); dn.appendChild(document.createTextNode(" ")); dn.appendChild(f3Name(f.denied.map(function (x) { return x.device; }).join(", "))); sec.appendChild(dn);
+      }
+      f.unresolved_epochs.forEach(function (n) {
+        var row = el("div", "notice warn");
+        row.appendChild(el("span", null, "Two owners started the same folder epoch at once. Keep one of them.")); row.appendChild(f3Name(" " + n + " "));
+        var kb = el("button", "secondary", "Keep one…"); kb.type = "button";
+        kb.onclick = function () {
+          dialog({ title: "Keep one folder epoch", text: "Choose the owner whose folder epoch stays.", fields: [{ name: "keep", label: "Owner", options: f.participants.filter(function (p) { return p.role === "owner"; }).map(function (p) { return [p.device_id, p.device]; }) }], ok: "Keep" })
+            .then(function (r) { if (r) { return f3Done(api("POST", "/api/folder/resolve-epoch", { folder: f.folder_id, epoch: n, keep: r.values.keep }), "kept a folder epoch"); } });
+        };
+        row.appendChild(kb); sec.appendChild(row);
+      });
+      box.appendChild(sec);
+    });
+  }
+  function loadF3() {
+    if (!f3Wanted() || f3Busy) { return; }
+    f3Busy = true;
+    Promise.all([api("GET", "/api/folder/members"), api("GET", "/api/recovery/escrow")]).then(function (rs) {
+      f3Render(rs[0].folders || [], rs[1].missing || []);
+    }).catch(function () { $("f3card").classList.add("hidden"); }).then(function () { f3Busy = false; });
+  }
+  $("f3recovery-go").onclick = function () {
+    dialog({
+      title: "Write recovery copies",
+      text: "Recovery copies let the vault words and the recovery words together rebuild these folders if every device is lost. Type the 24 recovery words from your kit; they are used once and not stored.",
+      fields: [{ name: "words", label: "Recovery words", type: "password", required: true }],
+      ok: "Write recovery copies"
+    }).then(function (r) {
+      if (!r) { return; }
+      f3Done(api("POST", "/api/recovery/escrow", { words: r.values.words }), "wrote the recovery copies");
+    });
+  };
+  // The offering side of pairing asks its person before anything is sent.
+  function f3PairAsk(s) {
+    if (!s.ask || f3Asked === s.ask.fingerprint) { return; }
+    f3Asked = s.ask.fingerprint;
+    var folders = s.ask.folders || [];
+    dialog({
+      title: "Let this device join?",
+      text: "A device that knows the pairing code asks to join. Compare the six words with those on the joining device. Only tick folders you want it to open; by default it gets none and asks for them later.",
+      facts: [["Device", s.ask.name], ["Six words", s.ask.fingerprint]],
+      fields: [{ name: "folders", label: "Folders to give", checks: folders.map(function (f) { return [f.id, f.name, false, true]; }), empty: "This device owns no folder with keys to give." }],
+      ok: "Let it join", cancel: "Decline", danger: false
+    }).then(function (r) {
+      var body = r ? { allow: true, fingerprint: s.ask.fingerprint, folders: r.values.folders ? r.values.folders.split(",") : [] } : { allow: false };
+      return api("POST", "/api/pair/answer", body);
+    }).catch(function (e) { f3Asked = ""; alertBox(e.message); }).then(function () { loadF3(); });
+  }
 
   // Recovery package: what to keep outside your devices and how to restore,
   // from GET /api/recovery/guide. Every sentence comes as an English
@@ -4484,7 +4641,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   };
   // The kit holds the vault key: it is printed on the command line, which asks for the passphrase.
   $("rg-kit").onclick = function () {
-    dialog({ title: "Print the recovery kit", text: "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.", code: "varsto recovery kit\nvarsto recovery kit --shares", ok: "Close", cancel: false }).then(function () { loadGuide(); });
+    dialog({ title: "Print the recovery kit", text: appState.format3 ? "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key." : "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.", code: "varsto recovery kit\nvarsto recovery kit --shares" + (appState.format3 ? "\nvarsto recovery kit --recovery-words\nvarsto recovery kit --new-recovery-key" : ""), ok: "Close", cancel: false }).then(function () { loadGuide(); });
   };
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
   // The service answers it without waiting for a sync, so it stays live during long transfers.

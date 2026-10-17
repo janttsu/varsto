@@ -335,6 +335,12 @@
     <!-- Files -->
     <div class="page hidden" data-page="files">
       <div id="needsdisk" class="notice warn hidden"></div>
+      <!-- Storage format 3: who may open each folder (shown when the build has folder membership). -->
+      <section id="f3card" class="card f3-card hidden" aria-label="Folder access">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Folder access</h2>
+        <div id="f3recovery" class="notice warn hidden"><span>Some folders have no recovery copy. Without one, losing every device loses them.</span> <span id="f3recovery-names" data-no-i18n></span> <button id="f3recovery-go" type="button" class="secondary">Write recovery copies…</button></div>
+        <div id="f3folders"></div>
+      </section>
       <div class="files-layout">
         <div class="card files-main" id="filesmain" data-screen="list">
           <!-- Phone: the Files tab opens with the vault's folders as cards; one tap opens a folder. -->
