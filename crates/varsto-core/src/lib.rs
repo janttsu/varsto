@@ -39,6 +39,8 @@ pub mod ledger_heads;
 pub mod logging;
 pub mod manifest;
 pub mod media;
+#[cfg(feature = "format3")]
+pub mod membership3;
 pub mod names;
 pub mod netif;
 pub mod org;
