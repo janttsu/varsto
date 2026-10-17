@@ -1651,6 +1651,8 @@ mod tests {
             .all(|k| pack_of_key(k).is_none()));
     }
 
+    // A format 3 reader refuses unpadded packs by design.
+    #[cfg(not(feature = "format3"))]
     #[test]
     fn a_pack_of_an_older_build_is_read_verified_and_collected() {
         let t = tempfile::tempdir().unwrap();
