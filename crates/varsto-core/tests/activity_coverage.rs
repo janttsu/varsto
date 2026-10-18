@@ -49,8 +49,6 @@ fn watch<T>(op: impl FnOnce() -> T) -> (T, Vec<TaskView>) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (membership)"]
-// Waits for remove_folder with purge in format 3.
 fn fetching_a_file_and_purging_a_folder_are_tasks() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -92,7 +90,8 @@ fn fetching_a_file_and_purging_a_folder_are_tasks() {
     );
 
     let (r, seen) = watch(|| a.remove_folder("docs", true));
-    assert!(r.unwrap() > 100);
+    // Packs and records go (a pack holds many blocks).
+    assert!(r.unwrap() > 0);
     let purge: Vec<&TaskView> = seen.iter().filter(|t| t.kind == "folder_purge").collect();
     assert!(!purge.is_empty(), "no purge task among {seen:?}");
     assert!(purge.iter().any(|t| t.total > 0 && t.done > 0), "{purge:?}");
