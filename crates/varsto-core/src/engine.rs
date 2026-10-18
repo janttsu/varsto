@@ -1950,20 +1950,12 @@ impl Engine {
         // Reads find blocks at the places the folders' block maps give
         // (format 3: no pack indexes, no tombstone lists).
         self.ensure_tables3();
-        if let StorageSpec::LocalDir { name, path, .. } = spec {
-            crate::packs::debug_registry::root(name, path);
-        }
         let target = if spec.is_cold() {
             crate::packs::COLD_TARGET
         } else {
             crate::packs::HOT_TARGET
         };
-        let packed = crate::packs::PackStore::new(inner, &self.pack_caches, target);
-        if spec.is_data_only() {
-            packed.blocks_only()
-        } else {
-            packed
-        }
+        crate::packs::PackStore::new(inner, &self.pack_caches, target)
     }
 
     fn open_spec_fresh(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
@@ -1988,21 +1980,6 @@ impl Engine {
             Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
             None => backend,
         })
-    }
-
-    /// The tombstone lists of packs are written and read under a key of
-    /// the vault (any full device deletes blocks and reads what the others
-    /// deleted, `crate::packs`).
-    fn ensure_pack_keys(&self) {
-        if !self.pack_caches.has_tombstone_keys() {
-            self.pack_caches.set_tombstone_keys(
-                crate::record_shim::Records::new(
-                    self.vault.vault_id.clone(),
-                    self.vault.device_id.clone(),
-                ),
-                self.root_key().derive("pack-tombstones", &[]),
-            );
-        }
     }
 
     /// Count every call this engine makes to its storages from now on

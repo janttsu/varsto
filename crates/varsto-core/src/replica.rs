@@ -232,13 +232,10 @@ impl Replica {
                 continue;
             }
             // Objects under chunks/ are not written any more, and a name
-            // under packs/ that is not a pack, index or tombstone list is
-            // junk left by something else: skipped, not a reason to stop.
+            // under packs/ that is not a pack is junk left by something
+            // else: skipped, not a reason to stop.
             let pack = crate::packs::pack_of_key(&key);
-            let record = key.starts_with(crate::packs::INDEX_PREFIX)
-                || key.starts_with(crate::packs::TOMBSTONE_PREFIX);
-            if key.starts_with("chunks/")
-                || (key.starts_with(crate::packs::PREFIX) && pack.is_none() && !record)
+            if key.starts_with("chunks/") || (key.starts_with(crate::packs::PREFIX) && pack.is_none())
             {
                 if report.skipped_junk == 0 {
                     log::warn!(

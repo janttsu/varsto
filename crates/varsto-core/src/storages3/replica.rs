@@ -51,10 +51,6 @@ pub struct ReplicaRound {
     pub events: Vec<Event>,
 }
 
-fn is_record_prefix(key: &str) -> bool {
-    key.starts_with(packs::INDEX_PREFIX) || key.starts_with(packs::TOMBSTONE_PREFIX)
-}
-
 fn pack_id(hex_id: &str) -> Option<PackId> {
     let mut id = [0u8; 32];
     hex::decode_to_slice(hex_id, &mut id).ok()?;
@@ -81,7 +77,7 @@ pub fn replicate(
         round.report.objects_seen += 1;
         let pack = packs::pack_of_key(&key).and_then(pack_id);
         let junk = key.starts_with("chunks/")
-            || (key.starts_with(packs::PREFIX) && pack.is_none() && !is_record_prefix(&key));
+            || (key.starts_with(packs::PREFIX) && pack.is_none());
         if junk {
             if round.report.skipped_junk == 0 {
                 log::warn!(

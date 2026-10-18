@@ -49,10 +49,7 @@ pub fn read_limit(key: &str) -> u64 {
     }
     if key.starts_with("chunks/") {
         MAX_BLOCK_OBJECT
-    } else if key.starts_with(crate::packs::PREFIX)
-        && !key.starts_with(crate::packs::INDEX_PREFIX)
-        && !key.starts_with(crate::packs::TOMBSTONE_PREFIX)
-    {
+    } else if key.starts_with(crate::packs::PREFIX) {
         MAX_PACK
     } else {
         MAX_RECORD
@@ -164,21 +161,10 @@ pub trait Storage: Send + Sync {
     fn pack_location(&self, _object: &str) -> Option<crate::packs::PackLoc> {
         None
     }
-    /// The packs written since the last call, for the pack index.
+    /// The packs written since the last call, for the writer's block map
+    /// delta.
     fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
         Vec::new()
-    }
-    /// Write the tombstones of the pack members deleted since the last call.
-    fn flush_deletions(&self) -> Result<()> {
-        Ok(())
-    }
-    /// Rewrite the packs here that are mostly dead (`packs::PackStore`):
-    /// the new location of every moved block.
-    fn collect_pack_garbage(
-        &self,
-        _keep: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
-        Ok(Vec::new())
     }
     /// Whether the storage honours a conditional write (S3 `If-None-Match:
     /// *`): known (true or false) once the backend has probed it, `None`
@@ -240,15 +226,6 @@ impl Storage for SharedStorage {
     }
     fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
         self.0.take_new_packs()
-    }
-    fn flush_deletions(&self) -> Result<()> {
-        self.0.flush_deletions()
-    }
-    fn collect_pack_garbage(
-        &self,
-        keep: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
-        self.0.collect_pack_garbage(keep)
     }
     fn conditional_writes(&self) -> Option<bool> {
         self.0.conditional_writes()
@@ -963,15 +940,6 @@ impl Storage for CountingStorage {
     fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
         self.inner.take_new_packs()
     }
-    fn flush_deletions(&self) -> Result<()> {
-        self.inner.flush_deletions()
-    }
-    fn collect_pack_garbage(
-        &self,
-        keep: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
-        self.inner.collect_pack_garbage(keep)
-    }
     fn conditional_writes(&self) -> Option<bool> {
         self.inner.conditional_writes()
     }
@@ -1175,15 +1143,6 @@ impl Storage for LoggedStorage {
     }
     fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
         self.inner.take_new_packs()
-    }
-    fn flush_deletions(&self) -> Result<()> {
-        self.inner.flush_deletions()
-    }
-    fn collect_pack_garbage(
-        &self,
-        keep: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
-        self.inner.collect_pack_garbage(keep)
     }
     fn conditional_writes(&self) -> Option<bool> {
         self.inner.conditional_writes()
