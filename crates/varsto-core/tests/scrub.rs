@@ -473,10 +473,21 @@ fn a_bad_copy_on_a_pool_disk_is_dropped_and_written_again() {
     assert!(!victim.exists(), "the bad copy is dropped from the disk");
     let rep = a.repair(&RepairOptions::service()).unwrap();
     assert_eq!(rep.repaired.len(), 1, "{rep:?}");
-    assert!(victim.exists());
-    let name = victim.file_name().unwrap().to_string_lossy().to_string();
-    let back = fs::read(victim).unwrap();
-    assert_eq!(hex::encode(varsto_core::crypto::hash(&back)), name);
+    // The block is written again in a new pack (other padding, so another
+    // id); the damaged pack is gone.
+    assert!(!victim.exists());
+    let packs: Vec<PathBuf> = walkdir::WalkDir::new(d1.join(pool::DATA_DIR).join("packs"))
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+    assert_eq!(packs.len(), on_disk.len(), "{packs:?}");
+    for p in &packs {
+        let name = p.file_name().unwrap().to_string_lossy().to_string();
+        let back = fs::read(p).unwrap();
+        assert_eq!(hex::encode(varsto_core::crypto::hash(&back)), name);
+    }
 
     // The disk goes away; long after, the run reports it.
     fs::rename(&d1, lab.p("away")).unwrap();

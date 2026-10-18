@@ -412,7 +412,8 @@ impl Engine {
         let finished = if report.stopped_early {
             false
         } else if report.waiting_room_blocks > 0 {
-            j.room_needed = report.waiting_min_bytes;
+            // A block is written in a pack of at least the smallest size class.
+            j.room_needed = report.waiting_min_bytes.max(crate::packs::MIN_PACK as u64);
             j.waiting = Some(self.room_waiting(&to_spec, &j, &report));
             j.room_sig = self.room_signature(&to_spec);
             false
