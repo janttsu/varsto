@@ -6006,8 +6006,7 @@ impl Engine {
             self.disk_group_findings(&rec, &state, view, &ctx.pools, &mut report);
             // Blocks a mailbox holds for their target: in transit, still short.
             if report.state != crate::policy::PolicyState::Ok {
-                if let Some((n, bytes, text)) =
-                    self.mailbox_in_transit(view, &rec.folder_id, &seen)
+                if let Some((n, bytes, text)) = self.mailbox_in_transit(view, &rec.folder_id, &seen)
                 {
                     report.chunks_in_transit = n;
                     report.bytes_in_transit = bytes;
