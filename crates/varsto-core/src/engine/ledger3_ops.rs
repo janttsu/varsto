@@ -170,6 +170,9 @@ impl Engine {
     fn scope3(&self, device: &Id16, key_id: &str) -> Option<EventScope> {
         let m = &self.f3.members;
         match EventScope::of_key_id(key_id)? {
+            // In an organization, a device the roster does not list (or a
+            // platform its policy refuses) writes nothing that counts.
+            _ if self.org_untrusted3(device) => None,
             EventScope::Full => m.devices.get(device).map(|_| EventScope::Full),
             EventScope::Member(f) if m.devices.get(device).is_some() => {
                 Some(EventScope::Owner(f))
@@ -214,6 +217,7 @@ impl Engine {
         }
         for d in m.devices.devices.keys() {
             parts.push(d.to_vec());
+            parts.push(vec![self.org_untrusted3(d) as u8]);
         }
         for (f, d) in m.members.members.keys() {
             parts.push(f.to_vec());
@@ -443,6 +447,20 @@ impl Engine {
         )?;
         self.push_own_batches3()?;
         Ok(rec.seq)
+    }
+
+    /// A full device of the registry that the organization does not trust
+    /// (not in its roster, or on a platform its policy refuses). Removed
+    /// devices are judged by their cut-off instead.
+    pub(crate) fn org_untrusted3(&self, device: &Id16) -> bool {
+        if self.org.is_none()
+            || *device == self.me3()
+            || self.f3.members.revoked.contains(device)
+        {
+            return false;
+        }
+        self.f3.members.devices.get(device).is_some()
+            && !self.trusted(&DeviceId::from_bytes(device))
     }
 
     /// The share-ledger key id and key of `folder`'s newest epoch held.

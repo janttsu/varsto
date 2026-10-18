@@ -2500,6 +2500,16 @@ impl Engine {
                 b.name
             );
         }
+        // A grant may have arrived since the membership was read here (an
+        // owner approved this device's request a moment ago).
+        let keyless = |e: &Engine| {
+            e.keyring.find(name_or_id).is_none_or(|r| {
+                !r.is_strongroom() && r.key_hex.is_empty() && r.epoch_keys.is_empty()
+            })
+        };
+        if keyless(self) && !self.vault.member {
+            let _ = self.refresh_members3();
+        }
         let rec = self
             .keyring
             .find(name_or_id)

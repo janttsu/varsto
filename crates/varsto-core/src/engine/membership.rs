@@ -732,8 +732,12 @@ impl Engine {
         }
         let names: Vec<String> = targets.iter().map(|t| self.device_name(t)).collect();
         let k1 = self.f3.recovery.clone();
+        // A device the organization's policy locks out stays a member of the
+        // new epoch; it gets the key once it is allowed again.
+        let held = self.org_held3();
         let report = self
             .with_members3_as(!unchecked, |m| {
+                m.hold_grants = held;
                 m.remove_devices(&list, wipe, k1.as_ref(), unchecked)
             })?
             .ok_or_else(|| anyhow!("this device has no storage to publish the removal to"))?;

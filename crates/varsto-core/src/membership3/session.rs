@@ -78,6 +78,10 @@ pub struct Membership<'a> {
     pub own_revocation: Option<RevocationRecord>,
     /// The newest key wraps of every Strongroom folder.
     pub strongrooms: BTreeMap<Id16, super::strongrooms::StrongroomRecord>,
+    /// Devices that stay members of a new vault epoch but get its key
+    /// only later (an organization's policy locks them out for now:
+    /// `grant_missing_vault_keys` seals it once they are allowed).
+    pub hold_grants: BTreeSet<Id16>,
     /// Vault epoch numbers that hold a record signed by a device of the
     /// vault.
     vault_signed: BTreeSet<u32>,
@@ -127,6 +131,7 @@ impl<'a> Membership<'a> {
             vault_kept,
             own_revocation: None,
             strongrooms: BTreeMap::new(),
+            hold_grants: BTreeSet::new(),
             vault_signed: BTreeSet::new(),
             lamport: 0,
         };
@@ -146,11 +151,14 @@ impl<'a> Membership<'a> {
         k3: SecretKey,
     ) -> Result<Membership<'a>> {
         let top = epochs::epoch_of_key(storages, vault, &k3)?;
-        if epochs::highest_number(storages)? > top {
+        let (keys, _) = epochs::walk_vault_chain(storages, vault, top, k3)?;
+        let m = Membership::open(vault, storages, sign, kem, keys)?;
+        // A newer vault epoch signed by a device of the vault means the key
+        // is from before a removal; junk under a higher number does not.
+        if m.vault_signed.iter().any(|e| *e > top) {
             bail!("this vault key is out of date: a device was removed since (the keys changed then). Use the current vault key: pair from one of your devices, or print a new recovery kit there");
         }
-        let (keys, _) = epochs::walk_vault_chain(storages, vault, top, k3)?;
-        Membership::open(vault, storages, sign, kem, keys)
+        Ok(m)
     }
 
     fn writer(&self) -> Writer<'_> {
@@ -1658,7 +1666,7 @@ impl<'a> Membership<'a> {
         }
         let mut sent = Vec::new();
         for m in &members {
-            if self.devices.kem_key(m).is_none() {
+            if self.devices.kem_key(m).is_none() || self.hold_grants.contains(m) {
                 continue;
             }
             let body = VaultGrantRecord {
@@ -1715,6 +1723,60 @@ impl<'a> Membership<'a> {
             report.folder_epochs.push((folder, start.epoch));
         }
         Ok(report)
+    }
+
+    /// Seal the newest vault key to every device its epoch record keeps
+    /// that has no grant of it yet (one held back by `hold_grants` when
+    /// the epoch started, or one whose grant was lost). Returns the
+    /// devices granted now.
+    pub fn grant_missing_vault_keys(&mut self) -> Result<Vec<Id16>> {
+        let Some((top, k3)) = self.vault_keys.newest().map(|(e, k)| (e, k.clone())) else {
+            return Ok(Vec::new());
+        };
+        if top == 0 {
+            return Ok(Vec::new());
+        }
+        let (_, opened) = epochs::walk_vault_chain(self.storages, self.vault, top, k3.clone())?;
+        let Some(newest) = opened.first() else {
+            return Ok(Vec::new());
+        };
+        let mut have: BTreeSet<Id16> = BTreeSet::new();
+        let prefix = format!("vault/grants/vault/{top:010}/");
+        for s in self.storages {
+            for name in s.list(&prefix)? {
+                if let Some(n) = RecordName::parse_as(Kind::Grant, &name) {
+                    if let Some(r) = n.recipient {
+                        have.insert(r);
+                    }
+                }
+            }
+        }
+        let mut sent = Vec::new();
+        for m in newest.record.members.clone() {
+            if m == self.me
+                || have.contains(&m)
+                || self.hold_grants.contains(&m)
+                || self.revoked.contains(&m)
+                || self.devices.kem_key(&m).is_none()
+            {
+                continue;
+            }
+            let body = VaultGrantRecord {
+                epoch: top,
+                recipient: m,
+                issuer: self.me,
+                k3: k3.0,
+            };
+            self.writer().write(
+                &self.ring(),
+                &StreamRef::grant(VAULT_SCOPE, top, m, self.me),
+                None,
+                &KeyId::Kem(m),
+                &body,
+            )?;
+            sent.push(m);
+        }
+        Ok(sent)
     }
 
     // ----- recovery escrow --------------------------------------------------

@@ -446,7 +446,31 @@ impl Engine {
             return self.read_member3(&refs);
         }
         self.with_enrolled3(|_| Ok(()))?;
+        // The organization's manifest, roster and log (`org_ops`), judged
+        // with the devices just read; a device its policy allows again gets
+        // the vault key it was held back from.
+        self.sync_org()?;
+        if self.org.is_some() && self.removal.is_none() {
+            let held = self.org_held3();
+            self.with_members3(|m| {
+                m.hold_grants = held;
+                m.grant_missing_vault_keys()
+            })?;
+        }
         Ok(())
+    }
+
+    /// Devices of the registry that an organization's policy locks out:
+    /// they get no new vault key until it allows them again.
+    pub(crate) fn org_held3(&self) -> BTreeSet<Id16> {
+        self.f3
+            .members
+            .devices
+            .devices
+            .keys()
+            .filter(|d| self.org_refuses_device(&DeviceId::from_bytes(*d)).is_some())
+            .copied()
+            .collect()
     }
 
     /// The shared folder of a member device (`member3.json`: the folder

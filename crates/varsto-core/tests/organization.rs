@@ -4,6 +4,8 @@
 //! member may not do, a device that joined without approval, and rosters
 //! that only an admin can write.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use varsto_core::chunking::ChunkerParams;
@@ -60,8 +62,14 @@ fn three_devices(lab: &Lab) -> (Engine, Engine, Engine, String) {
     a.push("docs").unwrap();
     let mut others = Vec::new();
     for who in ["b", "c"] {
-        let mut e =
-            small(Engine::join(&lab.home(who), who, PASS, &key, lab.storage.clone()).unwrap());
+        let mut e = small(common::join_approved(
+            &lab.home(who),
+            who,
+            PASS,
+            &key,
+            lab.storage.clone(),
+            &mut a,
+        ));
         e.attach_folder("docs", &lab.dir(who), false).unwrap();
         e.sync(None).unwrap();
         others.push(e);
@@ -72,12 +80,19 @@ fn three_devices(lab: &Lab) -> (Engine, Engine, Engine, String) {
     (a, b, c, key)
 }
 
+/// Share "docs" with a request code made in a fresh directory.
+fn try_share(lab: &Lab, e: &mut Engine) -> anyhow::Result<()> {
+    let home = tempfile::tempdir_in(&lab.root).unwrap();
+    let code = varsto_core::vault::ShareRequest::code_for(home.path()).unwrap();
+    e.share_add("docs", &code, None, varsto_core::share::ShareRole::Editor)
+        .map(|_| ())
+}
+
 fn removed(e: &anyhow::Error) -> Option<&DeviceRemoved> {
     e.downcast_ref::<DeviceRemoved>()
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
 fn create_approve_and_remove_a_user() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, key) = three_devices(&lab);
@@ -121,7 +136,7 @@ fn create_approve_and_remove_a_user() {
         "members cannot hand out the key"
     );
     assert!(b.export_vault_key().is_err());
-    assert!(b.share_create("docs").is_err());
+    assert!(try_share(&lab, &mut b).is_err());
     assert!(b
         .set_policy(
             "docs",
@@ -152,6 +167,8 @@ fn create_approve_and_remove_a_user() {
     assert_eq!(approval.user, "dana");
     assert!(notes.iter().any(|n| n.contains("joined")));
     assert_eq!(d.device_id().to_string(), approved.device_id);
+    // Folders come with an owner's approval of the device's request.
+    common::approve_all(&mut a, &mut d);
     d.attach_folder("docs", &lab.dir("d"), false).unwrap();
     d.sync(None).unwrap();
     assert!(lab.dir("d").join("one.txt").exists());
@@ -172,13 +189,16 @@ fn create_approve_and_remove_a_user() {
     assert!(lab.dir("b").join("from-d.txt").exists());
     assert_eq!(a.org_summary().unwrap().users.len(), 2);
 
-    // E joins with the vault key itself, without approval: nobody trusts it.
+    // E joins with the vault key itself, without the organization's
+    // approval: an owner lets it read the folder, but nobody takes what it
+    // writes.
     let mut e = small(Engine::join(&lab.home("e"), "e", PASS, &key, lab.storage.clone()).unwrap());
+    common::approve_all(&mut a, &mut e);
     e.attach_folder("docs", &lab.dir("e"), false).unwrap();
     e.sync(None).unwrap();
     assert!(
         lab.dir("e").join("one.txt").exists(),
-        "it holds the key, so it reads"
+        "it holds the folder key, so it reads"
     );
     assert!(!e.org_summary().unwrap().this_device_listed);
     fs::write(lab.dir("e").join("from-e.txt"), b"not approved").unwrap();
@@ -249,13 +269,14 @@ fn create_approve_and_remove_a_user() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
 fn policy_lets_admins_open_things_up_and_only_admins_write_rosters() {
     let lab = Lab::new();
     let (mut a, mut b, _c, _key) = three_devices(&lab);
     a.org_create("Acme", "alice").unwrap();
+    // B is an owner of the folder (only owners share); the policy decides.
+    a.f3_set_role("docs", "b", "owner").unwrap();
     b.sync(None).unwrap();
-    assert!(b.share_create("docs").is_err());
+    assert!(try_share(&lab, &mut b).is_err());
     assert!(
         b.org_set_policy(OrgPolicy::default()).is_err(),
         "members cannot change the policy"
@@ -269,7 +290,7 @@ fn policy_lets_admins_open_things_up_and_only_admins_write_rosters() {
     .unwrap();
     b.sync(None).unwrap();
     assert!(b.org_summary().unwrap().policy.members_may_share);
-    assert!(b.share_create("docs").is_ok());
+    try_share(&lab, &mut b).unwrap();
     assert!(b.pairing_bundle().is_ok());
     assert!(
         b.add_storage(StorageSpec::LocalDir {
@@ -319,7 +340,6 @@ fn policy_lets_admins_open_things_up_and_only_admins_write_rosters() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
 fn two_admins_writing_at_once_converge() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, _key) = three_devices(&lab);
@@ -353,7 +373,6 @@ fn two_admins_writing_at_once_converge() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
 fn a_dismissed_admin_cannot_write_rosters_but_its_earlier_ones_stay_valid() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, _key) = three_devices(&lab);
@@ -393,7 +412,6 @@ fn a_dismissed_admin_cannot_write_rosters_but_its_earlier_ones_stay_valid() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
 fn the_root_key_appoints_and_dismisses_admins() {
     let lab = Lab::new();
     let (mut a, mut b, _c, _key) = three_devices(&lab);
@@ -428,8 +446,7 @@ fn the_root_key_appoints_and_dismisses_admins() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
-fn junk_epoch_objects_and_forged_policies_are_skipped() {
+fn junk_epoch_objects_are_skipped() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, key) = three_devices(&lab);
     a.org_create("Acme", "alice").unwrap();
@@ -440,14 +457,14 @@ fn junk_epoch_objects_and_forged_policies_are_skipped() {
     // A member (anyone with the vault key and the storage credentials)
     // writes junk under the next epoch numbers: removals go on, the junk
     // numbers are skipped, and joining with the current key still works.
-    fs::write(epochs.join("00000001.enc"), b"not an epoch").unwrap();
-    fs::write(epochs.join("00000002.enc"), b"still not one").unwrap();
+    fs::write(epochs.join("0000000000000001-0000.rec"), b"not an epoch").unwrap();
+    fs::write(epochs.join("0000000000000002-0000.rec"), b"still not one").unwrap();
     let r = a.revoke_device("c", false).unwrap();
     assert_eq!(r.key_epoch, 3, "the first free number");
     b.sync(None).unwrap();
     assert_eq!(b.key_epoch(), 3);
     assert!(matches!(c.sync(None), Err(e) if removed(&e).is_some()));
-    fs::write(epochs.join("00000004.enc"), b"junk above the current epoch").unwrap();
+    fs::write(epochs.join("0000000000000004-0000.rec"), b"junk above the current epoch").unwrap();
     let current = a.export_vault_key().unwrap();
     let d = Engine::join(&lab.home("d"), "d", PASS, &current, lab.storage.clone()).unwrap();
     assert_eq!(d.key_epoch(), 3);
@@ -465,63 +482,6 @@ fn junk_epoch_objects_and_forged_policies_are_skipped() {
     let r = a.org_remove_user("fred", false).unwrap();
     assert_eq!(r.revoke.key_epoch, 5);
 
-    // A policy record that claims to come from the administrator but is not
-    // signed by it (anyone with the vault key can seal one) is ignored in an
-    // organization.
-    let folder = a
-        .folders()
-        .into_iter()
-        .find(|(r, _)| r.name == "docs")
-        .unwrap()
-        .0;
-    let fr_key = varsto_core::crypto::SecretKey::from_hex(&current)
-        .unwrap()
-        .derive("folder-record", &[]);
-    let forged = varsto_core::vault::PolicyRecord {
-        folder_id: folder.folder_id.clone(),
-        device: a.device_id().clone(),
-        updated_utc: varsto_core::util::now_utc() + 1000,
-        policy: Some(varsto_core::policy::Policy {
-            min_copies: 9,
-            min_per_place: Default::default(),
-            verified_within_days: None,
-        }),
-    };
-    let blob = forged.seal(a.vault_id(), &fr_key).unwrap();
-    let dir = lab.root.join("storage").join(format!(
-        "vault/policies/{}/{}",
-        folder.folder_id,
-        a.device_id()
-    ));
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join(format!("{:020}.enc", forged.updated_utc)), &blob).unwrap();
-    b.sync(None).unwrap();
-    let docs = b
-        .folders()
-        .into_iter()
-        .find(|(r, _)| r.name == "docs")
-        .unwrap()
-        .0;
-    assert!(
-        docs.policy.as_ref().is_none_or(|p| p.min_copies != 9),
-        "forged policy adopted"
-    );
-    // The real thing, signed by the administrator, is adopted.
-    a.set_policy(
-        "docs",
-        Some(varsto_core::policy::Policy {
-            min_copies: 2,
-            min_per_place: Default::default(),
-            verified_within_days: None,
-        }),
-    )
-    .unwrap();
-    b.sync(None).unwrap();
-    let docs = b
-        .folders()
-        .into_iter()
-        .find(|(r, _)| r.name == "docs")
-        .unwrap()
-        .0;
-    assert_eq!(docs.policy.as_ref().unwrap().min_copies, 2);
+    // Policies an administrator did not sign are a matter of the policy
+    // records (kind 11), tested with them.
 }
