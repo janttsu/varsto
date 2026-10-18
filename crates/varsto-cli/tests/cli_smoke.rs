@@ -328,7 +328,6 @@ fn folder_ignore_rules_and_metadata_settings_through_the_cli() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn staged_move_jobs_through_the_cli() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

@@ -34,6 +34,9 @@ pub(crate) struct Core3 {
     pub recovery: Option<crate::membership3::RecoveryKey>,
     /// Events of the next batch.
     pub pending: Vec<Event3>,
+    /// Replicas the vault's `replica` records name (`storages3_ops`):
+    /// their batches count in the replica scope.
+    pub replicas: BTreeMap<Id16, (String, crypto::VerifyingKey)>,
 }
 
 pub(crate) type MapTable3 = crate::blockmap::MapTable;
@@ -47,6 +50,7 @@ impl Core3 {
             tables: Default::default(),
             recovery: None,
             pending: Vec::new(),
+            replicas: BTreeMap::new(),
         })
     }
 }
@@ -123,7 +127,11 @@ impl Engine {
             KeyId::ShareLedger { folder, epoch } => {
                 self.f3.members.granted.get(&folder)?.share_ledger(epoch)
             }
-            // Replicas' batches: part B (f3-switch).
+            // Replicas' batches (`storages3_ops`).
+            KeyId::Replica if !self.vault.member => Some(crate::replica::replica_key(
+                self.root_key(),
+                &self.vault.vault_id,
+            )),
             _ => None,
         }
     }
@@ -154,7 +162,12 @@ impl Engine {
                     None => None,
                 }
             }
-            // Replicas: part B (f3-switch).
+            // Replicas a `replica` record of a full device names.
+            EventScope::Replica => self
+                .f3
+                .replicas
+                .contains_key(device)
+                .then_some(EventScope::Replica),
             _ => None,
         }
     }
@@ -184,6 +197,10 @@ impl Engine {
         }
         for (f, d) in m.members.members.keys() {
             parts.push(f.to_vec());
+            parts.push(d.to_vec());
+        }
+        for d in self.f3.replicas.keys() {
+            parts.push(b"replica".to_vec());
             parts.push(d.to_vec());
         }
         for (f, st) in &m.registry.folders {
@@ -230,7 +247,9 @@ impl Engine {
                 log::debug!("ledger view not saved: {e:#}");
             }
         }
-        Ok(self.f3.ledger.finish(&cache.raw))
+        // Other devices' names for this device's storages become its own.
+        let view = self.f3.ledger.finish(&cache.raw);
+        Ok(storages3_ops::localized(view, &self.storage_aliases3()))
     }
 
     pub(crate) fn view3_path(&self) -> PathBuf {
@@ -270,12 +289,13 @@ impl Engine {
     /// The view replayed from every local batch, without the one kept in
     /// memory (tests: the kept view must equal it).
     pub fn view3_replayed(&self) -> Result<View3> {
-        self.f3.ledger.view_with_roles(
+        let view = self.f3.ledger.view_with_roles(
             |id| self.key_for3(id),
             |d, seq| self.keep3(d, seq),
             |d, id| self.scope3(d, id),
             &self.f3.members.registry,
-        )
+        )?;
+        Ok(storages3_ops::localized(view, &self.storage_aliases3()))
     }
 
     /// The pack-level view (`view3`), for tests and tools.
@@ -353,10 +373,8 @@ impl Engine {
     pub(crate) fn push_own_batches3(&mut self) -> Result<()> {
         let me = self.me3();
         let head = self.f3.ledger.head(&me);
+        // Transferrers carry the ledger too (F-048).
         for (spec, backend) in self.metadata_storages(false)? {
-            if spec.is_carrier() {
-                continue;
-            }
             let mut done = self.f3.ledger.pushed(spec.name()).min(head.seq);
             // A storage that lost the newest batch it was known to hold (or
             // a new storage under a known name) is filled from the start.
@@ -394,6 +412,14 @@ impl Engine {
     /// hot metadata storage. Returns the devices found forked.
     pub(crate) fn pull_ledger3(&mut self) -> Result<Vec<DeviceId>> {
         self.refresh_members3()?;
+        // Replicas the vault enrolled, and other devices' names for this
+        // device's storages (`storages3_ops`).
+        self.refresh_replicas3();
+        self.refresh_storage_aliases3();
+        // Folders' policies and placements (kinds 11 and 12).
+        if let Err(e) = self.refresh_folder_rules3() {
+            log::warn!("policies and placements not read: {e:#}");
+        }
         let me = self.me3();
         let mut keys: BTreeMap<Id16, crypto::VerifyingKey> = BTreeMap::new();
         for (d, (rec, _)) in &self.f3.members.devices.devices {
@@ -406,12 +432,13 @@ impl Engine {
                 keys.entry(m.device).or_insert(k);
             }
         }
+        for (d, (_, k)) in &self.f3.replicas {
+            keys.entry(*d).or_insert_with(|| k.clone());
+        }
         let mut forks = BTreeSet::new();
         let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
-        for (spec, backend) in self.metadata_storages(false)? {
-            if spec.is_carrier() {
-                continue;
-            }
+        // Transferrers carry the ledger too (F-048).
+        for (_, backend) in self.metadata_storages(false)? {
             for (dev, pk) in &keys {
                 let head = self.f3.ledger.head(dev);
                 if !self.keep3(dev, head.seq + 1) {
@@ -628,10 +655,7 @@ impl Engine {
                 &key_id,
                 &self.keys.signer,
             )?;
-            for (spec, backend) in self.metadata_storages(false)? {
-                if spec.is_carrier() {
-                    continue;
-                }
+            for (_, backend) in self.metadata_storages(false)? {
                 for p in &parts {
                     backend.put_if_absent(
                         &ledger3::checkpoint::checkpoint_key(&me, p.seq, p.part),
@@ -649,8 +673,7 @@ impl Engine {
                 let upto = b.seq.saturating_sub(keep);
                 let prefix = format!("ledger/{}/", hex::encode(me));
                 for (spec, backend) in self.metadata_storages(false)? {
-                    if spec.is_carrier()
-                        || self.f3.ledger.pruned(spec.name()) >= upto
+                    if self.f3.ledger.pruned(spec.name()) >= upto
                         || !backend.exists(&ledger3::checkpoint::checkpoint_key(&me, b.seq, 0))?
                     {
                         continue;

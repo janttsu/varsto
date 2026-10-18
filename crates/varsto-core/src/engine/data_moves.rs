@@ -1,30 +1,47 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Data placement: which storages a folder is written to, and moving blocks
-//! from one storage to another (`docs/spec/alpha-0-format.md` section 23).
+//! from one storage to another (`docs/spec/alpha-0-format.md` sections 23
+//! and 77.9).
 //!
 //! A folder's placement (`crate::placement`) limits the storages a push
 //! writes its blocks to; it is published like the folder's policy, so every
-//! device writes the folder the same way. A move copies a block to the new
-//! storage, records the copy, checks it, records the block as dropped from
-//! the old storage (`Event::ChunkDropped`, sealed and pushed before anything
-//! is deleted) and then deletes it there. It never drops a copy the
-//! folder's copy rules still need, never the last one, and a block dropped
-//! from a storage is not written back there by later pushes while another
-//! copy exists. A move that stops halfway is carried on by running it again:
-//! blocks already on the new storage are not copied twice, and blocks
-//! recorded as dropped that are still on the old storage are deleted.
-
+//! device writes the folder the same way. A move works on packs
+//! (`storages3::moves`): a pack whose live blocks all move is copied whole
+//! (read from any storage that holds it, checked against its id), claimed,
+//! read back, and only then dropped from the old storage; a pack that also
+//! holds blocks that stay is rebuilt (the moving blocks into new packs on
+//! the new storage, the others into a new pack on the old one). The map
+//! record of the new packs and the batch with the drops are pushed before
+//! anything is deleted. It never drops a copy the folder's copy rules still
+//! need (the plan is checked against the policy over the copies the drops
+//! leave), never the last one, reads a cold storage only with a confirmed
+//! cold read (the files on this device are re-encrypted instead where they
+//! can be), and a block moved away from a storage is not written back there
+//! by later pushes while another copy exists. A move that stops halfway is
+//! carried on by running it again: packs already on the new storage are not
+//! copied twice, and packs recorded as dropped that are still on the old
+//! storage are deleted.
 use super::placement::{fmt_size, is_idle};
 use super::verify::storage_identity;
 use super::*;
 use crate::advice::{add_cost, Costs};
-use crate::ledger::ChunkRecord;
-use crate::placement::{MoveReport, MoveRequest, Placement, PlacementInfo, PlacementRecord};
+use crate::placement::{MoveReport, MoveRequest, Placement, PlacementInfo};
 use crate::policy::{ChunkFacts, PolicyState};
-use std::sync::Arc;
 
 /// How many kept blocks a report lists by name.
 const KEPT_EXAMPLES: usize = 10;
+/// Source packs per ledger batch of a move (a staged move's "group").
+pub(super) const MOVE_GROUP_PACKS: usize = 64;
+/// Bytes (size classes) of the source packs of one group.
+const MOVE_GROUP_BYTES: u64 = 16 << 20;
+
+/// The size class of the pack an action works on.
+fn action_class(a: &crate::storages3::PackAction) -> u8 {
+    match a {
+        crate::storages3::PackAction::Whole { class, .. }
+        | crate::storages3::PackAction::Rebuild { class, .. } => *class,
+    }
+}
 
 /// The storages a folder's blocks go to on this device.
 pub(super) struct WriteTargets {
@@ -49,10 +66,10 @@ pub(super) struct MinimalSet {
 }
 
 impl WriteTargets {
-    /// Whether a push writes a block with ledger record `record` to the
+    /// Whether a push writes a block whose copies are `standing` to the
     /// storage `name`. Transferrers follow their own rules. A block that was
     /// moved away from a storage is not put back while another copy exists.
-    pub(super) fn wants(&self, name: &str, record: Option<&ChunkRecord>) -> bool {
+    pub(super) fn wants(&self, name: &str, standing: Option<&BlockStanding>) -> bool {
         if self.closed.contains(name) {
             return false;
         }
@@ -75,15 +92,49 @@ impl WriteTargets {
         }
         // A copy on the trash storage does not keep a current file's block
         // off the folder's storages (a file restored or created again).
-        match record {
-            Some(r) if r.dropped_from(name) => !r.storages.iter().any(|(n, l)| {
-                n != name
-                    && Some(n.as_str()) != trash
-                    && !l.claimed_by.is_empty()
-                    && !self.carriers.contains(n)
-            }),
+        match standing {
+            Some(s) if s.dropped_from.contains(name) => !s
+                .copies
+                .iter()
+                .any(|n| n != name && Some(n.as_str()) != trash && !self.carriers.contains(n)),
             _ => true,
         }
+    }
+}
+
+/// Where a block is and where it was taken away from, on the pack-level
+/// view: the storages holding a live place of it, and the storages a pack
+/// with a place of it was dropped from (moved or drained away).
+#[derive(Clone, Debug, Default)]
+pub(super) struct BlockStanding {
+    pub(super) copies: BTreeSet<String>,
+    pub(super) dropped_from: BTreeSet<String>,
+}
+
+impl BlockStanding {
+    pub(super) fn of(
+        view: &crate::ledger3::LedgerView,
+        table: &crate::blockmap::MapTable,
+        object: &ObjectName,
+    ) -> BlockStanding {
+        let mut out = BlockStanding::default();
+        let Ok(obj) = crate::storages3::object_bin(object) else {
+            return out;
+        };
+        out.copies = crate::storages3::block_copies(view, table, &obj);
+        for place in crate::ledger3::BlockMapView::places_of(table, &obj) {
+            let Some(rec) = view.pack(&place.pack) else {
+                continue;
+            };
+            for (s, _) in rec.places.iter() {
+                if let Some(name) = view.tables.storage_name(*s) {
+                    if view.dropped_from(&place.pack, name) {
+                        out.dropped_from.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        out
     }
 }
 
@@ -118,27 +169,29 @@ impl StagedExtras {
     }
 }
 
-/// One block to move.
+/// One block a move takes off the old storage.
 pub(super) struct MoveItem {
     pub(super) chunk: ChunkId,
     pub(super) object: ObjectName,
     pub(super) epoch: u32,
     pub(super) size: u64,
-    /// Already claimed on the new storage.
+    /// The pack on the old storage that holds it.
+    pub(super) pack: crate::ledger3::PackId,
+    /// A live place of it on the new storage already, and that place's pack.
     pub(super) on_to: bool,
+    pub(super) to_pack: Option<crate::ledger3::PackId>,
     /// Files of this folder on this device that contain the block.
     pub(super) files: Vec<PathBuf>,
 }
 
-/// A move worked out from the ledger, before anything is changed.
+/// A move worked out from the ledger and the folder's block map, before
+/// anything is changed: the pack-level plan (after the policy's veto and
+/// the cold-read check) and the blocks it takes.
 pub(super) struct MovePlan {
+    pub(super) plan: crate::storages3::MovePlan,
     pub(super) items: Vec<MoveItem>,
-    /// Blocks recorded as dropped from `from` (an earlier run): their
-    /// objects may still be there.
-    dropped: Vec<ObjectName>,
     pub(super) report: MoveReport,
 }
-
 /// Count a block that stays where it is, naming a few.
 fn keep(report: &mut MoveReport, object: &ObjectName, why: String) {
     report.blocks_kept += 1;
@@ -221,14 +274,10 @@ impl Engine {
             .filter(|s| trash.as_deref() != Some(s.name()))
             .collect();
         let mut holds: BTreeSet<String> = BTreeSet::new();
-        if let Ok(view) = self.view() {
-            for ((f, _), r) in view.chunks.iter() {
-                if f == &rec.folder_id {
-                    for (n, l) in &r.storages {
-                        if !l.claimed_by.is_empty() {
-                            holds.insert(n.clone());
-                        }
-                    }
+        if let (Ok(view), Ok(folder)) = (self.view3(), members3::bin(&rec.folder_id)) {
+            for id in view.packs.keys() {
+                if view.pack_folder(id) == Some(folder) {
+                    holds.extend(view.holders(id).into_iter().map(str::to_string));
                 }
             }
         }
@@ -392,25 +441,9 @@ impl Engine {
             &self.vault.vault_id,
             &self.vault.device_id,
         )?;
-        let prec = PlacementRecord {
-            folder_id: rec.folder_id.clone(),
-            device: self.vault.device_id.clone(),
-            updated_utc: now,
-            placement,
-        };
-        // Signed in an organization, the older form otherwise (see set_policy).
-        let blob = if self.org.is_some() {
-            prec.seal_signed(
-                &self.vault.vault_id,
-                &self.folder_record_key_now(),
-                &self.keys.signer,
-            )?
-        } else {
-            prec.seal(&self.vault.vault_id, &self.folder_record_key_now())?
-        };
-        for (_, backend) in self.metadata_storages(true)? {
-            backend.put_if_absent(&prec.storage_key(), &blob)?;
-        }
+        // This device's `placement` record of the folder (kind 12): every
+        // device takes the newest.
+        self.publish_placement3(&rec, placement.as_ref(), now)?;
         self.placement(folder)
     }
 
@@ -469,73 +502,6 @@ impl Engine {
                 Some(p)
             }
         })
-    }
-
-    /// Adopt the newest placement record of every folder (as for policies).
-    /// Returns whether a folder record changed.
-    pub(super) fn pull_placement_records(&mut self) -> Result<bool> {
-        if self.vault.member {
-            return Ok(false);
-        }
-        let fr_keys = self.folder_record_keys();
-        let mut changed = false;
-        for (_, backend) in self.metadata_storages(false)? {
-            for key in backend.list(PlacementRecord::PREFIX)? {
-                let Some(fid) = key
-                    .strip_prefix(PlacementRecord::PREFIX)
-                    .and_then(|r| r.split('/').next())
-                    .and_then(|f| FolderId::from_hex(f).ok())
-                else {
-                    continue;
-                };
-                let Some(local) = self.keyring.folders.get(&fid) else {
-                    continue;
-                };
-                let Some(named) = key
-                    .strip_prefix(PlacementRecord::PREFIX)
-                    .and_then(|r| r.split('/').nth(1))
-                    .and_then(|d| DeviceId::from_hex(d).ok())
-                else {
-                    continue;
-                };
-                // The object name ends with the update time: skip anything not newer.
-                let stamp: i64 = key
-                    .rsplit('/')
-                    .next()
-                    .and_then(|n| n.strip_suffix(".enc"))
-                    .and_then(|n| n.parse().ok())
-                    .unwrap_or(0);
-                if stamp <= local.placement_updated_utc {
-                    continue;
-                }
-                let Some(blob) = backend.get(&key)? else {
-                    continue;
-                };
-                let verify = |d: &DeviceId| self.device_key(d);
-                let Ok(rec) = PlacementRecord::open_any(
-                    &blob,
-                    &self.vault.vault_id,
-                    &fid,
-                    &named,
-                    &fr_keys,
-                    &verify,
-                    self.org.is_none(),
-                ) else {
-                    continue;
-                };
-                if !self.trusted(&rec.device) || !self.org_accepts_policy_from(&rec.device) {
-                    continue;
-                }
-                if let Some(f) = self.keyring.folders.get_mut(&fid) {
-                    if rec.updated_utc > f.placement_updated_utc {
-                        f.placement = rec.placement;
-                        f.placement_updated_utc = rec.updated_utc;
-                        changed = true;
-                    }
-                }
-            }
-        }
-        Ok(changed)
     }
 
     // ----- moving data ---------------------------------------------------------
@@ -635,6 +601,13 @@ impl Engine {
                 to.name()
             );
         }
+        let table = self.folder_table3(rec)?.ok_or_else(|| {
+            anyhow!(
+                "this device holds no key of folder {}: ask for it with `varsto folder request`",
+                rec.name
+            )
+        })?;
+        let folder = members3::bin(&rec.folder_id)?;
         let state = self.load_state(&rec.folder_id)?;
         let root = self
             .config
@@ -654,14 +627,14 @@ impl Engine {
             None => None,
         };
         // Blocks of the files that move, without those other files still use.
-        let mut moving: BTreeMap<ChunkId, (ChunkRef, Vec<PathBuf>)> = BTreeMap::new();
-        let mut staying: HashSet<ChunkId> = HashSet::new();
+        let mut moving: BTreeMap<ObjectName, (ChunkRef, Vec<PathBuf>)> = BTreeMap::new();
+        let mut staying: HashSet<ObjectName> = HashSet::new();
         let mut files = 0u64;
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         for f in state.files.values().filter(|f| !f.deleted) {
             let moves = idle.as_ref().is_none_or(|s| s.contains(&f.path)) && ex.includes(&f.path);
             if !moves {
-                staying.extend(f.chunks.iter().map(|c| c.chunk.clone()));
+                staying.extend(f.chunks.iter().map(|c| c.object.clone()));
                 continue;
             }
             files += 1;
@@ -673,7 +646,7 @@ impl Engine {
             };
             for c in &f.chunks {
                 let e = moving
-                    .entry(c.chunk.clone())
+                    .entry(c.object.clone())
                     .or_insert_with(|| (c.clone(), Vec::new()));
                 e.1.extend(local.clone());
             }
@@ -682,13 +655,18 @@ impl Engine {
         if idle.is_none() && ex.paths.is_empty() {
             for c in self.trash_chunks(&rec.folder_id) {
                 moving
-                    .entry(c.chunk.clone())
+                    .entry(c.object.clone())
                     .or_insert_with(|| (c, Vec::new()));
             }
         }
-        moving.retain(|c, _| !staying.contains(c));
+        moving.retain(|o, _| !staying.contains(o));
 
-        let view = self.view()?;
+        let view = self.view3()?;
+        let t = table.read().unwrap_or_else(|e| e.into_inner());
+        let in_scope =
+            |o: &crate::ledger3::ObjectBin| moving.contains_key(&ObjectName::from_bytes(o));
+        let mut plan =
+            crate::storages3::plan_move(&view, &t, &folder, from.name(), to.name(), &in_scope)?;
         let carriers: BTreeSet<String> = self
             .config
             .storages
@@ -711,7 +689,7 @@ impl Engine {
             .config
             .storages
             .iter()
-            .filter(|s| !s.is_cold() && !s.is_carrier())
+            .filter(|s| !s.is_cold() && !s.is_carrier() && s.name() != from.name())
             .map(|s| s.name().to_string())
             .collect();
         let copy_rules = rec
@@ -732,124 +710,246 @@ impl Engine {
             files,
             ..Default::default()
         };
+        // Moved by an earlier run: off the old storage, a pack with a place
+        // of it dropped from there.
+        for object in moving.keys() {
+            let s = BlockStanding::of(&view, &t, object);
+            if !s.copies.contains(from.name()) && s.dropped_from.contains(from.name()) {
+                report.already_moved += 1;
+            }
+        }
+        let packs: HashSet<crate::ledger3::PackId> =
+            plan.actions.iter().map(|a| *a.pack()).collect();
+        let live = crate::storages3::members_of_packs(&t, &packs)?;
+        let read_cold = !from.is_cold() || req.confirm_cold_read;
+        let cached = |o: &crate::ledger3::ObjectBin| self.cache_has(&ObjectName::from_bytes(o));
+        let local_of = |o: &crate::ledger3::ObjectBin| {
+            moving
+                .get(&ObjectName::from_bytes(o))
+                .is_some_and(|(_, p)| !p.is_empty())
+                || cached(o)
+        };
         let mut items = Vec::new();
-        let mut dropped = Vec::new();
         let mut remaining: BTreeSet<String> = BTreeSet::new();
         let (mut new_on_to, mut read_from) = (0u64, 0u64);
         let price_from = self.storage_price(from.name());
         let price_to = self.storage_price(to.name());
         let mut early = Costs::new();
-        for (chunk, (cref, paths)) in moving {
-            let Some(r) = view
-                .locate(&rec.folder_id, &chunk)
-                .filter(|r| r.object == cref.object)
-            else {
-                continue;
-            };
-            let claimed = |n: &str| r.storages.get(n).is_some_and(|l| !l.claimed_by.is_empty());
-            if !claimed(from.name()) {
-                if r.dropped_from(from.name()) {
-                    report.already_moved += 1;
-                    dropped.push(r.object.clone());
-                }
-                continue;
-            }
-            let on_to = claimed(to.name());
-            // The copies left once this one is gone.
-            let after: Vec<(String, String, bool, i64)> = r
-                .storages
-                .iter()
-                .filter(|(n, l)| {
-                    !l.claimed_by.is_empty() && *n != from.name() && !carriers.contains(*n)
-                })
-                .map(|(n, _)| (n.clone(), place_of(n), false, 0))
-                .chain((!on_to).then(|| (to.name().to_string(), to.place(), false, 0)))
-                .collect();
-            let mut reason = None;
-            if let Some(rules) = &copy_rules {
-                // Only what dropping this copy makes worse counts: a
-                // requirement the copies did not meet before (no external
-                // storage yet, say) does not keep a copy elsewhere.
-                let before: Vec<(String, String)> = r
-                    .storages
+        let mut kept_actions = Vec::new();
+        for action in std::mem::take(&mut plan.actions) {
+            let pack = *action.pack();
+            let members = live.get(&pack).cloned().unwrap_or_default();
+            let (inside, outside): (Vec<&crate::storages3::PackMember>, Vec<_>) =
+                members.iter().partition(|m| in_scope(&m.object));
+            // The policy's veto: only what dropping this copy makes worse
+            // counts (a requirement the copies did not meet before keeps
+            // nothing back).
+            let mut vetoed: Vec<crate::storages3::PackMember> = Vec::new();
+            let mut afters: Vec<(crate::storages3::PackMember, Vec<(String, String)>)> = Vec::new();
+            for m in &inside {
+                let before: BTreeSet<String> =
+                    crate::storages3::block_copies(&view, &*t, &m.object)
+                        .into_iter()
+                        .filter(|n| !carriers.contains(n))
+                        .collect();
+                let after: Vec<(String, String)> = before
                     .iter()
-                    .filter(|(n, l)| !l.claimed_by.is_empty() && !carriers.contains(*n))
-                    .map(|(n, _)| (n.clone(), place_of(n)))
+                    .filter(|n| n.as_str() != from.name())
+                    .cloned()
+                    .chain((!before.contains(to.name())).then(|| to.name().to_string()))
+                    .map(|n| {
+                        let p = place_of(&n);
+                        (n, p)
+                    })
                     .collect();
-                let mut capped = rules.clone();
-                capped.min_copies = capped.min_copies.min(before.len() as u32);
-                for (place, n) in capped.min_per_place.iter_mut() {
-                    let have = before.iter().filter(|(_, p)| p == place).count() as u32;
-                    *n = (*n).min(have);
+                if let Some(rules) = &copy_rules {
+                    let before: Vec<(String, String)> =
+                        before.iter().map(|n| (n.clone(), place_of(n))).collect();
+                    let mut capped = rules.clone();
+                    capped.min_copies = capped.min_copies.min(before.len() as u32);
+                    for (place, n) in capped.min_per_place.iter_mut() {
+                        let have = before.iter().filter(|(_, p)| p == place).count() as u32;
+                        *n = (*n).min(have);
+                    }
+                    let verdict = crate::policy::evaluate(
+                        &rec.name,
+                        &capped,
+                        &[ChunkFacts {
+                            copies: after
+                                .iter()
+                                .map(|(n, p)| (n.clone(), p.clone(), false, 0))
+                                .collect(),
+                            stored_utc: 0,
+                        }],
+                        &BTreeMap::new(),
+                        &[],
+                        now,
+                    );
+                    if verdict.state == PolicyState::Violated {
+                        keep(
+                            &mut report,
+                            &ObjectName::from_bytes(&m.object),
+                            format!(
+                                "the folder's policy ({}) needs the copy on {}",
+                                capped.describe(),
+                                from.name()
+                            ),
+                        );
+                        vetoed.push(**m);
+                        continue;
+                    }
                 }
-                let rules = &capped;
-                let verdict = crate::policy::evaluate(
-                    &rec.name,
-                    rules,
-                    &[ChunkFacts {
-                        copies: after.clone(),
-                        stored_utc: 0,
-                    }],
-                    &BTreeMap::new(),
-                    &[],
-                    now,
-                );
-                if verdict.state == PolicyState::Violated {
-                    reason = Some(format!(
-                        "the folder's policy ({}) needs the copy on {}",
-                        rules.describe(),
-                        from.name()
-                    ));
-                }
+                afters.push((**m, after));
             }
-            let other_hot = r
-                .storages
-                .iter()
-                .any(|(n, l)| !l.claimed_by.is_empty() && n != from.name() && hot.contains(n));
-            if reason.is_none()
-                && !on_to
-                && from.is_cold()
-                && !req.confirm_cold_read
-                && !other_hot
-                && paths.is_empty()
-            {
-                reason = Some(format!(
-                    "the only copy to read is on cold storage {}: confirm the cold read to move it",
-                    from.name()
-                ));
-            }
-            if let Some(why) = reason {
-                keep(&mut report, &r.object, why);
+            if afters.is_empty() {
                 continue;
             }
-            report.blocks += 1;
-            report.bytes += r.size;
-            remaining.extend(after.iter().map(|(n, _, _, _)| n.clone()));
-            let n = after.len() as u64;
-            if report.blocks == 1 || n < report.min_copies_after {
-                report.min_copies_after = n;
+            // What is left of the action once the vetoed blocks stay.
+            let action = match action {
+                crate::storages3::PackAction::Whole {
+                    pack,
+                    class,
+                    copy,
+                    on_destination,
+                    members: all,
+                    missing,
+                } if vetoed.is_empty() => crate::storages3::PackAction::Whole {
+                    pack,
+                    class,
+                    copy,
+                    on_destination,
+                    members: all,
+                    missing,
+                },
+                crate::storages3::PackAction::Whole {
+                    pack,
+                    class,
+                    missing,
+                    ..
+                } => crate::storages3::PackAction::Rebuild {
+                    pack,
+                    class,
+                    moving: missing
+                        .into_iter()
+                        .filter(|m| !vetoed.iter().any(|v| v.object == m.object))
+                        .collect(),
+                    staying: vetoed.clone(),
+                },
+                crate::storages3::PackAction::Rebuild {
+                    pack,
+                    class,
+                    moving,
+                    mut staying,
+                } => {
+                    let moving: Vec<_> = moving
+                        .into_iter()
+                        .filter(|m| !vetoed.iter().any(|v| v.object == m.object))
+                        .collect();
+                    staying.extend(vetoed.iter().copied());
+                    crate::storages3::PackAction::Rebuild {
+                        pack,
+                        class,
+                        moving,
+                        staying,
+                    }
+                }
+            };
+            // Reading the pack: from a storage other than a cold source when
+            // one holds it, from the source when it may be read, or block by
+            // block from this device.
+            let needs_read = match &action {
+                crate::storages3::PackAction::Whole { copy, .. } => *copy,
+                crate::storages3::PackAction::Rebuild { .. } => true,
+            };
+            let other_hot = view
+                .holders(&pack)
+                .iter()
+                .any(|h| hot.contains(*h) && *h != to.name());
+            let local_ok = match &action {
+                crate::storages3::PackAction::Whole { missing, .. } => {
+                    missing.iter().all(|m| local_of(&m.object))
+                }
+                crate::storages3::PackAction::Rebuild {
+                    moving, staying, ..
+                } => moving
+                    .iter()
+                    .chain(staying.iter())
+                    .all(|m| local_of(&m.object)),
+            };
+            if needs_read && !read_cold && !other_hot && !local_ok {
+                for (m, _) in &afters {
+                    keep(
+                        &mut report,
+                        &ObjectName::from_bytes(&m.object),
+                        format!(
+                            "the only copy to read is on cold storage {}: confirm the cold read to move it",
+                            from.name()
+                        ),
+                    );
+                }
+                continue;
             }
-            if !on_to {
-                new_on_to += r.size;
-                if paths.is_empty() && !other_hot {
-                    read_from += r.size;
+            let class_bytes =
+                crate::ledger3::events::class_bytes(action_class(&action)).unwrap_or(0);
+            if needs_read && !other_hot && !local_ok {
+                read_from += class_bytes;
+            }
+            if let (Some(p), Some(c)) = (
+                &price_from,
+                view.copies(&pack)
+                    .into_iter()
+                    .find(|c| c.storage == from.name()),
+            ) {
+                let days = ((now - c.stored_utc).max(0) / 86_400) as u32;
+                if let Some(cost) = p
+                    .early_deletion_cost(class_bytes, days)
+                    .filter(|c| *c > 0.0)
+                {
+                    add_cost(&mut early, &p.currency, cost);
                 }
             }
-            if let (Some(p), Some(loc)) = (&price_from, r.storages.get(from.name())) {
-                let days = ((now - loc.claimed_utc).max(0) / 86_400) as u32;
-                if let Some(c) = p.early_deletion_cost(r.size, days).filter(|c| *c > 0.0) {
-                    add_cost(&mut early, &p.currency, c);
+            let _ = &outside;
+            for (m, after) in afters {
+                let object = ObjectName::from_bytes(&m.object);
+                let s = BlockStanding::of(&view, &t, &object);
+                let on_to = s.copies.contains(to.name());
+                report.blocks += 1;
+                report.bytes += u64::from(m.place.len);
+                remaining.extend(after.iter().map(|(n, _)| n.clone()));
+                let n = after.len() as u64;
+                if report.blocks == 1 || n < report.min_copies_after {
+                    report.min_copies_after = n;
                 }
+                if !on_to {
+                    new_on_to += u64::from(m.place.len);
+                }
+                let to_pack = on_to
+                    .then(|| {
+                        view.block_places(&m.object, &*t)
+                            .into_iter()
+                            .find(|p| !p.marked && p.storages.iter().any(|s| s == to.name()))
+                            .map(|p| p.place.pack)
+                    })
+                    .flatten();
+                let (chunk, paths) = match moving.get(&object) {
+                    Some((c, p)) => (c.chunk.clone(), p.clone()),
+                    None => (ChunkId::from_bytes(&m.chunk), Vec::new()),
+                };
+                items.push(MoveItem {
+                    chunk,
+                    object,
+                    epoch: m.epoch,
+                    size: u64::from(m.place.len),
+                    pack,
+                    on_to,
+                    to_pack,
+                    files: paths,
+                });
             }
-            items.push(MoveItem {
-                chunk,
-                object: r.object.clone(),
-                epoch: cref.epoch,
-                size: r.size,
-                on_to,
-                files: paths,
-            });
+            kept_actions.push(action);
         }
+        plan.actions = kept_actions;
+        drop(t);
         // Costs from the price model.
         match price_from
             .as_ref()
@@ -908,12 +1008,11 @@ impl Engine {
             ));
         }
         Ok(MovePlan {
+            plan,
             items,
-            dropped,
             report,
         })
     }
-
     fn move_summary(r: &MoveReport, folder: &str) -> String {
         let mut s = format!(
             "{} {} block{} ({}) of folder {} from {} to {}",
@@ -985,7 +1084,10 @@ impl Engine {
         s
     }
 
-    /// Carry out a planned move, one group of blocks per ledger batch.
+    /// Carry out a planned move, a few packs per ledger batch: each group's
+    /// packs are copied (or rebuilt) and checked, the map record of the new
+    /// packs and the batch with the claims and drops are pushed, and only
+    /// then are the dropped packs deleted from the old storage.
     pub(super) fn run_move(
         &mut self,
         rec: &FolderRecord,
@@ -994,8 +1096,8 @@ impl Engine {
         ex: &StagedExtras,
     ) -> Result<MoveReport> {
         let MovePlan {
+            plan,
             items,
-            dropped,
             mut report,
         } = plan;
         let find = |name: &str| {
@@ -1007,47 +1109,97 @@ impl Engine {
                 .ok_or_else(|| anyhow!("unknown storage {name}"))
         };
         let (from_spec, to_spec) = (find(&req.from)?, find(&req.to)?);
+        let folder = members3::bin(&rec.folder_id)?;
+        let epoch = self.folder_keys(rec)?.epoch;
         let from = self.open_spec(&from_spec)?;
-        // A staged move to a pool talks to the pool itself: it asks which
-        // places hold a block and adds copies for the disk group rule.
-        let to_pool: Option<Arc<PoolStorage>> = (ex.staged
-            && matches!(to_spec, StorageSpec::Pool { .. }))
-        .then(|| self.open_pool(&to_spec))
-        .transpose()?
-        .map(Arc::new);
-        // Blocks go into packs on the pool as on any storage.
-        let to_box: Box<dyn Storage> = match &to_pool {
-            Some(p) => {
-                let shared: Arc<dyn Storage> = p.clone();
-                Box::new(self.pack_store(&to_spec, Box::new(crate::storage::SharedStorage(shared))))
-            }
-            None => self.open_spec(&to_spec)?,
+        // A move to a pool talks to the pool itself: it asks which places
+        // hold a pack and adds copies for the disk group rule.
+        let to_pool: Option<PoolStorage> = matches!(to_spec, StorageSpec::Pool { .. })
+            .then(|| self.open_pool(&to_spec))
+            .transpose()?;
+        let to_box: Option<Box<dyn Storage>> = match &to_pool {
+            Some(_) => None,
+            None => Some(self.open_spec(&to_spec)?),
         };
-        let to: &dyn Storage = to_box.as_ref();
-        let others: OpenStorages = self
-            .open_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| {
-                !s.is_carrier() && s.name() != from_spec.name() && s.name() != to_spec.name()
-            })
-            .collect();
-        let fk = self.folder_keys(rec)?;
-        let read_from = !from_spec.is_cold() || req.confirm_cold_read;
-        let read_to = !to_spec.is_cold() || req.confirm_cold_read;
-        let view_now = self.view()?;
-        let gate = self.quota_gate(&view_now);
-        // A job from a pool: which disk that is away holds a block.
-        let from_pool: Option<PoolStorage> = (ex.staged && from_spec.is_data_only())
+        let to_storage: &dyn Storage = match (&to_pool, &to_box) {
+            (Some(p), _) => p,
+            (None, Some(b)) => b.as_ref(),
+            (None, None) => unreachable!("one of them is set"),
+        };
+        // A move from a pool: which disk that is away holds a pack.
+        let from_pool: Option<PoolStorage> = from_spec
+            .is_data_only()
             .then(|| self.open_pool(&from_spec))
             .transpose()?;
-        let away_disk = |item: &MoveItem| -> Option<String> {
-            let p = from_pool.as_ref()?;
-            let r = view_now.locate(&rec.folder_id, &item.chunk)?;
-            let locs = p.locate_all(&super::pack_upkeep::held_key(r, from_spec.name()));
-            if locs.is_empty() || locs.iter().any(|l| l.attached) {
-                return None;
+        let fk = self.folder_keys(rec)?;
+        let view_now = self.view3()?;
+        let gate = self.quota_gate(&view_now);
+        // Blocks this plan takes, by pack: what a run reports in blocks.
+        let mut by_pack: HashMap<crate::ledger3::PackId, Vec<&MoveItem>> = HashMap::new();
+        for i in &items {
+            by_pack.entry(i.pack).or_default().push(i);
+        }
+        let blocks_of = |p: &crate::ledger3::PackId| -> (u64, u64) {
+            by_pack.get(p).map_or((0, 0), |v| {
+                (v.len() as u64, v.iter().map(|i| i.size).sum::<u64>())
+            })
+        };
+        // Room on the new storage first (its quota counts size classes).
+        let mut actions: Vec<crate::storages3::PackAction> = Vec::new();
+        for a in plan
+            .actions
+            .iter()
+            .filter(|a| by_pack.contains_key(a.pack()))
+        {
+            let need = match a {
+                crate::storages3::PackAction::Whole {
+                    copy: true, class, ..
+                } => crate::ledger3::events::class_bytes(*class).unwrap_or(0),
+                crate::storages3::PackAction::Whole { .. } => 0,
+                crate::storages3::PackAction::Rebuild { moving, .. } => {
+                    moving.iter().map(|m| u64::from(m.place.len)).sum()
+                }
+            };
+            if need > 0 && !gate.take_pack(to_spec.name(), need) {
+                let (n, bytes) = blocks_of(a.pack());
+                if ex.staged {
+                    report.waiting_room_blocks += n;
+                    report.waiting_room_bytes += bytes;
+                    report.waiting_note = Some(gate.message(to_spec.name()));
+                } else {
+                    for i in by_pack.get(a.pack()).into_iter().flatten() {
+                        keep(&mut report, &i.object, gate.message(to_spec.name()));
+                    }
+                }
+                continue;
             }
-            Some(locs[0].label.clone())
+            actions.push(a.clone());
+        }
+        // Where the packs are read from besides the old storage: the
+        // mailbox's outbox, the other storages that hold them (a cold one
+        // only with a confirmed cold read), and blocks re-encrypted from the
+        // files on this device or taken from the block cache.
+        let readers: Vec<(StorageSpec, Box<dyn Storage>)> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| s.name() != from_spec.name() && s.name() != to_spec.name())
+            .filter(|s| !s.is_carrier() && (!s.is_cold() || req.confirm_cold_read))
+            .filter_map(|s| self.open_spec(s).ok().map(|b| (s.clone(), b)))
+            .collect();
+        let read_source = !from_spec.is_cold() || req.confirm_cold_read;
+        // Blocks re-encrypted from the files here: only when the old storage
+        // may not be read (a cold one without a confirmed cold read).
+        let local: HashMap<ObjectName, Vec<u8>> = if read_source {
+            HashMap::new()
+        } else {
+            self.local_ciphertexts(&fk, items.iter())
+        };
+        let opts = crate::storages3::MoveOptions {
+            keep_source: ex.keep_source,
+            confirm_cold_read: req.confirm_cold_read,
+            max_packs: 0,
+            split_on_no_room: ex.staged,
         };
         let task = crate::activity::start(
             crate::activity::DATA_MOVE,
@@ -1055,215 +1207,216 @@ impl Engine {
             items.iter().map(|i| i.size).sum(),
             crate::activity::Unit::Bytes,
         );
-        // Staged: blocks of this size and larger found no room on `to`.
-        let mut full_at: Option<u64> = None;
         let mut disks_used: BTreeSet<String> = BTreeSet::new();
-        // Groups of up to 15 MiB are written as one pack each; their drops are
-        // sealed and pushed before any of them is deleted from the old storage.
-        for (groups_done, group) in crate::packs::byte_groups(&items, |i| i.size)
-            .into_iter()
-            .enumerate()
-        {
+        let mut min_room: Option<u64> = None;
+        let mut runs: Vec<crate::storages3::MoveRun> = Vec::new();
+        // Groups of source packs of up to 16 MiB together (at least one
+        // pack): one batch each.
+        let mut groups: Vec<Vec<crate::storages3::PackAction>> = Vec::new();
+        let mut group_bytes = 0u64;
+        for a in actions {
+            let b = crate::ledger3::events::class_bytes(action_class(&a)).unwrap_or(0);
+            match groups.last_mut() {
+                Some(g) if group_bytes + b <= MOVE_GROUP_BYTES && g.len() < MOVE_GROUP_PACKS => {
+                    group_bytes += b;
+                    g.push(a);
+                }
+                _ => {
+                    group_bytes = b;
+                    groups.push(vec![a]);
+                }
+            }
+        }
+        for (groups_done, group) in groups.iter().enumerate() {
             if ex.max_groups.is_some_and(|m| groups_done >= m) {
                 report.stopped_early = true;
                 break;
             }
-            task.advance(group.iter().map(|i| i.size).sum());
-            let mut deletes: Vec<(ObjectName, u64)> = Vec::new();
-            let present: Vec<bool> = group
-                .iter()
-                .map(|i| i.on_to || to.exists(&chunk_storage_key(&i.object)).unwrap_or(false))
-                .collect();
-            let no_room = |full_at: Option<u64>, i: &MoveItem| full_at.is_some_and(|f| i.size >= f);
-            let mut local = self.local_ciphertexts(
-                &fk,
-                group
-                    .iter()
-                    .zip(&present)
-                    .filter(|(i, p)| !**p && !no_room(full_at, i))
-                    .map(|(i, _)| i),
-            );
-            // The blocks the target lacks are written together: as packs
-            // on a storage that keeps them (`crate::packs`).
-            let mut skip = vec![false; group.len()];
-            let mut sizes: Vec<u64> = group.iter().map(|i| i.size).collect();
-            let mut fresh: Vec<(usize, Vec<u8>)> = Vec::new();
-            for (n, (item, present)) in group.iter().zip(&present).enumerate() {
-                if *present {
-                    continue;
+            let sub = crate::storages3::MovePlan {
+                actions: group.to_vec(),
+                ..plan.clone()
+            };
+            let run = {
+                let pack_source = |p: &crate::ledger3::PackId| -> Option<Vec<u8>> {
+                    let key = crate::packs::pack_key(&hex::encode(p));
+                    if let Some(b) = self.mailbox_object(&key) {
+                        return Some(b);
+                    }
+                    let holders = view_now.holders(p);
+                    for (spec, b) in &readers {
+                        if holders.contains(&spec.name()) {
+                            if let Ok(Some(bytes)) = b.get_bounded(&key, crate::storage::MAX_PACK) {
+                                if crypto::hash(&bytes) == *p {
+                                    return Some(bytes);
+                                }
+                            }
+                        }
+                    }
+                    None
+                };
+                let member_source = |m: &crate::storages3::PackMember| -> Option<Vec<u8>> {
+                    let o = ObjectName::from_bytes(&m.object);
+                    local.get(&o).cloned().or_else(|| self.cached_object(&o))
+                };
+                let sources = crate::storages3::Sources {
+                    pack: &pack_source,
+                    member: &member_source,
+                    read_source,
+                };
+                let src_ep = crate::storages3::Endpoint {
+                    name: from_spec.name(),
+                    storage: from.as_ref(),
+                    cold: from_spec.is_cold(),
+                    pool: from_pool.as_ref(),
+                };
+                let dst_ep = crate::storages3::Endpoint {
+                    name: to_spec.name(),
+                    storage: to_storage,
+                    cold: to_spec.is_cold(),
+                    pool: to_pool.as_ref(),
+                };
+                crate::storages3::run_move_with(&sub, &src_ep, &dst_ep, &sources, &opts)
+            };
+            for p in group {
+                task.advance(blocks_of(p.pack()).1);
+            }
+            runs.push(run);
+            let run = runs.last().expect("pushed");
+            let r = &run.report;
+            disks_used.extend(r.disks_used.iter().cloned());
+            // Blocks that found no room went into the remainder on the
+            // source: not moved.
+            let kept: HashSet<crate::ledger3::ObjectBin> = r.kept_back.iter().copied().collect();
+            let moved_of = |p: &crate::ledger3::PackId| -> Vec<&MoveItem> {
+                by_pack
+                    .get(p)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|i| {
+                        crate::storages3::object_bin(&i.object).is_ok_and(|o| !kept.contains(&o))
+                    })
+                    .collect()
+            };
+            for p in r.copied_packs.iter().chain(&r.rebuilt_packs) {
+                let moved = moved_of(p);
+                report.blocks_copied += moved.iter().filter(|i| !i.on_to).count() as u64;
+                report.blocks_verified += moved.len() as u64;
+            }
+            report.bytes_copied += r.bytes_written;
+            for p in &r.dropped_packs {
+                for i in moved_of(p) {
+                    report.blocks_dropped += 1;
+                    report.bytes_dropped += i.size;
+                    report.blocks_done += 1;
+                    report.bytes_done += i.size;
                 }
-                skip[n] = true;
-                if no_room(full_at, item) {
+            }
+            if ex.keep_source {
+                // Copied and checked, nothing dropped: done all the same.
+                for a in group {
+                    let p = a.pack();
+                    if r.waiting_room.contains(p)
+                        || r.waiting_place.contains(p)
+                        || r.corrupt.contains(p)
+                        || r.unavailable.iter().any(|(u, _)| u == p)
+                    {
+                        continue;
+                    }
+                    for i in moved_of(p) {
+                        report.blocks_done += 1;
+                        report.bytes_done += i.size;
+                    }
+                }
+            }
+            for i in items.iter().filter(|i| {
+                crate::storages3::object_bin(&i.object).is_ok_and(|o| kept.contains(&o))
+            }) {
+                if ex.staged {
                     report.waiting_room_blocks += 1;
-                    report.waiting_room_bytes += item.size;
-                    continue;
+                    report.waiting_room_bytes += i.size;
+                } else {
+                    keep(
+                        &mut report,
+                        &i.object,
+                        format!("{} has no room for it now", to_spec.name()),
+                    );
                 }
-                let ct = local
-                    .remove(&item.object)
-                    .or_else(|| self.move_source(item, &others, from.as_ref(), read_from));
-                let Some(ct) = ct else {
-                    // A job waits for a source disk that is away instead
-                    // of leaving the block behind (the mailbox stages it
-                    // while that disk is docked, section 78).
-                    if let Some(label) = away_disk(item) {
-                        report.waiting_source_blocks += 1;
-                        report.waiting_source_bytes += item.size;
+            }
+            if !kept.is_empty() {
+                min_room =
+                    Some(min_room.map_or(r.waiting_min_bytes, |m| m.min(r.waiting_min_bytes)));
+            }
+            for p in &r.waiting_place {
+                let (n, bytes) = blocks_of(p);
+                report.waiting_place_blocks += n;
+                report.waiting_place_bytes += bytes;
+            }
+            for p in &r.waiting_room {
+                let (n, bytes) = blocks_of(p);
+                if ex.staged {
+                    report.waiting_room_blocks += n;
+                    report.waiting_room_bytes += bytes;
+                } else {
+                    for i in by_pack.get(p).into_iter().flatten() {
+                        keep(
+                            &mut report,
+                            &i.object,
+                            format!("{} has no room for it now", to_spec.name()),
+                        );
+                    }
+                }
+            }
+            if r.waiting_room_packs > 0 {
+                min_room =
+                    Some(min_room.map_or(r.waiting_min_bytes, |m| m.min(r.waiting_min_bytes)));
+            }
+            for p in &r.corrupt {
+                for i in by_pack.get(p).into_iter().flatten() {
+                    keep(
+                        &mut report,
+                        &i.object,
+                        format!(
+                            "the copy on {} is damaged: the repair fixes it first",
+                            from_spec.name()
+                        ),
+                    );
+                }
+            }
+            for (p, why) in &r.unavailable {
+                // A pack only on source disks that are away waits for them.
+                let away = from_pool.as_ref().and_then(|pool| {
+                    let locs = pool.locate_all(&crate::packs::pack_key(&hex::encode(p)));
+                    (!locs.is_empty() && !locs.iter().any(|l| l.attached))
+                        .then(|| locs[0].label.clone())
+                });
+                match away {
+                    Some(label) if ex.staged => {
+                        let (n, bytes) = blocks_of(p);
+                        report.waiting_source_blocks += n;
+                        report.waiting_source_bytes += bytes;
                         if !report.waiting_source_disks.contains(&label) {
                             report.waiting_source_disks.push(label);
                         }
-                        continue;
                     }
-                    keep(
-                        &mut report,
-                        &item.object,
-                        "no readable copy of the block was found".to_string(),
-                    );
-                    continue;
-                };
-                if !gate.take(to_spec.name(), ct.len() as u64) {
-                    if ex.staged {
-                        full_at = Some(full_at.map_or(item.size, |f| f.min(item.size)));
-                        report.waiting_room_blocks += 1;
-                        report.waiting_room_bytes += item.size;
-                        report.waiting_note = Some(gate.message(to_spec.name()));
-                        continue;
+                    _ => {
+                        for i in by_pack.get(p).into_iter().flatten() {
+                            keep(&mut report, &i.object, why.clone());
+                        }
                     }
-                    keep(&mut report, &item.object, gate.message(to_spec.name()));
-                    continue;
                 }
-                skip[n] = false;
-                fresh.push((n, ct));
             }
-            let members: Vec<(String, &[u8])> = fresh
-                .iter()
-                .map(|(n, ct)| (group[*n].object.as_str().to_string(), ct.as_slice()))
-                .collect();
-            let outcomes = put_members(to, &members, ex.staged);
-            for ((n, ct), outcome) in fresh.iter().zip(outcomes) {
-                let item = &group[*n];
-                let Some(e) = outcome else {
-                    report.blocks_copied += 1;
-                    report.bytes_copied += ct.len() as u64;
-                    sizes[*n] = ct.len() as u64;
-                    continue;
-                };
-                skip[*n] = true;
-                let pe = pool::pool_error(&e);
-                if ex.staged
-                    && matches!(
-                        pe,
-                        Some(PoolError::NoRoom { .. } | PoolError::NoDiskAttached { .. })
-                    )
-                {
-                    let at = if matches!(pe, Some(PoolError::NoDiskAttached { .. })) {
-                        0
-                    } else {
-                        ct.len() as u64
-                    };
-                    full_at = Some(full_at.map_or(at, |f| f.min(at)));
-                    report.waiting_room_blocks += 1;
-                    report.waiting_room_bytes += item.size;
-                    continue;
-                }
-                let why = match pe {
-                    Some(pe) => pe.to_string(),
-                    None => format!("writing to {} failed: {e:#}", to_spec.name()),
-                };
-                keep(&mut report, &item.object, why);
-            }
-            for (n, item) in group.iter().enumerate() {
-                if skip[n] {
-                    continue;
-                }
-                let key = chunk_storage_key(&item.object);
-                let size = sizes[n];
-                // Check the copy before the old one may go.
-                let checked = if read_to {
-                    matches!(to.get(&key), Ok(Some(b)) if ObjectName::from_bytes(&crypto::hash(&b)) == item.object)
-                } else {
-                    to.exists(&key).unwrap_or(false)
-                };
-                if !checked {
-                    keep(
-                        &mut report,
-                        &item.object,
-                        format!("the copy on {} could not be checked", to_spec.name()),
-                    );
-                    continue;
-                }
-                report.blocks_verified += 1;
-                // A pool holds the block inside a pack: its disks are the pack's.
-                let held = to
-                    .pack_location(item.object.as_str())
-                    .map_or_else(|| key.clone(), |l| crate::packs::pack_key(&l.pack));
-                if let Some(p) = &to_pool {
-                    if !present[n] {
-                        disks_used.extend(p.locate_all(&held).into_iter().map(|l| l.label));
-                    }
-                }
-                if !item.on_to {
-                    self.pending.push(Event::ChunkStored {
-                        folder: rec.folder_id.clone(),
-                        chunk: item.chunk.clone(),
-                        object: item.object.clone(),
-                        storage: to_spec.name().to_string(),
-                        size,
-                        pack: None,
-                    });
-                }
-                if read_to {
-                    self.pending.push(Event::ChunkVerified {
-                        folder: rec.folder_id.clone(),
-                        chunk: item.chunk.clone(),
-                        object: item.object.clone(),
-                        storage: to_spec.name().to_string(),
-                    });
-                }
-                // A disk group rule counts a block as moved only when its
-                // copies are in enough different places.
-                if let Some(p) = &to_pool {
-                    if !Self::group_rule_met(p, &held, &mut disks_used) {
-                        report.waiting_place_blocks += 1;
-                        report.waiting_place_bytes += item.size;
-                        continue;
-                    }
-                }
-                if ex.keep_source {
-                    report.blocks_done += 1;
-                    report.bytes_done += item.size;
-                    continue;
-                }
-                self.pending.push(Event::ChunkDropped {
-                    folder: rec.folder_id.clone(),
-                    chunk: item.chunk.clone(),
-                    object: item.object.clone(),
-                    storage: from_spec.name().to_string(),
-                });
-                deletes.push((item.object.clone(), item.size));
-                report.blocks_done += 1;
-                report.bytes_done += item.size;
-            }
-            // The drops are sealed and pushed before anything is deleted.
-            self.commit_batch()?;
-            let in_use = self.objects_claimed_on(from_spec.name())?;
-            for (object, size) in deletes {
-                if in_use.contains(&object) {
-                    continue;
-                }
-                match from.delete(&chunk_storage_key(&object)) {
-                    Ok(()) => {
-                        report.blocks_dropped += 1;
-                        report.bytes_dropped += size;
-                    }
-                    Err(e) => keep(
-                        &mut report,
-                        &object,
-                        format!(
-                            "recorded as dropped, but deleting it from {} failed ({e:#}); run the move again",
-                            from_spec.name()
-                        ),
-                    ),
-                }
+            // The map record of the new packs and the batch with the claims
+            // and drops go out before anything is deleted.
+            let written = run.new_packs.clone();
+            let events = run.events.clone();
+            let view = self.view3()?;
+            self.publish_map3(&folder, epoch, &written, &view)?;
+            self.f3.pending.extend(events);
+            self.commit_now3()?;
+            let (_, failed) = run.delete_dropped_each(from.as_ref());
+            for (p, e) in failed {
+                log::warn!(storage = from_spec.name(), pack = hex::encode(p).as_str(); "a dropped pack stays until garbage collection: {e}");
             }
             if ex.job_id.is_some() {
                 report.disks_used = disks_used.iter().cloned().collect();
@@ -1271,22 +1424,21 @@ impl Engine {
             }
         }
         report.disks_used = disks_used.into_iter().collect();
-        report.waiting_min_bytes = full_at.unwrap_or(0);
+        report.waiting_min_bytes = min_room.unwrap_or(0);
         // An earlier run that stopped after recording its drops.
-        if !dropped.is_empty() {
-            let in_use = self.objects_claimed_on(from_spec.name())?;
-            for object in dropped {
-                let key = chunk_storage_key(&object);
-                if in_use.contains(&object) || !from.exists(&key).unwrap_or(false) {
-                    continue;
-                }
-                if from.delete(&key).is_ok() {
+        let view = self.view3()?;
+        if !ex.keep_source {
+            for p in crate::storages3::leftovers(&view, from_spec.name(), from.as_ref())? {
+                if from
+                    .delete(&crate::packs::pack_key(&hex::encode(p)))
+                    .is_ok()
+                {
                     report.leftovers_removed += 1;
                 }
             }
         }
+        drop(runs);
         drop(to_box);
-        self.flush_pack_deletions();
         if let Some(p) = to_pool {
             // Keep the registry in `config.json` as the pool learned it.
             let disks = p.disks();
@@ -1296,37 +1448,6 @@ impl Engine {
         report.summary = Self::move_summary(&report, &rec.name);
         Ok(report)
     }
-
-    /// Whether the pool holds `key` (a pack) in as many different places as its disk
-    /// group rule asks, adding copies on attached disks of other places when
-    /// it can. Records the labels of disks written to.
-    fn group_rule_met(p: &PoolStorage, key: &str, used: &mut BTreeSet<String>) -> bool {
-        let want = p.copies() as usize;
-        if want <= 1 {
-            return true;
-        }
-        let mut places = p.places_of(key);
-        if places.len() >= want {
-            return true;
-        }
-        let Ok(Some(ct)) = p.get(key) else {
-            return false;
-        };
-        for d in p.disks() {
-            if places.len() >= want {
-                break;
-            }
-            if d.retired || p.mount_of(&d.id).is_none() || !p.wants_copy(&d.id, key) {
-                continue;
-            }
-            if p.add_copy_on_disk(&d.id, key, &ct).is_ok() {
-                used.insert(d.label.clone());
-                places = p.places_of(key);
-            }
-        }
-        places.len() >= want
-    }
-
     /// Objects some ledger record still counts as a copy on `storage` (an
     /// object shared with another record must stay).
     pub(super) fn objects_claimed_on(&self, storage: &str) -> Result<HashSet<ObjectName>> {
@@ -1400,43 +1521,6 @@ impl Engine {
             }
         }
         out
-    }
-
-    /// The ciphertext of a block to move that is not re-encrypted from a
-    /// local file: from the block cache, another readable storage, or the
-    /// old storage itself (only when it may be read). Checked against its
-    /// name.
-    pub(super) fn move_source(
-        &self,
-        item: &MoveItem,
-        others: &OpenStorages,
-        from: &dyn Storage,
-        read_from: bool,
-    ) -> Option<Vec<u8>> {
-        let good = |ct: &Vec<u8>| ObjectName::from_bytes(&crypto::hash(ct)) == item.object;
-        if let Some(ct) = self.cached_object(&item.object) {
-            return Some(ct);
-        }
-        let key = chunk_storage_key(&item.object);
-        // Staged by the mailbox while the source disk was docked (section 78).
-        if let Some(ct) = self.mailbox_object(&key).filter(good) {
-            return Some(ct);
-        }
-        for (_, b) in others {
-            if let Ok(Some(ct)) = b.get(&key) {
-                if good(&ct) {
-                    return Some(ct);
-                }
-            }
-        }
-        if read_from {
-            if let Ok(Some(ct)) = from.get(&key) {
-                if good(&ct) {
-                    return Some(ct);
-                }
-            }
-        }
-        None
     }
 
     // ----- the "move idle files to cold storage" suggestion -------------------
@@ -1522,32 +1606,5 @@ impl Engine {
             dry_run: false,
             confirm_cold_read: false,
         })
-    }
-}
-
-/// Write `members` to `to` together; per member, the error that kept it
-/// off. With `split` (a staged move to a pool whose disks fill up), a pack
-/// a disk has no room for is split in halves, so a disk fills to its edge.
-fn put_members(
-    to: &dyn Storage,
-    members: &[(String, &[u8])],
-    split: bool,
-) -> Vec<Option<Arc<anyhow::Error>>> {
-    if members.is_empty() {
-        return Vec::new();
-    }
-    match to.put_pack(members) {
-        Ok(_) => vec![None; members.len()],
-        Err(e)
-            if split
-                && members.len() > 1
-                && matches!(pool::pool_error(&e), Some(PoolError::NoRoom { .. })) =>
-        {
-            let (a, b) = members.split_at(members.len() / 2);
-            let mut out = put_members(to, a, split);
-            out.extend(put_members(to, b, split));
-            out
-        }
-        Err(e) => vec![Some(Arc::new(e)); members.len()],
     }
 }

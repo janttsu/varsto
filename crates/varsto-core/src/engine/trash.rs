@@ -1423,7 +1423,7 @@ impl Engine {
         );
         // A trash storage with a quota takes what fits; the rest stays where
         // it is (`quotas`).
-        let gate = self.quota_gate(&view);
+        let gate = self.quota_gate(&self.view3()?);
         let mut failed = 0u64;
         for group in crate::packs::byte_groups(&items, |(c, _)| c.size) {
             task.advance(group.iter().map(|(c, _)| c.size).sum());

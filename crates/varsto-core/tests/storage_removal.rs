@@ -28,16 +28,9 @@ fn objects(path: &Path) -> usize {
 }
 
 fn on_storage(e: &Engine, storage: &str) -> usize {
-    e.view()
-        .unwrap()
-        .chunks
-        .values()
-        .filter(|c| c.storages.contains_key(storage))
-        .count()
+    e.objects_on_storage3(storage).unwrap().len()
 }
-
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn storages_are_removed_only_with_enough_copies_elsewhere() {
     let t = tempfile::tempdir().unwrap();
     let (s1, s2, s3, files) = (
@@ -80,7 +73,9 @@ fn storages_are_removed_only_with_enough_copies_elsewhere() {
     let plan = a.plan_storage_removal("one").unwrap();
     assert!(plan.blocked.is_none(), "{:?}", plan.blocked);
     assert_eq!(plan.blocks as usize, blocks);
-    assert_eq!(plan.copies.len(), blocks);
+    // One whole-pack copy per pack on "one".
+    assert_eq!(plan.copies.len(), a.packs_on_storage3("one").unwrap().len());
+
     assert_eq!(plan.targets, vec!["three".to_string()]);
 
     let r = a.remove_storage("one", true).unwrap();
@@ -108,5 +103,75 @@ fn storages_are_removed_only_with_enough_copies_elsewhere() {
     fs::write(files.join("c.txt"), b"gamma").unwrap();
     a.sync(None).unwrap();
     assert_eq!(on_storage(&a, "two"), 0);
-    assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
+    assert_eq!(
+        a.ledger_view3().unwrap().canonical(),
+        a.view3_replayed().unwrap().canonical()
+    );
+}
+
+/// Files under a storage directory that are not packs (records, ledger
+/// batches, manifests), as relative paths.
+fn records(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for e in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let rel = e
+            .path()
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        if rel.starts_with("packs/")
+            || rel == "vault/storage-id.json"
+            || rel.split('/').any(|p| p.starts_with('.'))
+        {
+            continue;
+        }
+        out.push(rel);
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn a_storage_added_later_receives_the_vaults_records() {
+    let t = tempfile::tempdir().unwrap();
+    let (s1, s2, files, b_files) = (
+        t.path().join("s1"),
+        t.path().join("s2"),
+        t.path().join("files"),
+        t.path().join("b-files"),
+    );
+    for d in [&s1, &s2, &files] {
+        fs::create_dir_all(d).unwrap();
+    }
+    let (mut a, key) = Engine::init(&t.path().join("a"), "laptop", PASS).unwrap();
+    a.add_storage(dir("one", &s1)).unwrap();
+    a.add_folder("docs", &files).unwrap();
+    fs::write(files.join("a.txt"), b"alpha").unwrap();
+    a.sync(None).unwrap();
+    // Membership, map, manifest and trash records and the ledger are on
+    // "one" only; adding "two" copies them there.
+    a.add_storage(dir("two", &s2)).unwrap();
+    let theirs = records(&s2);
+    for k in records(&s1) {
+        assert!(theirs.contains(&k), "{k} was not copied to the new storage");
+    }
+    // The next push writes the blocks there as well; a device that reads
+    // only "two" gets the folder.
+    a.sync(None).unwrap();
+    let mut b = common::join_approved(
+        &t.path().join("b"),
+        "desk",
+        PASS,
+        &key,
+        dir("two", &s2),
+        &mut a,
+    );
+    b.attach_folder("docs", &b_files, false).unwrap();
+    b.sync(None).unwrap();
+    assert_eq!(fs::read(b_files.join("a.txt")).unwrap(), b"alpha");
 }

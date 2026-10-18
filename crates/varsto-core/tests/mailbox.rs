@@ -228,7 +228,6 @@ fn run(e: &mut Engine) -> varsto_core::mailbox::MailboxReport {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (mailbox)"]
 fn blocks_only_on_disk_a_reach_disk_b_through_the_outbox() {
     let (lab, mut e, _) = group_lab();
     let home = lab.p("dock-1-home");
@@ -305,7 +304,6 @@ fn blocks_only_on_disk_a_reach_disk_b_through_the_outbox() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (mailbox)"]
 fn the_free_space_rule_limits_staging_and_staged_copies_go_first() {
     let (lab, mut e, _) = group_lab();
     let home = lab.p("dock-1-home");
@@ -400,7 +398,6 @@ fn the_free_space_rule_limits_staging_and_staged_copies_go_first() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (mailbox)"]
 fn a_run_resumes_after_the_engine_is_dropped_and_bad_objects_are_refused() {
     let (lab, mut e, _) = group_lab();
     let home = lab.p("dock-1-home");
@@ -473,7 +470,6 @@ fn a_run_resumes_after_the_engine_is_dropped_and_bad_objects_are_refused() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (mailbox)"]
 fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
     let lab = Lab::new();
     let home = lab.p("dock-1-home");
@@ -504,17 +500,12 @@ fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
     )
     .unwrap();
     e.push("docs").unwrap();
-    let claims = |e: &Engine, s: &str| {
-        e.view()
-            .unwrap()
-            .chunks
-            .values()
-            .filter(|r| r.storages.get(s).is_some_and(|l| !l.claimed_by.is_empty()))
-            .count()
-    };
+    // Packs (the mailbox stages and moves whole packs) and blocks claimed.
+    let claims = |e: &Engine, s: &str| e.packs_on_storage3(s).unwrap().len();
     let blocks = claims(&e, "old");
-    assert!(blocks > 1);
-
+    assert!(blocks >= 1);
+    let objects = e.objects_on_storage3("old").unwrap().len();
+    assert!(objects > 1);
     // The job cannot write to B: it waits.
     let (job, _) = e
         .move_job_start(&MoveJobRequest {
@@ -535,27 +526,31 @@ fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
     // Nothing is dropped from A yet, nothing is on B.
     assert_eq!(claims(&e, "old"), blocks);
     assert_eq!(claims(&e, "new"), 0);
-    assert!(e
-        .view()
-        .unwrap()
-        .chunks
-        .values()
-        .all(|r| r.dropped.is_empty()));
-
+    let view = e.ledger_view3().unwrap();
+    assert!(view.packs.keys().all(|p| !view.dropped_from(p, "old")));
     // A away, B docked: the job reads the outbox, writes B, checks, drops A.
     lab.undock("disk-a");
     lab.dock_at("dock-1", "disk-b");
     let runs = e.move_jobs_run_ready(false, &JobRunLimits::default());
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].job.state, JobState::Done, "{:?}", runs[0].job);
-    assert_eq!(runs[0].report.blocks_verified as usize, blocks);
+    assert_eq!(runs[0].report.blocks_verified as usize, objects);
     assert_eq!(claims(&e, "new"), blocks);
     assert_eq!(claims(&e, "old"), 0);
-    let me = e.device_id().clone();
-    for r in e.view().unwrap().chunks.values() {
-        let l = &r.storages["new"];
-        assert!(l.verified_by.contains(&me), "the copy on B was read back");
-        assert!(r.dropped.contains_key("old"));
+    let me: [u8; 16] = hex::decode(e.device_id().as_str())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let view = e.ledger_view3().unwrap();
+    for id in e.packs_on_storage3("new").unwrap().keys() {
+        let id: [u8; 32] = hex::decode(id).unwrap().try_into().unwrap();
+        let c = view.copies(&id);
+        assert!(
+            c.iter()
+                .any(|c| c.storage == "new" && c.verified_by.contains(&me)),
+            "the copy on B was read back"
+        );
+        assert!(view.dropped_from(&id, "old"));
     }
     // A is away: its copies are deleted at its next insert.
     let rows = e.disks().unwrap();
@@ -568,7 +563,6 @@ fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (mailbox)"]
 fn a_move_waits_for_its_source_disk_instead_of_leaving_blocks_behind() {
     let lab = Lab::new();
     let home = lab.p("dock-1-home");
@@ -629,7 +623,6 @@ fn a_move_waits_for_its_source_disk_instead_of_leaving_blocks_behind() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (mailbox)"]
 fn two_dock_hosts_stage_each_block_once() {
     let (lab, mut x, key) = group_lab();
     // The second dock host knows the pool and both disks.
@@ -724,7 +717,6 @@ fn serve(from: &Engine, name: &str, to: &mut Engine) -> Served {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (mailbox)"]
 fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     let lab = Lab::new();
     let home = lab.p("dock-1-home");
@@ -765,7 +757,9 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     )
     .unwrap();
     x.push("docs").unwrap();
-    let blocks = x.view().unwrap().chunks.len();
+    // The mailbox stages whole packs.
+    let blocks = x.packs_on_storage3("home-pool").unwrap().len();
+
     assert_eq!(docs_policy(&x).state, PolicyState::Violated);
 
     // dock-1 stages the blocks for off-pool (its disk B is away).
@@ -780,7 +774,7 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     // dock-2 knows off-pool and B, keeps the folder selective; B is docked there.
     let home_z = lab.p("dock-2-home");
     roomy(&home_z);
-    let mut z = Engine::join(&home_z, "dock-2", PASS, &key, lab.hub()).unwrap();
+    let mut z = common::join_approved(&home_z, "dock-2", PASS, &key, lab.hub(), &mut x);
     z.chunker = ChunkerParams::SMALL;
     z.add_storage(pool_spec("off-pool", "offsite", 1, &lab.dock("dock-2")))
         .unwrap();
@@ -807,9 +801,19 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     assert_eq!(r.delivered_to.get("off-pool"), Some(&(blocks as u64)));
     drop(served);
     let mut by: BTreeMap<String, usize> = BTreeMap::new();
-    for rec in z.view().unwrap().chunks.values() {
-        if let Some(l) = rec.storages.get("off-pool") {
-            assert!(l.claimed_by.contains(z.device_id()));
+    let zid: [u8; 16] = hex::decode(z.device_id().as_str())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let view = z.ledger_view3().unwrap();
+    for id in z.packs_on_storage3("off-pool").unwrap().keys() {
+        let id: [u8; 32] = hex::decode(id).unwrap().try_into().unwrap();
+        for c in view
+            .copies(&id)
+            .into_iter()
+            .filter(|c| c.storage == "off-pool")
+        {
+            assert!(c.claimed_by.contains(&zid));
             *by.entry("off-pool".into()).or_default() += 1;
         }
     }

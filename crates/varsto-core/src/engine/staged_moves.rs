@@ -258,10 +258,13 @@ impl Engine {
         jobs::set_state(&self.home, id, state)
     }
 
-    /// The blocks an open job still has to move (planned from the ledger as
+    /// The packs an open job still has to move (planned from the ledger as
     /// a run would): for the mailbox (section 78), which stages those whose
     /// only copy is on a docked disk while the target cannot take them.
-    pub(super) fn move_job_pending(&self, job: &MoveJob) -> Result<HashSet<(FolderId, ChunkId)>> {
+    pub(super) fn move_job_pending(
+        &self,
+        job: &MoveJob,
+    ) -> Result<HashSet<crate::ledger3::PackId>> {
         let (rec, _) = self.resolve_folder(&job.folder_id)?;
         let mreq = MoveRequest {
             folder: job.folder_id.clone(),
@@ -279,12 +282,7 @@ impl Engine {
             ..Default::default()
         };
         let plan = self.plan_move(&rec, &mreq, &ex)?;
-        Ok(plan
-            .items
-            .into_iter()
-            .filter(|i| !i.on_to)
-            .map(|i| (rec.folder_id.clone(), i.chunk))
-            .collect())
+        Ok(plan.plan.actions.iter().map(|a| *a.pack()).collect())
     }
 
     // ----- running -------------------------------------------------------------
@@ -373,8 +371,10 @@ impl Engine {
                 let met = i.on_to
                     && pool.as_ref().is_none_or(|p| {
                         p.copies() <= 1
-                            || p.places_of(&chunk_storage_key(&i.object)).len()
-                                >= p.copies() as usize
+                            || i.to_pack.is_some_and(|tp| {
+                                p.places_of(&crate::packs::pack_key(&hex::encode(tp))).len()
+                                    >= p.copies() as usize
+                            })
                     });
                 if met {
                     pre_bytes += i.size;

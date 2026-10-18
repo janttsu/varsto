@@ -234,7 +234,6 @@ fn scrub_commands() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (quotas and data moves)"]
 fn quota_and_drain_commands() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

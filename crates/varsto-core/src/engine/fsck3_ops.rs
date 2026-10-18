@@ -138,13 +138,22 @@ impl Engine {
             keys: &keys,
             trust: &trust,
         };
+        // Packs read back whole and hashed right: `pack_verified` (a
+        // verification another device's policy counts, spec 77.9).
+        let verified: std::sync::Mutex<Vec<(String, [u8; 32])>> = Default::default();
         let verify_pack = |c: &crate::fsck3::PackCheck| -> PackVerdict {
             match crate::blockmap::class_of_len(c.class_len)
                 .map(|class| crate::gc3::verify_pack(c.backend, &c.pack, class))
             {
                 None => PackVerdict::Corrupt(format!("{} bytes is no size class", c.class_len)),
                 Some(Ok(v)) => match v.check {
-                    crate::gc3::PackCheck::Good => PackVerdict::Ok,
+                    crate::gc3::PackCheck::Good => {
+                        verified
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push((c.storage.to_string(), c.pack));
+                        PackVerdict::Ok
+                    }
                     crate::gc3::PackCheck::Missing => PackVerdict::Missing,
                     crate::gc3::PackCheck::WrongLength(n) => {
                         PackVerdict::Corrupt(format!("it is {n} bytes long"))
@@ -166,7 +175,21 @@ impl Engine {
             verify_pack: if verify { Some(&verify_pack) } else { None },
             now_utc: util::now_utc(),
         };
-        crate::fsck3::fsck(&input, &Fsck3Options { verify })
+        let report = crate::fsck3::fsck(&input, &Fsck3Options { verify });
+        drop(inputs);
+        drop(guards);
+        let verified = verified.into_inner().unwrap_or_else(|e| e.into_inner());
+        if !verified.is_empty() && !self.vault.member {
+            for (storage, pack) in verified {
+                self.f3
+                    .pending
+                    .push(crate::ledger3::events::Event::PackVerified(
+                        crate::ledger3::events::PackOn { storage, pack },
+                    ));
+            }
+            self.commit_batch()?;
+        }
+        report
     }
 
     /// The ciphertext of `row`'s block from this device: the block cache,
@@ -224,6 +247,17 @@ impl Engine {
             ..Default::default()
         };
         let mut f = self.fsck3(true)?;
+        // Transferrers empty themselves on purpose: never repaired.
+        let carriers: BTreeSet<String> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| s.is_carrier())
+            .map(|s| s.name().to_string())
+            .collect();
+        f.missing_copies.retain(|i| !carriers.contains(&i.storage));
+        f.corrupt_copies.retain(|i| !carriers.contains(&i.storage));
+        f.wrong_length.retain(|i| !carriers.contains(&i.storage));
         let view = self.view3()?;
         let folders = self.fsck_folders3(&view)?;
         let storages = self.open_storages(opts.from_cold)?;

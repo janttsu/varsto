@@ -222,7 +222,19 @@ impl Engine {
         let settings = self.config.disk_fetch.clone();
         let (rec, _) = self.resolve_folder(folder)?;
         let state = self.load_state(&rec.folder_id)?;
-        let view = self.view()?;
+        let view = self.view3()?;
+        let table = self.folder_table3(&rec)?;
+        // The live places of a block, with the storages holding each pack.
+        let places_of = |o: &ObjectName| -> Vec<crate::ledger3::view::BlockPlace> {
+            let (Some(t), Ok(obj)) = (&table, crate::storages3::object_bin(o)) else {
+                return Vec::new();
+            };
+            let t = t.read().unwrap_or_else(|e| e.into_inner());
+            view.block_places(&obj, &*t)
+                .into_iter()
+                .filter(|p| !p.marked)
+                .collect()
+        };
         let mut plan = FetchPlan {
             created_utc: util::now_utc(),
             ..Default::default()
@@ -293,10 +305,13 @@ impl Engine {
         let mut disk_info: BTreeMap<(String, String), (String, String, bool)> = BTreeMap::new();
         let mut cost_of: BTreeMap<ObjectName, Option<f64>> = BTreeMap::new();
         for (object, (size, chunk)) in &blocks {
-            let claims: Vec<String> = view
-                .locate(&rec.folder_id, chunk)
-                .map(|r| r.storages.keys().cloned().collect())
-                .unwrap_or_default();
+            let _ = chunk;
+            let places = places_of(object);
+            let claims: BTreeSet<String> = places
+                .iter()
+                .flat_map(|p| p.storages.iter().cloned())
+                .collect();
+
             // The cheapest remote copy, hot before cold.
             let mut best: Option<(bool, Option<f64>, String)> = None;
             for name in &claims {
@@ -344,10 +359,14 @@ impl Engine {
             let mut on_any = false;
             for (spec, pool) in &pools {
                 // The disks hold the block's pack.
-                let key = view
-                    .locate(&rec.folder_id, &blocks[object].1)
-                    .map(|r| super::pack_upkeep::held_key(r, spec.name()))
-                    .unwrap_or_else(|| chunk_storage_key(object));
+                let Some(pack) = places
+                    .iter()
+                    .find(|p| p.storages.iter().any(|s| s == spec.name()))
+                    .map(|p| p.place.pack)
+                else {
+                    continue;
+                };
+                let key = crate::packs::pack_key(&hex::encode(pack));
                 for l in pool.locate_all(&key) {
                     on_any = true;
                     let id = (spec.name().to_string(), l.disk_id.clone());
@@ -539,12 +558,43 @@ impl Engine {
             label: step.label.clone(),
             ..Default::default()
         };
-        // The disk holds packs: each block is read from its place in one.
-        let view = self.view()?;
-        let mut place: HashMap<String, crate::packs::PackLoc> = HashMap::new();
-        for r in view.chunks.values() {
-            if let Some(p) = r.storages.get(&step.pool).and_then(|l| l.pack.as_ref()) {
-                place.insert(chunk_storage_key(&r.object), p.clone());
+        // The disk holds packs: each block is read from its place in one
+        // (the folders' block maps give the places, the view the packs on
+        // the pool).
+        let view = self.view3()?;
+        let mut place: HashMap<String, (crate::ledger3::PackId, u64, u64)> = HashMap::new();
+        let folders: BTreeSet<String> = plan.files.iter().map(|f| f.folder.clone()).collect();
+        for name in folders {
+            let Ok((rec, _)) = self.resolve_folder(&name) else {
+                continue;
+            };
+            let Some(t) = self.folder_table3(&rec)? else {
+                continue;
+            };
+            let t = t.read().unwrap_or_else(|e| e.into_inner());
+            for key in &step.objects {
+                let Some(o) = key
+                    .rsplit('/')
+                    .next()
+                    .and_then(|n| ObjectName::from_hex(n).ok())
+                    .and_then(|o| crate::storages3::object_bin(&o).ok())
+                else {
+                    continue;
+                };
+                if let Some(p) = view
+                    .block_places(&o, &*t)
+                    .into_iter()
+                    .find(|p| p.storages.contains(&step.pool))
+                {
+                    place.insert(
+                        key.clone(),
+                        (
+                            p.place.pack,
+                            u64::from(p.place.offset),
+                            u64::from(p.place.len),
+                        ),
+                    );
+                }
             }
         }
         for key in &step.objects {
@@ -554,7 +604,9 @@ impl Engine {
             }
             let name = key.rsplit('/').next().unwrap_or("");
             let got = match place.get(key) {
-                Some(p) => pool.get_range(&crate::packs::pack_key(&p.pack), p.offset, p.len),
+                Some((pack, offset, len)) => {
+                    pool.get_range(&crate::packs::pack_key(&hex::encode(pack)), *offset, *len)
+                }
                 None => pool.get(key),
             }
             .ok()

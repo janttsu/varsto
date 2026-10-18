@@ -16,19 +16,25 @@
 //! Three kinds of tasks (`crate::mailbox::TaskKind`):
 //! - *group*: a pack on a pool whose disk group rule wants a copy in a place
 //!   that only away disks are in; delivered with `add_copy_on_disk`;
-//! - *storage*: a block whose folder's copy rules are not kept and that a
-//!   storage of this device should take, which cannot be written now (a
-//!   pool without a docked disk with room); written as packs, read back and
-//!   claimed (`chunk_stored`), like forwarding (section 70);
-//! - *move*: a block of an open move job (section 59) from a pool whose
+//! - *storage*: a pack holding a block whose folder's copy rules are not
+//!   kept and that a storage of this device should take, which cannot be
+//!   written now (a pool without a docked disk with room); the whole pack is
+//!   written there, read back and claimed (`pack_stored`, a zero folder: a
+//!   copy of a pack by someone else than its writer), like forwarding
+//!   (section 70);
+//! - *move*: a pack of an open move job (section 59) from a pool whose
 //!   target cannot take it now; the job itself reads it from the outbox
 //!   later and drops the source copy by its own rules (only once the target
 //!   copy is written and checked).
 //!
+//! In storage format 3 every task carries one whole pack (`packs/<xx>/<id>`):
+//! a pool disk holds packs, and a pack is copied keyless, checked against
+//! its id.
+//!
 //! Tasks are per-device state (`state/mailbox.json`). Other devices learn
-//! what this one holds from its published list,
-//! `vault/mailbox/<device>/<utc>.enc` (sealed under the device registry
-//! key): they do not stage the same objects again, show "staged on
+//! what this one holds from its published list, a `mailbox` record (kind
+//! 28, `vault/mailbox/<device>/`, under the registry key; newest seq per
+//! device wins): they do not stage the same objects again, show "staged on
 //! <device>", and a device that can write a storage task's target takes the
 //! block from this device over peer-to-peer (the outbox is served like the
 //! block cache). While staging, a device holds a lease
@@ -38,23 +44,20 @@
 use super::*;
 use crate::freespace;
 use crate::mailbox::{
-    Board, BoardEntry, MailboxGroup, MailboxReport, MailboxSettings, MailboxState, MailboxStatus,
+    BoardEntry, MailboxGroup, MailboxReport, MailboxSettings, MailboxState, MailboxStatus,
     MailboxWait, Outbox, RunLock, Staged, Task, TaskKind, TaskState,
 };
 use crate::policy::PolicyState;
 use crate::staged_move::{self as jobs, JobState};
 use std::sync::Arc;
 
-/// Published lists of staged objects, one per device.
-const BOARD_PREFIX: &str = "vault/mailbox/";
 /// The lease a device holds while it stages.
 const LEASE_DIR: &str = "vault/mailbox-leases/";
 /// A list older than this belongs to a device that went away: ignored.
 const BOARD_TTL_SECS: i64 = 30 * 86_400;
 /// A list with staged objects is published again at least this often.
 const BOARD_REFRESH_SECS: i64 = 86_400;
-/// Blocks collected per target before they are written as a pack.
-const DELIVER_BUFFER: u64 = crate::packs::HOT_TARGET as u64;
+
 /// The service's budget per run.
 const SERVICE_MAX_BYTES: u64 = 4 << 30;
 const SERVICE_MAX_OBJECTS: u64 = 20_000;
@@ -85,46 +88,39 @@ impl MailboxOptions {
     }
 }
 
-fn board_aad(vault: &crate::ids::VaultId, device: &DeviceId) -> Vec<u8> {
-    crypto::aad(
-        "mailbox-board",
-        &[vault.as_str().as_bytes(), device.as_str().as_bytes()],
-    )
-}
-
 /// What a folder's copy rules need, for the storage tasks.
 struct FolderNeeds {
     rec: FolderRecord,
     rules: Policy,
     targets: data_moves::WriteTargets,
     /// Blocks of current files (from the folder state on this device).
-    current: HashSet<ChunkId>,
+    current: HashSet<crate::ledger3::ObjectBin>,
+    table: Arc<std::sync::RwLock<crate::blockmap::MapTable>>,
 }
 
 /// The pools of this device, each opened once for the whole run (two
 /// instances of one pool would overwrite each other's index).
 type Pools = BTreeMap<String, (StorageSpec, Arc<PoolStorage>)>;
 
-/// Open move jobs from a pool, with the blocks each still has to move.
-type JobItems = BTreeMap<String, (jobs::MoveJob, HashSet<(FolderId, ChunkId)>)>;
-/// Pack id -> the blocks in it (folder, chunk, object).
-type PackBlocks = HashMap<String, Vec<(FolderId, ChunkId, ObjectName)>>;
+/// Open move jobs from a pool, with the packs each still has to move.
+type JobItems = BTreeMap<String, (jobs::MoveJob, HashSet<crate::ledger3::PackId>)>;
 /// (pool, role, disk ids) of a wait, and (bytes, the other ends, keys counted).
 type WaitKey = (String, String, Vec<String>);
 type WaitTally = (u64, BTreeSet<String>, BTreeSet<String>);
 /// Objects, bytes, target name and target disks held on another device.
 type OtherTally = (u64, u64, String, Vec<String>);
 
-/// One block collected for a storage target.
-struct Outgoing {
-    ids: Vec<String>,
-    folder: FolderId,
-    chunk: ChunkId,
-    object: ObjectName,
-    bytes: Vec<u8>,
-    from_peer: bool,
-}
+/// Packs to write to storage targets: (target, pack) -> (bytes, the tasks
+/// they end, taken from a peer).
+type OutgoingPacks = BTreeMap<(String, crate::ledger3::PackId), (Vec<u8>, Vec<String>, bool)>;
 
+/// The pack id of a task key `packs/<xx>/<id>`.
+fn pack_of_task(key: &str) -> Option<crate::ledger3::PackId> {
+    let id = crate::packs::pack_of_key(key)?;
+    let mut out = [0u8; 32];
+    hex::decode_to_slice(id, &mut out).ok()?;
+    Some(out)
+}
 impl Engine {
     // ----- settings and status -------------------------------------------------
 
@@ -476,98 +472,58 @@ impl Engine {
             .collect()
     }
 
-    /// Blocks of `folder` (of `chunks`) that are in transit through a
-    /// mailbox, here or on another device: (blocks, bytes, sentence).
+    /// Blocks of `folder` (of `objects`, with their sizes) that are in
+    /// transit through a mailbox, here or on another device: the members
+    /// of the packs staged for a target (blocks, bytes, sentence).
     pub(super) fn mailbox_in_transit(
         &self,
-        view: &LedgerView,
         folder: &FolderId,
-        chunks: &BTreeSet<ChunkId>,
+        objects: &BTreeMap<ObjectName, u64>,
     ) -> Option<(u64, u64, String)> {
         let st = MailboxState::load(&self.home);
         if st.tasks.is_empty() && st.elsewhere.is_empty() {
             return None;
         }
-        let mut found: BTreeMap<ChunkId, u64> = BTreeMap::new();
-        let mut targets: BTreeSet<String> = BTreeSet::new();
-        let mut holders: BTreeSet<String> = BTreeSet::new();
-        let mut by_pack: BTreeMap<String, PackBlocks> = BTreeMap::new();
-        let mut consider = |kind: TaskKind,
-                            key: &str,
-                            pool: &str,
-                            f: Option<&FolderId>,
-                            c: Option<&ChunkId>,
-                            target: String,
-                            holder: String| {
-            let mut hit = false;
-            match (kind, f, c) {
-                (TaskKind::Group, _, _) => {
-                    let packs = by_pack
-                        .entry(pool.to_string())
-                        .or_insert_with(|| super::pack_upkeep::blocks_by_pack(view, pool));
-                    let id = key.rsplit('/').next().unwrap_or("");
-                    for (bf, bc, _) in packs.get(id).into_iter().flatten() {
-                        if bf == folder && chunks.contains(bc) {
-                            let size = view.locate(bf, bc).map(|r| r.size).unwrap_or(0);
-                            found.insert(bc.clone(), size);
-                            hit = true;
-                        }
-                    }
-                }
-                (_, Some(f), Some(c)) if f == folder && chunks.contains(c) => {
-                    let size = view.locate(f, c).map(|r| r.size).unwrap_or(0);
-                    found.insert(c.clone(), size);
-                    hit = true;
-                }
-                _ => {}
-            }
-            if hit {
-                targets.insert(target);
-                holders.insert(holder);
+        // Staged packs: pack id -> (target, holder).
+        let mut staged: BTreeMap<crate::ledger3::PackId, Vec<(String, String)>> = BTreeMap::new();
+        let mut note = |key: &str, target: String, holder: String| {
+            let Some(id) = crate::packs::pack_of_key(key) else {
+                return;
+            };
+            let mut pack = [0u8; 32];
+            if hex::decode_to_slice(id, &mut pack).is_ok() {
+                staged.entry(pack).or_default().push((target, holder));
             }
         };
         for t in st.tasks.values().filter(|t| t.state == TaskState::Held) {
-            consider(
-                t.kind,
-                &t.key,
-                &t.pool,
-                t.folder.as_ref(),
-                t.chunk.as_ref(),
-                t.target_text(),
-                "this device".to_string(),
-            );
+            note(&t.key, t.target_text(), "this device".to_string());
         }
         for (dev, e) in &st.elsewhere {
-            let t = BoardEntry::clone(e);
-            let text = Task {
-                kind: t.kind,
-                key: t.key.clone(),
-                size: t.size,
-                pool: t.pool.clone(),
-                source_disk: String::new(),
-                source_label: t.source_label.clone(),
-                target: t.target.clone(),
-                places: t.places.clone(),
-                target_disks: t.target_disks.clone(),
-                folder: None,
-                chunk: None,
-                object: None,
-                job: None,
-                state: TaskState::Held,
-                created_utc: 0,
-                staged_utc: 0,
-                updated_utc: 0,
+            let text = Task::of_board(e).target_text();
+            note(&e.key, text, dev.clone());
+        }
+        if staged.is_empty() {
+            return None;
+        }
+        let rec = self.keyring.folders.get(folder)?;
+        let table = self.folder_table3(rec).ok().flatten()?;
+        let t = table.read().unwrap_or_else(|e| e.into_inner());
+        let mut found: BTreeMap<ObjectName, u64> = BTreeMap::new();
+        let mut targets: BTreeSet<String> = BTreeSet::new();
+        let mut holders: BTreeSet<String> = BTreeSet::new();
+        for row in t.scan().filter_map(|r| r.ok()) {
+            let Some(who) = staged.get(&row.place.pack) else {
+                continue;
+            };
+            let object = ObjectName::from_bytes(&row.object);
+            let Some(size) = objects.get(&object) else {
+                continue;
+            };
+            found.insert(object, *size);
+            for (target, holder) in who {
+                targets.insert(target.clone());
+                holders.insert(holder.clone());
             }
-            .target_text();
-            consider(
-                t.kind,
-                &t.key,
-                &t.pool,
-                t.folder.as_ref(),
-                t.chunk.as_ref(),
-                text,
-                dev.clone(),
-            );
         }
         if found.is_empty() {
             return None;
@@ -740,9 +696,10 @@ impl Engine {
             return Ok(report);
         }
 
-        let view = self.view()?;
+        let view = self.view3()?;
         let mut ctx = self.policy_ctx();
         let needs = self.mailbox_folder_needs();
+
         // Other storages of this device that a storage task may write.
         let mut stores: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
         let mut failed: BTreeSet<String> = BTreeSet::new();
@@ -905,11 +862,15 @@ impl Engine {
             let Ok(state) = self.load_state(&rec.folder_id) else {
                 continue;
             };
-            let current: HashSet<ChunkId> = state
+            let Ok(Some(table)) = self.folder_table3(&rec) else {
+                continue;
+            };
+            let current: HashSet<crate::ledger3::ObjectBin> = state
                 .files
                 .values()
                 .filter(|f| !f.deleted)
-                .flat_map(|f| f.chunks.iter().map(|c| c.chunk.clone()))
+                .flat_map(|f| f.chunks.iter())
+                .filter_map(|c| crate::storages3::object_bin(&c.object).ok())
                 .collect();
             if current.is_empty() {
                 continue;
@@ -925,6 +886,7 @@ impl Engine {
                     rec,
                     targets,
                     current,
+                    table,
                 },
             );
         }
@@ -932,47 +894,52 @@ impl Engine {
     }
 
     /// The storages of this device (other than `except`) that the folder's
-    /// copy rules need block `chunk` on: empty when the rules are kept.
+    /// copy rules need pack `pack` on, for the blocks of current files in
+    /// it whose rules are not kept: empty when they are.
     fn mailbox_storage_targets(
         &self,
         need: &FolderNeeds,
         ctx: &mut PolicyCtx,
-        view: &LedgerView,
-        record: &crate::ledger::ChunkRecord,
-        chunk: &ChunkId,
+        view: &crate::ledger3::LedgerView,
+        pack: &crate::ledger3::PackId,
         except: &str,
     ) -> Vec<String> {
-        if !need.current.contains(chunk) {
-            return Vec::new();
-        }
-        let facts = self.chunk_facts(ctx, view, &need.rec.folder_id, chunk);
-        let state = crate::policy::evaluate(
-            &need.rec.name,
-            &need.rules,
-            &[facts],
-            &BTreeMap::new(),
-            &[],
-            0,
-        )
-        .state;
-        if state != PolicyState::Violated {
-            return Vec::new();
-        }
-        self.config
-            .storages
-            .iter()
-            .filter(|s| {
-                s.name() != except
+        let t = need.table.read().unwrap_or_else(|e| e.into_inner());
+        let set: HashSet<crate::ledger3::PackId> = [*pack].into_iter().collect();
+        let members = crate::storages3::members_of_packs(&t, &set)
+            .ok()
+            .and_then(|mut m| m.remove(pack))
+            .unwrap_or_default();
+        let mut out: BTreeSet<String> = BTreeSet::new();
+        for m in members.iter().filter(|m| need.current.contains(&m.object)) {
+            let object = ObjectName::from_bytes(&m.object);
+            let facts = self.chunk_facts(ctx, view, &t, &object);
+            let state = crate::policy::evaluate(
+                &need.rec.name,
+                &need.rules,
+                &[facts],
+                &BTreeMap::new(),
+                &[],
+                0,
+            )
+            .state;
+            if state != PolicyState::Violated {
+                continue;
+            }
+            let standing = data_moves::BlockStanding::of(view, &t, &object);
+            for s in &self.config.storages {
+                if s.name() != except
                     && !s.is_cold()
                     && !s.is_carrier()
-                    && need.targets.wants(s.name(), Some(record))
-                    && !record
-                        .storages
-                        .get(s.name())
-                        .is_some_and(|l| !l.claimed_by.is_empty())
-            })
-            .map(|s| s.name().to_string())
-            .collect()
+                    && need.targets.wants(s.name(), Some(&standing))
+                    && !standing.copies.contains(s.name())
+                    && !view.is_held(pack, s.name())
+                {
+                    out.insert(s.name().to_string());
+                }
+            }
+        }
+        out.into_iter().collect()
     }
 
     /// Labels of a pool's disks that may take objects (not retired).
@@ -998,7 +965,7 @@ impl Engine {
     /// Tasks for what the docked disks hold and a target needs.
     fn mailbox_plan(
         &self,
-        view: &LedgerView,
+        view: &crate::ledger3::LedgerView,
         ctx: &mut PolicyCtx,
         needs: &BTreeMap<FolderId, FolderNeeds>,
         pools: &Pools,
@@ -1041,9 +1008,9 @@ impl Engine {
                 staged_utc: 0,
                 updated_utc: now,
             };
+            let wanted = Self::pool_wanted(view, pname);
             // Disk group rule: packs held in too few places.
             if p.copies() > 1 {
-                let wanted = Self::pool_wanted(view, pname);
                 let all_places: BTreeSet<String> = p
                     .disks()
                     .iter()
@@ -1070,40 +1037,34 @@ impl Engine {
                     out.push(t);
                 }
             }
-            // Blocks the folders' copy rules or a move job need elsewhere.
-            let jobs_here: Vec<&(jobs::MoveJob, HashSet<(FolderId, ChunkId)>)> = job_items
+            // Packs whose blocks the folders' copy rules or a move job need
+            // elsewhere.
+            let jobs_here: Vec<&(jobs::MoveJob, HashSet<crate::ledger3::PackId>)> = job_items
                 .values()
                 .filter(|(j, _)| &j.from == pname && j.waiting.is_some())
                 .collect();
-            for ((folder, chunk), r) in &view.chunks {
-                if !r
-                    .storages
-                    .get(pname)
-                    .is_some_and(|l| !l.claimed_by.is_empty())
-                {
+            for (key, src) in &docked {
+                let Some(pack) = pack_of_task(key) else {
+                    continue;
+                };
+                if !view.is_held(&pack, pname) {
                     continue;
                 }
-                let held = super::pack_upkeep::held_key(r, pname);
-                let Some(src) = docked.get(&held) else {
-                    continue;
-                };
-                let key = chunk_storage_key(&r.object);
+                let folder = view.pack_folder(&pack).map(|f| FolderId::from_bytes(&f));
                 let block = |kind: TaskKind, target: &str| {
-                    let mut t = base(kind, key.clone(), r.size, src);
+                    let mut t = base(kind, key.clone(), src.2, src);
                     t.target = target.to_string();
                     t.target_disks = Self::pool_disk_labels(pools, target, None);
-                    t.folder = Some(folder.clone());
-                    t.chunk = Some(chunk.clone());
-                    t.object = Some(r.object.clone());
+                    t.folder = folder.clone();
                     t
                 };
-                if let Some(need) = needs.get(folder) {
-                    for target in self.mailbox_storage_targets(need, ctx, view, r, chunk, pname) {
+                if let Some(need) = folder.as_ref().and_then(|f| needs.get(f)) {
+                    for target in self.mailbox_storage_targets(need, ctx, view, &pack, pname) {
                         out.push(block(TaskKind::Storage, &target));
                     }
                 }
                 for (j, items) in &jobs_here {
-                    if items.contains(&(folder.clone(), chunk.clone())) {
+                    if items.contains(&pack) {
                         let mut t = block(TaskKind::Move, &j.to);
                         t.job = Some(j.id.clone());
                         out.push(t);
@@ -1114,17 +1075,9 @@ impl Engine {
         out
     }
 
-    /// Object names (and the pack ids holding them) the ledger still wants
-    /// on pool `pool`.
-    fn pool_wanted(view: &LedgerView, pool: &str) -> HashSet<String> {
-        let mut wanted: HashSet<String> = view
-            .chunks
-            .values()
-            .filter(|r| !r.dropped_from(pool))
-            .map(|r| r.object.as_str().to_ascii_lowercase())
-            .collect();
-        super::pack_upkeep::with_pack_ids(view, pool, &mut wanted, false);
-        wanted
+    /// Pack ids (hex) the ledger shows held on pool `pool`.
+    fn pool_wanted(view: &crate::ledger3::LedgerView, pool: &str) -> HashSet<String> {
+        view.packs_on(pool).map(|(id, _)| hex::encode(id)).collect()
     }
 
     /// Whether a task still has work: its target lacks the object and the
@@ -1132,7 +1085,7 @@ impl Engine {
     fn mailbox_task_needed(
         &self,
         t: &Task,
-        view: &LedgerView,
+        view: &crate::ledger3::LedgerView,
         ctx: &mut PolicyCtx,
         needs: &BTreeMap<FolderId, FolderNeeds>,
         pools: &Pools,
@@ -1154,25 +1107,25 @@ impl Engine {
                 Self::pool_wanted(view, &t.pool).contains(name)
             }
             TaskKind::Storage => {
-                let (Some(f), Some(c), Some(o)) = (&t.folder, &t.chunk, &t.object) else {
+                let (Some(f), Some(pack)) = (&t.folder, pack_of_task(&t.key)) else {
                     return false;
                 };
-                let Some(r) = view.locate(f, c).filter(|r| &r.object == o) else {
+                if !view.is_held(&pack, &t.pool) {
                     return false;
-                };
+                }
                 let Some(need) = needs.get(f) else {
                     return false;
                 };
-                self.mailbox_storage_targets(need, ctx, view, r, c, &t.pool)
+                self.mailbox_storage_targets(need, ctx, view, &pack, &t.pool)
                     .contains(&t.target)
             }
             TaskKind::Move => {
-                let (Some(f), Some(c), Some(id)) = (&t.folder, &t.chunk, &t.job) else {
+                let (Some(id), Some(pack)) = (&t.job, pack_of_task(&t.key)) else {
                     return false;
                 };
                 job_items
                     .get(id)
-                    .is_some_and(|(_, items)| items.contains(&(f.clone(), c.clone())))
+                    .is_some_and(|(_, items)| items.contains(&pack))
             }
         }
     }
@@ -1209,9 +1162,9 @@ impl Engine {
             return p
                 .disks()
                 .iter()
-                .any(|d| !d.retired && d.write_failed_utc == 0 && p.has_room(&d.id, size + 64));
+                .any(|d| !d.retired && d.write_failed_utc == 0 && p.has_room(&d.id, size));
         }
-        stores.contains_key(name) && gate.fits(name, size + 64)
+        stores.contains_key(name) && gate.fits(name, size)
     }
 
     /// A docked disk of the task's pool, in a place the rule still needs,
@@ -1226,31 +1179,25 @@ impl Engine {
             .map(|d| d.id)
     }
 
-    /// The object of a task read from its docked source disk, checked
-    /// against its name. `Err(())` when the disk returned other bytes.
+    /// The pack of a task read from a docked disk of its pool that holds
+    /// it, checked against its id. `Err(())` when a disk returned other
+    /// bytes.
     fn mailbox_read_source(&self, t: &Task, pools: &Pools) -> Result<Option<Vec<u8>>, ()> {
-        let Some((spec, p)) = pools.get(&t.pool) else {
+        let Some((_, p)) = pools.get(&t.pool) else {
             return Ok(None);
         };
-        if t.key.starts_with("packs/") || !p.places_of(&t.key).is_empty() {
-            // The object as the pool holds it: from any docked disk with a copy.
-            let mut bad = false;
-            for loc in p.locate_all(&t.key).into_iter().filter(|l| l.attached) {
-                match p.read_on_disk(&loc.disk_id, &t.key) {
-                    Ok(Some(b)) if crate::mailbox::name_matches(&t.key, &b) => return Ok(Some(b)),
-                    Ok(Some(_)) => bad = true,
-                    _ => {}
-                }
+        let mut bad = false;
+        for loc in p.locate_all(&t.key).into_iter().filter(|l| l.attached) {
+            match p.read_on_disk(&loc.disk_id, &t.key) {
+                Ok(Some(b)) if crate::mailbox::name_matches(&t.key, &b) => return Ok(Some(b)),
+                Ok(Some(_)) => bad = true,
+                _ => {}
             }
-            return if bad { Err(()) } else { Ok(None) };
         }
-        // A block inside a pack on the pool.
-        let shared: Arc<dyn Storage> = p.clone();
-        let store = self.pack_store(spec, Box::new(crate::storage::SharedStorage(shared)));
-        match crate::storage::guarded(&t.key, || store.get(&t.key)) {
-            Ok(Some(b)) if crate::mailbox::name_matches(&t.key, &b) => Ok(Some(b)),
-            Ok(Some(_)) => Err(()),
-            _ => Ok(None),
+        if bad {
+            Err(())
+        } else {
+            Ok(None)
         }
     }
 
@@ -1353,13 +1300,13 @@ impl Engine {
     }
 
     /// Write held objects (and objects of docked sources) to the targets
-    /// that can take them now, and blocks other devices hold for storages
+    /// that can take them now, and packs other devices hold for storages
     /// of this device.
     #[allow(clippy::too_many_arguments)]
     fn mailbox_deliver(
         &mut self,
         st: &mut MailboxState,
-        view: &LedgerView,
+        view: &crate::ledger3::LedgerView,
         ctx: &mut PolicyCtx,
         needs: &BTreeMap<FolderId, FolderNeeds>,
         pools: &Pools,
@@ -1372,9 +1319,9 @@ impl Engine {
         let ids: Vec<String> = st.tasks.keys().cloned().collect();
         let task = activity::start(activity::MAILBOX, "", 0, activity::Unit::Bytes);
         task.set_phase("deliver");
-        // Storage targets: blocks collected per target, written as packs.
-        let mut outgoing: BTreeMap<String, Vec<Outgoing>> = BTreeMap::new();
         let mut finished: BTreeSet<String> = BTreeSet::new();
+        // Storage targets: (target, pack) -> bytes and the tasks it ends.
+        let mut outgoing: OutgoingPacks = BTreeMap::new();
         for id in ids {
             let Some(t) = st.tasks.get(&id).cloned() else {
                 continue;
@@ -1439,87 +1386,60 @@ impl Engine {
                     }
                 }
                 TaskKind::Storage => {
-                    let (Some(f), Some(c), Some(o)) = (&t.folder, &t.chunk, &t.object) else {
+                    let Some(pack) = pack_of_task(&t.key) else {
                         continue;
                     };
-                    let list = outgoing.entry(t.target.clone()).or_default();
-                    if let Some(x) = list.iter_mut().find(|x| &x.object == o) {
-                        x.ids.push(id.clone());
-                    } else {
-                        list.push(Outgoing {
-                            ids: vec![id.clone()],
-                            folder: f.clone(),
-                            chunk: c.clone(),
-                            object: o.clone(),
-                            bytes,
-                            from_peer: false,
-                        });
+                    let e = outgoing
+                        .entry((t.target.clone(), pack))
+                        .or_insert_with(|| (bytes, Vec::new(), false));
+                    if e.1.is_empty() {
                         report.direct += u64::from(direct);
                     }
-                    let held: u64 = list.iter().map(|x| x.bytes.len() as u64).sum();
-                    if held >= DELIVER_BUFFER {
-                        let batch = outgoing.remove(&t.target).unwrap_or_default();
-                        finished.extend(self.mailbox_write_blocks(
-                            &t.target, batch, pools, stores, failed, report, st,
-                        )?);
-                    }
+                    e.1.push(id.clone());
                 }
                 TaskKind::Move => {}
             }
         }
-        // Blocks other devices hold for a storage of this device.
+        // Packs other devices hold for a storage of this device.
         if self.peers.as_ref().is_some_and(|p| !p.is_empty()) {
             let held_here: BTreeSet<String> = st.tasks.values().map(|t| t.key.clone()).collect();
             let entries: Vec<BoardEntry> = st.elsewhere.iter().map(|(_, e)| e.clone()).collect();
             for e in entries {
-                let (TaskKind::Storage, Some(f), Some(c), Some(o)) =
-                    (e.kind, &e.folder, &e.chunk, &e.object)
+                let (TaskKind::Storage, Some(f), Some(pack)) =
+                    (e.kind, &e.folder, pack_of_task(&e.key))
                 else {
                     continue;
                 };
                 if held_here.contains(&e.key) {
                     continue;
                 }
-                let Some(r) = view.locate(f, c).filter(|r| &r.object == o) else {
-                    continue;
-                };
                 let Some(need) = needs.get(f) else { continue };
+                if !view.is_held(&pack, &e.pool) {
+                    continue;
+                }
                 let targets: Vec<String> = self
-                    .mailbox_storage_targets(need, ctx, view, r, c, &e.pool)
+                    .mailbox_storage_targets(need, ctx, view, &pack, &e.pool)
                     .into_iter()
                     .filter(|n| Self::storage_ready(n, e.size, pools, stores, failed, gate))
                     .collect();
                 let Some(target) = targets.first() else {
                     continue;
                 };
-                if outgoing
-                    .get(target)
-                    .is_some_and(|l| l.iter().any(|x| &x.object == o))
-                {
+                if outgoing.contains_key(&(target.clone(), pack)) {
                     continue;
                 }
-                let Some((_, bytes)) = self.peers.as_ref().and_then(|p| p.get(o)) else {
+                let name = ObjectName::from_bytes(&pack);
+                let Some((_, bytes)) = self.peers.as_ref().and_then(|p| p.get(&name)) else {
                     continue;
                 };
                 if !crate::mailbox::name_matches(&e.key, &bytes) {
                     report.rejected += 1;
                     continue;
                 }
-                outgoing.entry(target.clone()).or_default().push(Outgoing {
-                    ids: Vec::new(),
-                    folder: f.clone(),
-                    chunk: c.clone(),
-                    object: o.clone(),
-                    bytes,
-                    from_peer: true,
-                });
+                outgoing.insert((target.clone(), pack), (bytes, Vec::new(), true));
             }
         }
-        for (target, batch) in std::mem::take(&mut outgoing) {
-            finished.extend(
-                self.mailbox_write_blocks(&target, batch, pools, stores, failed, report, st)?,
-            );
-        }
+        finished.extend(self.mailbox_write_packs(outgoing, pools, stores, failed, report, st)?);
         drop(task);
         for id in &finished {
             if st.tasks.remove(id).is_some() {
@@ -1535,73 +1455,75 @@ impl Engine {
         Ok(())
     }
 
-    /// Write blocks to a storage target as a pack, read each back and
-    /// record it (`chunk_stored`); the batch is sealed and pushed. Returns
-    /// the tasks finished.
+    /// Write whole packs to storage targets, read each back and claim it
+    /// (`pack_stored`, a zero folder: a copy of a pack by someone other
+    /// than its writer); the batch is sealed and pushed. Returns the tasks
+    /// finished.
     #[allow(clippy::too_many_arguments)]
-    fn mailbox_write_blocks(
+    fn mailbox_write_packs(
         &mut self,
-        target: &str,
-        batch: Vec<Outgoing>,
+        outgoing: OutgoingPacks,
         pools: &Pools,
         stores: &BTreeMap<String, Box<dyn Storage>>,
         failed: &mut BTreeSet<String>,
         report: &mut MailboxReport,
         st: &mut MailboxState,
     ) -> Result<Vec<String>> {
-        if batch.is_empty() {
-            return Ok(Vec::new());
-        }
-        let pool_store;
-        let store: &dyn Storage = match pools.get(target) {
-            Some((spec, p)) => {
-                let shared: Arc<dyn Storage> = p.clone();
-                pool_store = self.pack_store(spec, Box::new(crate::storage::SharedStorage(shared)));
-                &pool_store
-            }
-            None => match stores.get(target) {
-                Some(s) => s.as_ref(),
-                None => return Ok(Vec::new()),
-            },
-        };
-        let members: Vec<(String, &[u8])> = batch
-            .iter()
-            .map(|x| (x.object.as_str().to_string(), x.bytes.as_slice()))
-            .collect();
-        if let Err(e) = store.put_pack(&members) {
-            report
-                .notes
-                .push(format!("writing to {target} failed: {e:#}"));
-            failed.insert(target.to_string());
+        if outgoing.is_empty() {
             return Ok(Vec::new());
         }
         let mut done = Vec::new();
-        for x in &batch {
-            let key = chunk_storage_key(&x.object);
-            let back = crate::storage::guarded(&key, || store.get(&key));
-            if !matches!(&back, Ok(Some(b)) if crate::mailbox::name_matches(&key, b)) {
+        for ((target, pack), (bytes, ids, from_peer)) in outgoing {
+            if failed.contains(&target) {
+                continue;
+            }
+            let store: &dyn Storage = match pools.get(&target) {
+                Some((_, p)) => p.as_ref(),
+                None => match stores.get(&target) {
+                    Some(s) => s.as_ref(),
+                    None => continue,
+                },
+            };
+            let key = crate::packs::pack_key(&hex::encode(pack));
+            let Some(class) = crate::blockmap::class_of_len(bytes.len() as u64) else {
+                report.rejected += 1;
+                continue;
+            };
+            if let Err(e) = store.put_if_absent(&key, &bytes) {
+                report
+                    .notes
+                    .push(format!("writing to {target} failed: {e:#}"));
+                failed.insert(target.clone());
+                continue;
+            }
+            let back =
+                crate::storage::guarded(&key, || store.get_bounded(&key, crate::storage::MAX_PACK));
+            if !matches!(&back, Ok(Some(b)) if crypto::hash(b) == pack) {
                 log::warn!(
-                    storage = target,
-                    object = x.object.short();
-                    "mailbox: the storage did not return the block intact; not recorded"
+                    storage = target.as_str(),
+                    pack = hex::encode(pack).as_str();
+                    "mailbox: the storage did not return the pack intact; not recorded"
                 );
                 continue;
             }
-            self.pending.push(Event::ChunkStored {
-                folder: x.folder.clone(),
-                chunk: x.chunk.clone(),
-                object: x.object.clone(),
-                storage: target.to_string(),
-                size: x.bytes.len() as u64,
-                pack: None,
-            });
+            self.f3
+                .pending
+                .push(crate::ledger3::events::Event::PackStored(
+                    crate::ledger3::events::PackStored {
+                        storage: target.clone(),
+                        pack,
+                        class,
+                        folder: crate::ledger3::NO_FOLDER,
+                        map_seq: 0,
+                    },
+                ));
             report.delivered += 1;
-            report.delivered_bytes += x.bytes.len() as u64;
-            report.pulled_from_peers += u64::from(x.from_peer);
-            *report.delivered_to.entry(target.to_string()).or_default() += 1;
+            report.delivered_bytes += bytes.len() as u64;
+            report.pulled_from_peers += u64::from(from_peer);
+            *report.delivered_to.entry(target.clone()).or_default() += 1;
             st.total_delivered += 1;
-            st.total_delivered_bytes += x.bytes.len() as u64;
-            done.extend(x.ids.iter().cloned());
+            st.total_delivered_bytes += bytes.len() as u64;
+            done.extend(ids);
         }
         // Sealed and pushed now: other devices see the copies (and the
         // device holding them staged lets them go).
@@ -1611,54 +1533,44 @@ impl Engine {
 
     // ----- the published list --------------------------------------------------
 
-    /// Every other device's newest list that is not older than 30 days:
-    /// (device name, entry).
-    fn read_mailbox_boards(&self, meta: &OpenStorages, now: i64) -> Vec<(String, BoardEntry)> {
-        let reg_keys: Vec<SecretKey> = self.registry_keys().into_iter().map(|(_, k)| k).collect();
-        let vault = &self.vault.vault_id;
-        let me = &self.vault.device_id;
-        let mut newest: BTreeMap<DeviceId, Board> = BTreeMap::new();
-        for (_, backend) in meta {
-            let Ok(keys) = backend.list(BOARD_PREFIX) else {
-                continue;
-            };
-            let mut last: BTreeMap<&str, &String> = BTreeMap::new();
-            for k in &keys {
-                if let Some((dev, _)) = k[BOARD_PREFIX.len()..].split_once('/') {
-                    last.insert(dev, k);
+    /// Every other device's newest list (a `mailbox` record, kind 28) that
+    /// is not older than 30 days: (device name, entry).
+    fn read_mailbox_boards(&self, _meta: &OpenStorages, now: i64) -> Vec<(String, BoardEntry)> {
+        let me = self.me3();
+        let devices: Vec<crate::record::Id16> = self
+            .f3
+            .members
+            .devices
+            .devices
+            .keys()
+            .filter(|d| **d != me && !self.f3.members.revoked.contains(*d))
+            .copied()
+            .collect();
+        let mut newest: BTreeMap<crate::record::Id16, crate::mailbox::BoardBody> = BTreeMap::new();
+        let _ = self.with_records3(|store| {
+            let streams: Vec<_> = devices
+                .iter()
+                .map(|d| crate::mailbox::board_stream(*d))
+                .collect();
+            let mut refused = crate::record::RecordsRefused::default();
+            for b in crate::records3::read_newest::<crate::mailbox::BoardBody>(
+                store,
+                &streams,
+                &mut refused,
+            )? {
+                if now - b.updated_utc > BOARD_TTL_SECS {
+                    continue;
+                }
+                if newest.get(&b.device).is_none_or(|o| o.seq < b.seq) {
+                    newest.insert(b.device, b);
                 }
             }
-            for (dev, k) in last {
-                let Ok(dev) = DeviceId::from_hex(dev) else {
-                    continue;
-                };
-                if &dev == me || self.devices.revoked.contains_key(&dev) {
-                    continue;
-                }
-                let board = backend
-                    .get_bounded(k, 64 << 20)
-                    .ok()
-                    .flatten()
-                    .and_then(|blob| {
-                        reg_keys.iter().find_map(|key| {
-                            crypto::decrypt(key, &board_aad(vault, &dev), &blob).ok()
-                        })
-                    })
-                    .and_then(|plain| serde_json::from_slice::<Board>(&plain).ok())
-                    .filter(|b| b.device == dev && now - b.updated_utc <= BOARD_TTL_SECS);
-                let Some(board) = board else { continue };
-                if newest
-                    .get(&dev)
-                    .is_none_or(|b| b.updated_utc < board.updated_utc)
-                {
-                    newest.insert(dev, board);
-                }
-            }
-        }
+            Ok(())
+        });
         let mut out = Vec::new();
         for (dev, board) in newest {
-            let name = self.device_name(&dev);
-            for e in board.held {
+            let name = self.device_name(&DeviceId::from_bytes(&dev));
+            for e in board.entries() {
                 out.push((name.clone(), e));
             }
         }
@@ -1666,8 +1578,8 @@ impl Engine {
     }
 
     /// Publish what this device holds staged when it changed (and daily
-    /// while it holds something); older lists of this device are deleted.
-    fn publish_mailbox_board(&self, st: &mut MailboxState, meta: &OpenStorages, now: i64) {
+    /// while it holds something), as its next `mailbox` record.
+    fn publish_mailbox_board(&self, st: &mut MailboxState, _meta: &OpenStorages, now: i64) {
         let mut held: Vec<BoardEntry> = Vec::new();
         let mut seen = BTreeSet::new();
         for t in st.tasks.values().filter(|t| t.state == TaskState::Held) {
@@ -1686,37 +1598,17 @@ impl Engine {
             st.board_sig = sig;
             return; // never published anything: nothing to take back
         }
-        let me = self.vault.device_id.clone();
-        let board = Board {
-            device: me.clone(),
-            updated_utc: now.max(st.board_utc + 1),
-            held,
-        };
-        let key = self.registry_key_now();
-        let Some(blob) = serde_json::to_vec(&board)
-            .ok()
-            .and_then(|p| crypto::encrypt(&key, &board_aad(&self.vault.vault_id, &me), &p).ok())
-        else {
-            return;
-        };
-        let name = format!("{BOARD_PREFIX}{me}/{:020}.enc", board.updated_utc);
-        let mut ok = false;
-        for (_, backend) in meta {
-            if backend.put_if_absent(&name, &blob).is_ok() {
-                ok = true;
-                for old in backend
-                    .list(&format!("{BOARD_PREFIX}{me}/"))
-                    .unwrap_or_default()
-                {
-                    if old != name {
-                        let _ = backend.delete(&old);
-                    }
-                }
+        let updated_utc = now.max(st.board_utc + 1);
+        let me = self.me3();
+        let published = self.publish_newest3(&crate::mailbox::board_stream(me), |seq| {
+            crate::mailbox::BoardBody::new(me, seq, updated_utc, &held)
+        });
+        match published {
+            Ok(()) => {
+                st.board_sig = sig;
+                st.board_utc = updated_utc;
             }
-        }
-        if ok {
-            st.board_sig = sig;
-            st.board_utc = board.updated_utc;
+            Err(e) => log::debug!("mailbox: list not published: {e:#}"),
         }
     }
 }

@@ -1,47 +1,47 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Draining a storage: emptying it onto the other storages without ever
-//! weakening a folder's copies (`docs/spec/alpha-0-format.md` section 44).
+//! weakening a folder's copies (`docs/spec/alpha-0-format.md` sections 44
+//! and 77.9).
 //!
 //! Starting a drain publishes it with the storage's shared settings
 //! (`quotas`), so no device writes new blocks there any more; the storage
 //! stays readable. The device that started it (the driver) then works
-//! through the blocks the ledger places on the storage, in runs (the
-//! service runs one after every sync), within a daily budget of bytes
-//! copied:
+//! through the packs the ledger shows held on the storage
+//! (`storages3::drain`), in runs (the service runs one after every sync),
+//! within a daily budget of bytes copied:
 //!
-//! 1. Blocks that already have the copies they need elsewhere come first:
-//!    they only have to be dropped. Then the others, oldest first.
-//! 2. For each block, the copies it should keep without this one: the
+//! 1. Packs whose blocks already have the copies they need elsewhere come
+//!    first: they only have to be dropped. Then the others.
+//! 2. For each pack, the copies its blocks keep without this storage: the
 //!    folder's placement says which storages take the folder's blocks
 //!    (storages being drained and storages at their quota excepted), and
-//!    every copy that dropping this one leaves must still meet the folder's
+//!    the copies dropping this one leaves must still meet the folder's
 //!    policy as far as the copies met it before (its minimum count and
 //!    per-place minimums, capped at what was there). A block is never left
-//!    without a copy. Missing copies are written first and read back to
-//!    check them (a cold target is checked by name only).
-//! 3. Only then is the copy recorded as dropped (`ChunkDropped`, sealed and
-//!    pushed) and deleted from the storage. A block whose policy cannot be
-//!    met elsewhere stays, and the drain reports what is missing.
-//! 4. When the storage holds no block, every record, ledger batch,
-//!    manifest and thumbnail there is copied to the other storages that hold
+//!    without a copy. Missing copies are whole copies of the pack onto the
+//!    folder's other storages, read back and checked against the pack id
+//!    (a cold target is checked by name only).
+//! 3. Only then is the pack recorded as dropped (`pack_dropped`, sealed and
+//!    pushed) and deleted from the storage. A pack whose blocks' policy
+//!    cannot be met elsewhere stays, and the drain reports what is missing.
+//! 4. When the storage holds no pack, every record, ledger batch, manifest
+//!    and thumbnail there is copied to the other storages that hold
 //!    records, and the drain is published as finished ("drained"): no device
 //!    writes to the storage or reads records from it any more. With
 //!    "remove when empty" the driver then removes it.
 //!
 //! A run that stops halfway is carried on by the next one: copies already
 //! made are found on their storages, drops already recorded are not made
-//! twice, and blocks recorded as dropped are deleted at the end.
-
-use super::data_moves::MoveItem;
+//! twice, and packs recorded as dropped are deleted at the end.
 use super::placement::fmt_size;
 use super::quotas::QuotaGate;
 use super::*;
 use crate::advice::{add_cost, Costs};
 use crate::storage_settings::{DrainPhase, DrainSetting};
 
-/// Blocks per ledger batch: their drops are sealed and pushed before any
-/// of them is deleted.
-const DRAIN_GROUP: usize = 64;
+/// Packs per ledger batch: their drops are sealed and pushed before any of
+/// them is deleted.
+const DRAIN_GROUP: usize = 16;
 /// How many distinct reasons a report lists.
 const REASONS: usize = 10;
 /// Local progress of the drains this device drives.
@@ -186,72 +186,22 @@ struct DrainState {
     last_error: Option<String>,
 }
 
-/// One block on the draining storage, worked out.
-struct DrainItem {
-    folder: FolderId,
-    chunk: ChunkId,
-    object: ObjectName,
-    epoch: u32,
-    size: u64,
-    claimed_utc: i64,
-    /// The names its claims on the draining storage are under (this
-    /// device's, and other devices' names for the same storage).
-    sources: Vec<String>,
-    /// Storages to copy it to first.
-    targets: Vec<String>,
-    /// The copies that stay (name, place).
-    after: Vec<(String, String)>,
-    /// The folder's copy rules capped at what the copies met before.
-    rules: Option<Policy>,
-    /// Files of the folder on this device that contain it.
-    files: Vec<PathBuf>,
-}
-
+/// A drain worked out from the ledger and the folders' block maps: the
+/// pack-level plan (with what the quotas and the cold-read rule leave
+/// out marked as blocked) and the report of it.
 struct DrainWork {
-    items: Vec<DrainItem>,
+    packs: crate::storages3::DrainPlan,
     plan: DrainPlan,
 }
 
-/// What a folder's blocks need, for a drain.
-struct FolderNeeds {
-    name: String,
-    rules: Option<Policy>,
-    /// Storages the folder's blocks go to (placement), drained ones out.
-    targets: Vec<String>,
-    /// Blocks current files (or known snapshots) use; `None`: unknown, all count.
-    referenced: Option<HashSet<ChunkId>>,
-    /// Key epoch and local files of each block, for re-encrypting locally.
-    local: HashMap<ChunkId, (u32, Vec<PathBuf>)>,
-}
-
-/// Why the copies that stay do not hold, or `None` when they do.
-fn shortfall(folder: &str, after: &[(String, String)], rules: Option<&Policy>) -> Option<String> {
-    if after.is_empty() {
-        return Some(format!(
-            "a block of {folder} has no other copy and no other storage can take one: add another storage"
-        ));
-    }
-    let r = rules?;
-    for (place, n) in &r.min_per_place {
-        let have = after.iter().filter(|(_, p)| p == place).count() as u32;
-        if have < *n {
-            return Some(format!(
-                "folder {folder} needs {n} cop{} {} and no other storage there can take {}: add another {place} storage or lower the policy",
-                if *n == 1 { "y" } else { "ies" },
-                crate::policy::place_phrase(place),
-                if *n - have == 1 { "it" } else { "them" }
-            ));
-        }
-    }
-    if (after.len() as u32) < r.min_copies {
-        return Some(format!(
-            "folder {folder} needs {} copies and no other storage can take another one: add another storage or lower the policy",
-            r.min_copies
-        ));
-    }
-    None
-}
-
+/// The pack-level drain needs of every folder: (needs, tables).
+type DrainInputs = (
+    HashMap<crate::ledger3::FolderBin, crate::storages3::DrainNeeds>,
+    HashMap<
+        crate::ledger3::FolderBin,
+        std::sync::Arc<std::sync::RwLock<crate::blockmap::MapTable>>,
+    >,
+);
 fn push_reason(list: &mut Vec<String>, why: String) {
     if !list.contains(&why) && list.len() < REASONS {
         list.push(why);
@@ -291,72 +241,99 @@ impl Engine {
 
     // ----- planning -----------------------------------------------------------
 
-    fn folder_needs(&self, rec: &FolderRecord, candidates: &[&StorageSpec]) -> FolderNeeds {
-        let rules = rec
-            .effective_policy()
-            .filter(|p| p.min_copies > 0 || p.min_per_place.values().any(|n| *n > 0))
-            .map(|p| Policy {
-                verified_within_days: None,
-                ..p
-            });
-        let placed = self.write_targets(rec);
-        let mut targets: Vec<String> = candidates
-            .iter()
-            .filter(|s| placed.wants(s.name(), None))
-            .map(|s| s.name().to_string())
-            .collect();
-        if targets.is_empty() {
-            targets = candidates.iter().map(|s| s.name().to_string()).collect();
-        }
-        // Warm storages first: a cold one is written, rarely read.
-        targets.sort_by_key(|n| {
-            candidates
-                .iter()
-                .any(|s| s.name() == n.as_str() && s.is_cold())
-        });
-        let mut referenced = None;
-        let mut local = HashMap::new();
-        if rec.is_backup() {
-            let known = self.backup_blocks_known(&rec.folder_id);
-            if !known.is_empty() {
-                referenced = Some(known.into_iter().map(|(c, _)| c).collect());
+    /// What every folder's blocks need for a drain of `name` (the storages
+    /// the packs may go to, the copy rules, the blocks something still
+    /// uses), and the folders' block map tables.
+    fn drain_inputs(&self, candidates: &[&StorageSpec], replace: bool) -> Result<DrainInputs> {
+        let mut needs = HashMap::new();
+        let mut tables = HashMap::new();
+        for rec in self.keyring.folders.values() {
+            let Ok(folder) = members3::bin(&rec.folder_id) else {
+                continue;
+            };
+            if let Some(t) = self.folder_table3(rec)? {
+                tables.insert(folder, t);
             }
-        } else if let Ok(state) = self.load_state(&rec.folder_id) {
-            let root = self
-                .config
-                .folders
+            let all: Vec<String> = candidates.iter().map(|s| s.name().to_string()).collect();
+            if rec.is_removed() {
+                // Nothing needs a removed folder's blocks any more.
+                needs.insert(
+                    folder,
+                    crate::storages3::DrainNeeds {
+                        name: rec.name.clone(),
+                        rules: None,
+                        targets: all,
+                        referenced: Some(HashSet::new()),
+                        replace: false,
+                    },
+                );
+                continue;
+            }
+            let rules = rec
+                .effective_policy()
+                .filter(|p| p.min_copies > 0 || p.min_per_place.values().any(|n| *n > 0))
+                .map(|p| Policy {
+                    verified_within_days: None,
+                    ..p
+                });
+            let placed = self.write_targets(rec);
+            let mut targets: Vec<String> = candidates
                 .iter()
-                .find(|m| m.folder_id == rec.folder_id)
-                .map(|m| m.path.clone());
-            let plain_here = root.is_some() && !self.mount_is_encrypted(&rec.folder_id);
-            let mut refs = HashSet::new();
-            for f in state.files.values().filter(|f| !f.deleted) {
-                let path = match &root {
-                    Some(r) if plain_here && state.local_index.contains_key(&f.path) => {
-                        Some(self.disk_of(r, &state, &f.path))
+                .filter(|s| placed.wants(s.name(), None))
+                .map(|s| s.name().to_string())
+                .collect();
+            if targets.is_empty() {
+                targets = all;
+            }
+            // Warm storages first: a cold one is written, rarely read.
+            targets.sort_by_key(|n| {
+                candidates
+                    .iter()
+                    .any(|s| s.name() == n.as_str() && s.is_cold())
+            });
+            // Blocks of current files, of the trash and of the snapshots
+            // this device has seen; a folder never synced here: all count.
+            let mut referenced: Option<HashSet<crate::ledger3::ObjectBin>> = None;
+            if rec.is_backup() {
+                let known = self.backup_blocks_known(&rec.folder_id);
+                if !known.is_empty() {
+                    referenced = Some(
+                        known
+                            .into_iter()
+                            .filter_map(|(_, o)| crate::storages3::object_bin(&o).ok())
+                            .collect(),
+                    );
+                }
+            } else if let Ok(state) = self.load_state(&rec.folder_id) {
+                if !state.files.is_empty() {
+                    let mut refs: HashSet<crate::ledger3::ObjectBin> = HashSet::new();
+                    for f in state.files.values().filter(|f| !f.deleted) {
+                        for c in &f.chunks {
+                            if let Ok(o) = crate::storages3::object_bin(&c.object) {
+                                refs.insert(o);
+                            }
+                        }
                     }
-                    _ => None,
-                };
-                for c in &f.chunks {
-                    refs.insert(c.chunk.clone());
-                    let e = local
-                        .entry(c.chunk.clone())
-                        .or_insert_with(|| (c.epoch, Vec::new()));
-                    e.1.extend(path.clone());
+                    for c in self.trash_chunks(&rec.folder_id) {
+                        if let Ok(o) = crate::storages3::object_bin(&c.object) {
+                            refs.insert(o);
+                        }
+                    }
+                    referenced = Some(refs);
                 }
             }
-            // A folder never synced here has no state: every block counts.
-            if !state.files.is_empty() {
-                referenced = Some(refs);
-            }
+            needs.insert(
+                folder,
+                crate::storages3::DrainNeeds {
+                    name: rec.name.clone(),
+                    rules,
+                    targets,
+                    referenced,
+                    replace,
+                },
+            );
         }
-        FolderNeeds {
-            name: rec.name.clone(),
-            rules,
-            targets,
-            referenced,
-            local,
-        }
+        Ok((needs, tables))
     }
 
     /// Work out a drain of `name` from the ledger, taking room on the
@@ -365,6 +342,7 @@ impl Engine {
         &self,
         name: &str,
         confirm_cold_read: bool,
+        replace: bool,
         gate: &QuotaGate,
     ) -> Result<DrainWork> {
         let spec = self
@@ -374,25 +352,14 @@ impl Engine {
             .find(|s| s.name() == name)
             .cloned()
             .ok_or_else(|| anyhow!("unknown storage {name}"))?;
-        let view = self.view()?;
+        let view = self.view3()?;
         let closed = self.closed_storages();
-        let carriers: BTreeSet<&str> = self
+        let candidates: Vec<&StorageSpec> = self
             .config
             .storages
             .iter()
-            .filter(|s| s.is_carrier())
-            .map(|s| s.name())
+            .filter(|s| s.name() != name && !s.is_carrier() && !closed.contains(s.name()))
             .collect();
-        let place_of = |n: &str| -> Option<String> {
-            if n.starts_with("replica:") {
-                return Some("replica".to_string());
-            }
-            self.config
-                .storages
-                .iter()
-                .find(|s| s.name() == n && !s.is_carrier())
-                .map(|s| s.place())
-        };
         let hot: BTreeSet<&str> = self
             .config
             .storages
@@ -400,36 +367,30 @@ impl Engine {
             .filter(|s| !s.is_cold() && !s.is_carrier() && s.name() != name)
             .map(|s| s.name())
             .collect();
-        let candidates: Vec<&StorageSpec> = self
-            .config
-            .storages
-            .iter()
-            .filter(|s| s.name() != name && !s.is_carrier() && !closed.contains(s.name()))
-            .collect();
-        let mut needs: HashMap<FolderId, FolderNeeds> = HashMap::new();
-        for rec in self.keyring.folders.values() {
-            let n = if rec.is_removed() {
-                // Nothing needs a removed folder's blocks beyond not losing
-                // the last copy.
-                FolderNeeds {
-                    name: rec.name.clone(),
-                    rules: None,
-                    targets: candidates.iter().map(|s| s.name().to_string()).collect(),
-                    referenced: Some(HashSet::new()),
-                    local: HashMap::new(),
-                }
-            } else {
-                self.folder_needs(rec, &candidates)
-            };
-            needs.insert(rec.folder_id.clone(), n);
-        }
-        let unknown = FolderNeeds {
-            name: "(a folder this device does not know)".to_string(),
-            rules: None,
-            targets: candidates.iter().map(|s| s.name().to_string()).collect(),
-            referenced: Some(HashSet::new()),
-            local: HashMap::new(),
+        let place_of = |n: &str| -> String {
+            if n.starts_with("replica:") {
+                return "replica".to_string();
+            }
+            self.config
+                .storages
+                .iter()
+                .find(|s| s.name() == n && !s.is_carrier())
+                .map(|s| s.place())
+                .unwrap_or_else(|| "other".to_string())
         };
+        let (needs, tables) = self.drain_inputs(&candidates, replace)?;
+        let guards: Vec<(
+            crate::ledger3::FolderBin,
+            std::sync::RwLockReadGuard<'_, crate::blockmap::MapTable>,
+        )> = tables
+            .iter()
+            .map(|(f, t)| (*f, t.read().unwrap_or_else(|e| e.into_inner())))
+            .collect();
+        let refs: HashMap<crate::ledger3::FolderBin, &crate::blockmap::MapTable> =
+            guards.iter().map(|(f, g)| (*f, &**g)).collect();
+        let fallback: Vec<String> = candidates.iter().map(|s| s.name().to_string()).collect();
+        let mut packs =
+            crate::storages3::drain_plan(&view, name, &refs, &needs, &place_of, &fallback)?;
         let price = self.storage_price(name);
         let now = util::now_utc();
         let mut plan = DrainPlan {
@@ -437,171 +398,86 @@ impl Engine {
             cold: spec.is_cold(),
             ..Default::default()
         };
-        let mut items = Vec::new();
         let mut early = Costs::new();
-        let source_place = spec.place();
         let mut quota_refused: BTreeSet<String> = BTreeSet::new();
-        // Claims name storages by their writers' names: each is matched to
-        // a storage here by identity (section 20), or by equal name.
-        let names = self.drain_resolver();
-        let configured: BTreeSet<String> = self
-            .config
-            .storages
-            .iter()
-            .map(|s| s.name().to_string())
-            .collect();
-        let mut keys: Vec<(&(FolderId, ChunkId), Vec<String>)> = view
-            .chunks
-            .iter()
-            .filter(|((f, _), _)| !f.as_str().is_empty())
-            .filter_map(|(k, r)| {
-                let sources: Vec<String> = r
-                    .storages
-                    .iter()
-                    .filter(|(n, l)| {
-                        !l.claimed_by.is_empty()
-                            && names.resolve_any(n, &l.claimed_by, &configured).as_deref()
-                                == Some(name)
-                    })
-                    .map(|(n, _)| n.clone())
-                    .collect();
-                (!sources.is_empty()).then_some((k, sources))
-            })
-            .collect();
-        keys.sort();
-        for (key, sources) in keys {
-            let r = &view.chunks[key];
-            let (folder, chunk) = key;
-            let claimed_utc = sources
+        for item in packs.items.iter_mut() {
+            let size = crate::ledger3::events::class_bytes(item.class).unwrap_or(0);
+            let blocks = item.needed_blocks;
+            plan.blocks += blocks;
+            plan.bytes += size;
+            let other_hot = view
+                .holders(&item.pack)
                 .iter()
-                .map(|n| r.storages[n].claimed_utc)
-                .min()
-                .unwrap_or(0);
-            plan.blocks += 1;
-            plan.bytes += r.size;
-            let need = needs.get(folder).unwrap_or(&unknown);
-            // The copies that stay: on the other storages known here.
-            let mut after: Vec<(String, String)> = Vec::new();
-            for (n, l) in &r.storages {
-                if l.claimed_by.is_empty() {
-                    continue;
-                }
-                let Some(local) = names.resolve_any(n, &l.claimed_by, &configured) else {
-                    continue;
-                };
-                if local == name || carriers.contains(local.as_str()) {
-                    continue;
-                }
-                if after.iter().any(|(x, _)| *x == local) {
-                    continue;
-                }
-                if let Some(p) = place_of(&local) {
-                    after.push((local, p));
-                }
-            }
-            // The rules as far as the copies met them before.
-            let rules = need.rules.as_ref().map(|p| {
-                let before: Vec<&str> = after
-                    .iter()
-                    .map(|(_, p)| p.as_str())
-                    .chain(std::iter::once(source_place.as_str()))
-                    .collect();
-                let mut capped = p.clone();
-                capped.min_copies = capped.min_copies.min(before.len() as u32);
-                for (place, n) in capped.min_per_place.iter_mut() {
-                    let have = before.iter().filter(|p| **p == place).count() as u32;
-                    *n = (*n).min(have);
-                }
-                capped
-            });
-            let referenced = need.referenced.as_ref().is_none_or(|s| s.contains(chunk));
-            let mut targets: Vec<String> = Vec::new();
-            let holds = |t: &str| after.iter().any(|(n, _)| n == t);
-            if referenced {
-                // Every storage the placement takes, as far as there is room.
-                for t in &need.targets {
-                    if holds(t) {
-                        continue;
-                    }
-                    if gate.take(t, r.size) {
-                        targets.push(t.clone());
-                    } else {
-                        quota_refused.insert(t.clone());
-                    }
-                }
-            } else if after.is_empty() {
-                // Nothing uses it any more: one copy elsewhere is enough.
-                for t in &need.targets {
-                    if gate.take(t, r.size) {
-                        targets.push(t.clone());
-                        break;
-                    }
-                    quota_refused.insert(t.clone());
-                }
-            }
-            let mut with: Vec<(String, String)> = after.clone();
-            for t in &targets {
-                with.push((t.clone(), place_of(t).unwrap_or_default()));
-            }
-            let mut why = shortfall(&need.name, &with, rules.as_ref());
-            let local = need.local.get(chunk);
-            let files: Vec<PathBuf> = local.map(|(_, f)| f.clone()).unwrap_or_default();
-            let read_here = !targets.is_empty()
-                && files.is_empty()
-                && !after.iter().any(|(n, _)| hot.contains(n.as_str()));
-            if why.is_none() && read_here && spec.is_cold() && !confirm_cold_read {
-                why = Some(format!(
+                .any(|h| *h != name && hot.contains(h));
+            if item.shortfall.is_none()
+                && !item.copy_to.is_empty()
+                && spec.is_cold()
+                && !confirm_cold_read
+                && !other_hot
+            {
+                item.shortfall = Some(format!(
                     "the only copy to read is on cold storage {name}: confirm the cold read (retrieval fees and restore delays apply)"
                 ));
             }
-            if let Some(why) = why {
-                for t in &targets {
-                    gate.give_back(t, r.size);
-                }
-                plan.blocks_blocked += 1;
-                let why = match quota_refused.iter().next() {
-                    Some(full) if why.contains("no other storage") => {
-                        format!("{why} ({})", gate.message(full))
+            if item.shortfall.is_none() {
+                // Room on the storages that take a copy (their quotas count
+                // size classes).
+                let mut taken: Vec<String> = Vec::new();
+                for t in &item.copy_to {
+                    if gate.take_pack(t, size) {
+                        taken.push(t.clone());
+                    } else {
+                        quota_refused.insert(t.clone());
+                        item.shortfall = Some(format!(
+                            "a pack of {} needs a copy on {t}, which has no room: {}",
+                            item.folder
+                                .and_then(|f| needs.get(&f))
+                                .map(|n| n.name.as_str())
+                                .unwrap_or("the vault"),
+                            gate.message(t)
+                        ));
+                        break;
                     }
-                    _ => why,
-                };
-                push_reason(&mut plan.blocked, why);
+                }
+                if item.shortfall.is_some() {
+                    for t in taken {
+                        gate.give_back_pack(&t, size);
+                    }
+                }
+            }
+            if let Some(why) = &item.shortfall {
+                plan.blocks_blocked += blocks.max(1);
+                push_reason(&mut plan.blocked, why.clone());
                 continue;
             }
-            if targets.is_empty() {
-                plan.blocks_drop_only += 1;
+            if item.copy_to.is_empty() {
+                plan.blocks_drop_only += blocks;
             } else {
-                plan.blocks_to_copy += 1;
-                for t in &targets {
-                    plan.bytes_to_copy += r.size;
-                    *plan.targets.entry(t.clone()).or_default() += r.size;
+                plan.blocks_to_copy += blocks;
+                for t in &item.copy_to {
+                    plan.bytes_to_copy += size;
+                    *plan.targets.entry(t.clone()).or_default() += size;
                 }
-                if read_here {
-                    plan.bytes_read_here += r.size;
+                if !other_hot {
+                    plan.bytes_read_here += size;
                 }
             }
-            if let Some(p) = &price {
-                let days = ((now - claimed_utc).max(0) / 86_400) as u32;
-                if let Some(c) = p.early_deletion_cost(r.size, days).filter(|c| *c > 0.0) {
+            if let (Some(p), Some(c)) = (
+                &price,
+                view.copies(&item.pack)
+                    .into_iter()
+                    .find(|c| c.storage == name),
+            ) {
+                let days = ((now - c.stored_utc).max(0) / 86_400) as u32;
+                if let Some(c) = p.early_deletion_cost(size, days).filter(|c| *c > 0.0) {
                     add_cost(&mut early, &p.currency, c);
                 }
             }
-            items.push(DrainItem {
-                folder: folder.clone(),
-                chunk: chunk.clone(),
-                object: r.object.clone(),
-                epoch: local.map(|(e, _)| *e).unwrap_or(0),
-                size: r.size,
-                claimed_utc,
-                sources,
-                targets,
-                after,
-                rules,
-                files,
-            });
         }
-        // Drops first (no egress), then the oldest blocks.
-        items.sort_by_key(|i| (!i.targets.is_empty(), i.claimed_utc));
+        // Drops first (no egress), then the copies; blocked ones last.
+        packs
+            .items
+            .sort_by_key(|i| (i.shortfall.is_some(), !i.copy_to.is_empty(), i.pack));
         if let Some(p) = &price {
             if let Some(c) = p.read_cost(plan.bytes_read_here).filter(|c| *c > 0.0) {
                 add_cost(&mut plan.egress_cost, &p.currency, c);
@@ -641,9 +517,8 @@ impl Engine {
                 ));
             }
         }
-        Ok(DrainWork { items, plan })
+        Ok(DrainWork { packs, plan })
     }
-
     /// Why the records on `name` cannot be moved now, if they cannot.
     fn records_blocker(&self, name: &str) -> Option<String> {
         let spec = self.config.storages.iter().find(|s| s.name() == name)?;
@@ -723,12 +598,12 @@ impl Engine {
     /// What draining `name` takes now (the drain dialog, `--plan`).
     pub fn drain_plan(&self, name: &str, opts: &DrainOptions) -> Result<DrainPlan> {
         self.drain_check(name)?;
-        let view = self.view()?;
+        let view = self.view3()?;
         let gate = self.quota_gate(&view);
         let current = self.storage_settings(name).drain;
         let confirm =
             opts.confirm_cold_read || current.as_ref().is_some_and(|d| d.confirm_cold_read);
-        let mut plan = self.drain_work(name, confirm, &gate)?.plan;
+        let mut plan = self.drain_work(name, confirm, true, &gate)?.plan;
         plan.budget_bytes_per_day = opts
             .budget_bytes_per_day
             .or(current.and_then(|d| d.budget_bytes_per_day));
@@ -867,79 +742,19 @@ impl Engine {
         self.storage_resolver(&readable)
     }
 
-    /// Blocks some claim still places on `name`, under any device's name
-    /// for it.
-    fn claims_left_on(&self, name: &str, names: &super::verify::NameResolver) -> Result<u64> {
-        let configured: BTreeSet<String> = self
-            .config
-            .storages
-            .iter()
-            .map(|s| s.name().to_string())
-            .collect();
-        let view = self.view()?;
-        Ok(view
-            .chunks
-            .iter()
-            .filter(|((f, _), _)| !f.as_str().is_empty())
-            .filter(|(_, r)| {
-                r.storages.iter().any(|(n, l)| {
-                    !l.claimed_by.is_empty()
-                        && names.resolve_any(n, &l.claimed_by, &configured).as_deref() == Some(name)
-                })
-            })
-            .count() as u64)
+    /// Packs some claim still places on `name` (under any device's name
+    /// for it: the view is localized).
+    fn claims_left_on(&self, name: &str) -> Result<u64> {
+        Ok(self.view3()?.packs_on(name).count() as u64)
     }
 
-    /// Objects that must stay on `name`: a claim places them there (under
-    /// any device's name for it), or on a storage this device cannot
-    /// match to one of its own (it may be this one).
-    fn objects_kept_on(
-        &self,
-        name: &str,
-        names: &super::verify::NameResolver,
-    ) -> Result<HashSet<ObjectName>> {
-        let configured: BTreeSet<String> = self
-            .config
-            .storages
-            .iter()
-            .map(|s| s.name().to_string())
-            .collect();
-        let view = self.view()?;
-        let mut out = HashSet::new();
-        for r in view.chunks.values() {
-            for (n, l) in &r.storages {
-                if l.claimed_by.is_empty() {
-                    continue;
-                }
-                match names.resolve_any(n, &l.claimed_by, &configured) {
-                    Some(local) if local != name => {}
-                    _ => {
-                        out.insert(r.object.clone());
-                    }
-                }
-            }
-        }
-        Ok(out)
-    }
-
-    /// (blocks, bytes) the ledger places on `name`.
+    /// (blocks, bytes) the ledger places on `name`: the live blocks in the
+    /// packs held there, and the size classes of those packs.
     fn claimed_bytes_on(&self, name: &str) -> Result<(u64, u64)> {
-        let view = self.view()?;
-        let mut seen = HashSet::new();
-        let (mut blocks, mut bytes) = (0u64, 0u64);
-        for r in view.chunks.values() {
-            if r.storages
-                .get(name)
-                .is_some_and(|l| !l.claimed_by.is_empty())
-                && seen.insert(&r.object)
-            {
-                blocks += 1;
-                bytes += r.size;
-            }
-        }
-        Ok((blocks, bytes))
+        let blocks = self.objects_on_storage3(name)?.len() as u64;
+        let view = self.view3()?;
+        Ok((blocks, crate::storages3::storage_usage(&view, name).bytes))
     }
-
     // ----- running ------------------------------------------------------------------
 
     /// The drains this device drives that have work left (the service runs
@@ -1006,9 +821,9 @@ impl Engine {
             storage: name.to_string(),
             ..Default::default()
         };
-        let view = self.view()?;
+        let view = self.view3()?;
         let gate = self.quota_gate(&view);
-        let work = self.drain_work(name, setting.confirm_cold_read, &gate)?;
+        let work = self.drain_work(name, setting.confirm_cold_read, true, &gate)?;
         st.blocked = work.plan.blocked.clone();
         report.blocks_kept += work.plan.blocks_blocked;
         report.kept = work.plan.blocked.clone();
@@ -1017,15 +832,23 @@ impl Engine {
             .budget_bytes_per_day
             .map(|b| b.saturating_sub(st.bytes_today));
         let mut planned_copy = 0u64;
-        let mut chosen: Vec<DrainItem> = Vec::new();
-        let total = work.items.len();
-        for item in work.items {
+        let mut chosen: Vec<crate::storages3::DrainItem> = Vec::new();
+        let ready: Vec<crate::storages3::DrainItem> = work
+            .packs
+            .items
+            .iter()
+            .filter(|i| i.shortfall.is_none())
+            .cloned()
+            .collect();
+        let total: u64 = ready.iter().map(|i| i.needed_blocks.max(1)).sum();
+        for item in ready {
             if limits.max_items.is_some_and(|m| chosen.len() >= m) {
                 break;
             }
-            let cost = item.size * item.targets.len() as u64;
+            let cost = crate::ledger3::events::class_bytes(item.class).unwrap_or(0)
+                * item.copy_to.len() as u64;
             if cost > 0 {
-                // The first block of a day goes even when larger than the budget.
+                // The first pack of a day goes even when larger than the budget.
                 let first = planned_copy == 0 && st.bytes_today == 0;
                 if !first
                     && (budget_left.is_some_and(|l| planned_copy + cost > l)
@@ -1037,21 +860,26 @@ impl Engine {
             }
             chosen.push(item);
         }
-        report.blocks_left_for_later = (total - chosen.len()) as u64;
+        let taken: u64 = chosen.iter().map(|i| i.needed_blocks.max(1)).sum();
+        report.blocks_left_for_later = total - taken;
         if !chosen.is_empty() {
-            self.drain_blocks(&spec, &setting, chosen, &mut report)?;
+            let sub = crate::storages3::DrainPlan {
+                storage: name.to_string(),
+                items: chosen,
+                ..Default::default()
+            };
+            self.drain_packs(&spec, setting.confirm_cold_read, false, &sub, &mut report)?;
         }
         st.bytes_today += report.bytes_copied;
         st.bytes_moved += report.bytes_dropped;
         // Finished with the blocks: the records follow, then the drain ends.
-        let left = self.claims_left_on(name, &self.drain_resolver())?;
+        let left = self.claims_left_on(name)?;
         if left == 0 {
             if let Some(why) = self.records_blocker(name) {
                 push_reason(&mut report.kept, why.clone());
                 push_reason(&mut st.blocked, why);
             } else {
                 report.objects_deleted += self.delete_leftovers(&spec);
-                self.retire_stale_locations(name)?;
                 report.records_copied = self.drain_records(&spec)?;
                 let mut settings = self.storage_settings(name);
                 if let Some(d) = settings.drain.as_mut() {
@@ -1076,282 +904,260 @@ impl Engine {
         Ok(report)
     }
 
-    /// Copy, check, drop and delete the chosen blocks, one batch per group.
-    fn drain_blocks(
+    /// Copy whole, check, drop and delete the chosen packs, one batch per
+    /// group: the copies and drops are sealed and pushed before anything is
+    /// deleted. With `keep_source` (a storage being removed) the packs are
+    /// copied and checked but neither dropped nor deleted.
+    fn drain_packs(
         &mut self,
         spec: &StorageSpec,
-        setting: &DrainSetting,
-        items: Vec<DrainItem>,
+        confirm_cold_read: bool,
+        keep_source: bool,
+        plan: &crate::storages3::DrainPlan,
         report: &mut DrainRunReport,
     ) -> Result<()> {
         let name = spec.name().to_string();
         let source = self.open_spec(spec)?;
-        let names = self.drain_resolver();
-        let read_source = !spec.is_cold() || setting.confirm_cold_read;
-        let others: OpenStorages = self
-            .open_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier() && s.name() != name)
+        let source_pool: Option<PoolStorage> = spec
+            .is_data_only()
+            .then(|| self.open_pool(spec))
+            .transpose()?;
+        // The storages that take copies, pools as themselves (disk group
+        // rules count their places).
+        let mut dst_specs: BTreeMap<String, StorageSpec> = BTreeMap::new();
+        for i in &plan.items {
+            for t in &i.copy_to {
+                if let Some(s) = self.config.storages.iter().find(|s| s.name() == t.as_str()) {
+                    dst_specs.insert(t.clone(), s.clone());
+                }
+            }
+        }
+        let mut pools: BTreeMap<String, PoolStorage> = BTreeMap::new();
+        let mut boxes: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
+        for (t, s) in &dst_specs {
+            if s.is_data_only() {
+                if let Ok(p) = self.open_pool(s) {
+                    pools.insert(t.clone(), p);
+                }
+            } else {
+                match self.open_spec(s) {
+                    Ok(b) => {
+                        boxes.insert(t.clone(), b);
+                    }
+                    Err(e) => push_reason(&mut report.kept, format!("{t} cannot be opened: {e:#}")),
+                }
+            }
+        }
+        let readers: Vec<(String, Box<dyn Storage>)> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| s.name() != name && !s.is_carrier() && !s.is_cold())
+            .filter_map(|s| self.open_spec(s).ok().map(|b| (s.name().to_string(), b)))
             .collect();
-        let mut targets: BTreeMap<String, (StorageSpec, Box<dyn Storage>)> = BTreeMap::new();
         let task = activity::start(
             activity::DRAIN,
             &name,
-            items.iter().map(|i| i.size).sum(),
+            plan.items
+                .iter()
+                .map(|i| crate::ledger3::events::class_bytes(i.class).unwrap_or(0))
+                .sum(),
             activity::Unit::Bytes,
         );
         task.set_phase("copy");
-        for group in items.chunks(DRAIN_GROUP) {
-            let mut deletes: Vec<(ObjectName, u64)> = Vec::new();
-            // Ciphertexts re-made from the files on this device, per folder.
-            let mut local: HashMap<ObjectName, Vec<u8>> = HashMap::new();
-            let mut by_folder: BTreeMap<&FolderId, Vec<MoveItem>> = BTreeMap::new();
-            for i in group
-                .iter()
-                .filter(|i| !i.targets.is_empty() && !i.files.is_empty())
-            {
-                by_folder
-                    .entry(&i.folder)
-                    .or_default()
-                    .push(self.move_item(i));
-            }
-            for (fid, list) in by_folder {
-                let Some(rec) = self.keyring.folders.get(fid).cloned() else {
-                    continue;
-                };
-                if let Ok(fk) = self.folder_keys(&rec) {
-                    local.extend(self.local_ciphertexts(&fk, list.iter()));
-                }
-            }
-            // Every copy this group needs, written per target in one go (as
-            // packs on a storage that keeps them, `crate::packs`).
-            let mut cts: HashMap<ObjectName, Vec<u8>> = HashMap::new();
-            for item in group.iter().filter(|i| !i.targets.is_empty()) {
-                let ct = local.remove(&item.object).or_else(|| {
-                    self.move_source(&self.move_item(item), &others, source.as_ref(), read_source)
-                });
-                if let Some(ct) = ct {
-                    cts.insert(item.object.clone(), ct);
-                }
-            }
-            let mut write_failed: BTreeMap<String, String> = BTreeMap::new();
-            let wanted_targets: BTreeSet<String> = group
-                .iter()
-                .filter(|i| cts.contains_key(&i.object))
-                .flat_map(|i| i.targets.iter().cloned())
-                .collect();
-            for t in wanted_targets {
-                if !targets.contains_key(&t) {
-                    let Some(tspec) = self.config.storages.iter().find(|s| s.name() == t).cloned()
-                    else {
-                        continue;
-                    };
-                    match self.open_spec(&tspec) {
-                        Ok(b) => {
-                            targets.insert(t.clone(), (tspec, b));
-                        }
-                        Err(e) => {
-                            write_failed.insert(t.clone(), format!("{t} cannot be opened: {e:#}"));
-                            continue;
+        let opts = crate::storages3::MoveOptions {
+            keep_source,
+            ..Default::default()
+        };
+        let read_source = !spec.is_cold() || confirm_cold_read;
+        for group in plan.items.chunks(DRAIN_GROUP) {
+            let view = self.view3()?;
+            let sub = crate::storages3::DrainPlan {
+                storage: name.clone(),
+                items: group.to_vec(),
+                ..Default::default()
+            };
+            let run = {
+                let pack_source = |p: &crate::ledger3::PackId| -> Option<Vec<u8>> {
+                    let key = crate::packs::pack_key(&hex::encode(p));
+                    if let Some(b) = self.mailbox_object(&key) {
+                        return Some(b);
+                    }
+                    let holders = view.holders(p);
+                    for (n, b) in &readers {
+                        if holders.contains(&n.as_str()) {
+                            if let Ok(Some(bytes)) = b.get_bounded(&key, crate::storage::MAX_PACK) {
+                                if crypto::hash(&bytes) == *p {
+                                    return Some(bytes);
+                                }
+                            }
                         }
                     }
-                }
-                let members: Vec<(String, &[u8])> = group
+                    None
+                };
+                let sources = crate::storages3::Sources {
+                    pack: &pack_source,
+                    member: &|_| None,
+                    read_source,
+                };
+                let src = crate::storages3::Endpoint {
+                    name: &name,
+                    storage: source.as_ref(),
+                    cold: spec.is_cold(),
+                    pool: source_pool.as_ref(),
+                };
+                let dsts: Vec<crate::storages3::Endpoint> = dst_specs
                     .iter()
-                    .filter(|i| i.targets.contains(&t))
-                    .filter_map(|i| {
-                        cts.get(&i.object)
-                            .map(|c| (i.object.as_str().to_string(), c.as_slice()))
+                    .filter_map(|(t, s)| {
+                        let storage: &dyn Storage = match pools.get(t) {
+                            Some(p) => p,
+                            None => boxes.get(t)?.as_ref(),
+                        };
+                        Some(crate::storages3::Endpoint {
+                            name: t,
+                            storage,
+                            cold: s.is_cold(),
+                            pool: pools.get(t),
+                        })
                     })
                     .collect();
-                if let Err(e) = targets[&t].1.put_pack(&members) {
-                    let why = match pool::pool_error(&e) {
-                        Some(pe) => pe.to_string(),
-                        None => format!("writing to {t} failed: {e:#}"),
-                    };
-                    write_failed.insert(t.clone(), why);
-                }
+                crate::storages3::run_drain_with(&view, &sub, &src, &dsts, &sources, &opts)
+            };
+            let r = &run.report;
+            let blocks_of = |p: &crate::ledger3::PackId| {
+                group
+                    .iter()
+                    .find(|i| i.pack == *p)
+                    .map(|i| {
+                        (
+                            i.needed_blocks,
+                            crate::ledger3::events::class_bytes(i.class).unwrap_or(0),
+                        )
+                    })
+                    .unwrap_or((0, 0))
+            };
+            for i in group {
+                task.advance(crate::ledger3::events::class_bytes(i.class).unwrap_or(0));
             }
-            for item in group {
-                task.advance(item.size);
-                let mut made: Vec<(String, String)> = Vec::new();
-                if !item.targets.is_empty() {
-                    let Some(ct) = cts.get(&item.object) else {
-                        report.blocks_kept += 1;
-                        push_reason(
-                            &mut report.kept,
-                            "no readable copy of a block was found; it stays".to_string(),
-                        );
-                        continue;
-                    };
-                    let key = chunk_storage_key(&item.object);
-                    for t in &item.targets {
-                        if let Some(why) = write_failed.get(t) {
-                            push_reason(&mut report.kept, why.clone());
-                            continue;
-                        }
-                        let Some((tspec, backend)) = targets.get(t) else {
-                            continue;
-                        };
-                        // Read back before the old copy may go.
-                        let read_back = !tspec.is_cold();
-                        let ok = if read_back {
-                            matches!(backend.get(&key), Ok(Some(b)) if ObjectName::from_bytes(&crypto::hash(&b)) == item.object)
-                        } else {
-                            backend.exists(&key).unwrap_or(false)
-                        };
-                        if !ok {
-                            push_reason(
-                                &mut report.kept,
-                                format!("the copy on {t} could not be checked"),
-                            );
-                            continue;
-                        }
-                        report.copies_verified += 1;
-                        report.bytes_copied += ct.len() as u64;
-                        self.pending.push(Event::ChunkStored {
-                            folder: item.folder.clone(),
-                            chunk: item.chunk.clone(),
-                            object: item.object.clone(),
-                            storage: t.clone(),
-                            size: ct.len() as u64,
-                            pack: None,
-                        });
-                        if read_back {
-                            self.pending.push(Event::ChunkVerified {
-                                folder: item.folder.clone(),
-                                chunk: item.chunk.clone(),
-                                object: item.object.clone(),
-                                storage: t.clone(),
-                            });
-                        }
-                        made.push((t.clone(), tspec.place()));
-                    }
-                    if !made.is_empty() {
-                        report.blocks_copied += 1;
-                    }
-                }
-                // The copies that stay, with those just made, must hold.
-                let mut with = item.after.clone();
-                with.extend(made);
-                let folder_name = self
-                    .keyring
-                    .folders
-                    .get(&item.folder)
-                    .map(|r| r.name.clone())
-                    .unwrap_or_else(|| item.folder.short().to_string());
-                if let Some(why) = shortfall(&folder_name, &with, item.rules.as_ref()) {
-                    report.blocks_kept += 1;
-                    push_reason(&mut report.kept, why);
-                    continue;
-                }
-                for source_name in &item.sources {
-                    self.pending.push(Event::ChunkDropped {
-                        folder: item.folder.clone(),
-                        chunk: item.chunk.clone(),
-                        object: item.object.clone(),
-                        storage: source_name.clone(),
-                    });
-                }
-                deletes.push((item.object.clone(), item.size));
+            for p in &r.copied_packs {
+                report.blocks_copied += blocks_of(p).0;
+                report.copies_verified += 1;
             }
-            // The copies and drops are sealed and pushed before anything is deleted.
-            self.commit_batch()?;
-            let in_use = self.objects_kept_on(&name, &names)?;
-            for (object, size) in deletes {
-                report.blocks_dropped += 1;
-                report.bytes_dropped += size;
-                if in_use.contains(&object) {
-                    continue;
-                }
-                match source.delete(&chunk_storage_key(&object)) {
-                    Ok(()) => report.objects_deleted += 1,
-                    Err(e) => push_reason(
-                        &mut report.kept,
-                        format!("a block recorded as dropped could not be deleted from {name} ({e:#}); the next run tries again"),
-                    ),
-                }
+            report.bytes_copied += r.bytes_written;
+            for p in &r.dropped_packs {
+                let (n, bytes) = blocks_of(p);
+                report.blocks_dropped += n;
+                report.bytes_dropped += bytes;
+            }
+            for p in r
+                .corrupt
+                .iter()
+                .chain(&r.waiting_room)
+                .chain(&r.waiting_place)
+            {
+                report.blocks_kept += blocks_of(p).0;
+            }
+            if !r.corrupt.is_empty() {
+                push_reason(
+                    &mut report.kept,
+                    format!("a pack on {name} is damaged: the repair fixes it first"),
+                );
+            }
+            if !r.waiting_room.is_empty() {
+                push_reason(
+                    &mut report.kept,
+                    "a storage that takes copies has no room for a pack now".to_string(),
+                );
+            }
+            if !r.waiting_place.is_empty() {
+                push_reason(
+                    &mut report.kept,
+                    "a pool's disk group rule needs a copy on a disk kept in another place"
+                        .to_string(),
+                );
+            }
+            for (p, why) in &r.unavailable {
+                report.blocks_kept += blocks_of(p).0;
+                push_reason(&mut report.kept, why.clone());
+            }
+            let events = run.events.clone();
+            self.f3.pending.extend(events);
+            self.commit_now3()?;
+            let (deleted, failed) = run.delete_dropped_each(source.as_ref());
+            report.objects_deleted += deleted;
+            for (_, e) in failed {
+                push_reason(
+                    &mut report.kept,
+                    format!("a pack recorded as dropped could not be deleted from {name} ({e}); the next run tries again"),
+                );
             }
         }
-        self.flush_pack_deletions();
+        drop(boxes);
+        for (t, p) in pools {
+            let disks = p.disks();
+            drop(p);
+            self.save_pool_disks(&t, disks)?;
+        }
         Ok(())
     }
 
-    fn move_item(&self, i: &DrainItem) -> MoveItem {
-        MoveItem {
-            chunk: i.chunk.clone(),
-            object: i.object.clone(),
-            epoch: i.epoch,
-            size: i.size,
-            on_to: false,
-            files: i.files.clone(),
-        }
+    /// The packs of a storage to be removed, worked out as a drain would
+    /// (a removal reads the storage itself, cold or not).
+    pub(super) fn drain_work_for_removal(
+        &self,
+        name: &str,
+        gate: &QuotaGate,
+    ) -> Result<crate::storages3::DrainPlan> {
+        Ok(self.drain_work(name, true, false, gate)?.packs)
     }
 
-    /// Delete the block objects still on a storage that no claim counts any
-    /// more (drops recorded by a run that stopped before deleting).
+    /// Copy the packs whose blocks need a copy elsewhere off a storage that
+    /// is being removed, whole and checked, without dropping anything from
+    /// it (it is retired afterwards). Returns (blocks, bytes) copied.
+    pub(super) fn copy_off_for_removal(&mut self, name: &str) -> Result<(u64, u64)> {
+        let spec = self
+            .config
+            .storages
+            .iter()
+            .find(|s| s.name() == name)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown storage {name}"))?;
+        let view = self.view3()?;
+        let gate = self.quota_gate(&view);
+        let mut work = self.drain_work_for_removal(name, &gate)?;
+        work.items
+            .retain(|i| i.shortfall.is_none() && !i.copy_to.is_empty());
+        let mut report = DrainRunReport::default();
+        let task = activity::start(
+            activity::STORAGE_REMOVAL,
+            name,
+            work.items.len() as u64,
+            activity::Unit::Items,
+        );
+        task.set_phase("copy");
+        self.drain_packs(&spec, true, true, &work, &mut report)?;
+        Ok((report.blocks_copied, report.bytes_copied))
+    }
+
+    /// Delete the packs still on a storage that the ledger shows dropped
+    /// from it (drops recorded by a run that stopped before deleting).
     fn delete_leftovers(&self, spec: &StorageSpec) -> u64 {
-        let Ok(source) = self.open_spec(spec) else {
+        let (Ok(source), Ok(view)) = (self.open_spec(spec), self.view3()) else {
             return 0;
         };
-        let Ok(in_use) = self.objects_kept_on(spec.name(), &self.drain_resolver()) else {
-            return 0;
-        };
-        let Ok(keys) = source.list("chunks/") else {
+        let Ok(left) = crate::storages3::leftovers(&view, spec.name(), source.as_ref()) else {
             return 0;
         };
         let mut n = 0;
-        for key in keys {
-            let Some(obj) =
-                crate::packs::object_of(&key).and_then(|o| ObjectName::from_hex(o).ok())
-            else {
-                continue;
-            };
-            if !in_use.contains(&obj) && source.delete(&key).is_ok() {
+        for p in left {
+            if source
+                .delete(&crate::packs::pack_key(&hex::encode(p)))
+                .is_ok()
+            {
                 n += 1;
             }
         }
         n
-    }
-
-    /// Locations the view still lists on `name` although no claim counts
-    /// there (a verification a device made before it saw the drop, an old
-    /// record): dropped for every file, so no status lists the storage.
-    fn retire_stale_locations(&mut self, name: &str) -> Result<()> {
-        let names = self.drain_resolver();
-        let configured: BTreeSet<String> = self
-            .config
-            .storages
-            .iter()
-            .map(|s| s.name().to_string())
-            .collect();
-        let view = self.view()?;
-        let mut any = false;
-        for ((folder, chunk), r) in &view.chunks {
-            if folder.as_str().is_empty() {
-                continue;
-            }
-            for (n, l) in &r.storages {
-                let who = if l.claimed_by.is_empty() {
-                    &l.verified_by
-                } else {
-                    &l.claimed_by
-                };
-                if names.resolve_any(n, who, &configured).as_deref() == Some(name) {
-                    self.pending.push(Event::ChunkDropped {
-                        folder: folder.clone(),
-                        chunk: chunk.clone(),
-                        object: r.object.clone(),
-                        storage: n.clone(),
-                    });
-                    any = true;
-                }
-            }
-        }
-        if any {
-            self.commit_batch()?;
-        }
-        Ok(())
     }
 
     /// Make sure every record, ledger batch, manifest and thumbnail on

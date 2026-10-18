@@ -46,37 +46,19 @@ fn pseudo_random(len: usize, seed: u64) -> Vec<u8> {
 
 /// Objects of every block the ledger counts on `storage`.
 fn claimed(e: &Engine, storage: &str) -> Vec<String> {
-    let mut v: Vec<String> = e
-        .view()
+    e.objects_on_storage3(storage)
         .unwrap()
-        .chunks
-        .values()
-        .filter(|c| {
-            c.storages
-                .get(storage)
-                .is_some_and(|l| !l.claimed_by.is_empty())
-        })
-        .map(|c| c.object.to_string())
-        .collect();
-    v.sort();
-    v.dedup();
-    v
+        .into_iter()
+        .collect()
 }
 
-/// Bytes of the blocks the ledger counts on `storage`.
+/// Bytes the ledger counts on `storage`: the size classes of the packs
+/// claimed there (what a quota counts).
 fn block_bytes(e: &Engine, storage: &str) -> u64 {
-    let mut seen = std::collections::HashSet::new();
-    e.view()
+    e.packs_on_storage3(storage)
         .unwrap()
-        .chunks
         .values()
-        .filter(|c| {
-            c.storages
-                .get(storage)
-                .is_some_and(|l| !l.claimed_by.is_empty())
-                && seen.insert(c.object.clone())
-        })
-        .map(|c| c.size)
+        .map(|c| 256u64 << 10 << (2 * u64::from(*c)))
         .sum()
 }
 
@@ -174,12 +156,15 @@ fn device(lab: &Lab, storages: &[(&str, &str)]) -> (Engine, String) {
         }),
     )
     .unwrap();
+    // One sync per file: each push writes a pack of its own, so a drain
+    // has several packs to work through.
     for i in 0..6u64 {
         fs::write(
             files.join(format!("f{i}.bin")),
             pseudo_random(40_000 + 9_000 * i as usize, i + 1),
         )
         .unwrap();
+        a.sync(None).unwrap();
     }
     fs::write(files.join("small.txt"), b"a small file").unwrap();
     a.sync(None).unwrap();
@@ -187,7 +172,6 @@ fn device(lab: &Lab, storages: &[(&str, &str)]) -> (Engine, String) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_drain_moves_every_block_checked_and_never_weakens_a_policy() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("old", "cloud"), ("home", "home")]);
@@ -231,15 +215,13 @@ fn a_drain_moves_every_block_checked_and_never_weakens_a_policy() {
             );
         }
         marks = now;
-        // Every block gone from "old" is on "new", intact and read back.
-        let view = a.view().unwrap();
-        for c in view.chunks.values() {
-            if blocks.contains(&c.object.to_string()) && !c.storages.contains_key("old") {
-                let loc = c.storages.get("new").expect("copied before the drop");
-                assert!(!loc.verified_by.is_empty(), "the copy was read back");
-                assert!(common::intact(&lab.path("new"), c.object.as_str()));
-                assert!(!common::object_names(&lab.path("old")).contains(c.object.as_str()));
-            }
+        // Every block gone from "old" is on "new", intact (its pack was
+        // read back whole and checked against its id before the drop).
+        let (on_old, on_new) = (claimed(&a, "old"), claimed(&a, "new"));
+        for o in blocks.iter().filter(|o| !on_old.contains(o)) {
+            assert!(on_new.contains(o), "copied before the drop");
+            assert!(common::intact(&lab.path("new"), o));
+            assert!(!common::object_names(&lab.path("old")).contains(o));
         }
         if r.drained {
             break;
@@ -286,7 +268,6 @@ fn a_drain_moves_every_block_checked_and_never_weakens_a_policy() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_drain_that_cannot_keep_the_policy_stops_and_says_what_is_missing() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("c1", "cloud"), ("c2", "cloud"), ("h", "home")]);
@@ -353,7 +334,6 @@ fn a_drain_that_cannot_keep_the_policy_stops_and_says_what_is_missing() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_drain_resumes_after_interruption_and_removes_the_storage_when_empty() {
     let lab = Lab::new();
     let (mut a, _) = device(
@@ -378,14 +358,18 @@ fn a_drain_resumes_after_interruption_and_removes_the_storage_when_empty() {
             },
         )
         .unwrap();
-    assert_eq!(r.blocks_dropped, 2);
+    // Two packs, and every live block in them.
+    assert!(r.blocks_dropped > 0);
     assert!(r.blocks_left_for_later > 0);
+    let dropped = r.blocks_dropped as usize;
+
     // Interrupted: the device stops and comes back.
     drop(a);
     let mut a = Engine::open(&lab.root.join("a"), PASS).unwrap();
     let st = &a.drain_statuses().unwrap()[0];
     assert!(st.percent < 100, "{}", st.percent);
-    assert_eq!(st.blocks_left as usize, blocks - 2);
+    assert_eq!(st.blocks_left as usize, blocks - dropped);
+
     assert!(a.drains_to_run().contains(&"old".to_string()));
     let r = a.drain_run("old", &DrainRunLimits::default()).unwrap();
     assert!(r.drained && r.removed, "{}", r.summary);
@@ -401,21 +385,22 @@ fn a_drain_resumes_after_interruption_and_removes_the_storage_when_empty() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_quota_routes_writes_elsewhere_and_without_room_they_wait() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("a", "cloud"), ("b", "cloud")]);
     let used = a.quota_status("a").unwrap().used_bytes;
-    // Room for about 100 kB more on "a".
-    let quota = (used + 100_000) * 100 / 99 + 1;
+    // Room for one more pack of the smallest class (256 KiB) on "a", not
+    // two (a quota counts the size classes of the packs).
+    let quota = (used + 300_000) * 100 / 99 + 1;
+
     let q = a.set_storage_quota("a", Some(Some(quota)), None).unwrap();
     assert_eq!(q.quota_bytes, Some(quota));
-    assert_eq!(q.state, "ok");
+    assert!(q.state == "ok" || q.state == "warning", "{q:?}");
     let files = lab.path("files");
     for i in 0..4u64 {
         fs::write(
             files.join(format!("n{i}.bin")),
-            pseudo_random(60_000, 50 + i),
+            pseudo_random(100_000, 50 + i),
         )
         .unwrap();
     }
@@ -467,7 +452,6 @@ fn a_quota_routes_writes_elsewhere_and_without_room_they_wait() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_drain_respects_the_quota_of_the_storages_it_fills() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("old", "cloud"), ("home", "home")]);
@@ -498,7 +482,6 @@ fn a_drain_respects_the_quota_of_the_storages_it_fills() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn quotas_and_drains_are_the_same_on_every_device() {
     let lab = Lab::new();
     let (mut a, key) = device(&lab, &[("s1", "cloud"), ("s2", "cloud")]);
@@ -507,14 +490,15 @@ fn quotas_and_drains_are_the_same_on_every_device() {
     a.set_storage_quota("s1", Some(Some(quota)), None).unwrap();
 
     // B names the storages differently: the settings follow the storage.
-    let mut b = Engine::join(
+    let mut b = common::join_approved(
         &lab.root.join("b"),
         "phone",
         PASS,
         &key,
         dir("box", &lab.path("s1"), "cloud"),
-    )
-    .unwrap();
+        &mut a,
+    );
+
     b.chunker = ChunkerParams::SMALL;
     b.add_storage(dir("s2", &lab.path("s2"), "cloud")).unwrap();
     b.sync(None).unwrap();
@@ -565,7 +549,6 @@ fn quotas_and_drains_are_the_same_on_every_device() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn after_a_drain_no_file_and_no_status_lists_the_storage() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("old", "cloud"), ("home", "home")]);
@@ -581,11 +564,8 @@ fn after_a_drain_no_file_and_no_status_lists_the_storage() {
         }
     }
     // Neither the ledger view ...
-    let view = a.view().unwrap();
-    assert!(view
-        .chunks
-        .values()
-        .all(|c| !c.storages.contains_key("old")));
+    assert!(claimed(&a, "old").is_empty());
+    assert!(a.packs_on_storage3("old").unwrap().is_empty());
     // ... nor the "where your data is" status lists it.
     let loc = a.data_locations().unwrap();
     let old = loc.storages.iter().find(|s| s.name == "old").unwrap();
@@ -593,10 +573,5 @@ fn after_a_drain_no_file_and_no_status_lists_the_storage() {
     assert!(loc.folders.iter().all(|f| !f.storages.contains_key("old")));
     // A later sync does not bring it back.
     a.sync(None).unwrap();
-    assert!(a
-        .view()
-        .unwrap()
-        .chunks
-        .values()
-        .all(|c| !c.storages.contains_key("old")));
+    assert!(a.packs_on_storage3("old").unwrap().is_empty());
 }

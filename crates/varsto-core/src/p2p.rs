@@ -195,14 +195,14 @@ impl Snapshot {
         if name.as_str().len() < 2 || !name.as_str().bytes().all(|b| b.is_ascii_hexdigit()) {
             bail!("malformed object name");
         }
+        // Blocks, and whole packs a mailbox staged (named by their id).
         for root in &self.local_roots {
-            let p = root
-                .join("chunks")
-                .join(&name.as_str()[..2])
-                .join(name.as_str());
-            if let Ok(bytes) = std::fs::read(&p) {
-                if ObjectName::from_bytes(&crypto::hash(&bytes)) == *name {
-                    return Ok(Some(bytes));
+            for top in ["chunks", "packs"] {
+                let p = root.join(top).join(&name.as_str()[..2]).join(name.as_str());
+                if let Ok(bytes) = std::fs::read(&p) {
+                    if ObjectName::from_bytes(&crypto::hash(&bytes)) == *name {
+                        return Ok(Some(bytes));
+                    }
                 }
             }
         }

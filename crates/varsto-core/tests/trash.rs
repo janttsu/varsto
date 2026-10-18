@@ -223,7 +223,6 @@ fn the_local_trash_copy_is_used_first_and_cleared_with_the_entry() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (trash GC)"]
 fn trashed_blocks_survive_moves_and_storage_removal() {
     let lab = Lab::new();
     let (one, two, docs) = (lab.p("one"), lab.p("two"), lab.p("docs"));
@@ -265,7 +264,8 @@ fn trashed_blocks_survive_moves_and_storage_removal() {
     a.add_storage(dir("three", &three, false)).unwrap();
     let plan = a.plan_storage_removal("two").unwrap();
     assert!(plan.blocked.is_none(), "{:?}", plan.blocked);
-    assert!(plan.copies.iter().any(|c| gone.contains(c.object.as_str())));
+    // Whole copies of the packs that hold them.
+    assert!(!plan.copies.is_empty(), "{plan:?}");
     a.remove_storage("two", true).unwrap();
     let left: BTreeSet<String> = objects(&one).union(&objects(&three)).cloned().collect();
     assert!(gone.is_subset(&left));

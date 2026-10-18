@@ -287,7 +287,6 @@ fn copy_dir(from: &Path, to: &Path) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (replicas)"]
 fn untrusted_replica_holds_copies_without_keys() {
     use varsto_core::replica::Replica;
     let lab = lab();
@@ -351,9 +350,13 @@ fn untrusted_replica_holds_copies_without_keys() {
         st.folders[0].chunks_verified_elsewhere,
         st.folders[0].chunks
     );
-    // A second run copies nothing new.
+    // A second run copies and claims no pack again (records the owner
+    // wrote since, its enrolment of the replica among them, are copied as
+    // they are).
     let rep2 = r.run_once().unwrap();
-    assert_eq!(rep2.objects_copied, 0);
+    assert_eq!(rep2.chunks_verified, 0, "{rep2:?}");
+    let rep3 = r.run_once().unwrap();
+    assert_eq!(rep3.objects_copied, 0, "{rep3:?}");
 }
 
 #[test]
@@ -401,7 +404,6 @@ fn shared_folder_between_two_users() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (transferrers)"]
 fn carrier_disk_only_carries_what_is_missing_and_empties_itself() {
     let lab = lab();
     // Two devices with no shared hot storage, only a removable disk marked as carrier.
@@ -425,7 +427,7 @@ fn carrier_disk_only_carries_what_is_missing_and_empties_itself() {
         "the carrier holds the chunks in transit"
     );
     // The disk travels to the second device.
-    let mut b = Engine::join(&lab.b_home, "office-pc", PASS, &key, usb.clone()).unwrap();
+    let mut b = common::join_approved(&lab.b_home, "office-pc", PASS, &key, usb.clone(), &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.sync(None).unwrap();
@@ -672,7 +674,6 @@ fn last_accessed_is_recorded_and_files_can_be_moved() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (policies)"]
 fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
     use varsto_core::policy::{Policy, PolicyState};
     let lab = lab();

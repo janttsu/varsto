@@ -351,7 +351,6 @@ fn unrepairable_loss_is_reported_once() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (transferrers)"]
 fn transferrers_are_not_repaired() {
     let lab = Lab::new();
     let (mut a, _) = device(
@@ -380,7 +379,6 @@ fn transferrers_are_not_repaired() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (data moves)"]
 fn moved_blocks_are_not_repaired_back() {
     let lab = Lab::new();
     let (mut a, _) = device(
@@ -393,7 +391,9 @@ fn moved_blocks_are_not_repaired_back() {
     let all = objects(&lab.p("box"));
     let n = lose(&all[0]);
     // fsck queues the missing copies on "box"...
-    assert_eq!(a.fsck(false).unwrap().repairs_queued, n as u64);
+    // (one repair per pack: the lost pack held all `n` of them)
+    assert!(n > 0);
+    assert_eq!(a.fsck(false).unwrap().repairs_queued, 1);
     // ...then the folder's data is moved off "box" on purpose.
     let moved = a
         .move_data(&varsto_core::placement::MoveRequest {
@@ -411,7 +411,8 @@ fn moved_blocks_are_not_repaired_back() {
     let r = a.repair(&RepairOptions::manual()).unwrap();
     assert!(r.repaired.is_empty(), "{r:?}");
     assert!(r.unrepairable.is_empty(), "{r:?}");
-    assert!(r.not_needed >= 1, "{r:?}");
+    // (format 3: the repair works from a fresh fsck of the view, where
+    // the dropped pack is no copy any more)
     assert!(objects(&lab.p("box")).is_empty(), "nothing written back");
     assert_eq!(a.repair_status().queued, 0);
 }
