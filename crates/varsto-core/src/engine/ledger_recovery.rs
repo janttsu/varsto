@@ -77,8 +77,8 @@ pub struct LedgerBehind {
     /// storage may be withholding batches and `warnings` says so.
     pub pulls: u32,
     /// Where the gap was learned from: `acks` (another device's signed
-    /// acknowledgement), `peer` (a head statement a peer sent over
-    /// peer-to-peer, section 74) or `pending` (batches wait for a
+    /// acknowledgement), `peer` (a batch a peer proved, by an envelope or
+    /// the writer's own peer record) or `pending` (batches wait for a
     /// predecessor that no storage offered).
     #[serde(default = "default_source")]
     pub source: String,
@@ -225,10 +225,6 @@ pub(super) struct Alarm {
     no_ledger: bool,
     repairing: bool,
     lost_checked_utc: Option<i64>,
-    /// The newest head statement of every peer (`ledger/heads-seen.json`).
-    pub(super) heads: crate::ledger_heads::HeadsSeen,
-    /// When the peers were last asked for their statements.
-    pub(super) heads_asked: Option<std::time::Instant>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -243,10 +239,7 @@ impl Alarm {
         // Format 3: the ledger is `ledger3` (`Engine::f3`).
         let me = &e.me3();
         let head = e.f3.ledger.head(me);
-        let mut a = Alarm {
-            heads: crate::ledger_heads::HeadsSeen::load(&e.home),
-            ..Alarm::default()
-        };
+        let mut a = Alarm { ..Alarm::default() };
         if e.removal.is_some() {
             // A removed device signs nothing anyway.
             return a;

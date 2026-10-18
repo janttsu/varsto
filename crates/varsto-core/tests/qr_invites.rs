@@ -36,8 +36,10 @@ fn through_camera(uris: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The links of a share and a pairing through QR codes: a request code,
+/// a sealed token in parts in any order, the single-code form, and the
+/// sizes the spec records.
 #[test]
-#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn a_share_through_qr_links() {
     let tmp = tempfile::tempdir().unwrap();
     let root: PathBuf = tmp.path().to_path_buf();
@@ -79,16 +81,6 @@ fn a_share_through_qr_links() {
     let single = through_camera(std::slice::from_ref(&token_uri));
     let token = ShareRequest::open_token(&home, &single[0]).unwrap();
     assert_eq!(token.fingerprint, words);
-    let mut m = Engine::accept_share(&home, "robin", PASS, &token, storage(&root)).unwrap();
-    m.chunker = ChunkerParams::SMALL;
-    ShareRequest::clear(&home);
-    m.attach_folder("project", &root.join("robin-docs"), false)
-        .unwrap();
-    m.sync(None).unwrap();
-    assert_eq!(
-        fs::read(root.join("robin-docs/plan.txt")).unwrap(),
-        b"shared by QR"
-    );
 
     // Someone who photographs the token cannot open it on another device.
     let other = root.join("eve-home");
@@ -125,4 +117,39 @@ fn a_share_through_qr_links() {
         addresses: vec!["192.168.1.20:41234".into()],
     };
     report("pairing", "123-456-789", &pair);
+}
+
+/// The recipient of a token scanned through QR codes opens the folder.
+#[test]
+#[ignore = "f3-switch: port in part B (sharing with other people: member folder-scoped batches)"]
+fn a_share_scanned_through_qr_opens_on_the_member() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root: PathBuf = tmp.path().to_path_buf();
+    let (mut a, _) = Engine::init(&root.join("a-home"), "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(storage(&root)).unwrap();
+    a.add_folder("project", &root.join("a-docs")).unwrap();
+    fs::write(root.join("a-docs/plan.txt"), b"shared by QR").unwrap();
+    a.sync(None).unwrap();
+    let home = root.join("robin-home");
+    let code = ShareRequest::code_for_named(&home, Some("Robin")).unwrap();
+    let words = ShareRequest::fingerprint_for(&home).unwrap();
+    let req_uri = Link::from_text(&code).unwrap().to_uri().unwrap();
+    let scanned = through_camera(std::slice::from_ref(&req_uri));
+    let (sealed, _) = a
+        .share_create_sealed("project", &scanned[0], Some(&words))
+        .unwrap();
+    let token_uri = Link::from_text(&sealed.encode()).unwrap().to_uri().unwrap();
+    let single = through_camera(std::slice::from_ref(&token_uri));
+    let token = ShareRequest::open_token(&home, &single[0]).unwrap();
+    let mut m = Engine::accept_share(&home, "robin", PASS, &token, storage(&root)).unwrap();
+    m.chunker = ChunkerParams::SMALL;
+    ShareRequest::clear(&home);
+    m.attach_folder("project", &root.join("robin-docs"), false)
+        .unwrap();
+    m.sync(None).unwrap();
+    assert_eq!(
+        fs::read(root.join("robin-docs/plan.txt")).unwrap(),
+        b"shared by QR"
+    );
 }
