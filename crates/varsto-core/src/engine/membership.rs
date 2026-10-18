@@ -2079,30 +2079,11 @@ impl Engine {
         Ok((sent, pending))
     }
 
-    /// Re-seal our rendezvous record under the current registry key, so a
+    /// Publish our peer record again under the current registry key, so a
     /// removed device stops learning our addresses at once rather than at
     /// the next periodic republish.
     fn reseal_own_peer_record(&self) {
-        let key = crate::p2p::PeerRecord::storage_key(&self.vault.device_id);
-        let Ok(storages) = self.metadata_storages(false) else {
-            return;
-        };
-        for (_, b) in &storages {
-            let Ok(Some(blob)) = b.get(&key) else {
-                continue;
-            };
-            for (_, k) in self.registry_keys().iter().skip(1) {
-                if let Ok(rec) = crate::p2p::PeerRecord::open(
-                    &blob,
-                    &self.vault.vault_id,
-                    &self.vault.device_id,
-                    k,
-                ) {
-                    let _ = self.publish_peer_record(&rec);
-                    return;
-                }
-            }
-        }
+        self.republish_own_peer_record();
     }
 
     // ----- remote wipe ------------------------------------------------------------

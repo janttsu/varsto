@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Traffic counters on localhost: a laptop serves its blocks over TCP to one
-//! device and over QUIC to another, and a device behind "NAT" serves through
+//! Traffic counters on localhost: a laptop serves its blocks over TLS on TCP
+//! to one device and over QUIC to another, and a device behind "NAT" serves through
 //! a relay. Both ends (and the relay) must agree on bytes, objects,
 //! direction and path.
 
 mod common;
 
+use common::p2p::{empty, publish_quic, quic_node, quic_table, served, QuicDev};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::ids::DeviceId;
 use varsto_core::p2p::traffic::{PeerTraffic, TrafficReport};
-use varsto_core::p2p::{self, quic, PeerRecord, Peers, Traffic};
+use varsto_core::p2p::{self, Traffic};
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
@@ -51,8 +52,8 @@ impl Lab {
     }
 }
 
-/// The device holding the files; the storage then loses every chunk, so
-/// only peers can supply them.
+/// The device holding the files (the storage loses every block once the
+/// others joined, so only peers can supply them).
 fn seed(lab: &Lab, who: &str, name: &str) -> (Engine, String) {
     let (mut e, key) = Engine::init(&lab.home(who), name, PASS).unwrap();
     e.chunker = ChunkerParams::SMALL;
@@ -63,46 +64,22 @@ fn seed(lab: &Lab, who: &str, name: &str) -> (Engine, String) {
         .collect();
     fs::write(lab.dir(who).join("big.bin"), big).unwrap();
     e.push("docs").unwrap();
-    common::lose_all_objects(&lab.root.join("storage"));
     (e, key)
 }
 
-fn join(lab: &Lab, who: &str, name: &str, key: &str) -> Engine {
-    let mut e = Engine::join(&lab.home(who), name, PASS, key, lab.storage.clone()).unwrap();
+fn lose(lab: &Lab) {
+    common::lose_all_objects(&lab.root.join("storage"));
+}
+
+fn join(lab: &Lab, who: &str, name: &str, key: &str, owner: &mut Engine) -> Engine {
+    let mut e = common::join_approved(&lab.home(who), name, PASS, key, lab.storage.clone(), owner);
     e.chunker = ChunkerParams::SMALL;
     e.attach_folder("docs", &lab.dir(who), false).unwrap();
     e
 }
 
-type Snap = Arc<Mutex<Option<Arc<p2p::Snapshot>>>>;
-
-fn node(e: &Engine, snap: Snap, traffic: &Arc<Traffic>) -> Arc<quic::Node> {
-    traffic.set_me(e.device_id(), e.own_device_name());
-    quic::Node::start(
-        "127.0.0.1:0".parse().unwrap(),
-        e.p2p_identity().unwrap(),
-        e.device_id().clone(),
-        e.peer_key(),
-        snap,
-        traffic.clone(),
-    )
-    .unwrap()
-}
-
-fn record(e: &Engine, n: &quic::Node, direct: bool) -> PeerRecord {
-    let mut rec = e.peer_record_template(n.local_addr.port());
-    rec.lan_addrs.clear();
-    rec.udp_local = if direct { vec![n.local_addr] } else { vec![] };
-    rec.cert_sha256 = n.identity().sha256.clone();
-    rec
-}
-
-fn served(e: &Engine) -> Snap {
-    Arc::new(Mutex::new(Some(Arc::new(e.peer_snapshot().unwrap()))))
-}
-
-fn empty() -> Snap {
-    Arc::new(Mutex::new(None))
+fn node(e: &Engine, snap: common::p2p::Snap, traffic: &Arc<Traffic>) -> QuicDev {
+    quic_node(e, snap, traffic.clone())
 }
 
 /// The serving side records an answer once the receiver has acknowledged
@@ -126,16 +103,19 @@ fn peer<'a>(r: &'a TrafficReport, d: &DeviceId) -> &'a PeerTraffic {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
     let lab = lab();
-    let (a, key) = seed(&lab, "a", "laptop");
+    let (mut a, key) = seed(&lab, "a", "laptop");
+    let mut b = join(&lab, "b", "desk", &key, &mut a);
+    let mut c = join(&lab, "c", "phone", &key, &mut a);
+    lose(&lab);
     let traffic_a = Arc::new(Traffic::new());
     let snap_a = served(&a);
-    let node_a = node(&a, snap_a.clone(), &traffic_a);
+    let qa = node(&a, snap_a.clone(), &traffic_a);
 
-    // TCP listener sharing the laptop's counters.
-    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap())
+    // TLS over TCP, sharing the laptop's answering side and counters.
+    let tls = p2p::v3::tls::TcpTls::new(qa.node.identity(), qa.responder.clone()).unwrap();
+    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap(), tls)
         .unwrap()
         .with_traffic(traffic_a.clone());
     let tcp_addr = server.addr;
@@ -144,43 +124,28 @@ fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
     let th = std::thread::spawn(move || server.run(snap2, stop2));
 
     // The desk pulls over QUIC.
-    let mut b = join(&lab, "b", "desk", &key);
     let traffic_b = Arc::new(Traffic::new());
-    let node_b = node(&b, empty(), &traffic_b);
-    let (rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));
-    let _peers_a = Peers::build(
-        a.peer_key(),
-        a.device_id().clone(),
-        std::slice::from_ref(&rec_b),
-        &[],
-        Some(node_a.clone()),
-    );
-    let peers_b = Peers::build(
-        b.peer_key(),
-        b.device_id().clone(),
-        std::slice::from_ref(&rec_a),
-        &[],
-        Some(node_b.clone()),
-    );
+    let qb = node(&b, empty(), &traffic_b);
+    publish_quic(&a, &qa, true, false, &[]);
+    publish_quic(&b, &qb, true, false, &[]);
+    // The phone has no listener of its own; its record names its certificate.
+    common::p2p::publish(&c, 9);
+    let _peers_a = quic_table(&mut a, &qa);
+    let peers_b = quic_table(&mut b, &qb);
     assert!(Arc::ptr_eq(peers_b.traffic(), &traffic_b));
     b.set_peers(Some(Arc::new(peers_b)));
     let rep_b = b.pull("docs").unwrap();
     assert!(rep_b.files_unavailable.is_empty());
     assert!(rep_b.chunks_from_peers >= 2);
 
-    // The phone pulls over TCP only.
-    let mut c = join(&lab, "c", "phone", &key);
+    // The phone pulls over TCP only, from the laptop's TLS listener.
+    let mut body = a.peer_body(tcp_addr.port());
+    body.lan_addrs = vec![tcp_addr.ip()];
+    body.udp_local = Vec::new();
+    a.publish_peer_body(&mut body).unwrap();
     let traffic_c = Arc::new(Traffic::new());
-    let peers_c = Peers::new(
-        c.peer_key(),
-        c.device_id().clone(),
-        vec![p2p::PeerAddr {
-            device: a.device_id().clone(),
-            addr: tcp_addr,
-            name: "laptop".into(),
-        }],
-    )
-    .with_traffic(traffic_c.clone());
+    c.refresh_devices().unwrap();
+    let peers_c = c.p2p_peers_tcp().unwrap().with_traffic(traffic_c.clone());
     c.set_peers(Some(Arc::new(peers_c)));
     let rep_c = c.pull("docs").unwrap();
     assert!(rep_c.files_unavailable.is_empty());
@@ -203,7 +168,7 @@ fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
     assert_eq!((b_from_a.tx_total, b_from_a.objects_out), (0, 0));
     assert!(b_from_a.rx_total > 0);
     assert_eq!(b_from_a.path, "direct-lan");
-    assert_eq!(b_from_a.addr, Some(node_a.local_addr));
+    assert_eq!(b_from_a.addr, Some(qa.node.local_addr));
     // Speeds and the per-second history depend on timing (the current second
     // is not in the history yet, and the speed window may have passed on a
     // busy machine); the byte totals are exact.
@@ -217,7 +182,7 @@ fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
     assert_eq!(a_to_b.objects_out, b_from_a.objects_in);
     assert_eq!(a_to_b.rx_total, 0);
     assert_eq!(a_to_b.path, "direct-lan");
-    assert_eq!(a_to_b.addr, Some(node_b.local_addr));
+    assert_eq!(a_to_b.addr, Some(qb.node.local_addr));
 
     // TCP: the phone counted what the laptop's listener counted.
     let c_from_a = peer(&rc, a.device_id());
@@ -248,51 +213,35 @@ fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn relayed_transfer_is_counted_by_both_ends_and_the_relay() {
     let lab = lab();
     // B holds the data behind "NAT", R relays, A fetches.
-    let (b, key) = seed(&lab, "b", "nas");
+    let (mut b, key) = seed(&lab, "b", "nas");
+    let mut r = join(&lab, "r", "home-server", &key, &mut b);
+    let mut a = join(&lab, "a", "travel", &key, &mut b);
+    lose(&lab);
     let (traffic_a, traffic_b, traffic_r) = (
         Arc::new(Traffic::new()),
         Arc::new(Traffic::new()),
         Arc::new(Traffic::new()),
     );
-    let node_b = node(&b, served(&b), &traffic_b);
-    let r = join(&lab, "r", "home-server", &key);
-    let node_r = node(&r, empty(), &traffic_r);
-    let mut a = join(&lab, "a", "travel", &key);
-    let node_a = node(&a, empty(), &traffic_a);
+    let qb = node(&b, served(&b), &traffic_b);
+    let qr = node(&r, empty(), &traffic_r);
+    let qa = node(&a, empty(), &traffic_a);
 
-    let mut rec_b = record(&b, &node_b, false);
-    rec_b.relay_via = vec![r.device_id().clone()];
-    let mut rec_r = record(&r, &node_r, true);
-    rec_r.reachable = true;
-    let rec_a = record(&a, &node_a, false);
-    let _peers_r = Peers::build(
-        r.peer_key(),
-        r.device_id().clone(),
-        &[rec_a.clone(), rec_b.clone()],
-        &[],
-        Some(node_r.clone()),
-    );
-    let _peers_b = Peers::build(
-        b.peer_key(),
-        b.device_id().clone(),
-        &[rec_r.clone(), rec_a.clone()],
-        &[],
-        Some(node_b.clone()),
-    );
-    node_b
-        .register_with(r.device_id(), &[node_r.local_addr], &rec_r.cert_sha256)
+    publish_quic(&b, &qb, false, false, &[r.device_id().clone()]);
+    publish_quic(&r, &qr, true, true, &[]);
+    publish_quic(&a, &qa, false, false, &[]);
+    let _peers_r = quic_table(&mut r, &qr);
+    let _peers_b = quic_table(&mut b, &qb);
+    qb.node
+        .register_with(
+            r.device_id(),
+            &[qr.node.local_addr],
+            &qr.node.identity().sha256,
+        )
         .unwrap();
-    let peers_a = Peers::build(
-        a.peer_key(),
-        a.device_id().clone(),
-        &[rec_r.clone(), rec_b.clone()],
-        &[],
-        Some(node_a.clone()),
-    );
+    let peers_a = quic_table(&mut a, &qa);
     a.set_peers(Some(Arc::new(peers_a)));
     let rep = a.pull("docs").unwrap();
     assert!(rep.files_unavailable.is_empty());
@@ -304,7 +253,7 @@ fn relayed_transfer_is_counted_by_both_ends_and_the_relay() {
     let rr = traffic_r.report();
     let a_from_b = peer(&ra, b.device_id());
     assert_eq!(a_from_b.path, "relayed via home-server");
-    assert_eq!(a_from_b.addr, Some(node_r.local_addr));
+    assert_eq!(a_from_b.addr, Some(qr.node.local_addr));
     assert_eq!(a_from_b.objects_in, rep.chunks_from_peers);
     assert!(a_from_b.rx_total > 0);
 
@@ -312,7 +261,7 @@ fn relayed_transfer_is_counted_by_both_ends_and_the_relay() {
     let b_to_a = peer(&rb, a.device_id());
     assert_eq!(b_to_a.name, "travel");
     assert_eq!(b_to_a.path, "relayed via home-server");
-    assert_eq!(b_to_a.addr, Some(node_r.local_addr));
+    assert_eq!(b_to_a.addr, Some(qr.node.local_addr));
     assert_eq!(b_to_a.tx_total, a_from_b.rx_total);
     assert_eq!(b_to_a.objects_out, a_from_b.objects_in);
 
@@ -335,7 +284,6 @@ fn relayed_transfer_is_counted_by_both_ends_and_the_relay() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn many_blocks_and_small_files_share_one_quic_connection() {
     // A large file (many blocks in flight at once) and many small files
     // (fetched ahead across files) all travel over one QUIC connection. The
@@ -357,28 +305,18 @@ fn many_blocks_and_small_files_share_one_quic_connection() {
         fs::write(lab.dir("a").join(format!("small-{i:02}.bin")), body).unwrap();
     }
     a.push("docs").unwrap();
-    common::lose_all_objects(&lab.root.join("storage"));
+    let mut b = join(&lab, "b", "desk", &key, &mut a);
+    lose(&lab);
 
     let traffic_a = Arc::new(Traffic::new());
-    let node_a = node(&a, served(&a), &traffic_a);
-    let mut b = join(&lab, "b", "desk", &key);
+    let qa = node(&a, served(&a), &traffic_a);
     let traffic_b = Arc::new(Traffic::new());
-    let node_b = node(&b, empty(), &traffic_b);
-    let (rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));
-    let _peers_a = Peers::build(
-        a.peer_key(),
-        a.device_id().clone(),
-        std::slice::from_ref(&rec_b),
-        &[],
-        Some(node_a.clone()),
-    );
-    b.set_peers(Some(Arc::new(Peers::build(
-        b.peer_key(),
-        b.device_id().clone(),
-        std::slice::from_ref(&rec_a),
-        &[],
-        Some(node_b.clone()),
-    ))));
+    let qb = node(&b, empty(), &traffic_b);
+    publish_quic(&a, &qa, true, false, &[]);
+    publish_quic(&b, &qb, true, false, &[]);
+    let _peers_a = quic_table(&mut a, &qa);
+    let peers_b = quic_table(&mut b, &qb);
+    b.set_peers(Some(Arc::new(peers_b)));
     let rep = b.pull("docs").unwrap();
     assert!(
         rep.files_unavailable.is_empty(),
@@ -397,7 +335,7 @@ fn many_blocks_and_small_files_share_one_quic_connection() {
         );
     }
     // Every request in flight shared the one connection.
-    assert_eq!(node_b.connections_opened(), 1);
+    assert_eq!(qb.node.connections_opened(), 1);
 
     // Both ends counted the same objects and bytes.
     let rb = settle(&traffic_b, |r| r.totals.active == 0);

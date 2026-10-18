@@ -184,7 +184,6 @@ fn snapshot(me: &Dev) -> Snapshot {
     Snapshot {
         vault_id: crate::ids::VaultId::from_bytes(&VAULT),
         device_id: me.device(),
-        peer_key: SecretKey::random(),
         folder_keys: BTreeMap::new(),
         pieces: BTreeMap::new(),
         local_roots: Vec::new(),
@@ -192,6 +191,7 @@ fn snapshot(me: &Dev) -> Snapshot {
         revoked: Default::default(),
         activity_audience: None,
         heads: Vec::new(),
+        ledger_dir: None,
     }
 }
 
@@ -429,9 +429,11 @@ impl Drop for TcpServer {
 }
 
 fn tls_server(me: &Dev, r: Arc<Responder>) -> TcpServer {
-    let server = Server::bind("127.0.0.1:0".parse().unwrap())
-        .unwrap()
-        .with_tls(tls::TcpTls::new(&me.tls, r).unwrap());
+    let server = Server::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        tls::TcpTls::new(&me.tls, r).unwrap(),
+    )
+    .unwrap();
     let addr = server.addr;
     let snap = Arc::new(Mutex::new(Some(Arc::new(snapshot(me)))));
     let stop = Arc::new(AtomicBool::new(false));
@@ -462,6 +464,71 @@ fn tls_admits_only_certificates_named_by_an_accepted_peer_record() {
     // A server that is not the pinned one is not talked to.
     let got = client_b.tcp_get(srv.addr, &c.tls.sha256, &a.device(), "/p2p/info", t);
     assert!(got.is_err());
+}
+
+#[test]
+fn an_unknown_certificate_asks_for_the_records_to_be_read_again() {
+    let (a, b, c) = (Dev::new(1), Dev::new(2), Dev::new(3));
+    let r = responder_for(&a, &[&b]);
+    let srv = tls_server(&a, r.clone());
+    let t = Duration::from_secs(3);
+    assert!(!r.take_unknown());
+    // A device of the directory knocks: nothing to read again.
+    Client::new(b.device(), b.tls.clone())
+        .tcp_get(srv.addr, &a.tls.sha256, &a.device(), "/p2p/info", t)
+        .unwrap();
+    assert!(!r.take_unknown());
+    // C published its record after A's last read: its knock is noted once.
+    let got = Client::new(c.device(), c.tls.clone()).tcp_get(
+        srv.addr,
+        &a.tls.sha256,
+        &a.device(),
+        "/p2p/info",
+        t,
+    );
+    assert!(!matches!(got, Ok((200, _))));
+    assert!(r.take_unknown());
+    assert!(!r.take_unknown());
+    // The asking side rests only briefly after such a refusal.
+    let e = format!("{:#}", got.err().unwrap());
+    assert!(crate::p2p::refused_us(&e), "{e}");
+}
+
+#[test]
+fn a_connection_that_never_finishes_its_handshake_is_closed_at_the_deadline() {
+    use std::io::{Read, Write};
+    let (a, b) = (Dev::new(1), Dev::new(2));
+    let srv = tls_server(&a, responder_for(&a, &[&b]));
+    let mut buf = [0u8; 8];
+    // A connection that never sends a byte, and one that trickles the
+    // start of a handshake, are both closed at the handshake deadline.
+    let mut mute = std::net::TcpStream::connect(srv.addr).unwrap();
+    let mut trickle = std::net::TcpStream::connect(srv.addr).unwrap();
+    trickle.write_all(&[0x16, 0x03, 0x01]).unwrap();
+    for s in [&mut mute, &mut trickle] {
+        s.set_read_timeout(Some(tls::HANDSHAKE_DEADLINE + Duration::from_secs(4)))
+            .unwrap();
+    }
+    let started = std::time::Instant::now();
+    assert_eq!(mute.read(&mut buf).unwrap_or(0), 0);
+    let _ = trickle.read(&mut buf);
+    assert!(
+        started.elapsed() < tls::HANDSHAKE_DEADLINE + Duration::from_secs(3),
+        "closed after {:?}",
+        started.elapsed()
+    );
+    // Meanwhile a device of the directory is served as usual.
+    let client = Client::new(b.device(), b.tls.clone());
+    let (s, _) = client
+        .tcp_get(
+            srv.addr,
+            &a.tls.sha256,
+            &a.device(),
+            "/p2p/info",
+            Duration::from_secs(3),
+        )
+        .unwrap();
+    assert_eq!(s, 200);
 }
 
 #[test]

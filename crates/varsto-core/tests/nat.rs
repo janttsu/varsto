@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! NAT traversal pieces on localhost: QUIC transfer between two devices with
-//! pinned certificates, rejection of a device whose certificate the server
-//! does not know, and a relayed fetch A -> R -> B where B registers with R.
-//! No real NAT is involved; the traversal logic (STUN, punching) is covered
-//! by unit tests and by hand on the maintainer's own networks.
+//! certificates pinned from their signed peer records, rejection of a device
+//! whose certificate no accepted record names, and a relayed fetch A -> R ->
+//! B where B registers with R. No real NAT is involved; the traversal logic
+//! (STUN, punching) is covered by unit tests and by hand on the maintainer's
+//! own networks.
 
 mod common;
 
+use common::p2p::{empty, publish_quic, quic_node, quic_table, served};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::ids::DeviceId;
-use varsto_core::p2p::{self, quic, PeerRecord, Peers};
+use varsto_core::p2p;
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
@@ -50,8 +52,8 @@ impl Lab {
     }
 }
 
-/// The first device: holds the files, pushes them, then the storage loses
-/// every chunk so that only peers can supply them.
+/// The first device: holds the files and pushes them; `lose` empties the
+/// storage of every block afterwards, so that only peers can supply them.
 fn seed(lab: &Lab, who: &str) -> (Engine, String, Vec<u8>) {
     let (mut a, key) = Engine::init(&lab.home(who), "laptop", PASS).unwrap();
     a.chunker = ChunkerParams::SMALL;
@@ -61,79 +63,47 @@ fn seed(lab: &Lab, who: &str) -> (Engine, String, Vec<u8>) {
     fs::write(lab.dir(who).join("big.bin"), &big).unwrap();
     fs::write(lab.dir(who).join("note.txt"), b"over quic").unwrap();
     a.push("docs").unwrap();
-    common::lose_all_objects(&lab.root.join("storage"));
     (a, key, big)
 }
 
-fn join(lab: &Lab, who: &str, name: &str, key: &str) -> Engine {
-    let mut e = Engine::join(&lab.home(who), name, PASS, key, lab.storage.clone()).unwrap();
+fn lose(lab: &Lab) {
+    common::lose_all_objects(&lab.root.join("storage"));
+}
+
+/// A device that joined and was given the folder by `owner`.
+fn join(lab: &Lab, who: &str, name: &str, key: &str, owner: &mut Engine) -> Engine {
+    let mut e = common::join_approved(&lab.home(who), name, PASS, key, lab.storage.clone(), owner);
     e.chunker = ChunkerParams::SMALL;
     e.attach_folder("docs", &lab.dir(who), false).unwrap();
     e
 }
 
-type Snap = Arc<Mutex<Option<Arc<p2p::Snapshot>>>>;
-
-/// A QUIC node for `e` on a loopback port of its own, serving `snap`.
-fn node(e: &Engine, snap: Snap) -> Arc<quic::Node> {
-    quic::Node::start(
-        "127.0.0.1:0".parse().unwrap(),
-        e.p2p_identity().unwrap(),
-        e.device_id().clone(),
-        e.peer_key(),
-        snap,
-        Arc::default(),
-    )
-    .unwrap()
-}
-
-/// The record `e` would publish, with its node's loopback address as the
-/// only UDP address (or none at all, for a device "behind NAT").
-fn record(e: &Engine, n: &quic::Node, direct: bool) -> PeerRecord {
-    let mut rec = e.peer_record_template(n.local_addr.port());
-    rec.lan_addrs.clear();
-    rec.udp_local = if direct { vec![n.local_addr] } else { vec![] };
-    rec.cert_sha256 = n.identity().sha256.clone();
-    rec
-}
-
-fn empty() -> Snap {
-    Arc::new(Mutex::new(None))
-}
-
 #[test]
-#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn quic_direct_transfer_with_pinned_certificates() {
     let lab = lab();
-    let (a, key, big) = seed(&lab, "a");
-    let snap_a: Snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
-    let node_a = node(&a, snap_a);
-    let mut b = join(&lab, "b", "desk", &key);
-    let node_b = node(&b, empty());
-    let (rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));
-    assert_eq!(rec_a.version, PeerRecord::VERSION);
-    assert_eq!(rec_a.cert_sha256.len(), 64);
+    let (mut a, key, big) = seed(&lab, "a");
+    let mut b = join(&lab, "b", "desk", &key, &mut a);
+    let c = join(&lab, "c", "phone", &key, &mut a);
+    lose(&lab);
+    let qa = quic_node(&a, served(&a), Arc::default());
+    let qb = quic_node(&b, empty(), Arc::default());
+    let qc = quic_node(&c, empty(), Arc::default());
+    // A and B publish their records; C does not.
+    publish_quic(&a, &qa, true, false, &[]);
+    publish_quic(&b, &qb, true, false, &[]);
 
-    // Each side learns the other's record, as the services do from the storage.
-    let _peers_a = Peers::build(
-        a.peer_key(),
-        a.device_id().clone(),
-        std::slice::from_ref(&rec_b),
-        &[],
-        Some(node_a.clone()),
-    );
-    let peers_b = Arc::new(Peers::build(
-        b.peer_key(),
-        b.device_id().clone(),
-        std::slice::from_ref(&rec_a),
-        &[],
-        Some(node_b.clone()),
-    ));
+    // Each side reads the other's record from the storage, as the services do.
+    let _peers_a = quic_table(&mut a, &qa);
+    let peers_b = Arc::new(quic_table(&mut b, &qb));
+    assert_eq!(peers_b.status().len(), 1);
     assert_eq!(peers_b.status()[0].path, "untried");
     b.set_peers(Some(peers_b.clone()));
     let r = b.pull("docs").unwrap();
     assert!(r.files_unavailable.is_empty(), "{:?}", r.files_unavailable);
     assert!(r.chunks_from_peers >= 2, "{}", r.chunks_from_peers);
+    // Every block came from the laptop: the bytes say so too.
+    assert_eq!(r.bytes_from_peers, r.bytes_downloaded, "{r:?}");
+    assert!(r.bytes_from_peers >= 200_000, "{r:?}");
     assert_eq!(fs::read(lab.dir("b").join("big.bin")).unwrap(), big);
     assert_eq!(
         fs::read(lab.dir("b").join("note.txt")).unwrap(),
@@ -142,98 +112,77 @@ fn quic_direct_transfer_with_pinned_certificates() {
     let st = &peers_b.status()[0];
     assert_eq!(st.path, "direct-lan", "{st:?}"); // loopback counts as LAN
     assert!(st.ok);
-    assert_eq!(st.addr, Some(node_a.local_addr));
+    assert_eq!(st.addr, Some(qa.node.local_addr));
 
-    // A third vault device whose certificate the laptop has never seen in a
-    // record cannot complete the handshake, even with the right token.
-    let c = join(&lab, "c", "phone", &key);
-    let node_c = node(&c, empty());
-    let peers_c = Peers::build(
-        c.peer_key(),
-        c.device_id().clone(),
-        std::slice::from_ref(&rec_a),
-        &[],
-        Some(node_c.clone()),
-    );
+    // A third vault device whose certificate no record names (it published
+    // none) cannot complete the handshake with the laptop.
+    let mut c = c;
+    let peers_c = quic_table(&mut c, &qc);
     let name = varsto_core::ids::ObjectName::from_bytes(&[0u8; 32]);
     assert!(peers_c.get(&name).is_none());
-    assert_eq!(peers_c.status()[0].path, "unreachable");
+    let st = peers_c
+        .status()
+        .into_iter()
+        .find(|s| &s.device == a.device_id())
+        .unwrap();
+    assert_eq!(st.path, "unreachable", "{st:?}");
 
-    // A record that announces the wrong certificate for the laptop makes the
-    // desk refuse the laptop's real certificate.
-    let mut forged = rec_a.clone();
-    forged.cert_sha256 = node_c.identity().sha256.clone();
-    let suspicious = Peers::build(
-        b.peer_key(),
-        b.device_id().clone(),
-        &[forged],
-        &[],
-        Some(node_b.clone()),
+    // The token is checked behind the certificate: one made for another
+    // responder is refused on the desk's open connection.
+    let path = "/p2p/info";
+    let (status, _) = qb
+        .node
+        .request_with(
+            qa.node.local_addr,
+            &qa.node.identity().sha256,
+            path,
+            false,
+            &|e| qb.client.token(e, c.device_id(), path),
+        )
+        .unwrap();
+    assert_eq!(status, 403);
+    // A request pinned to another certificate than the laptop's is not
+    // talked to: the desk pins what the laptop's signed record says.
+    let got = qb.node.request_with(
+        qa.node.local_addr,
+        &qc.node.identity().sha256,
+        path,
+        false,
+        &|e| qb.client.token(e, a.device_id(), path),
     );
-    assert!(suspicious.probe().iter().all(|s| !s.ok));
-
-    // The request token is still checked behind the certificates.
-    let stranger = Peers::build(
-        varsto_core::crypto::SecretKey::random(),
-        b.device_id().clone(),
-        std::slice::from_ref(&rec_a),
-        &[],
-        Some(node_b.clone()),
-    );
-    assert!(stranger.get(&name).is_none());
-    // The handshake succeeded (the path is known) but every answer is 403:
-    // the second layer doing its job.
-    let st = stranger.probe();
-    assert!(st.iter().all(|s| !s.ok && s.path == "direct-lan"), "{st:?}");
+    assert!(got.is_err(), "{got:?}");
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn relayed_fetch_through_a_reachable_device() {
     let lab = lab();
     // B holds the data, R is reachable and relays, A fetches.
-    let (b, key, big) = seed(&lab, "b");
-    let snap_b: Snap = Arc::new(Mutex::new(Some(Arc::new(b.peer_snapshot().unwrap()))));
-    let node_b = node(&b, snap_b);
-    let mut r = join(&lab, "r", "home-server", &key);
-    let node_r = node(&r, empty());
-    let mut a = join(&lab, "a", "travel", &key);
-    let node_a = node(&a, empty());
+    let (mut b, key, big) = seed(&lab, "b");
+    let mut r = join(&lab, "r", "home-server", &key, &mut b);
+    let mut a = join(&lab, "a", "travel", &key, &mut b);
+    let x = Engine::join(&lab.home("x"), "stray", PASS, &key, lab.storage.clone()).unwrap();
+    lose(&lab);
+    let qb = quic_node(&b, served(&b), Arc::default());
+    let qr = quic_node(&r, empty(), Arc::default());
+    let qa = quic_node(&a, empty(), Arc::default());
+    let qx = quic_node(&x, empty(), Arc::default());
 
-    let mut rec_b = record(&b, &node_b, false); // behind NAT: no direct address
-    rec_b.relay_via = vec![r.device_id().clone()];
-    let mut rec_r = record(&r, &node_r, true);
-    rec_r.reachable = true;
-    let rec_a = record(&a, &node_a, false);
+    // B is behind NAT (no direct address) and relays through R.
+    publish_quic(&b, &qb, false, false, &[r.device_id().clone()]);
+    publish_quic(&r, &qr, true, true, &[]);
+    publish_quic(&a, &qa, false, false, &[]);
 
-    // R knows both; B knows R; A knows R and B.
-    let peers_r = Arc::new(Peers::build(
-        r.peer_key(),
-        r.device_id().clone(),
-        &[rec_a.clone(), rec_b.clone()],
-        &[],
-        Some(node_r.clone()),
-    ));
-    let _peers_b = Peers::build(
-        b.peer_key(),
-        b.device_id().clone(),
-        std::slice::from_ref(&rec_r),
-        &[],
-        Some(node_b.clone()),
-    );
-    node_b
-        .register_with(r.device_id(), &[node_r.local_addr], &rec_r.cert_sha256)
+    // Every device reads the records.
+    let peers_r = Arc::new(quic_table(&mut r, &qr));
+    let _peers_b = quic_table(&mut b, &qb);
+    let r_cert = qr.node.identity().sha256.clone();
+    qb.node
+        .register_with(r.device_id(), &[qr.node.local_addr], &r_cert)
         .unwrap();
-    assert_eq!(node_r.registrants(), vec![b.device_id().clone()]);
-    assert_eq!(node_b.registered_relays(), vec![r.device_id().clone()]);
+    assert_eq!(qr.node.registrants(), vec![b.device_id().clone()]);
+    assert_eq!(qb.node.registered_relays(), vec![r.device_id().clone()]);
 
-    let peers_a = Arc::new(Peers::build(
-        a.peer_key(),
-        a.device_id().clone(),
-        &[rec_r.clone(), rec_b.clone()],
-        &[],
-        Some(node_a.clone()),
-    ));
+    let peers_a = Arc::new(quic_table(&mut a, &qa));
     a.set_peers(Some(peers_a.clone()));
     let rep = a.pull("docs").unwrap();
     assert!(
@@ -246,7 +195,7 @@ fn relayed_fetch_through_a_reachable_device() {
     let st: Vec<p2p::PeerStatus> = peers_a.status();
     let b_st = st.iter().find(|s| &s.device == b.device_id()).unwrap();
     assert_eq!(b_st.path, "relayed via home-server", "{b_st:?}");
-    assert_eq!(b_st.addr, Some(node_r.local_addr));
+    assert_eq!(b_st.addr, Some(qr.node.local_addr));
 
     // The relay itself fetches from B: B has no address R could dial (as
     // behind a symmetric NAT), so the only way is B's registration with R.
@@ -262,34 +211,25 @@ fn relayed_fetch_through_a_reachable_device() {
     let st = peers_r.status();
     let b_st = st.iter().find(|s| &s.device == b.device_id()).unwrap();
     assert!(b_st.ok && b_st.path == "direct-lan", "{b_st:?}");
-    assert_eq!(b_st.addr, Some(node_b.local_addr));
+    assert_eq!(b_st.addr, Some(qb.node.local_addr));
 
-    // A device whose certificate differs from what R's record for it says
-    // cannot register as that device.
-    let mut wrong = rec_a.clone();
-    wrong.cert_sha256 = node_b.identity().sha256.clone();
-    let _ = Peers::build(
-        r.peer_key(),
-        r.device_id().clone(),
-        &[wrong, rec_b.clone()],
-        &[],
-        Some(node_r.clone()),
-    );
-    let err = node_a
-        .register_with(r.device_id(), &[node_r.local_addr], &rec_r.cert_sha256)
-        .unwrap_err()
-        .to_string();
-    assert!(
-        err.contains("relay refused") || err.contains("quic"),
-        "{err}"
-    );
+    // A device of the vault whose certificate no accepted record names
+    // cannot register with the relay at all.
+    // (TLS 1.3: the client learns it when the connection is closed on it.)
+    let got = qx
+        .node
+        .register_with(r.device_id(), &[qr.node.local_addr], &r_cert);
+    assert!(got.is_err());
+    assert!(!qr.node.registrants().contains(x.device_id()));
 
     // Nobody registered under an unknown device: the relay says so.
     let ghost = DeviceId::from_bytes(&[7u8; 16]);
     let path = format!("/p2p/via/{ghost}/p2p/info");
-    let auth = p2p::auth_header(&a.peer_key(), a.device_id(), "/p2p/info");
-    let (status, _) = node_a
-        .request(node_r.local_addr, &rec_r.cert_sha256, &path, &auth, false)
+    let (status, _) = qa
+        .node
+        .request_with(qr.node.local_addr, &r_cert, &path, false, &|e| {
+            qa.client.token(e, r.device_id(), &path)
+        })
         .unwrap();
     assert_eq!(status, 502);
 }
@@ -301,37 +241,38 @@ fn relayed_fetch_through_a_reachable_device() {
 /// would leave as 127.0.0.1.
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn wildcard_server_answers_from_the_address_it_was_reached_at() {
     let lab = lab();
-    let (a, key, _big) = seed(&lab, "a");
-    let snap_a: Snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
-    let node_a = quic::Node::start(
+    let (mut a, key, _big) = seed(&lab, "a");
+    let mut b = join(&lab, "b", "desk", &key, &mut a);
+    let identity = a.p2p_identity().unwrap();
+    let responder = a.p2p_responder(&identity);
+    let node_a = p2p::quic::Node::start_v3(
         "0.0.0.0:0".parse().unwrap(),
-        a.p2p_identity().unwrap(),
-        a.device_id().clone(),
-        a.peer_key(),
-        snap_a,
+        identity.clone(),
+        responder.clone(),
+        served(&a),
         Arc::default(),
     )
     .unwrap();
-    let b = join(&lab, "b", "desk", &key);
-    let node_b = node(&b, empty());
-    let (mut rec_a, rec_b) = (record(&a, &node_a, true), record(&b, &node_b, true));
+    let qb = quic_node(&b, empty(), Arc::default());
+    publish_quic(&b, &qb, true, false, &[]);
+    let qa = common::p2p::QuicDev {
+        node: node_a.clone(),
+        responder,
+        client: a.p2p_client(identity.clone()),
+    };
+    let _peers_a = quic_table(&mut a, &qa);
+    let _peers_b = quic_table(&mut b, &qb);
     let second: std::net::SocketAddr = format!("127.0.0.2:{}", node_a.local_addr.port())
         .parse()
         .unwrap();
-    rec_a.udp_local = vec![second];
-    let _peers_a = Peers::build(
-        a.peer_key(),
-        a.device_id().clone(),
-        std::slice::from_ref(&rec_b),
-        &[],
-        Some(node_a.clone()),
-    );
-    let auth = p2p::auth_header(&b.peer_key(), b.device_id(), "/p2p/info");
-    let (status, _) = node_b
-        .request(second, &rec_a.cert_sha256, "/p2p/info", &auth, false)
+    let path = "/p2p/info";
+    let (status, _) = qb
+        .node
+        .request_with(second, &identity.sha256, path, false, &|e| {
+            qb.client.token(e, a.device_id(), path)
+        })
         .unwrap();
     assert_eq!(status, 200);
 }
@@ -339,63 +280,56 @@ fn wildcard_server_answers_from_the_address_it_was_reached_at() {
 #[test]
 fn a_device_is_never_its_own_peer() {
     let lab = lab();
-    let (a, _key, _big) = seed(&lab, "a");
-    let snap_a: Snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
-    let node_a = node(&a, snap_a.clone());
+    let (mut a, key, _big) = seed(&lab, "a");
+    let qa = quic_node(&a, served(&a), Arc::default());
     let traffic: Arc<p2p::traffic::Traffic> = Arc::default();
     traffic.set_me(a.device_id(), a.own_device_name());
 
     // A TCP listener of A's own, as the service runs.
-    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap())
+    let tls = p2p::v3::tls::TcpTls::new(qa.node.identity(), qa.responder.clone()).unwrap();
+    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap(), tls)
         .unwrap()
         .with_traffic(traffic.clone());
     let port = server.addr.port();
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let (s2, st2) = (snap_a.clone(), stop.clone());
+    let (s2, st2) = (served(&a), stop.clone());
     let th = std::thread::spawn(move || server.run(s2, st2));
 
-    // 1. The table never lists the own device id, nor an old id of this
-    // install that still carries the own certificate.
-    let mut own = record(&a, &node_a, true);
-    let mut old_id = own.clone();
-    old_id.device = DeviceId::from_bytes(&[9u8; 16]);
-    assert!(Peers::build(
-        a.peer_key(),
-        a.device_id().clone(),
-        &[own.clone(), old_id],
-        &[],
-        Some(node_a.clone()),
-    )
-    .peers
-    .is_empty());
+    // 1. The directory never lists the own device, even with its record
+    // on the storage.
+    publish_quic(&a, &qa, true, false, &[]);
+    assert!(quic_table(&mut a, &qa).peers.is_empty());
 
     // 2. A handshake with the own certificate is refused outright.
-    let err = node_a
-        .request(
-            node_a.local_addr,
-            &node_a.identity().sha256,
-            "/p2p/info",
-            &p2p::auth_header(&a.peer_key(), a.device_id(), "/p2p/info"),
+    let path = "/p2p/info";
+    let err = qa
+        .node
+        .request_with(
+            qa.node.local_addr,
+            &qa.node.identity().sha256,
+            path,
             false,
+            &|_| String::new(),
         )
         .unwrap_err();
     assert!(format!("{err:#}").contains("own"), "{err:#}");
 
-    // 3. Another device's record that lists an address of A itself (no
-    // certificate to compare): the first request is answered "self", the
-    // address is remembered, no traffic is counted for anybody, and the
-    // address is not tried again.
-    own.device = DeviceId::from_bytes(&[7u8; 16]);
-    own.cert_sha256 = String::new();
-    own.port = port;
-    own.lan_addrs = vec!["127.0.0.1".parse().unwrap()];
-    let peers = Peers::build(a.peer_key(), a.device_id().clone(), &[own], &[], None)
-        .with_traffic(traffic.clone());
-    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-    assert!(!peers.is_self_addr(addr));
+    // 3. Another device's record that lists an address of A itself: the
+    // handshake pins that device's certificate, A presents its own, and
+    // nothing is answered or counted for anybody.
+    let d = Engine::join(&lab.home("d"), "desk", PASS, &key, lab.storage.clone()).unwrap();
+    d.p2p_identity().unwrap();
+    let mut body = d.peer_body(port);
+    body.lan_addrs = vec!["127.0.0.1".parse().unwrap()];
+    body.udp_local = Vec::new();
+    d.publish_peer_body(&mut body).unwrap();
+    a.refresh_devices().unwrap();
+    let dir = a.peer_directory().unwrap();
+    assert_eq!(dir.infos().len(), 1);
+    let peers =
+        p2p::Peers::build_v3(qa.client.clone(), &dir, &[], None).with_traffic(traffic.clone());
     let st = peers.probe();
     assert!(st.iter().all(|s| !s.ok), "{st:?}");
-    assert!(peers.is_self_addr(addr));
     let r = traffic.report();
     assert!(
         r.peers.iter().all(|p| p.rx_total == 0 && p.tx_total == 0),

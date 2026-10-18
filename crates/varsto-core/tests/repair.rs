@@ -9,11 +9,9 @@ mod common;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::engine::{DamageKind, RepairOptions};
-use varsto_core::p2p;
 use varsto_core::storage::{StorageCalls, StorageSpec};
 use varsto_core::Engine;
 
@@ -246,25 +244,11 @@ fn missing_copy_is_rewritten_from_a_peer() {
     let r = b.repair(&RepairOptions::manual()).unwrap();
     assert_eq!(r.unrepairable.len(), n, "{r:?}");
 
-    // The laptop serves its blocks over TCP.
-    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let addr = server.addr;
-    let snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop2 = stop.clone();
-    let th = std::thread::spawn(move || server.run(snap, stop2));
-    b.set_peers(Some(Arc::new(p2p::Peers::new(
-        b.peer_key(),
-        b.device_id().clone(),
-        vec![p2p::PeerAddr {
-            device: a.device_id().clone(),
-            addr,
-            name: "laptop".into(),
-        }],
-    ))));
+    // The laptop serves its blocks over TLS on TCP.
+    let serving = common::p2p::Serving::start(&mut a);
+    common::p2p::connect(&mut a, &serving, &mut [&mut b]);
     let r = b.repair(&RepairOptions::manual()).unwrap();
-    stop.store(true, std::sync::atomic::Ordering::SeqCst);
-    let _ = th.join();
+    drop(serving);
     assert_eq!(r.repaired.len(), n, "{r:?}");
     assert!(
         r.repaired.iter().all(|c| c.source.starts_with("peer ")),

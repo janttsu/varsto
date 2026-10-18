@@ -12,13 +12,9 @@ mod common;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::engine::{JobRunLimits, MailboxOptions, MoveJobRequest};
 use varsto_core::mailbox::MailboxSettings;
-use varsto_core::p2p;
 use varsto_core::placement::Placement;
 use varsto_core::policy::{Policy, PolicyState};
 use varsto_core::pool::{self, DiskSpace};
@@ -676,44 +672,11 @@ fn two_dock_hosts_stage_each_block_once() {
     assert_eq!(r.busy.as_deref(), Some("dock-1"), "{r:?}");
 }
 
-/// `from` serves its blocks (and its outbox) over TCP to `to`.
-struct Served {
-    stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl Drop for Served {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-    }
-}
-
-fn serve(from: &Engine, name: &str, to: &mut Engine) -> Served {
-    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let addr = server.addr;
-    let snap = Arc::new(Mutex::new(Some(Arc::new(from.peer_snapshot().unwrap()))));
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop2 = stop.clone();
-    let thread = std::thread::spawn(move || {
-        server.run(snap, stop2);
-    });
-    let peers = p2p::Peers::new(
-        to.peer_key(),
-        to.device_id().clone(),
-        vec![p2p::PeerAddr {
-            device: from.device_id().clone(),
-            addr,
-            name: name.into(),
-        }],
-    );
-    to.set_peers(Some(Arc::new(peers)));
-    Served {
-        stop,
-        thread: Some(thread),
-    }
+/// `from` serves its blocks (and its outbox) over TLS on TCP to `to`.
+fn serve(from: &mut Engine, _name: &str, to: &mut Engine) -> common::p2p::Serving {
+    let serving = common::p2p::Serving::start(from);
+    common::p2p::connect(from, &serving, &mut [to]);
+    serving
 }
 
 #[test]
@@ -795,7 +758,7 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     );
 
     // dock-1 is online: dock-2 takes the staged blocks from its outbox.
-    let served = serve(&x, "dock-1", &mut z);
+    let served = serve(&mut x, "dock-1", &mut z);
     let r = run(&mut z);
     assert_eq!(r.pulled_from_peers as usize, blocks, "{r:?}");
     assert_eq!(r.delivered_to.get("off-pool"), Some(&(blocks as u64)));
