@@ -73,7 +73,6 @@ impl Drop for Kill {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (sharing: member folder-scoped batches)"]
 fn a_share_with_qr_links_and_the_service_endpoints() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -94,8 +93,8 @@ fn a_share_with_qr_links_and_the_service_endpoints() {
     std::fs::write(docs.join("a.txt"), b"by qr").unwrap();
     ok(root, &owner, &["push", "docs"]);
 
-    // Robin's request as a link; the owner seals to the link and answers
-    // with the token's link; Robin accepts the link.
+    // Robin's request as a link; the owner shares to the link and tells
+    // its device's six words; Robin accepts through the storage.
     let req = ok(root, &robin, &["share", "request", "--name", "Robin"]);
     let qr = ok(
         root,
@@ -118,14 +117,10 @@ fn a_share_with_qr_links_and_the_service_endpoints() {
             req["fingerprint"].as_str().unwrap(),
         ],
     );
-    let tq = ok(
-        root,
-        &owner,
-        &["share", "qr", made["token"].as_str().unwrap()],
-    );
-    let token_uri = tq["uris"][0].as_str().unwrap().to_string();
-    assert!(token_uri.starts_with("varsto://share/token?t="));
-    let parts = ok(root, &owner, &["share", "qr", "--parts", &token_uri]);
+    assert_eq!(made["fingerprint"], req["fingerprint"]);
+    let owner_words = made["owner_fingerprint"].as_str().unwrap().to_string();
+    assert_eq!(owner_words.split(' ').count(), 6);
+    let parts = ok(root, &robin, &["share", "qr", "--parts", &req_uri]);
     assert!(parts["uris"].as_array().unwrap().len() > 1);
     ok(
         root,
@@ -133,28 +128,37 @@ fn a_share_with_qr_links_and_the_service_endpoints() {
         &[
             "share",
             "accept",
-            &token_uri,
+            "--owner-words",
+            &owner_words,
             "--name",
             "robin",
             "--storage-path",
             storage.to_str().unwrap(),
         ],
     );
-    // A plain token never becomes a QR code.
+    let robin_docs = root.join("robin-docs");
+    ok(
+        root,
+        &robin,
+        &["folder", "attach", "docs", robin_docs.to_str().unwrap()],
+    );
+    ok(root, &robin, &["sync"]);
+    assert_eq!(std::fs::read(robin_docs.join("a.txt")).unwrap(), b"by qr");
+    // Share tokens are gone: their text forms are refused with a reason.
     let out = varsto(root, &owner)
         .args(["share", "qr", "00aa.11bb.22cc33dd.docs"])
         .output()
         .unwrap();
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("folder key"));
-    // The terminal code.
+    assert!(String::from_utf8_lossy(&out.stderr).contains("tokens are gone"));
+    // The terminal code (a pairing code fits one).
     let out = varsto(root, &owner)
-        .args(["share", "qr", &token_uri])
+        .args(["share", "qr", "123-456-789"])
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains('█') && text.contains("Sealed share token for docs"),
+        text.contains('█') && text.contains("Pairing code"),
         "{text}"
     );
 
@@ -188,10 +192,8 @@ fn a_share_with_qr_links_and_the_service_endpoints() {
     assert_eq!(v["kind"], "request", "{v}");
     assert_eq!(v["fingerprint"], req["fingerprint"]);
     assert!(v["codes"][0]["svg"].as_str().unwrap().contains("<svg"));
-    let body = serde_json::json!({"text": token_uri, "parts": true}).to_string();
-    let (_, v) = call(port, &token, "POST", "/api/qr", body.as_bytes());
-    let n = v["codes"].as_array().unwrap().len();
-    assert!(n > 1);
+    // A request code needs several codes.
+    assert!(v["codes"].as_array().unwrap().len() > 1);
     let part_uris: Vec<String> = parts["uris"]
         .as_array()
         .unwrap()
@@ -203,10 +205,10 @@ fn a_share_with_qr_links_and_the_service_endpoints() {
     assert_eq!(v["count"], part_uris.len());
     let body = serde_json::json!({"texts": part_uris}).to_string();
     let (_, v) = call(port, &token, "POST", "/api/link/parse", body.as_bytes());
-    assert_eq!(v["kind"], "token");
-    assert_eq!(v["folder"], "docs");
-    // A grey camera frame with the request code in it.
-    let (side, px) = varsto_core::qr::to_luma(&req_uri, 2).unwrap();
+    assert_eq!(v["kind"], "request");
+    assert_eq!(v["fingerprint"], req["fingerprint"]);
+    // A grey camera frame with a part of the request code in it.
+    let (side, px) = varsto_core::qr::to_luma(&part_uris[0], 2).unwrap();
     let (st, v) = call(
         port,
         &token,
@@ -215,7 +217,7 @@ fn a_share_with_qr_links_and_the_service_endpoints() {
         &px,
     );
     assert_eq!(st, 200, "{v}");
-    assert_eq!(v["texts"][0], req_uri.as_str());
+    assert_eq!(v["texts"][0], part_uris[0].as_str());
     let (st, _) = call(port, &token, "POST", "/api/qr/scan?w=0&h=5", b"");
     assert_eq!(st, 400);
     // `varsto open-link`: the service keeps the link until the page takes it.

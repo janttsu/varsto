@@ -48,385 +48,115 @@ pub struct LocalVault {
     pub member: bool,
 }
 
-/// Token the owner gives to another Varsto user to share one folder (F-047):
-/// `<vault-id>.<folder-id>.<folder-key-hex>.<name>`.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct ShareToken {
-    pub vault_id: VaultId,
-    pub folder_id: FolderId,
-    pub key_hex: String,
-    pub name: String,
-    /// Folder keys of later epochs (a folder re-keyed with the vault key,
-    /// share epochs), hex by epoch. Only sealed tokens carry them.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub epoch_keys: BTreeMap<u32, String>,
-    /// Fingerprint of the request code the owner confirmed (sealed tokens).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub fingerprint: String,
-    /// The owner's devices when the token was made: a member accepts new
-    /// folder keys only from them (and from devices a later share epoch of
-    /// theirs names). Only sealed tokens carry them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub owners: Vec<DeviceId>,
-    /// What the recipient may do (sealed tokens; a plain token is always an
-    /// editor's).
-    #[serde(default)]
-    pub role: crate::share::ShareRole,
-    /// Invitation id and secret the member derives its join proof from
-    /// (sealed tokens only; see `share::JoinProof`).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub invite: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub join_secret_hex: String,
-}
-
-crate::redacted_debug!(ShareToken { vault_id, folder_id, name, fingerprint, owners, role, invite ; key_hex, epoch_keys, join_secret_hex });
-
-impl Drop for ShareToken {
-    fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.key_hex.zeroize();
-        self.join_secret_hex.zeroize();
-        for v in self.epoch_keys.values_mut() {
-            v.zeroize();
-        }
-    }
-}
-
-impl ShareToken {
-    pub fn encode(&self) -> String {
-        format!(
-            "{}.{}.{}.{}",
-            self.vault_id, self.folder_id, self.key_hex, self.name
-        )
-    }
-    pub fn decode(s: &str) -> Result<Self> {
-        let parts: Vec<&str> = s.trim().splitn(4, '.').collect();
-        if parts.len() != 4 {
-            bail!("share token must be <vault-id>.<folder-id>.<key-hex>.<name>");
-        }
-        SecretKey::from_hex(parts[2])?;
-        Ok(ShareToken {
-            vault_id: VaultId::from_hex(parts[0])?,
-            folder_id: FolderId::from_hex(parts[1])?,
-            key_hex: parts[2].to_string(),
-            name: parts[3].to_string(),
-            epoch_keys: BTreeMap::new(),
-            fingerprint: String::new(),
-            owners: Vec::new(),
-            role: Default::default(),
-            invite: String::new(),
-            join_secret_hex: String::new(),
-        })
-    }
-    /// The plain form, refused when the folder has keys of later epochs
-    /// (the plain format has no room for them).
-    pub fn encode_plain(&self) -> Result<String> {
-        if !self.epoch_keys.is_empty() {
-            bail!(
-                "{} has newer folder keys than a plain token can carry; ask the recipient for a request code (varsto share request) and seal the token to it",
-                self.name
-            );
-        }
-        Ok(self.encode())
-    }
-}
-
-/// What a version-2 sealed token carries inside its ciphertext.
-#[derive(Serialize, Deserialize)]
-struct TokenPayload {
-    key_hex: String,
-    #[serde(default)]
-    epoch_keys: BTreeMap<u32, String>,
-    #[serde(default)]
-    fingerprint: String,
-    #[serde(default)]
-    owners: Vec<DeviceId>,
-    #[serde(default)]
-    role: crate::share::ShareRole,
-    #[serde(default)]
-    invite: String,
-    #[serde(default)]
-    join_secret_hex: String,
-}
-
-impl Drop for TokenPayload {
-    fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.key_hex.zeroize();
-        self.join_secret_hex.zeroize();
-        for v in self.epoch_keys.values_mut() {
-            v.zeroize();
-        }
-    }
-}
-
-impl ShareToken {
-    /// Seal the folder key to a recipient's encapsulation key so the token
-    /// can travel over an untrusted channel. Everything but the key stays in
-    /// clear: vault id, folder id and name are not secrets.
-    pub fn seal(&self, to: &crate::kem::EncapsKey) -> Result<SealedShareToken> {
-        let (kem_ct, key) = to.encapsulate()?;
-        let mut t = SealedShareToken {
-            version: 1,
-            vault_id: self.vault_id.clone(),
-            folder_id: self.folder_id.clone(),
-            name: self.name.clone(),
-            kem_alg: crate::kem::KEM_ALG.to_string(),
-            kem_ct_hex: hex::encode(&kem_ct),
-            sealed_key_hex: String::new(),
-        };
-        let sealed = if self.epoch_keys.is_empty()
-            && self.fingerprint.is_empty()
-            && self.owners.is_empty()
-            && self.role.is_editor()
-            && self.join_secret_hex.is_empty()
-        {
-            // Version 1: the folder key alone, readable by older versions.
-            crypto::encrypt(&key, &t.aad(), &hex::decode(&self.key_hex)?)?
-        } else {
-            t.version = 2;
-            let payload = TokenPayload {
-                key_hex: self.key_hex.clone(),
-                epoch_keys: self.epoch_keys.clone(),
-                fingerprint: self.fingerprint.clone(),
-                owners: self.owners.clone(),
-                role: self.role,
-                invite: self.invite.clone(),
-                join_secret_hex: self.join_secret_hex.clone(),
-            };
-            crypto::encrypt(
-                &key,
-                &t.aad(),
-                &Zeroizing::new(serde_json::to_vec(&payload)?),
-            )?
-        };
-        t.sealed_key_hex = hex::encode(sealed);
-        Ok(t)
-    }
-}
-
-/// A share token whose folder key is encapsulated to one recipient
-/// (hybrid X25519 + ML-KEM-768). Encoded as
-/// `vst1.<vault-id>.<folder-id>.<kem-alg>.<kem-ct-hex>.<sealed-key-hex>.<name>`;
-/// version 2 (`vst2.`, same fields) seals a JSON payload instead of the bare
-/// key: the folder key, the keys of later epochs and the fingerprint the
-/// owner confirmed.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct SealedShareToken {
-    #[serde(default = "one")]
-    pub version: u8,
-    pub vault_id: VaultId,
-    pub folder_id: FolderId,
-    pub name: String,
-    pub kem_alg: String,
-    pub kem_ct_hex: String,
-    pub sealed_key_hex: String,
-}
-
-crate::redacted_debug!(SealedShareToken { version, vault_id, folder_id, name, kem_alg ; kem_ct_hex, sealed_key_hex });
-
-fn one() -> u8 {
-    1
-}
-
-pub const SEALED_SHARE_PREFIX: &str = "vst1.";
-pub const SEALED_SHARE_PREFIX_V2: &str = "vst2.";
+/// Prefix of a share request code.
 pub const SHARE_REQUEST_PREFIX: &str = "vsr1.";
 
-impl SealedShareToken {
-    fn aad(&self) -> Vec<u8> {
-        if self.version >= 2 {
-            crypto::aad(
-                "share-token-v2",
-                &[
-                    self.vault_id.as_str().as_bytes(),
-                    self.folder_id.as_str().as_bytes(),
-                    self.name.as_bytes(),
-                    self.kem_ct_hex.as_bytes(),
-                ],
-            )
-        } else {
-            crypto::aad(
-                "share-token",
-                &[
-                    self.vault_id.as_str().as_bytes(),
-                    self.folder_id.as_str().as_bytes(),
-                    self.name.as_bytes(),
-                ],
-            )
-        }
-    }
-    pub fn encode(&self) -> String {
-        format!(
-            "{}{}.{}.{}.{}.{}.{}",
-            if self.version >= 2 {
-                SEALED_SHARE_PREFIX_V2
-            } else {
-                SEALED_SHARE_PREFIX
-            },
-            self.vault_id,
-            self.folder_id,
-            self.kem_alg,
-            self.kem_ct_hex,
-            self.sealed_key_hex,
-            self.name
-        )
-    }
-    /// A sealed token in text form or as a `varsto://share/token` link.
-    pub fn is_sealed(s: &str) -> bool {
-        let s = s.trim();
-        if crate::qr::is_link(s) {
-            return s[crate::qr::SCHEME.len()..]
-                .to_ascii_lowercase()
-                .starts_with("share/token");
-        }
-        s.starts_with(SEALED_SHARE_PREFIX) || s.starts_with(SEALED_SHARE_PREFIX_V2)
-    }
-    /// Decode a token, given as text or as a `varsto://share/token` link.
-    pub fn decode(s: &str) -> Result<Self> {
-        let s = s.trim();
-        if crate::qr::is_link(s) {
-            return match crate::qr::Link::from_text(s)? {
-                crate::qr::Link::ShareToken(t) => Self::decode(&t),
-                other => bail!("this is a {} link, not a share token", other.kind()),
-            };
-        }
-        let (version, rest) = if let Some(r) = s.strip_prefix(SEALED_SHARE_PREFIX_V2) {
-            (2, r)
-        } else {
-            (
-                1,
-                s.strip_prefix(SEALED_SHARE_PREFIX)
-                    .ok_or_else(|| anyhow!("not a sealed share token"))?,
-            )
-        };
-        let parts: Vec<&str> = rest.splitn(6, '.').collect();
-        if parts.len() != 6 {
-            bail!("sealed share token has the wrong shape");
-        }
-        Ok(SealedShareToken {
-            version,
-            vault_id: VaultId::from_hex(parts[0])?,
-            folder_id: FolderId::from_hex(parts[1])?,
-            kem_alg: parts[2].to_string(),
-            kem_ct_hex: parts[3].to_string(),
-            sealed_key_hex: parts[4].to_string(),
-            name: parts[5].to_string(),
-        })
-    }
-    /// Open with the recipient's private key.
-    pub fn open(&self, dk: &crate::kem::DecapsKey) -> Result<ShareToken> {
-        if self.kem_alg != crate::kem::KEM_ALG {
-            bail!("unsupported key encapsulation algorithm {}", self.kem_alg);
-        }
-        let key = dk.decapsulate(&hex::decode(&self.kem_ct_hex)?)?;
-        let plain = Zeroizing::new(
-            crypto::decrypt(&key, &self.aad(), &hex::decode(&self.sealed_key_hex)?).map_err(
-                |_| anyhow!("this share token was not sealed to this device's request code"),
-            )?,
-        );
-        let payload = if self.version >= 2 {
-            serde_json::from_slice::<TokenPayload>(&plain)?
-        } else {
-            TokenPayload {
-                key_hex: hex::encode(&*plain),
-                epoch_keys: BTreeMap::new(),
-                fingerprint: String::new(),
-                owners: Vec::new(),
-                role: Default::default(),
-                invite: String::new(),
-                join_secret_hex: String::new(),
-            }
-        };
-        SecretKey::from_hex(&payload.key_hex)?;
-        for k in payload.epoch_keys.values() {
-            SecretKey::from_hex(k)?;
-        }
-        Ok(ShareToken {
-            vault_id: self.vault_id.clone(),
-            folder_id: self.folder_id.clone(),
-            key_hex: payload.key_hex.clone(),
-            name: self.name.clone(),
-            epoch_keys: payload.epoch_keys.clone(),
-            fingerprint: payload.fingerprint.clone(),
-            owners: payload.owners.clone(),
-            role: payload.role,
-            invite: payload.invite.clone(),
-            join_secret_hex: payload.join_secret_hex.clone(),
-        })
-    }
-}
-
-/// Recipient-side state for a pending share request: the private half of the
-/// request code, kept in the device directory until the token is accepted
-/// (the member device then keeps it as its KEM key, see `share_ops`).
+/// Recipient-side state for a pending share request: the device keys of
+/// the member device it will become (format 3: K6 signs everything it
+/// writes, K8 receives its grants), kept in the device directory until the
+/// share is accepted (they then move into the device's key files).
 #[derive(Serialize, Deserialize)]
 pub struct ShareRequest {
     pub kem_alg: String,
+    /// K8 private key.
     pub secret_hex: String,
+    /// K6 private key (`SigningKey::to_bytes`).
+    #[serde(default)]
+    pub signing_hex: String,
     /// Name bound to the request code (covered by its fingerprint).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
 }
 
-/// A parsed request code: the requester's KEM key, the name it bound, and
-/// the fingerprint both sides compare.
+impl Drop for ShareRequest {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.secret_hex.zeroize();
+        self.signing_hex.zeroize();
+    }
+}
+
+/// A parsed request code: the requester's K6 and K8 public keys, the name
+/// it bound, its device id and the fingerprint both sides compare.
 pub struct RequestCode {
+    /// K6 public key (`VerifyingKey::to_bytes`).
+    pub k6: Vec<u8>,
+    /// K8 public key.
     pub key: crate::kem::EncapsKey,
     pub name: String,
+    /// BLAKE3(K6)[..16].
+    pub device: [u8; 16],
     pub fingerprint: String,
 }
 
 impl ShareRequest {
     pub const FILE: &'static str = "share-request.json";
 
-    /// Load or create the request key for `home` and return the request code.
+    /// Load or create the request keys for `home` and return the request code.
     pub fn code_for(home: &Path) -> Result<String> {
         Self::code_for_named(home, None)
     }
 
-    /// Like `code_for`, binding `name` to the code when given (the key stays
+    /// Like `code_for`, binding `name` to the code when given (the keys stay
     /// the same; only the name and with it the fingerprint change).
     pub fn code_for_named(home: &Path, name: Option<&str>) -> Result<String> {
         std::fs::create_dir_all(home)?;
         let path = home.join(Self::FILE);
-        let mut r = if path.exists() {
+        let mut r: ShareRequest = if path.exists() {
             serde_json::from_slice(&std::fs::read(&path)?)?
         } else {
             ShareRequest {
                 kem_alg: crate::kem::KEM_ALG.to_string(),
                 secret_hex: hex::encode(crate::kem::DecapsKey::generate().to_bytes()),
+                signing_hex: String::new(),
                 name: String::new(),
             }
         };
+        let mut changed = !path.exists();
+        if r.signing_hex.is_empty() {
+            r.signing_hex = hex::encode(SigningKey::generate().to_bytes());
+            changed = true;
+        }
         let name = name.map(|n| n.trim().to_string());
         if let Some(n) = &name {
             crate::names::check_display_name(n)?;
         }
-        let changed = !path.exists() || name.as_ref().is_some_and(|n| *n != r.name);
+        changed |= name.as_ref().is_some_and(|n| *n != r.name);
         if let Some(n) = name {
             r.name = n;
         }
         if changed {
             util::write_atomic(&path, &serde_json::to_vec_pretty(&r)?)?;
         }
-        let dk = crate::kem::DecapsKey::from_bytes(&hex::decode(&r.secret_hex)?)?;
+        let (sign, dk) = r.keys()?;
+        Ok(Self::code_of(
+            &sign.public().to_bytes(),
+            &dk.public().to_bytes(),
+            &r.name,
+        ))
+    }
+
+    /// The text form of a request code: `vsr1.<K6 hex>.<K8 hex>[.<name>]`.
+    pub fn code_of(k6: &[u8], k8: &[u8], name: &str) -> String {
         let mut code = format!(
-            "{SHARE_REQUEST_PREFIX}{}",
-            hex::encode(dk.public().to_bytes())
+            "{SHARE_REQUEST_PREFIX}{}.{}",
+            hex::encode(k6),
+            hex::encode(k8)
         );
-        if !r.name.is_empty() {
+        if !name.is_empty() {
             code.push('.');
-            code.push_str(&r.name);
+            code.push_str(name);
         }
-        Ok(code)
+        code
     }
-    /// The KEM key of a request code (`vsr1.<key hex>[.<name>]`).
-    pub fn parse_code(code: &str) -> Result<crate::kem::EncapsKey> {
-        Ok(Self::parse(code)?.key)
+
+    fn keys(&self) -> Result<(SigningKey, crate::kem::DecapsKey)> {
+        let sign = SigningKey::from_bytes(&hex::decode(&self.signing_hex)?)?;
+        let dk = crate::kem::DecapsKey::from_bytes(&hex::decode(&self.secret_hex)?)?;
+        Ok((sign, dk))
     }
-    /// Key, bound name and fingerprint of a request code.
+
+    /// Keys, bound name, device id and fingerprint of a request code.
     /// Accepts the text form or a `varsto://share/request` link.
     pub fn parse(code: &str) -> Result<RequestCode> {
         if crate::qr::is_link(code) {
@@ -439,16 +169,30 @@ impl ShareRequest {
             .trim()
             .strip_prefix(SHARE_REQUEST_PREFIX)
             .ok_or_else(|| anyhow!("not a share request code (expected the vsr1. prefix)"))?;
-        let (hex_part, name) = rest.split_once('.').unwrap_or((rest, ""));
-        let key = crate::kem::EncapsKey::from_bytes(&hex::decode(hex_part)?)?;
-        let name = name.trim().to_string();
+        let mut it = rest.splitn(3, '.');
+        let k6_hex = it.next().unwrap_or_default();
+        let k8_hex = it.next().ok_or_else(|| {
+            anyhow!("this share request code is from an older version of Varsto: ask for a new one")
+        })?;
+        let name = it.next().unwrap_or_default().trim().to_string();
+        let k6 = hex::decode(k6_hex).map_err(|_| anyhow!("the request code is damaged"))?;
+        let vk = VerifyingKey::from_bytes(&k6).map_err(|_| {
+            anyhow!("this share request code is from an older version of Varsto: ask for a new one")
+        })?;
+        let key = crate::kem::EncapsKey::from_bytes(
+            &hex::decode(k8_hex).map_err(|_| anyhow!("the request code is damaged"))?,
+        )?;
         crate::names::check_display_name(&name)?;
+        let k8 = key.to_bytes();
         Ok(RequestCode {
-            fingerprint: crate::share::fingerprint(&key, &name),
+            fingerprint: crate::share::fingerprint(&k6, &k8, &name),
+            device: crate::membership3::device_id(&vk),
+            k6,
             key,
             name,
         })
     }
+
     fn load(home: &Path) -> Result<ShareRequest> {
         let path = home.join(Self::FILE);
         if !path.exists() {
@@ -459,33 +203,26 @@ impl ShareRequest {
         }
         Ok(serde_json::from_slice(&std::fs::read(&path)?)?)
     }
-    /// The private key of the pending request in `home`, if there is one.
-    pub fn key(home: &Path) -> Option<crate::kem::DecapsKey> {
-        let r = Self::load(home).ok()?;
-        crate::kem::DecapsKey::from_bytes(&hex::decode(&r.secret_hex).ok()?).ok()
+
+    /// The device keys of the pending request in `home` (K6, K8), if there
+    /// is one.
+    pub fn device_keys(home: &Path) -> Result<(SigningKey, crate::kem::DecapsKey, String)> {
+        let r = Self::load(home)?;
+        let (sign, dk) = r.keys()?;
+        Ok((sign, dk, r.name.clone()))
     }
+
     /// The fingerprint of the pending request in `home`.
     pub fn fingerprint_for(home: &Path) -> Result<String> {
         let r = Self::load(home)?;
-        let dk = crate::kem::DecapsKey::from_bytes(&hex::decode(&r.secret_hex)?)?;
-        Ok(crate::share::fingerprint(&dk.public(), &r.name))
+        let (sign, dk) = r.keys()?;
+        Ok(crate::share::fingerprint(
+            &sign.public().to_bytes(),
+            &dk.public().to_bytes(),
+            &r.name,
+        ))
     }
-    /// Open a sealed token with the request key stored in `home`. A token
-    /// that names the fingerprint the owner confirmed must name this
-    /// request's fingerprint.
-    pub fn open_token(home: &Path, token: &str) -> Result<ShareToken> {
-        let r = Self::load(home)?;
-        let dk = crate::kem::DecapsKey::from_bytes(&hex::decode(&r.secret_hex)?)?;
-        let t = SealedShareToken::decode(token)?.open(&dk)?;
-        let mine = crate::share::fingerprint(&dk.public(), &r.name);
-        if !t.fingerprint.is_empty() && !crate::share::fingerprint_matches(&mine, &t.fingerprint) {
-            bail!(
-                "the owner confirmed the fingerprint \"{}\" but this device's request has \"{mine}\": the request code was changed on its way; ask the owner for a new token",
-                t.fingerprint
-            );
-        }
-        Ok(t)
-    }
+
     pub fn clear(home: &Path) {
         let _ = std::fs::remove_file(home.join(Self::FILE));
     }
@@ -690,65 +427,6 @@ impl SignedRecord {
     }
 }
 
-/// A folder removed from the vault, published so every device stops
-/// syncing it: `vault/removed/<folder>/<device>.enc`. Files on devices stay.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FolderRemoval {
-    pub folder_id: FolderId,
-    pub device: DeviceId,
-    pub removed_utc: i64,
-}
-
-impl FolderRemoval {
-    pub const PREFIX: &'static str = "vault/removed/";
-    pub fn storage_key(&self) -> String {
-        format!("{}{}/{}.enc", Self::PREFIX, self.folder_id, self.device)
-    }
-    fn aad(vault: &VaultId, folder: &FolderId) -> Vec<u8> {
-        crypto::aad(
-            "folder-removal",
-            &[vault.as_str().as_bytes(), folder.as_str().as_bytes()],
-        )
-    }
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.folder_id),
-            &serde_json::to_vec(self)?,
-        )
-    }
-    pub fn open(blob: &[u8], vault: &VaultId, folder: &FolderId, key: &SecretKey) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, folder), blob)?;
-        let rec: FolderRemoval = serde_json::from_slice(&plain)?;
-        if &rec.folder_id != folder {
-            bail!("folder removal record mismatch");
-        }
-        Ok(rec)
-    }
-}
-
-/// Prefix of member device records: `vault/shares/<folder>/<device>.enc`.
-pub const SHARE_PREFIX: &str = "vault/shares/";
-
-pub fn share_record_key(folder: &FolderId, device: &DeviceId) -> String {
-    format!("{SHARE_PREFIX}{folder}/{device}.enc")
-}
-
-/// Key id of a member device's ledger batches for one shared folder.
-pub fn share_key_id(folder: &FolderId) -> String {
-    format!("share:{folder}")
-}
-
-/// Members encrypt their ledger batches for a shared folder under this key,
-/// derived from the folder key, so every holder of the folder key can read them.
-pub fn share_ledger_key(folder_key: &SecretKey, folder: &FolderId) -> SecretKey {
-    folder_key.derive("share-ledger", &[folder.as_str().as_bytes()])
-}
-
-pub fn share_registry_key(folder_key: &SecretKey, folder: &FolderId) -> SecretKey {
-    folder_key.derive("share-registry", &[folder.as_str().as_bytes()])
-}
-
 #[derive(Serialize, Deserialize)]
 struct KeyFile {
     params: PassphraseParams,
@@ -922,7 +600,7 @@ pub struct FolderRecord {
     /// only while unlocked.
     #[serde(default)]
     pub strongroom: Option<crate::strongroom::StrongroomInfo>,
-    /// Removed from the vault (local flag, learned from a `FolderRemoval`).
+    /// Removed from the vault (local flag, from the folder record's `removed` stamp).
     #[serde(default)]
     pub removed_utc: i64,
     /// Folder keys of later epochs held besides those derived from the vault
@@ -935,31 +613,9 @@ pub struct FolderRecord {
     /// served to peers, and only its source device writes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup: Option<BackupInfo>,
-    /// On a member device: the invitation it joined through, with the
-    /// secret its join proof is derived from and the role the token gave.
-    /// Local only, never published.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub share_join: Option<ShareJoin>,
 }
 
-/// See `FolderRecord::share_join`.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ShareJoin {
-    pub invite: String,
-    pub secret_hex: String,
-    pub role: crate::share::ShareRole,
-}
-
-crate::redacted_debug!(ShareJoin { invite, role ; secret_hex });
-
-impl Drop for ShareJoin {
-    fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.secret_hex.zeroize();
-    }
-}
-
-crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, shared, strongroom, removed_utc, backup, placement, policy, share_join ; key_hex, k11_hex, epoch_keys });
+crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, shared, strongroom, removed_utc, backup, placement, policy ; key_hex, k11_hex, epoch_keys });
 
 impl Drop for FolderRecord {
     fn drop(&mut self) {
@@ -1073,20 +729,6 @@ impl FolderRecord {
     }
     pub fn folder_key(&self) -> Result<SecretKey> {
         SecretKey::from_hex(&self.key_hex)
-    }
-    pub fn share_token(&self, vault: &VaultId) -> ShareToken {
-        ShareToken {
-            vault_id: vault.clone(),
-            folder_id: self.folder_id.clone(),
-            key_hex: self.key_hex.clone(),
-            name: self.name.clone(),
-            epoch_keys: BTreeMap::new(),
-            fingerprint: String::new(),
-            owners: Vec::new(),
-            role: Default::default(),
-            invite: String::new(),
-            join_secret_hex: String::new(),
-        }
     }
 }
 
@@ -1736,8 +1378,18 @@ mod tests {
 
     #[test]
     fn request_codes_with_control_or_direction_characters_are_refused() {
-        let key = hex::encode(crate::kem::DecapsKey::generate().public().to_bytes());
+        let key = format!(
+            "{}.{}",
+            hex::encode(SigningKey::generate().public().to_bytes()),
+            hex::encode(crate::kem::DecapsKey::generate().public().to_bytes())
+        );
         assert!(ShareRequest::parse(&format!("vsr1.{key}.Ville")).is_ok());
+        // A code of format 2 (the KEM key alone) is refused with a reason.
+        let old = hex::encode(crate::kem::DecapsKey::generate().public().to_bytes());
+        let e = ShareRequest::parse(&format!("vsr1.{old}.Ville"))
+            .err()
+            .unwrap();
+        assert!(format!("{e:#}").contains("older version"), "{e:#}");
         for bad in ["x\u{1b}[2Ay", "a\u{202e}b", "a\u{200b}b", "tab\there"] {
             let e = ShareRequest::parse(&format!("vsr1.{key}.{bad}"))
                 .err()
@@ -1755,46 +1407,18 @@ mod tests {
     fn debug_output_shows_no_key_material() {
         let key = "ab".repeat(32);
         let later = "cd".repeat(32);
-        let secret = "ef".repeat(32);
-        let token = ShareToken {
-            vault_id: VaultId::random(),
-            folder_id: FolderId::random(),
-            key_hex: key.clone(),
-            name: "docs".into(),
-            epoch_keys: BTreeMap::from([(1_048_576, later.clone())]),
-            fingerprint: "one two three".into(),
-            owners: vec![],
-            role: Default::default(),
-            invite: "inv".into(),
-            join_secret_hex: secret.clone(),
-        };
-        let shown = format!("{token:?}");
-        assert!(shown.contains("docs") && shown.contains("inv"), "{shown}");
-        for s in [&key, &later, &secret] {
-            assert!(!shown.contains(s.as_str()), "{shown}");
-        }
-
-        let join = ShareJoin {
-            invite: "inv".into(),
-            secret_hex: secret.clone(),
-            role: Default::default(),
-        };
-        let shown = format!("{join:?}");
-        assert!(shown.contains("inv") && !shown.contains(&secret), "{shown}");
-
         let rec: FolderRecord = serde_json::from_value(serde_json::json!({
             "folder_id": FolderId::random(),
             "name": "docs",
             "key_hex": key,
             "created_by": DeviceId::random(),
             "created_utc": 1,
-            "epoch_keys": {"1048576": later},
-            "share_join": join,
+            "epoch_keys": {"1": later},
         }))
         .unwrap();
         let shown = format!("{rec:?}");
         assert!(shown.contains("docs"), "{shown}");
-        for s in [&key, &later, &secret] {
+        for s in [&key, &later] {
             assert!(!shown.contains(s.as_str()), "{shown}");
         }
     }

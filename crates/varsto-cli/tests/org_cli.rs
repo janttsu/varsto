@@ -55,7 +55,6 @@ fn fails(home: &Path, args: &[&str]) -> String {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
 fn organization_through_the_cli() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -144,6 +143,9 @@ fn organization_through_the_cli() {
     assert_eq!(joined["organization"], "Acme");
     assert_eq!(joined["user"], "carol");
     assert_eq!(joined["device_id"], approved["device_id"]);
+    // The organization lets it in; an owner of the folder lets it read.
+    ok(&c, &["folder", "request", "docs"]);
+    ok(&a, &["folder", "approve", "docs", "c-laptop", "--yes"]);
     let c_docs = root.join("c-docs");
     ok(&c, &["folder", "attach", "docs", c_docs.to_str().unwrap()]);
     ok(&c, &["sync"]);

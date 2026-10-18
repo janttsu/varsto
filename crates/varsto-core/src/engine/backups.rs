@@ -333,7 +333,6 @@ impl Engine {
             removed_utc: 0,
             epoch_keys: BTreeMap::new(),
             backup: Some(info),
-            share_join: None,
         };
         let id = rec.folder_id.clone();
         self.keyring.folders.insert(id.clone(), rec);
