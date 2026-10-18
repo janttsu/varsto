@@ -488,6 +488,7 @@ impl Engine {
             put_cached(&root, &cref.object, &ct)?;
             if source.starts_with("peer:") {
                 report.chunks_from_peers += 1;
+                report.bytes_from_peers += cref.size;
             }
             report.chunks_downloaded += 1;
             report.bytes_downloaded += cref.size;

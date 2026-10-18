@@ -3041,6 +3041,7 @@ fn api_unlocked(
             "peers": service.p2p_peers,
             "lan_peers": service.p2p_lan_peers,
             "chunks_from_peers": service.p2p_chunks,
+            "bytes_from_peers": service.p2p_bytes,
             "nat": service.p2p_nat,
             "public": service.p2p_public,
             "reachable": service.p2p_reachable,
