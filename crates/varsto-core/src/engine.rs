@@ -764,6 +764,9 @@ pub struct Engine {
     ledger_policy: ledger_upkeep::LedgerPolicy,
     /// When manifests are listed in full and whether old ones are pruned.
     manifest_policy: manifest_upkeep::ManifestPolicy,
+    /// Tests: a manifest base after this many deltas, instead of the
+    /// design's rule (`set_manifest_base_after`).
+    manifest_base_after: Option<u64>,
     /// The token of the restic hold this engine works under (its own run's
     /// completeness check), which the hold does not stop (`restic_mirror`).
     hold_exempt: Option<String>,
@@ -1474,6 +1477,7 @@ impl Engine {
             cycle: None,
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
+            manifest_base_after: None,
             hold_exempt: None,
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),
@@ -1709,6 +1713,7 @@ impl Engine {
             cycle: None,
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
+            manifest_base_after: None,
             hold_exempt: None,
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),

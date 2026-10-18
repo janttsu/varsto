@@ -81,6 +81,13 @@ impl Engine {
         self.manifest_policy = policy;
     }
 
+    /// Tests: write a manifest base after `n` deltas (`None`: the design's
+    /// rule, section 7), so that pruning can be seen with a few edits.
+    #[doc(hidden)]
+    pub fn set_manifest_base_after(&mut self, n: Option<u64>) {
+        self.manifest_base_after = n;
+    }
+
     fn manifest_upkeep_path(&self) -> PathBuf {
         self.home.join(UPKEEP_FILE)
     }

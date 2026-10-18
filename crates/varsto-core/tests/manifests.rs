@@ -4,6 +4,8 @@
 //! last one applied, and a device deletes its superseded manifests only once
 //! every other full device has acknowledged a batch announcing a newer one.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -54,14 +56,14 @@ fn devices(lab: &Lab, others: &[&str]) -> Vec<Engine> {
     a.sync(None).unwrap();
     let mut out = vec![a];
     for who in others {
-        let mut e = Engine::join(
+        let mut e = common::join_approved(
             &lab.root.join(format!("{who}-home")),
             who,
             PASS,
             &key,
             lab.storage.clone(),
-        )
-        .unwrap();
+            &mut out[0],
+        );
         e.chunker = ChunkerParams::SMALL;
         e.attach_folder("docs", &lab.dir(who), false).unwrap();
         e.sync(None).unwrap();
@@ -80,18 +82,15 @@ fn measure<T>(e: &mut Engine, f: impl FnOnce(&mut Engine) -> T) -> (T, CallCount
     (out, calls.snapshot(), ms)
 }
 
-/// Manifest objects of `device` on the storage.
+/// Manifest records of `device` on the storage (one seq per record).
 fn stored(lab: &Lab, folder: &str, device: &str) -> Vec<u64> {
     let d = lab.root.join("storage/manifests").join(folder).join(device);
     let mut out: Vec<u64> = fs::read_dir(&d)
         .map(|r| {
             r.filter_map(|e| {
-                e.ok()?
-                    .file_name()
-                    .to_string_lossy()
-                    .strip_suffix(".enc")?
-                    .parse()
-                    .ok()
+                let name = e.ok()?.file_name().to_string_lossy().to_string();
+                let (seq, part) = name.strip_suffix(".rec")?.split_once('-')?;
+                (part == "0000").then(|| seq.parse().ok())?
             })
             .collect()
         })
@@ -117,7 +116,6 @@ fn edit(lab: &Lab, e: &mut Engine, who: &str, text: &str) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (manifest pruning)"]
 fn pull_lists_only_new_manifests() {
     let lab = lab();
     let mut devs = devices(&lab, &["b"]);
@@ -150,21 +148,23 @@ fn pull_lists_only_new_manifests() {
         b"version 6"
     );
 
-    // A full listing (the periodic sweep) finds the same and applies nothing twice.
-    b.set_manifest_policy(ManifestPolicy {
-        sweep_secs: 0,
-        prune: true,
-    });
+    // B publishes its own view of the change; after that nothing is new:
+    // nothing listed, nothing applied twice (storage format 3 lists only
+    // what the ledger announced; there is no sweep).
+    b.sync(None).unwrap();
     let (r, c, _) = measure(b, |e| e.sync(None).unwrap());
     assert_eq!(r[0].0.manifests_applied, 0);
-    assert!(c.manifest_lists >= 1, "{c:?}");
+    assert_eq!((c.manifest_lists, c.manifest_gets), (0, 0), "{c:?}");
 }
 
+/// Storage format 3 prunes a writer's records below its newest base once
+/// every reader acknowledged the batch that announced the base; here a
+/// base follows every second delta, so a few edits show it.
 #[test]
-#[ignore = "f3-switch: port in part B (manifest pruning)"]
 fn pruning_waits_for_every_reader() {
     let lab = lab();
     let mut devs = devices(&lab, &["b", "c"]);
+    devs[0].set_manifest_base_after(Some(2));
     let folder = folder_id(&devs[0]);
     let a_id = devs[0].device_id().to_string();
     // Everyone has seen everything once.
@@ -193,7 +193,10 @@ fn pruning_waits_for_every_reader() {
         c.manifest_listed_keys <= (left.len() + b_left.len()) as u64,
         "{c:?}"
     );
-    assert_eq!(c.manifest_gets, 2, "one manifest of each: {c:?}");
+    assert!(
+        c.manifest_gets <= (left.len() + b_left.len()) as u64,
+        "from the newest bases on: {c:?}"
+    );
     assert_eq!(
         fs::read(lab.dir("c").join("note.txt")).unwrap(),
         b"version 6"
@@ -221,14 +224,14 @@ fn pruning_waits_for_every_reader() {
         );
     }
     let key = devs[0].export_vault_key().unwrap();
-    let mut d = Engine::join(
+    let mut d = common::join_approved(
         &lab.root.join("d-home"),
         "d",
         PASS,
         &key,
         lab.storage.clone(),
-    )
-    .unwrap();
+        &mut devs[0],
+    );
     d.chunker = ChunkerParams::SMALL;
     d.attach_folder("docs", &lab.dir("d"), false).unwrap();
     d.sync(None).unwrap();
