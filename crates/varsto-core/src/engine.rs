@@ -5529,7 +5529,9 @@ impl Engine {
         // Cleared: an empty policy, so the default does not come back.
         let policy = Some(policy.unwrap_or_default());
         f.policy = policy.clone();
-        f.policy_updated_utc = now;
+        // Strictly newer than what is known (two changes in one second), so
+        // other devices adopt it.
+        f.policy_updated_utc = now.max(f.policy_updated_utc + 1);
         self.keyring.save(
             &self.home,
             &self.keys,
