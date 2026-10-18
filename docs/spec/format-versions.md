@@ -24,6 +24,13 @@ Alpha-0-format.md section 74. A peer-to-peer message (`/p2p/heads`, the head sta
 ## Format version 3, planned (format version 2 unchanged)
 
 Alpha-0-format.md section 77 describes storage format 3: packs of fixed size classes with a pack-level ledger, a signed block map per folder and writer, every published object as a SignedRecord, folder keys only as approved grants with recovery escrow, manifests, trash and snapshots as base + delta records, and TLS-only peer transport with exporter-bound tokens. It is built behind the `format3` cargo feature (off by default) and nothing in a default build reads or writes it; the shipped format stays 2, `FORMAT_VERSION` stays 2 and the format-2 row above is the one that applies to every release, until the integration package sets it to 3. Format 3 reads nothing older (no migration): a format-3 build will refuse a format-2 vault and the alpha.15 binary, which stays downloadable, is the reader of format 2 (release rule 3). When format 3 ships, this table gets its release number and reader status (release rule 4).
+## Format 3 peers and transport, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 75. Builds with the `format3` feature carry the format-3 peer records (`vault/peers/<device>/<seq>-0000.rec`, SignedRecords), TLS-only TCP, connection-bound tokens, signed beacons, the format-3 pairing hello and the head exchange with proofs (`ledger/watch.json`), but nothing switches to them before the format does: every build still reads, writes and speaks format 2.
+
+## Format 3 folder membership for people, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 76. Commands, local API routes, event-stream events (`folder.request`, `folder.changed`, `pair.ask`) and a pairing question for the format-3 membership records of section 6 of the design. No stored format changes: builds with the feature write `request`, `grant`, `folder`, `share-epoch` and `escrow` SignedRecords only when a person runs those commands, and no build reads them for anything else before the format flips.
 
 ## Release rules
 

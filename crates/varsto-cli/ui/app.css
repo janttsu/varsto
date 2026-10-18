@@ -1161,3 +1161,11 @@ html[data-density="compact"] body[data-mobile="1"] .folder-card { padding-top: 8
 html[data-density="compact"] body[data-mobile="1"] .folder-card .li-icon { width: 34px; height: 34px; }
 #density-toggle[aria-pressed="true"] { background: var(--selected); color: var(--accent); }
 html[data-density="compact"] body:not([data-mobile="1"]) #files tbody tr, html[data-density="compact"] body:not([data-mobile="1"]) .fo-table tbody tr { height: 36px; }
+
+/* Folder access (storage format 3) */
+.f3-card { margin-bottom: 16px; }
+.f3-folder { margin-top: 12px; }
+.f3-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 0 0 4px; }
+.f3-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.f3-who { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; min-width: 0; }
+.f3-words { background: var(--surface-2, rgba(127, 127, 127, 0.12)); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }
