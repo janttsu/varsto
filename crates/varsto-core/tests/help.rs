@@ -4,6 +4,8 @@
 //! devices, a broken policy, paused syncing, a folder not synced here, the
 //! recovery kit printed or out of date, and a vault where all is in order.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 use varsto_core::chunking::ChunkerParams;
@@ -94,7 +96,8 @@ fn no_vault_and_locked() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (help)"]
+#[ignore = "f3-switch: port in part B (storages)"]
+// Waits for policy evaluation on the pack-level view.
 fn steps_follow_the_vault_as_it_grows() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -122,19 +125,9 @@ fn steps_follow_the_vault_as_it_grows() {
     assert!(!h.all_ok);
     well_formed(&h);
 
-    // A storage but no folder: add a folder. The storage is a pool of
-    // disks with no disk yet, so nothing reaches it.
-    a.add_storage(StorageSpec::Pool {
-        name: "shelf".into(),
-        place: "home".into(),
-        reserve_percent: 5,
-        min_reserve_bytes: 0,
-        disks: vec![],
-        scan_roots: vec![],
-        copies: 1,
-        verify_after_days: 180,
-    })
-    .unwrap();
+    // A storage but no folder: add a folder. A folder's records live on the
+    // storage, so it comes first.
+    a.add_storage(dir(root, "box", "home")).unwrap();
     let h = a.help_state(running()).unwrap();
     assert_eq!(first(&h), "add_folder");
     assert!(!ids(&h).contains(&"add_storage"));
@@ -145,14 +138,14 @@ fn steps_follow_the_vault_as_it_grows() {
     assert!(ids(&h).contains(&"kit"));
     well_formed(&h);
 
-    // A folder with files, pushed while no storage can take them: they lack a copy.
+    // A folder with files that were read but not stored yet: they lack a copy.
     let docs = root.join("docs");
     fs::create_dir_all(&docs).unwrap();
     fs::write(docs.join("a.txt"), vec![7u8; 50_000]).unwrap();
     fs::write(docs.join("b.txt"), b"hello").unwrap();
     fs::write(docs.join("c.txt"), vec![9u8; 30_000]).unwrap();
     a.add_folder("docs", &docs).unwrap();
-    a.push("docs").unwrap();
+    a.pull("docs").unwrap();
     let h = a.help_state(running()).unwrap();
     assert!(ids(&h).contains(&"sync"), "{:?}", ids(&h));
     assert!(h.figures.unkept_bytes > 0);
@@ -164,9 +157,8 @@ fn steps_follow_the_vault_as_it_grows() {
     );
     assert_eq!(sync.command.as_deref(), Some("varsto sync"));
 
-    // A directory storage takes them. The default policy wants a copy in
-    // the cloud too, so that comes first, then the kit and other devices.
-    a.add_storage(dir(root, "box", "home")).unwrap();
+    // The sync stores them. The default policy wants a copy in the cloud
+    // too, so that comes first, then the kit and other devices.
     a.push("docs").unwrap();
     let h = a.help_state(running()).unwrap();
     assert_eq!(h.figures.unkept_bytes, 0);
@@ -208,7 +200,9 @@ fn steps_follow_the_vault_as_it_grows() {
     assert!(!ids(&hb).contains(&"add_device"));
     assert!(hb.folders.iter().any(|f| f.name == "docs" && !f.attached));
     well_formed(&hb);
-    // It syncs the folder, which checks the copies it reads.
+    // The laptop approves it for the folder, and it syncs the folder, which
+    // checks the copies it reads.
+    common::approve_all(&mut a, &mut b);
     b.attach_folder("docs", &b_docs, false).unwrap();
     b.pull("docs").unwrap();
     drop(b);

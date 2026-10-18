@@ -3,6 +3,8 @@
 //! metadata (permissions, symbolic links, extended attributes, ownership)
 //! between two devices through one storage.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use varsto_core::chunking::ChunkerParams;
@@ -46,7 +48,14 @@ fn two(files: &[(&str, &[u8])]) -> (Lab, Engine, Engine) {
         write(&lab.a_dir, p, b);
     }
     a.push("docs").unwrap();
-    let mut b = Engine::join(&lab.root.join("b-home"), "desk", PASS, &vault_key, storage).unwrap();
+    let mut b = common::join_approved(
+        &lab.root.join("b-home"),
+        "desk",
+        PASS,
+        &vault_key,
+        storage,
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     (lab, a, b)
@@ -67,7 +76,6 @@ fn published(e: &Engine) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (metadata)"]
 fn ignored_paths_are_neither_published_nor_deleted_elsewhere() {
     let (lab, mut a, mut b) = two(&[
         (".varstoignore", b"# junk\n*.tmp\nbuild/\n"),
@@ -139,7 +147,6 @@ fn ignored_paths_are_neither_published_nor_deleted_elsewhere() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (metadata)"]
 fn local_rules_stay_on_the_device_and_incoming_files_are_skipped() {
     let (lab, mut a, mut b) = two(&[("a.txt", b"a")]);
     b.pull("docs").unwrap();
@@ -222,7 +229,6 @@ fn chmod(p: &Path, m: u32) {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "f3-switch: port in part B (metadata)"]
 fn a_chmod_syncs_without_uploading_blocks() {
     let (lab, mut a, mut b) = two(&[("run.sh", b"#!/bin/sh\necho hi\n")]);
     chmod(&lab.a_dir.join("run.sh"), 0o644);
@@ -251,7 +257,6 @@ fn a_chmod_syncs_without_uploading_blocks() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "f3-switch: port in part B (metadata)"]
 fn a_device_that_cannot_represent_a_property_does_not_publish_its_removal() {
     let (lab, mut a, mut b) = two(&[("run.sh", b"v1")]);
     chmod(&lab.a_dir.join("run.sh"), 0o750);
@@ -277,7 +282,6 @@ fn a_device_that_cannot_represent_a_property_does_not_publish_its_removal() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "f3-switch: port in part B (metadata)"]
 fn settings_off_means_not_synced() {
     let (lab, mut a, mut b) = two(&[("f.txt", b"x")]);
     chmod(&lab.a_dir.join("f.txt"), 0o644);
@@ -317,7 +321,6 @@ fn settings_off_means_not_synced() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "f3-switch: port in part B (metadata)"]
 fn symbolic_links_round_trip_and_are_never_followed() {
     let tmp_out = tempfile::tempdir().unwrap();
     fs::write(tmp_out.path().join("secret.txt"), b"outside").unwrap();
@@ -417,7 +420,6 @@ fn symbolic_links_round_trip_and_are_never_followed() {
 
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "f3-switch: port in part B (metadata)"]
 fn extended_attributes_round_trip() {
     use varsto_core::fsmeta::{get_xattr, set_xattr};
     let (lab, mut a, mut b) = two(&[("tagged.txt", b"content")]);

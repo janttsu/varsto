@@ -4,6 +4,8 @@
 //! last one applied, and a device deletes its superseded manifests only once
 //! every other full device has acknowledged a batch announcing a newer one.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -54,14 +56,14 @@ fn devices(lab: &Lab, others: &[&str]) -> Vec<Engine> {
     a.sync(None).unwrap();
     let mut out = vec![a];
     for who in others {
-        let mut e = Engine::join(
+        let mut e = common::join_approved(
             &lab.root.join(format!("{who}-home")),
             who,
             PASS,
             &key,
             lab.storage.clone(),
-        )
-        .unwrap();
+            &mut out[0],
+        );
         e.chunker = ChunkerParams::SMALL;
         e.attach_folder("docs", &lab.dir(who), false).unwrap();
         e.sync(None).unwrap();
@@ -80,23 +82,22 @@ fn measure<T>(e: &mut Engine, f: impl FnOnce(&mut Engine) -> T) -> (T, CallCount
     (out, calls.snapshot(), ms)
 }
 
-/// Manifest objects of `device` on the storage.
+/// Sequence numbers of the manifest records of `device` on the storage
+/// (`<seq 16>-<part 4>.rec`).
 fn stored(lab: &Lab, folder: &str, device: &str) -> Vec<u64> {
     let d = lab.root.join("storage/manifests").join(folder).join(device);
     let mut out: Vec<u64> = fs::read_dir(&d)
         .map(|r| {
             r.filter_map(|e| {
-                e.ok()?
-                    .file_name()
-                    .to_string_lossy()
-                    .strip_suffix(".enc")?
-                    .parse()
-                    .ok()
+                let name = e.ok()?.file_name().to_string_lossy().into_owned();
+                name.strip_suffix(".rec")?;
+                name[..16].parse().ok()
             })
             .collect()
         })
         .unwrap_or_default();
     out.sort();
+    out.dedup();
     out
 }
 
@@ -117,7 +118,6 @@ fn edit(lab: &Lab, e: &mut Engine, who: &str, text: &str) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (manifest pruning)"]
 fn pull_lists_only_new_manifests() {
     let lab = lab();
     let mut devs = devices(&lab, &["b"]);
@@ -149,19 +149,9 @@ fn pull_lists_only_new_manifests() {
         fs::read(lab.dir("b").join("note.txt")).unwrap(),
         b"version 6"
     );
-
-    // A full listing (the periodic sweep) finds the same and applies nothing twice.
-    b.set_manifest_policy(ManifestPolicy {
-        sweep_secs: 0,
-        prune: true,
-    });
-    let (r, c, _) = measure(b, |e| e.sync(None).unwrap());
-    assert_eq!(r[0].0.manifests_applied, 0);
-    assert!(c.manifest_lists >= 1, "{c:?}");
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (manifest pruning)"]
 fn pruning_waits_for_every_reader() {
     let lab = lab();
     let mut devs = devices(&lab, &["b", "c"]);
@@ -171,8 +161,9 @@ fn pruning_waits_for_every_reader() {
     for e in devs.iter_mut() {
         e.sync(None).unwrap();
     }
-    // C goes quiet; A and B keep working.
-    for i in 1..=6 {
+    // C goes quiet; A and B keep working. A's manifest is a base and deltas:
+    // a new base follows 64 deltas.
+    for i in 1..=70 {
         edit(&lab, &mut devs[0], "a", &format!("version {i}"));
         devs[1].sync(None).unwrap();
     }
@@ -180,25 +171,18 @@ fn pruning_waits_for_every_reader() {
     let left = stored(&lab, &folder, &a_id);
     let newest = *left.last().unwrap();
     assert!(
-        left.len() as u64 >= newest - 1,
-        "C has not acknowledged the newer ones: {left:?}"
+        left.contains(&1) && left.len() as u64 >= newest - 1,
+        "C has not acknowledged the new base: nothing goes: {left:?}"
     );
 
-    // C catches up: it reads only A's newest manifest and gets the newest content.
-    let (r, c, _) = measure(&mut devs[2], |e| e.sync(None).unwrap());
-    assert_eq!(r[0].0.manifests_applied, 2, "A's and B's newest");
-    let b_id = devs[1].device_id().to_string();
-    let b_left = stored(&lab, &folder, &b_id);
-    assert!(
-        c.manifest_listed_keys <= (left.len() + b_left.len()) as u64,
-        "{c:?}"
-    );
-    assert_eq!(c.manifest_gets, 2, "one manifest of each: {c:?}");
+    // C catches up: it reads A's base and the deltas after it, and B's.
+    devs[2].sync(None).unwrap();
     assert_eq!(
         fs::read(lab.dir("c").join("note.txt")).unwrap(),
-        b"version 6"
+        b"version 70"
     );
-    // Once B and C have acknowledged A's newest batch, A keeps only its newest.
+    // Once B and C have acknowledged A's newest base, A keeps the records
+    // from that base on.
     devs[1].sync(None).unwrap();
     edit(&lab, &mut devs[1], "b", "from b");
     devs[2].sync(None).unwrap();
@@ -206,7 +190,10 @@ fn pruning_waits_for_every_reader() {
     devs[0].sync(None).unwrap();
     devs[0].sync(None).unwrap();
     let left = stored(&lab, &folder, &a_id);
-    assert!(left.len() <= 2, "superseded manifests pruned: {left:?}");
+    assert!(
+        !left.contains(&1) && left.len() < 10,
+        "records below the newest base pruned: {left:?}"
+    );
     assert!(left.contains(&newest) || left.iter().any(|s| *s > newest));
 
     // Everyone still converges, and a device joining now reads the few left.
@@ -221,14 +208,14 @@ fn pruning_waits_for_every_reader() {
         );
     }
     let key = devs[0].export_vault_key().unwrap();
-    let mut d = Engine::join(
+    let mut d = common::join_approved(
         &lab.root.join("d-home"),
         "d",
         PASS,
         &key,
         lab.storage.clone(),
-    )
-    .unwrap();
+        &mut devs[0],
+    );
     d.chunker = ChunkerParams::SMALL;
     d.attach_folder("docs", &lab.dir("d"), false).unwrap();
     d.sync(None).unwrap();

@@ -5,6 +5,8 @@
 //! unchanged; a device whose filesystem does not take a name writes it
 //! under a mapped local name and reads it back without seeing a change.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -112,14 +114,14 @@ impl Lab {
         }
         let push = a.push("docs").unwrap();
         assert_eq!(push.files_changed, names.len() as u64);
-        let mut b = Engine::join(
+        let mut b = common::join_approved(
             &self.dir("b-home"),
             "other",
             PASS,
             &key,
             self.storage.clone(),
-        )
-        .unwrap();
+            &mut a,
+        );
         b.chunker = ChunkerParams::SMALL;
         b.set_local_rules(rules);
         b.attach_folder("docs", &self.dir("b-docs"), false).unwrap();
@@ -159,7 +161,6 @@ fn case_sensitive(lab: &Lab) -> bool {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (original names)"]
 fn original_names_round_trip_between_linux_devices() {
     let lab = Lab::new();
     if !case_sensitive(&lab) {
@@ -203,7 +204,6 @@ const WINDOWS: LocalRules = LocalRules {
 };
 
 #[test]
-#[ignore = "f3-switch: port in part B (original names)"]
 fn windows_names_are_mapped_and_read_back_unchanged() {
     let lab = Lab::new();
     if !case_sensitive(&lab) {
@@ -290,7 +290,6 @@ fn windows_names_are_mapped_and_read_back_unchanged() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (original names)"]
 fn case_collisions_get_a_local_name_and_lose_nothing() {
     let lab = Lab::new();
     if !case_sensitive(&lab) {

@@ -5,6 +5,8 @@
 //! folder feed with its filters, the history surviving a restart, and a
 //! device that joins later starting its history from the manifests.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use varsto_core::changes::Action;
@@ -70,7 +72,6 @@ fn actions(r: &ChangesReport) -> Vec<(Action, String, String)> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (change history)"]
 fn who_changed_what_and_when() {
     let lab = Lab::new();
     let (a, key) = Engine::init(&lab.home("a"), "laptop", PASS).unwrap();
@@ -79,8 +80,14 @@ fn who_changed_what_and_when() {
     a.add_folder("docs", &lab.dir("a")).unwrap();
     fs::write(lab.dir("a").join("plan.txt"), b"first draft").unwrap();
     a.sync(None).unwrap();
-    let mut b =
-        small(Engine::join(&lab.home("b"), "desk", PASS, &key, lab.storage.clone()).unwrap());
+    let mut b = small(common::join_approved(
+        &lab.home("b"),
+        "desk",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    ));
     b.attach_folder("docs", &lab.dir("b"), false).unwrap();
     b.sync(None).unwrap();
 
@@ -228,16 +235,15 @@ fn who_changed_what_and_when() {
 
     // A device that joins later starts from the manifests: the newest
     // version of every file, with the device that made it.
-    let mut c = small(
-        Engine::join(
-            &lab.home("c"),
-            "phone",
-            PASS,
-            &a.export_vault_key().unwrap(),
-            lab.storage.clone(),
-        )
-        .unwrap(),
-    );
+    let key = a.export_vault_key().unwrap();
+    let mut c = small(common::join_approved(
+        &lab.home("c"),
+        "phone",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    ));
     c.attach_folder("docs", &lab.dir("c"), false).unwrap();
     c.sync(None).unwrap();
     let r = of(&c, Some("notes/monday.txt"));

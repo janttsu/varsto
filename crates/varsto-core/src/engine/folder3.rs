@@ -342,6 +342,10 @@ impl Engine {
         let view = self.view3()?;
         let mut writer = ManifestWriter::new(*folder, me);
         if let Some(own) = manifests.views.get(&me) {
+            // Nothing changed since the last record: no storage is asked.
+            if own.files == current {
+                return Ok(None);
+            }
             writer.seq = own.seq;
             writer.base_seq = own.base;
             writer.hash = own.hash;

@@ -49,10 +49,13 @@ start_service() { # home
 }
 # ---- writer, without the delay
 W="$work/w"
-key=$("$bin" --home "$W" init --name writer --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["vault_key"])')
+init=$("$bin" --home "$W" init --name writer --json)
+key=$(echo "$init" | python3 -c 'import json,sys; print(json.load(sys.stdin)["vault_key"])')
+# The kit's recovery words make the folder's recovery copy (format 3).
+recovery=$(echo "$init" | python3 -c 'import json,re,sys; k=json.load(sys.stdin)["kit"].split("RECOVERY WORDS")[1]; print(" ".join(re.findall(r"\d+\.\s+([a-z]+)", k)))')
 "$bin" --home "$W" storage add-s3 cloud --endpoint http://127.0.0.1:9000 --bucket bench --access-key-id bench-access >/dev/null
 "$bin" --home "$W" verify set --off >/dev/null
-"$bin" --home "$W" folder add data "$data" >/dev/null
+VARSTO_RECOVERY_WORDS="$recovery" "$bin" --home "$W" folder add data "$data" >/dev/null
 t0=$(date +%s.%N)
 "$bin" --home "$W" sync >/dev/null
 echo "{\"kind\":\"push\",\"seconds\":$(echo "$(date +%s.%N) - $t0" | bc)}"
@@ -67,8 +70,14 @@ for mode in $modes; do
   n=$((n + 1))
   R="$work/r-$mode-$n"; D="$work/d-$mode-$n"
   mkdir -p "$D"
-  if [ "$mode" = p2p ]; then mv "$work/s3/bench/chunks" "$work/s3/bench/chunks.away"; fi
   VARSTO_VAULT_KEY="$key" "$bin" --home "$R" join --name "reader-$mode" "${s3flags[@]}" >/dev/null
+  # Format 3: the reader asks for the folder, the writer approves, the reader
+  # reads its grant. All before the bucket's packs move away (p2p mode).
+  "$bin" --home "$R" folder request data >/dev/null
+  api "$W" POST /api/sync '{}' >/dev/null
+  "$bin" --home "$W" folder approve data "reader-$mode" --yes >/dev/null
+  "$bin" --home "$R" sync >/dev/null
+  if [ "$mode" = p2p ]; then mv "$work/s3/bench/packs" "$work/s3/bench/packs.away"; fi
   "$bin" --home "$R" verify set --off >/dev/null
   if [ "$mode" != s3 ]; then "$bin" --home "$R" p2p enable --port $((17900 + n)) >/dev/null; fi
   start_service "$R"
@@ -90,7 +99,7 @@ print(json.dumps({"kind": "pull", "mode": mode, "seconds": round(secs, 1), "mb_s
                   "chunks": down, "from_peers": peers, "files": got}))
 PY
   api "$R" POST /api/quit '{}' >/dev/null 2>&1 || true
-  if [ "$mode" = p2p ]; then mv "$work/s3/bench/chunks.away" "$work/s3/bench/chunks"; fi
+  if [ "$mode" = p2p ]; then mv "$work/s3/bench/packs.away" "$work/s3/bench/packs"; fi
   rm -rf "$D"
 done
 netem_off
