@@ -42,6 +42,10 @@ varsto_core::redacted_debug!(ServiceFile { pid, port, started_utc, version ; tok
 /// Runtime state of the service, shared with the API.
 #[derive(Default)]
 pub struct ServiceState {
+    /// Storage format 3: folder requests already announced to the page
+    /// (`folder.request`), as `<folder>/<device>/<words>`.
+    #[cfg(feature = "format3")]
+    pub seen_requests: std::collections::BTreeSet<String>,
     pub running: bool,
     pub paused: bool,
     pub interval_secs: u64,
@@ -194,6 +198,44 @@ impl ServiceState {
             "move_jobs": self.move_jobs,
         })
     }
+    /// Storage format 3: tell the page about folder requests that wait for
+    /// an owner of this device (`folder.request`, and a notification). This
+    /// only reads. Answering a request is up to a person, at the page or at
+    /// a command line: nothing in this file approves, denies or grants.
+    pub fn watch_folder_requests(&mut self, engine: &mut Engine) {
+        #[cfg(feature = "format3")]
+        match engine.f3_requests(None) {
+            Ok(list) => {
+                let mut now = std::collections::BTreeSet::new();
+                for r in list {
+                    let key = format!("{}/{}/{}", r.folder_id, r.device_id, r.fingerprint);
+                    if !self.seen_requests.contains(&key) {
+                        varsto_core::events::publish(
+                            "folder.request",
+                            json!({
+                                "folder": r.folder,
+                                "folder_id": r.folder_id,
+                                "device": r.device,
+                                "device_id": r.device_id,
+                                "role": r.role_wanted,
+                                "fingerprint": r.fingerprint,
+                            }),
+                        );
+                        notify(
+                            "Varsto folder request",
+                            &format!("{} asks for folder {}", r.device, r.folder),
+                        );
+                    }
+                    now.insert(key);
+                }
+                self.seen_requests = now;
+            }
+            Err(e) => log::debug!("folder requests not checked: {e:#}"),
+        }
+        #[cfg(not(feature = "format3"))]
+        let _ = engine;
+    }
+
     /// Rank the pool disks for docking next (`disk suggest`) and, at most
     /// once a week and unless turned off, remind of a disk that is away and
     /// overdue for a check.
@@ -479,10 +521,17 @@ impl ServiceState {
 
     /// Keep the ledger's state; a new state is an event.
     fn set_ledger_health(&mut self, h: varsto_core::engine::LedgerHealth) {
-        if self.ledger_health.as_ref().map(|o| o.state.as_str()) != Some(h.state.as_str()) {
+        // A new state, or new warnings (a storage that may be withholding or
+        // rolling back batches, section 74), is an event.
+        let changed = self
+            .ledger_health
+            .as_ref()
+            .map(|o| (o.state.as_str(), &o.warnings))
+            != Some((h.state.as_str(), &h.warnings));
+        if changed {
             varsto_core::events::publish(
                 "ledger.health",
-                json!({"state": h.state, "text": h.describe()}),
+                json!({"state": h.state, "text": h.describe(), "warnings": h.warnings}),
             );
         }
         self.ledger_health = Some(h);
@@ -2268,6 +2317,7 @@ const UPKEEP_STEPS: &[UpkeepStep] = &[
         s.moves_if_due(e, true);
     },
     |s, e| s.suggest_disks(e),
+    |s, e| s.watch_folder_requests(e),
     |s, e| {
         if let Err(err) = e.publish_device_details(s.last_sync_utc) {
             log::info!("device details not published: {err:#}");
@@ -2779,6 +2829,38 @@ pub mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The background service never answers a folder request (design
+    /// section 6, S-020): no call that approves, denies, grants, changes a
+    /// role, removes a device or writes recovery copies appears in this file.
+    /// (The needles are split so that this test does not match itself.)
+    #[test]
+    fn the_service_never_approves_or_grants() {
+        let src = include_str!("service.rs");
+        let needles: Vec<String> = [
+            [".appr", "ove("],
+            [".de", "ny("],
+            ["issue_", "grant"],
+            ["grant_to_", "joiner"],
+            ["f3_ap", "prove"],
+            ["f3_de", "ny"],
+            ["f3_set_", "role"],
+            ["f3_re", "move"],
+            ["f3_pair_", "grants"],
+            ["f3_write_", "escrows"],
+            ["escrow_folder_", "epoch"],
+            ["start_folder_", "epoch"],
+            ["answer_", "pair"],
+        ]
+        .iter()
+        .map(|p| p.concat())
+        .collect();
+        for n in &needles {
+            assert!(!src.contains(n.as_str()), "service.rs contains {n}");
+        }
+        // What it does call is the read-only listing.
+        assert!(src.contains("f3_requests"));
+    }
 
     #[test]
     fn a_mapping_is_published_only_after_the_probe_reached_us() {

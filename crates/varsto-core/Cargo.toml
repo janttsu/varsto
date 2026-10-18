@@ -12,8 +12,9 @@ publish = false
 # tests and the lab only: it protects nothing beyond the passphrase, so
 # release binaries are built without it.
 software-key = []
-# Format 3 readers refuse a pack whose length is not a size class.
-format3 = []
+# Storage format 3 (docs/spec/format-3-design.md), built up work package
+# by work package; off until the format switches over.
+format3 = ["dep:postcard", "dep:smallvec"]
 
 [dependencies]
 anyhow.workspace = true
@@ -57,6 +58,8 @@ socket2 = { version = "0.6", features = ["all"] }
 sha1 = "0.10"
 md-5 = "0.10"
 blake2 = "0.10"
+postcard = { version = "1", default-features = false, features = ["use-std"], optional = true }
+smallvec = { version = "1.13", features = ["serde", "union"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -1466,6 +1466,60 @@ def s_ledger_withhold():
     check(got == "after-junk", "the file written beside the junk did not arrive")
 
 
+@scenario("ledger-rollback")
+def s_ledger_rollback():
+    """Spec 74. The bucket's ledger of the laptop goes back to an older copy
+    after the laptop pushed two more batches, while the desktop has not
+    pulled them yet. Nothing signed in the bucket contradicts the old state,
+    but the laptop tells the desktop over peer-to-peer how far it holds its
+    own ledger (head statement, `/p2p/heads`, `/p2p/changed`, rendezvous
+    record): the desktop's gap has the source `peer`, and after three pulls
+    it warns that a storage may be withholding or rolling back the laptop's
+    batches. When the newer copy is back the warning goes."""
+    fresh_pair()
+    lap = v("vl-laptop", "status")["device_id"]
+    ledger_dir = lab.DIR / "s3" / BUCKET / "ledger" / lap
+    stun = " ".join(f"--stun {x}" for x in lab.STUN)
+    for vm in ("vl-laptop", "vl-desktop"):
+        v(vm, f"p2p enable {stun}", json_out=False)
+        start_service(vm)
+    time.sleep(40)  # rendezvous records travel through the bucket
+    old = lab.DIR / "ledger-rollback-old"
+    newer = lab.DIR / "ledger-rollback-newer"
+    shutil.rmtree(old, ignore_errors=True)
+    shutil.rmtree(newer, ignore_errors=True)
+    shutil.copytree(ledger_dir, old)
+    # The desktop stops pulling, the laptop writes two more batches.
+    api("vl-desktop", "POST", "/api/service/pause", {"paused": True})
+    for i in (1, 2):
+        run("vl-laptop", f"echo rollback-{i} > ~/data/docs/rollback-{i}.txt")
+        v("vl-laptop", "sync")
+    time.sleep(10)  # the laptop's service rebuilds what it serves after a sync
+    shutil.move(str(ledger_dir), newer)
+    shutil.copytree(old, ledger_dir)
+    try:
+        time.sleep(6)  # rclone serve s3 lists from a 5 s directory cache
+        api("vl-desktop", "POST", "/api/service/pause", {"paused": False})
+        health = {}
+        for pull in (1, 2, 3):
+            v("vl-desktop", "sync")
+            health = api("vl-desktop", "GET", "/api/ledger/health")
+            behind = [b for b in health.get("behind", []) if b["device"] == lap]
+            check(behind and behind[0]["source"] == "peer",
+                  f"pull {pull}: the laptop's statement did not reveal the gap: {health}")
+        warned = " ".join(health.get("warnings", []))
+        check("rolling back" in warned, f"no warning after three pulls: {health}")
+        s = v("vl-desktop", "status")
+        check("rolling back" in json.dumps(s["ledger_health"]), f"status does not show it: {s['ledger_health']}")
+    finally:
+        shutil.rmtree(ledger_dir, ignore_errors=True)
+        shutil.move(str(newer), ledger_dir)
+    time.sleep(6)
+    v("vl-desktop", "sync")
+    health = api("vl-desktop", "GET", "/api/ledger/health")
+    check(not health.get("behind") and not health.get("warnings"), f"still warned after the newer copy came back: {health}")
+
+
 def ensure_restic(vm):
     """restic on the VM: the image's, Debian's package, or a copy of the
     binary named by VARSTO_LAB_RESTIC (best a static release build) or of

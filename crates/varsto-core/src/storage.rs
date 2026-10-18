@@ -43,6 +43,10 @@ pub const MAX_RECORD: u64 = 256 << 20;
 /// How many bytes a read of `key` may return: nothing a storage holds can
 /// make the program allocate more.
 pub fn read_limit(key: &str) -> u64 {
+    #[cfg(feature = "format3")]
+    if key.ends_with(".rec") {
+        return crate::record::MAX_PART_READ;
+    }
     if key.starts_with("chunks/") {
         MAX_BLOCK_OBJECT
     } else if key.starts_with(crate::packs::PREFIX)
@@ -55,9 +59,26 @@ pub fn read_limit(key: &str) -> u64 {
     }
 }
 
+/// A read that found an object larger than allowed (`too_large`); callers
+/// that treat it as a property of the object, not a failed read, find it
+/// with `downcast_ref`.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "{key} is {size} bytes, more than the {max} bytes an object of that kind may have; not read"
+)]
+pub struct TooLarge {
+    pub key: String,
+    pub size: u64,
+    pub max: u64,
+}
+
 /// The error of a read that found an object larger than allowed.
 pub fn too_large(key: &str, size: u64, max: u64) -> anyhow::Error {
-    anyhow::anyhow!("{key} is {size} bytes, more than the {max} bytes an object of that kind may have; not read")
+    anyhow::Error::new(TooLarge {
+        key: key.to_string(),
+        size,
+        max,
+    })
 }
 
 /// Run one storage operation so that a panic in it (a malformed object name

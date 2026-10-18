@@ -17,6 +17,18 @@ During alpha development, storage formats may change without migration paths. On
 
 `FORMAT_VERSION` is 2. There is no migration from format 1: block objects of their own (`chunks/`) are not read, so an alpha.14 vault opens without its data. Checked in the lab (`upgrade-from-alpha-14`) with the format number left at 1: `status` worked and `fsck --verify` reported every block of the vault missing. With the bump an alpha.15 build refuses a format 1 vault when it opens it or joins through its storage and says to recreate it (`varsto reset --yes`, `varsto init`, then sync the files into the new vault). Alpha.14 refuses a format 2 vault with "vault format version 2 is not readable by this version (1)". Release rule 3 (a reader for the previous format) is met by the alpha.14 binary, which stays downloadable and is the tool to read an alpha.14 vault.
 
+## Ledger heads between peers after 0.0.1-alpha.15 (format version 2 unchanged)
+
+Alpha-0-format.md section 74. A peer-to-peer message (`/p2p/heads`, the head statement on `/p2p/changed`), one optional field `head` in the rendezvous record `vault/peers/<device>.enc` and the device-local file `ledger/heads-seen.json`. Batches, checkpoints and the storage layout are unchanged. Older versions answer `404` to the new path, skip the new record field and never read the file, so devices of different versions work together; only the newer ones compare heads.
+
+## Format 3 peers and transport, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 75. Builds with the `format3` feature carry the format-3 peer records (`vault/peers/<device>/<seq>-0000.rec`, SignedRecords), TLS-only TCP, connection-bound tokens, signed beacons, the format-3 pairing hello and the head exchange with proofs (`ledger/watch.json`), but nothing switches to them before the format does: every build still reads, writes and speaks format 2.
+
+## Format 3 folder membership for people, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 76. Commands, local API routes, event-stream events (`folder.request`, `folder.changed`, `pair.ask`) and a pairing question for the format-3 membership records of section 6 of the design. No stored format changes: builds with the feature write `request`, `grant`, `folder`, `share-epoch` and `escrow` SignedRecords only when a person runs those commands, and no build reads them for anything else before the format flips.
+
 ## Release rules
 
 1. Tag every alpha release (`v0.0.1-alpha.N`) with the source commit and binaries. Tags `v0.0.1-alpha.3` and `v0.0.1-alpha.9` do not exist: those releases were folded into the next tag (`v0.0.1-alpha.4` and `v0.0.1-alpha.10`).
