@@ -151,7 +151,6 @@ fn two_devices_through(spec_a: StorageSpec, secret: Option<String>, spec_b: Stor
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (remote storages)"]
 fn s3_backend_against_local_s3_server() {
     if !have_rclone_s3_server() {
         eprintln!("rclone 1.65+ with `serve s3` not installed; skipping");
@@ -184,7 +183,6 @@ fn s3_backend_against_local_s3_server() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (remote storages)"]
 fn rclone_backend_against_local_remote() {
     if !have_rclone() {
         eprintln!("rclone not installed; skipping");

@@ -41,7 +41,6 @@ fn dir(root: &std::path::Path, name: &str, place: &str) -> StorageSpec {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (visualisation)"]
 fn snapshot_joins_storages_disks_costs_and_a_running_upload() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_path_buf();

@@ -47,7 +47,6 @@ fn watch<T>(op: impl FnOnce() -> T) -> (T, Vec<TaskView>) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (activity log)"]
 fn fetching_a_file_and_purging_a_folder_are_tasks() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

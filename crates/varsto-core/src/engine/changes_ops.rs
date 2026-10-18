@@ -234,7 +234,7 @@ impl Engine {
 
     /// The name of any device this one knows: its own, the vault's, a
     /// member of a shared folder.
-    fn any_device_name(&self, d: &DeviceId) -> String {
+    pub(super) fn any_device_name(&self, d: &DeviceId) -> String {
         if d == &self.vault.device_id {
             return self.vault.device_name.clone();
         }

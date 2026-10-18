@@ -159,7 +159,6 @@ fn case_sensitive(lab: &Lab) -> bool {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (original names)"]
 fn original_names_round_trip_between_linux_devices() {
     let lab = Lab::new();
     if !case_sensitive(&lab) {
@@ -203,7 +202,6 @@ const WINDOWS: LocalRules = LocalRules {
 };
 
 #[test]
-#[ignore = "f3-switch: port in part B (original names)"]
 fn windows_names_are_mapped_and_read_back_unchanged() {
     let lab = Lab::new();
     if !case_sensitive(&lab) {
@@ -290,7 +288,6 @@ fn windows_names_are_mapped_and_read_back_unchanged() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (original names)"]
 fn case_collisions_get_a_local_name_and_lose_nothing() {
     let lab = Lab::new();
     if !case_sensitive(&lab) {

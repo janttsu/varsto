@@ -45,7 +45,6 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (view)"]
 fn view_decrypts_ranges_in_memory_only() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

@@ -28,7 +28,6 @@ fn set_version(path: &std::path::Path, version: u16) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (format checks)"]
 fn an_older_or_newer_vault_is_refused_with_a_clear_message() {
     assert_eq!(varsto_core::FORMAT_VERSION, 2);
     let tmp = tempfile::tempdir().unwrap();
@@ -77,7 +76,6 @@ fn an_older_or_newer_vault_is_refused_with_a_clear_message() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (format checks)"]
 fn the_messages_tell_what_to_do() {
     let old = varsto_core::format_mismatch(1);
     assert!(

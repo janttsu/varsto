@@ -10,9 +10,6 @@
 //! Thumbnails are derived data and follow the same rule as content: never
 //! stored in clear text outside the process.
 
-use crate::crypto::{self, SecretKey};
-use crate::ids::{FolderId, VaultId};
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::io::Cursor;
@@ -40,21 +37,6 @@ fn ext(path: &str) -> String {
         .next()
         .map(|e| e.to_ascii_lowercase())
         .unwrap_or_default()
-}
-
-pub fn storage_key(folder: &FolderId, content_hash: &str) -> String {
-    format!("thumbs/{}/{}.enc", folder, content_hash)
-}
-
-fn aad(vault: &VaultId, folder: &FolderId, content_hash: &str) -> Vec<u8> {
-    crypto::aad(
-        "thumbnail",
-        &[
-            vault.as_str().as_bytes(),
-            folder.as_str().as_bytes(),
-            content_hash.as_bytes(),
-        ],
-    )
 }
 
 /// Whether ffmpeg may decode videos on the GPU or another media engine.
@@ -336,26 +318,6 @@ fn encode(img: image::DynamicImage) -> Option<Vec<u8>> {
         .encode_image(&thumb)
         .ok()?;
     Some(buf.into_inner())
-}
-
-pub fn seal(
-    bytes: &[u8],
-    vault: &VaultId,
-    folder: &FolderId,
-    content_hash: &str,
-    meta_key: &SecretKey,
-) -> Result<Vec<u8>> {
-    crypto::encrypt(meta_key, &aad(vault, folder, content_hash), bytes)
-}
-
-pub fn open(
-    blob: &[u8],
-    vault: &VaultId,
-    folder: &FolderId,
-    content_hash: &str,
-    meta_key: &SecretKey,
-) -> Result<Vec<u8>> {
-    crypto::decrypt(meta_key, &aad(vault, folder, content_hash), blob)
 }
 
 #[cfg(test)]

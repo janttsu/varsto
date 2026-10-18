@@ -1807,7 +1807,9 @@
   "This device owns no folder with keys to give.": "Den här enheten äger ingen mapp vars nycklar kan ges.",
   "Let it join": "Låt den ansluta",
   "Decline": "Avvisa",
-  "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.": "Återställningsorden är valvnyckeln som 24 ord och med lagringsformat 3 även återställningsorden som en andra uppsättning om 24. Av säkerhetsskäl skrivs de ut på den här datorns kommandorad, som frågar efter ditt lösenord: kör ett kommando nedan och skriv ut eller kopiera orden för hand. Med --shares skrivs även tre delar ut, av vilka två återskapar nyckeln."
+  "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.": "Återställningsorden är valvnyckeln som 24 ord och med lagringsformat 3 även återställningsorden som en andra uppsättning om 24. Av säkerhetsskäl skrivs de ut på den här datorns kommandorad, som frågar efter ditt lösenord: kör ett kommando nedan och skriv ut eller kopiera orden för hand. Med --shares skrivs även tre delar ut, av vilka två återskapar nyckeln.",
+  "Recovery words (optional)": "Återställningsord (valfritt)",
+  "the 24 words of your recovery kit: they make the folder's recovery copy now. Leave empty to write it later": "de 24 orden i ditt återställningspaket: med dem görs mappens återställningskopia nu. Lämna tomt för att skriva den senare"
  },
  "patterns": [
   [

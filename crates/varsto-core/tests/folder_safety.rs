@@ -133,7 +133,6 @@ fn status_of(e: &Engine) -> varsto_core::engine::FolderStatus {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn adding_and_attaching_write_the_marker() {
     let lab = Lab::new();
     let (a, key) = lab.device_a(2);
@@ -150,7 +149,6 @@ fn adding_and_attaching_write_the_marker() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn empty_root_without_marker_pauses_and_nothing_is_deleted() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(5);
@@ -231,7 +229,6 @@ fn another_folders_marker_pauses_until_repaired() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn pull_does_not_fill_an_unmarked_root() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(3);
@@ -286,7 +283,6 @@ fn older_mounts_get_a_marker_only_when_their_files_are_there() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn mass_deletion_is_held_and_discard_restores() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(150);
@@ -341,7 +337,6 @@ fn files_coming_back_release_a_hold() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn confirmed_mass_deletion_is_held_again_on_the_other_device() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(150);
@@ -380,7 +375,6 @@ fn confirmed_mass_deletion_is_held_again_on_the_other_device() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn remote_mass_deletion_discarded_restores_on_every_device() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(150);
@@ -404,7 +398,6 @@ fn remote_mass_deletion_discarded_restores_on_every_device() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn deletions_below_the_threshold_sync_normally() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(150);
@@ -474,7 +467,6 @@ fn the_guard_is_set_per_folder() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn send_only_ignores_remote_changes_until_override() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(4);
@@ -524,7 +516,6 @@ fn send_only_ignores_remote_changes_until_override() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn send_only_back_to_normal_applies_what_waited() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(2);
@@ -544,7 +535,6 @@ fn send_only_back_to_normal_applies_what_waited() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn receive_only_keeps_local_edits_private_and_revert_restores() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(4);
@@ -595,7 +585,6 @@ fn receive_only_keeps_local_edits_private_and_revert_restores() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn receive_only_remote_update_keeps_the_local_edit_in_the_trash() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(2);
@@ -617,7 +606,6 @@ fn receive_only_remote_update_keeps_the_local_edit_in_the_trash() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn receive_only_back_to_normal_publishes_the_changes() {
     let lab = Lab::new();
     let (mut a, key) = lab.device_a(2);
@@ -635,7 +623,6 @@ fn receive_only_back_to_normal_publishes_the_changes() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (folder safety)"]
 fn downloads_go_newest_first() {
     let lab = Lab::new();
     let (mut a, key) = Engine::init(&lab.root.join("a-home"), "laptop", PASS).unwrap();

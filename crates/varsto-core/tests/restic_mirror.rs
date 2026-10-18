@@ -106,7 +106,6 @@ fn kinds(c: &varsto_core::restic::Completeness) -> Vec<(String, ProblemKind)> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn mirror_setup_completeness_cache_and_fixes() {
     let (lab, mut a, mut b) = two_devices();
     let root = lab.p("mirror");
@@ -251,7 +250,6 @@ fn listing(dir: &Path) -> std::collections::BTreeSet<String> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn setup_refuses_folders_attached_elsewhere_unless_moved() {
     let (lab, _a, mut b) = two_devices();
     b.sync(None).unwrap();
@@ -290,7 +288,6 @@ fn setup_refuses_folders_attached_elsewhere_unless_moved() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn hold_keeps_varsto_out_of_the_mirror_folders() {
     let (lab, mut a, mut b) = two_devices();
     b.restic_setup(config(&lab.p("mirror"), &lab.p("pw")), None, false)

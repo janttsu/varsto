@@ -106,7 +106,6 @@ fn storage_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn restic_backup_of_the_mirror_restores_byte_for_byte() {
     if Command::new("restic").arg("version").output().is_err() {
         eprintln!("restic is not installed; skipped");

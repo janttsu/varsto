@@ -14,7 +14,6 @@ use varsto_core::Engine;
 const PASS: &str = "correct horse battery staple";
 
 #[test]
-#[ignore = "f3-switch: port in part B (temp files)"]
 fn a_planted_link_under_the_old_temporary_name_is_not_written_through() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
