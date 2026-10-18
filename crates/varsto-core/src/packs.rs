@@ -229,6 +229,29 @@ pub fn build(
     (id, bytes, locs)
 }
 
+/// Place members of the given sizes into bins of at most `limit` bytes,
+/// first fit decreasing: the largest member first, each into the first bin
+/// it fits. Returns the member indexes of every bin (a member larger than
+/// `limit` gets a bin of its own). Used by `PackStore` and by the pack-level
+/// moves of format 3 (`crate::storages3`), so full packs are nearly all
+/// members.
+pub fn first_fit_decreasing(sizes: &[usize], limit: usize) -> Vec<Vec<usize>> {
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(sizes[i]));
+    let mut bins: Vec<(Vec<usize>, usize)> = Vec::new();
+    for i in order {
+        let n = sizes[i];
+        match bins.iter_mut().find(|(_, used)| *used + n <= limit) {
+            Some((members, used)) => {
+                members.push(i);
+                *used += n;
+            }
+            None => bins.push((vec![i], n)),
+        }
+    }
+    bins.into_iter().map(|(m, _)| m).collect()
+}
+
 /// A pack this process wrote, not yet listed in a pack index.
 #[derive(Clone, Debug)]
 pub struct NewPack {
@@ -998,20 +1021,9 @@ impl PackStore {
     /// of what is left takes the smallest class it fits.
     fn write_packs(&self, fresh: &[(String, &[u8])]) -> Result<()> {
         let limit = self.target.min(top_class(self.target));
-        let mut order: Vec<usize> = (0..fresh.len()).collect();
-        order.sort_by_key(|&i| std::cmp::Reverse(fresh[i].1.len()));
-        let mut bins: Vec<(Vec<usize>, usize)> = Vec::new();
-        for i in order {
-            let n = fresh[i].1.len();
-            match bins.iter_mut().find(|(_, used)| *used + n <= limit) {
-                Some((members, used)) => {
-                    members.push(i);
-                    *used += n;
-                }
-                None => bins.push((vec![i], n)),
-            }
-        }
-        for (mut idx, _) in bins {
+        let sizes: Vec<usize> = fresh.iter().map(|(_, b)| b.len()).collect();
+        let bins = first_fit_decreasing(&sizes, limit);
+        for mut idx in bins {
             // The order of the push inside a pack (blocks of a file next
             // to each other).
             idx.sort_unstable();
