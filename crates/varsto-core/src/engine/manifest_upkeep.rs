@@ -40,65 +40,22 @@ impl Default for ManifestPolicy {
     }
 }
 
-const UPKEEP_FILE: &str = "state/manifests.json";
-
-/// Kept in `state/manifests.json`.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct ManifestUpkeep {
-    #[serde(default)]
-    folders: BTreeMap<FolderId, FolderUpkeep>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct FolderUpkeep {
-    /// Per storage: own manifest records below this seq are gone there.
-    #[serde(default)]
-    pruned_below: BTreeMap<String, u64>,
-}
-
-/// (device, seq) of a key under `manifests/<folder>/` in format 2 (the
-/// format-2 ledger rebuild in `ledger_recovery` still reads it; it goes
-/// with that code).
-pub(super) fn parse_key(folder_prefix: &str, key: &str) -> Option<(DeviceId, u64)> {
-    let rest = key.strip_prefix(folder_prefix)?;
-    let (dev, file) = rest.split_once('/')?;
-    let seq = file.strip_suffix(".enc")?.parse::<u64>().ok()?;
-    Some((DeviceId::from_hex(dev).ok()?, seq))
-}
-
 impl Engine {
     /// Use another manifest policy (tests and measurements).
     pub fn set_manifest_policy(&mut self, policy: ManifestPolicy) {
         self.manifest_policy = policy;
     }
 
-
-    fn manifest_upkeep_path(&self) -> PathBuf {
-        self.home.join(UPKEEP_FILE)
-    }
-
-    fn load_manifest_upkeep(&self) -> ManifestUpkeep {
-        util::read_json_or_default(&self.manifest_upkeep_path()).unwrap_or_default()
-    }
-
-    fn save_manifest_upkeep(&self, up: &ManifestUpkeep) -> Result<()> {
-        // Never recreate a state directory that was removed (reset, wipe).
-        if !self.home.join("state").is_dir() {
-            return Ok(());
-        }
-        util::write_json(&self.manifest_upkeep_path(), up)
-    }
-
-    /// After a sync: delete own manifest records below the newest base
-    /// every reader of the folder has acknowledged, from the hot
-    /// storages. Anything left undone is retried after the next sync.
+    /// After a sync: delete own manifest and map records below the newest
+    /// base every reader of the folder has acknowledged, from the hot
+    /// storages (`prune_records3`). Anything left undone is retried after
+    /// the next sync.
     pub fn manifest_upkeep(&mut self) -> Result<()> {
-        if !self.manifest_policy.prune || !self.pending.is_empty() {
+        if !self.manifest_policy.prune || !self.pending.is_empty() || !self.f3.pending.is_empty() {
             return Ok(());
         }
         crate::logged_op_plain!("manifest upkeep", "", {
             self.prune_records3().map(|_| ())
         })
     }
-
 }
