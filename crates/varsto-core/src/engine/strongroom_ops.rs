@@ -414,6 +414,7 @@ impl Engine {
             folder_id: new_id.clone(),
             name: rec.name.clone(),
             key_hex: folder_key.to_hex(),
+            k11_hex: String::new(),
             created_by: me.clone(),
             created_utc: util::now_utc(),
             shared: false,

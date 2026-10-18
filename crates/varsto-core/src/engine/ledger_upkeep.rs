@@ -247,10 +247,11 @@ impl Engine {
     /// this device's own, locally for everyone's). Cold storages are left
     /// as they are.
     pub fn ledger_upkeep(&mut self) -> Result<()> {
-        crate::logged_op_plain!("ledger upkeep", "", { self.ledger_upkeep_inner() })
+        crate::logged_op_plain!("ledger upkeep", "", { self.ledger_upkeep3() })
     }
 
-    fn ledger_upkeep_inner(&mut self) -> Result<()> {
+    /// Format 2 (f3-switch: part B deletes it).
+    fn ledger_upkeep_inner2(&mut self) -> Result<()> {
         if self.vault.member
             || self.forked_self
             || self.removal.is_some()
@@ -595,9 +596,22 @@ impl Engine {
         util::write_atomic(&path, &crypto::encrypt(&key, &aad, &packed)?)
     }
 
-    /// Push every own batch (and the newest own checkpoint) that a storage
-    /// does not have yet; detect forks.
+    /// Push every own batch that a hot metadata storage does not have yet
+    /// (format 3, `ledger3_ops`).
     pub(super) fn push_own_batches(&mut self) -> Result<()> {
+        self.push_own_batches3()
+    }
+
+    /// Pull the membership and everyone's new batches (format 3,
+    /// `ledger3_ops`).
+    pub(super) fn pull_ledger(&mut self) -> Result<Vec<DeviceId>> {
+        self.pull_ledger3()
+    }
+
+    /// Push every own batch (and the newest own checkpoint) that a storage
+    /// does not have yet; detect forks. Format 2 (f3-switch: part B
+    /// deletes it).
+    pub(super) fn push_own_batches2(&mut self) -> Result<()> {
         let me = self.vault.device_id.clone();
         let head = self.ledger.head(&me);
         let checkpoint = self.ledger.checkpoint(&me)?;
@@ -706,8 +720,9 @@ impl Engine {
 
     /// Pull everyone's new batches from every hot storage: for each device
     /// with a known key, only the batches after the local head, and its
-    /// newest checkpoint when that is newer than the one held here.
-    pub(super) fn pull_ledger(&mut self) -> Result<Vec<DeviceId>> {
+    /// newest checkpoint when that is newer than the one held here. Format
+    /// 2 (f3-switch: part B deletes it).
+    pub(super) fn pull_ledger2(&mut self) -> Result<Vec<DeviceId>> {
         self.pull_registry()?;
         self.sync_membership()?;
         let dir = self.key_directory()?;

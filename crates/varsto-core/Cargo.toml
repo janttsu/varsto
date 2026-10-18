@@ -12,6 +12,7 @@ publish = false
 # tests and the lab only: it protects nothing beyond the passphrase, so
 # release binaries are built without it.
 software-key = []
+default = ["format3"]
 # Storage format 3 (docs/spec/format-3-design.md), built up work package
 # by work package; off until the format switches over.
 format3 = ["dep:postcard", "dep:smallvec"]

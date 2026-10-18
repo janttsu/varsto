@@ -240,8 +240,9 @@ struct ForkFile {
 impl Alarm {
     /// What the local files say when the engine opens (no storage is read).
     pub(super) fn at_open(e: &Engine, pending_lost: bool) -> Alarm {
-        let me = &e.vault.device_id;
-        let head = e.ledger.head(me);
+        // Format 3: the ledger is `ledger3` (`Engine::f3`).
+        let me = &e.me3();
+        let head = e.f3.ledger.head(me);
         let mut a = Alarm {
             heads: crate::ledger_heads::HeadsSeen::load(&e.home),
             ..Alarm::default()
@@ -250,13 +251,13 @@ impl Alarm {
             // A removed device signs nothing anyway.
             return a;
         }
-        let damaged = e.ledger.damaged();
+        let damaged = e.f3.ledger.damaged();
         if damaged.iter().any(|n| n == "heads.json") {
             a.local.push(LedgerProblem {
                 code: "local_files_damaged".into(),
                 detail: "the local ledger's heads file could not be read".into(),
             });
-        } else if e.ledger.heads_absent() && !e.vault.member {
+        } else if e.f3.ledger.heads_absent() && !e.vault.member {
             // Every full device signs its enrolment when it is created, so
             // its heads file exists from then on.
             a.local.push(LedgerProblem {
@@ -276,7 +277,7 @@ impl Alarm {
                     .into(),
             );
         }
-        let pushed = e.ledger.pushed_max();
+        let pushed = e.f3.ledger.pushed_max();
         if a.local.is_empty() && pushed > head.seq {
             a.local.push(LedgerProblem {
                 code: "behind_pushed".into(),
@@ -289,7 +290,8 @@ impl Alarm {
         if a.local.is_empty()
             && head.seq > head.dropped
             && head.base.as_ref().is_none_or(|b| b.seq < head.seq)
-            && e.ledger
+            && e.f3
+                .ledger
                 .get(me, head.seq)
                 .map(|b| b.is_none())
                 .unwrap_or(true)
@@ -808,7 +810,8 @@ impl Engine {
             return Ok(self.ledger_alarm.no_ledger);
         }
         self.ledger_alarm.lost_checked_utc = Some(now);
-        let lost = self.view()?.chunks.is_empty() && self.chunk_map(true)?.objects_named() > 0;
+        // Format 3: no pack claims at all while files name blocks.
+        let lost = self.view3()?.packs.is_empty() && self.chunk_map(true)?.objects_named() > 0;
         self.ledger_alarm.no_ledger = lost;
         Ok(lost)
     }

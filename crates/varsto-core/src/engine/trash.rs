@@ -80,6 +80,9 @@ pub struct TrashRemoval {
     pub restored: bool,
     /// When the entry was deleted (decides when the removal can be forgotten).
     pub deleted_utc: i64,
+    /// Lamport time of the removal (format 3: orders concurrent removals).
+    #[serde(default)]
+    pub lamport: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -133,6 +136,12 @@ struct TrashCache {
     /// device first saw it. They stay listed for a while, then are forgotten.
     #[serde(default)]
     versions_gone: BTreeMap<String, i64>,
+    /// Format 3: this device's trash stream as last published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) writer3: Option<trash3_io::Writer3>,
+    /// Format 3: how far each other device's stream was applied.
+    #[serde(default)]
+    pub(super) remote3: BTreeMap<DeviceId, trash3_io::Applied3>,
 }
 
 /// Vault-wide trash settings (newest wins).
@@ -353,19 +362,12 @@ fn settings_aad(vault: &VaultId, device: &DeviceId, written: i64) -> Vec<u8> {
 }
 
 pub(super) fn entry_id(folder: &FolderId, path: &str, device: &DeviceId, clock: u64) -> String {
-    let h = crypto::hash(
-        &[
-            b"varsto-trash-entry".as_slice(),
-            folder.as_str().as_bytes(),
-            &[0],
-            path.as_bytes(),
-            &[0],
-            device.as_str().as_bytes(),
-            &clock.to_le_bytes(),
-        ]
-        .concat(),
-    );
-    hex::encode(&h[..16])
+    // Format 3: over the binary ids (`trash3::entry_id`), so a reader of
+    // the trash record recomputes it.
+    match (members3::bin(folder), members3::bin(device)) {
+        (Ok(f), Ok(d)) => hex::encode(crate::trash3::entry_id(&f, path, &d, clock)),
+        _ => String::new(),
+    }
 }
 
 /// An entry from another device's record that could have come from an
@@ -697,43 +699,97 @@ impl Engine {
             self.save_trash_cache(&rec.folder_id, &cache)?;
             return Ok(false);
         }
-        let storages = self.metadata_storages(true)?;
-        let storages: OpenStorages = storages
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
+        let storages = self.record_storages3()?;
         if storages.is_empty() {
             self.save_trash_cache(&rec.folder_id, &cache)?;
             return Ok(false);
         }
+        // Format 3: this device's `trash` stream (base + delta, announced
+        // in its next batch; `trash3`).
         let fk = self.folder_keys(rec)?;
-        let me = self.vault.device_id.clone();
-        let written = now.max(cache.published_utc + 1);
-        let body = TrashBody {
-            device: me.clone(),
-            folder: rec.folder_id.clone(),
-            written_utc: written,
-            entries: cache.own.clone(),
-            removed: cache.own_removed.clone(),
-            versions: cache.own_versions.clone(),
-        };
-        let packed = zstd::bulk::compress(&serde_json::to_vec(&body)?, 3)?;
-        let blob = crypto::encrypt(
-            &record_key(&fk.meta, &rec.folder_id),
-            &record_aad(&self.vault.vault_id, &rec.folder_id, &me, written),
-            &packed,
-        )?;
-        let key = record_storage_key(&rec.folder_id, &me, written);
-        let own = format!("{}{me}/", record_prefix(&rec.folder_id));
-        for (_, b) in &storages {
-            b.put_if_absent(&key, &blob)?;
-            // Only the newest record of a device is read.
-            for old in b.list(&own)? {
-                if old != key {
-                    b.delete(&old)?;
-                }
+        let folder = members3::bin(&rec.folder_id)?;
+        let me = self.me3();
+        let vault = members3::bin(&self.vault.vault_id)?;
+        let current = trash3_io::snapshot_of(&cache.own, &cache.own_removed, &cache.own_versions)?;
+        let mut writer = cache.writer3.clone().unwrap_or_default().writer(folder, me);
+        let lamport = self.tick()?;
+        let vault_keys = self.vault_keys3();
+        let refs: Vec<&dyn Storage> = storages.iter().map(|(_, b)| &**b).collect();
+        let published = {
+            let keys = self.keys3(&vault_keys);
+            let signer = crate::record::DeviceSigner {
+                device: me,
+                key: &self.keys.signer,
+            };
+            let rw = crate::record::RecordWriter {
+                vault,
+                signer: &signer,
+                keys: &keys,
+            };
+            let no_trust = crate::membership3::Trust {
+                devices: &self.f3.members.devices,
+                revoked: &self.f3.members.revoked,
+                folders: None,
+                members: None,
+            };
+            let highest = crate::record::RecordStore {
+                storage: refs[0],
+                acceptor: crate::record::Acceptor {
+                    vault,
+                    keys: &keys,
+                    trust: &no_trust,
+                },
             }
+            .highest_seq(&crate::trash3::stream(folder, me))?;
+            writer.resume(highest);
+            let key = crate::record::KeyId::Meta {
+                folder,
+                epoch: fk.epoch,
+            };
+            let mut out = None;
+            for _ in 0..4 {
+                let Some(p) = writer.seal(&rw, &key, &current, lamport, now)? else {
+                    break;
+                };
+                let mut taken = false;
+                for (name, bytes) in &p.sealed.parts {
+                    if !refs[0].put_if_absent(name, bytes)? {
+                        taken = true;
+                        break;
+                    }
+                }
+                if taken {
+                    writer.abandon(p);
+                    continue;
+                }
+                for s in &refs[1..] {
+                    for (name, bytes) in &p.sealed.parts {
+                        s.put_if_absent(name, bytes)?;
+                    }
+                }
+                out = Some(p.sealed.published.clone());
+                writer.commit(p);
+                break;
+            }
+            out
+        };
+        cache.writer3 = Some(trash3_io::Writer3::of(&writer));
+        if let Some(a) = published {
+            self.f3
+                .pending
+                .push(crate::ledger3::events::Event::RecordPublished(
+                    crate::ledger3::events::Announcement {
+                        kind: a.kind,
+                        scope: a.scope,
+                        seq: a.seq,
+                        base: a.base,
+                        parts: a.parts,
+                        body_hash: a.body_hash,
+                        size: a.size,
+                    },
+                ));
         }
+        let written = now.max(cache.published_utc + 1);
         cache.published_utc = written;
         cache.published_hash = hash;
         self.save_trash_cache(&rec.folder_id, &cache)?;
@@ -742,6 +798,89 @@ impl Engine {
 
     /// Read the newest trash record of every other device of a folder.
     fn trash_read(
+        &self,
+        storages: &OpenStorages,
+        fk: &FolderKeys,
+        cache: &mut TrashCache,
+    ) -> Result<usize> {
+        // Format 3: the `trash` streams the view announces past what was
+        // applied, through the acceptance rule (`trash3::FolderTrash`).
+        let folder = members3::bin(&fk.folder)?;
+        let me = self.me3();
+        let view = self.view3()?;
+        let mut ft = crate::trash3::FolderTrash::new(folder);
+        for (dev, applied) in &cache.remote3 {
+            let Ok(d) = members3::bin(dev) else {
+                continue;
+            };
+            let r = cache.remote.get(dev).cloned().unwrap_or_default();
+            ft.insert(applied.device_trash(d, &r.entries, &r.versions)?);
+        }
+        let vault = members3::bin(&self.vault.vault_id)?;
+        let vault_keys = self.vault_keys3();
+        let keys = self.keys3(&vault_keys);
+        let trust = members3::EngineTrust {
+            inner: self.f3.members.trust(),
+            view: &view,
+        };
+        let mut refused = crate::record::RecordsRefused::default();
+        for (_, backend) in storages {
+            let store = crate::record::RecordStore {
+                storage: backend.as_ref(),
+                acceptor: crate::record::Acceptor {
+                    vault,
+                    keys: &keys,
+                    trust: &trust,
+                },
+            };
+            let r = ft.pull(&store, &view, &me, &mut refused)?;
+            for x in &r.refused {
+                log::warn!("trash record refused: {x}");
+            }
+        }
+        let mut read = 0;
+        for (d, dt) in &ft.devices {
+            let did = DeviceId::from_bytes(d);
+            if cache.remote3.get(&did).is_some_and(|a| a.seq == dt.seq) {
+                continue;
+            }
+            read += 1;
+            let entries = dt
+                .state
+                .entries
+                .values()
+                .map(trash3_io::entry_from3)
+                .filter(|e| entry_valid(e, &fk.folder, &did))
+                .collect();
+            let versions = dt
+                .state
+                .versions
+                .values()
+                .map(trash3_io::entry_from3)
+                .filter(|e| entry_valid(e, &fk.folder, &did))
+                .collect();
+            let removed = dt
+                .state
+                .removals
+                .values()
+                .map(|r| trash3_io::removal_from3(r, &did))
+                .collect();
+            cache.remote.insert(
+                did.clone(),
+                RemoteTrash {
+                    written_utc: dt.created_utc,
+                    entries,
+                    removed,
+                    versions,
+                },
+            );
+            cache.remote3.insert(did, trash3_io::Applied3::of(dt));
+        }
+        Ok(read)
+    }
+
+    /// The format-2 trash records (f3-switch: part B deletes it).
+    fn trash_read2(
         &self,
         storages: &OpenStorages,
         fk: &FolderKeys,
@@ -836,6 +975,10 @@ impl Engine {
             .collect();
         if storages.is_empty() {
             return Ok(());
+        }
+        if force {
+            // Format 3: trash records count once a batch announces them.
+            self.pull_ledger_once()?;
         }
         self.trash_read_settings(&storages, force, now)?;
         let folders: Vec<FolderRecord> = self.folders().into_iter().map(|(r, _)| r).collect();
@@ -1470,25 +1613,35 @@ impl Engine {
     /// only from cold storage.
     pub(super) fn entry_storages(
         &self,
-        view: &LedgerView,
+        _view: &LedgerView,
         folder: &FolderId,
         e: &TrashEntry,
     ) -> (Vec<String>, bool) {
+        // Format 3: the storages holding a live place of each block.
+        let Ok(view) = self.view3() else {
+            return (Vec::new(), false);
+        };
         let mut names = BTreeSet::new();
         let mut cold_only = false;
         for c in &e.chunks {
-            let Some(r) = view
-                .locate(folder, &c.chunk)
-                .filter(|r| r.object == c.object)
-            else {
-                continue;
-            };
-            names.extend(r.storages.keys().cloned());
-            if self.needs_cold_read(r, c) {
+            let held = self.block_copies3(&view, folder, &c.object);
+            if self.needs_cold_read3(&held, c) {
                 cold_only = true;
             }
+            names.extend(held);
         }
         (names.into_iter().collect(), cold_only)
+    }
+
+    /// A block that no warm storage of this device and no cache holds, but
+    /// a cold one does (format 3: `held` are the storages with a copy).
+    pub(super) fn needs_cold_read3(&self, held: &BTreeSet<String>, c: &ChunkRef) -> bool {
+        let spec = |n: &str| self.config.storages.iter().find(|s| s.name() == n);
+        let warm = held
+            .iter()
+            .any(|n| spec(n).is_some_and(|s| !s.is_cold() && !s.is_carrier()));
+        let cold = held.iter().any(|n| spec(n).is_some_and(|s| s.is_cold()));
+        !warm && cold && self.cached_object(&c.object).is_none()
     }
 
     /// A block that no warm storage of this device and no cache holds, but a
@@ -1854,33 +2007,30 @@ impl Engine {
         plan: &mut TrashRestorePlan,
         cold: &mut BTreeSet<String>,
     ) {
+        let _ = view;
+        // Format 3: copies from the block map and the pack-level view.
+        let Ok(view) = self.view3() else {
+            return;
+        };
         for c in &e.chunks {
-            match view
-                .locate(folder, &c.chunk)
-                .filter(|r| r.object == c.object)
+            let held = self.block_copies3(&view, folder, &c.object);
+            if self.needs_cold_read3(&held, c) {
+                plan.cold_bytes += c.size;
+                cold.extend(
+                    held.iter()
+                        .filter(|n| {
+                            self.config
+                                .storages
+                                .iter()
+                                .any(|s| s.name() == n.as_str() && s.is_cold())
+                        })
+                        .cloned(),
+                );
+            } else if held.is_empty()
+                && self.cached_object(&c.object).is_none()
+                && !plan.unavailable.contains(&e.path)
             {
-                Some(r) if self.needs_cold_read(r, c) => {
-                    plan.cold_bytes += c.size;
-                    cold.extend(
-                        r.storages
-                            .keys()
-                            .filter(|n| {
-                                self.config
-                                    .storages
-                                    .iter()
-                                    .any(|s| s.name() == n.as_str() && s.is_cold())
-                            })
-                            .cloned(),
-                    );
-                }
-                Some(r) if !r.storages.is_empty() || !r.devices.is_empty() => {}
-                _ => {
-                    if self.cached_object(&c.object).is_none()
-                        && !plan.unavailable.contains(&e.path)
-                    {
-                        plan.unavailable.push(e.path.clone());
-                    }
-                }
+                plan.unavailable.push(e.path.clone());
             }
         }
     }
@@ -2035,6 +2185,7 @@ impl Engine {
                     by: me.clone(),
                     restored: true,
                     deleted_utc: *deleted_utc,
+                    lamport: self.clock.lamport,
                 },
             );
             cache.queued.insert(id.clone());
@@ -2155,6 +2306,7 @@ impl Engine {
                         by: me.clone(),
                         restored: false,
                         deleted_utc: e.deleted_utc,
+                        lamport: self.clock.lamport,
                     },
                 );
                 cache.queued.insert(e.id.clone());

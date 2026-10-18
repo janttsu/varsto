@@ -892,7 +892,13 @@ impl DeviceRecord {
 pub struct FolderRecord {
     pub folder_id: FolderId,
     pub name: String,
+    /// K9 of folder epoch 0 (hex), when this device holds it (format 3:
+    /// from a grant to this device, never from a published record).
     pub key_hex: String,
+    /// K11 (hex): fixed at the folder's first epoch, carried in every
+    /// grant; empty when it follows from `key_hex`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub k11_hex: String,
     pub created_by: DeviceId,
     pub created_utc: i64,
     /// Shared with other users: member records and batches live under
@@ -953,12 +959,13 @@ impl Drop for ShareJoin {
     }
 }
 
-crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, shared, strongroom, removed_utc, backup, placement, policy, share_join ; key_hex, epoch_keys });
+crate::redacted_debug!(FolderRecord { folder_id, name, created_by, created_utc, shared, strongroom, removed_utc, backup, placement, policy, share_join ; key_hex, k11_hex, epoch_keys });
 
 impl Drop for FolderRecord {
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.key_hex.zeroize();
+        self.k11_hex.zeroize();
         for v in self.epoch_keys.values_mut() {
             v.zeroize();
         }
@@ -1044,8 +1051,25 @@ impl FolderRecord {
         }
         Ok(rec)
     }
+    /// The folder keys this record holds: K9 of epoch 0 (`key_hex`) and of
+    /// later epochs (`epoch_keys`), and K11.
     pub fn keys(&self) -> Result<FolderKeys> {
-        FolderKeys::from_folder_key(&self.folder_id, SecretKey::from_hex(&self.key_hex)?)
+        let mut epochs = BTreeMap::new();
+        if !self.key_hex.is_empty() {
+            epochs.insert(0, SecretKey::from_hex(&self.key_hex)?);
+        }
+        for (e, k) in &self.epoch_keys {
+            epochs.insert(*e, SecretKey::from_hex(k)?);
+        }
+        let k11 = if !self.k11_hex.is_empty() {
+            SecretKey::from_hex(&self.k11_hex)?
+        } else {
+            let k0 = epochs
+                .get(&0)
+                .ok_or_else(|| anyhow!("no key of folder {} is held here", self.name))?;
+            FolderKeys::k11_of(&self.folder_id, k0)?
+        };
+        FolderKeys::new(&self.folder_id, epochs, k11)
     }
     pub fn folder_key(&self) -> Result<SecretKey> {
         SecretKey::from_hex(&self.key_hex)
@@ -1066,137 +1090,171 @@ impl FolderRecord {
     }
 }
 
-/// Keys derived from one folder key.
-///
-/// A folder has key *epochs* (`docs/spec/alpha-0-format.md` section 20):
-/// epoch 0 is the key in the folder record; each device revocation starts a
-/// new vault key epoch, and the folder key of epoch `e >= 1` is derived from
-/// that epoch's vault key. New chunks and manifests use the newest epoch the
-/// device knows; older chunks stay under the epoch recorded in their
-/// `ChunkRef`. The keyed-hash key stays the one of epoch 0, so chunk ids and
-/// content hashes (and with them deduplication and merging) do not change.
+/// The keys of one folder (storage format 3, `docs/spec/format-3-design.md`
+/// section 1): K9 of every folder epoch this device holds (from grants to
+/// it, or a recovery), K11 (fixed at the folder's first epoch and carried
+/// in every grant), K10 of the epoch new records and chunks are written
+/// under, and what they give: K12 (the chunker seed), K14 (a chunk's key)
+/// and the chunk nonce. Every derivation is the design's
+/// `derive(K, purpose, scope...)` (context `e2ee-sync-format/3/<purpose>`)
+/// over binary ids. Chunk ids and content hashes are keyed by K11, so a
+/// new folder epoch moves no cut point and changes no chunk id; older
+/// chunks stay under the epoch recorded in their `ChunkRef`.
 pub struct FolderKeys {
     pub folder: FolderId,
-    base: SecretKey,
-    /// Keyed-hash key for chunk ids and file content hashes (dedup domain = folder).
+    folder_bin: [u8; 16],
+    /// K9 by folder epoch.
+    epochs: BTreeMap<u32, SecretKey>,
+    /// K11: keyed-hash key for chunk ids and content hashes.
     pub hash: SecretKey,
-    /// Encrypts manifests (and thumbnails) written now: the newest epoch.
+    /// K10 of the write epoch: manifests, maps, trash, thumbnails.
     pub meta: SecretKey,
-    /// The epoch new chunks and manifests are written under.
+    /// The epoch new chunks and records are written under.
     pub epoch: u32,
-    /// Folder keys of epochs 1 and later.
-    later: BTreeMap<u32, SecretKey>,
 }
 
 crate::redacted_opaque!(FolderKeys);
 
+fn folder_bin(folder: &FolderId) -> Result<[u8; 16]> {
+    folder
+        .as_bytes()
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow!("folder id {folder} is not 16 bytes"))
+}
+
+fn derive3(k: &SecretKey, purpose: &str, scope: &[&[u8]]) -> SecretKey {
+    k.derive_with_prefix(crate::membership3::CONTEXT3, purpose, scope)
+}
+
 impl FolderKeys {
-    pub fn from_folder_key(folder: &FolderId, base: SecretKey) -> Result<Self> {
-        crate::logging::register_key(base.as_bytes());
-        let scope: &[&[u8]] = &[folder.as_str().as_bytes()];
+    /// The keys of `folder` from K9 of the epochs held and K11. The newest
+    /// epoch is the write epoch.
+    pub fn new(
+        folder: &FolderId,
+        epochs: BTreeMap<u32, SecretKey>,
+        k11: SecretKey,
+    ) -> Result<Self> {
+        let fb = folder_bin(folder)?;
+        for k in epochs.values() {
+            crate::logging::register_key(k.as_bytes());
+        }
+        let (epoch, meta) = match epochs.iter().next_back() {
+            Some((e, k)) => (*e, derive3(k, "folder-metadata", &[&fb])),
+            None => bail!("no key of folder {folder} is held here"),
+        };
         Ok(FolderKeys {
             folder: folder.clone(),
-            hash: base.derive("dedup-hash", scope),
-            meta: base.derive("folder-metadata", scope),
-            base,
-            epoch: 0,
-            later: BTreeMap::new(),
+            folder_bin: fb,
+            epochs,
+            hash: k11,
+            meta,
+            epoch,
         })
     }
 
-    /// Add the folder keys of later epochs; the newest becomes the write epoch.
+    /// The keys of a folder from its first epoch's K9 alone (K11 follows
+    /// from it): a new folder, or a test.
+    pub fn from_folder_key(folder: &FolderId, base: SecretKey) -> Result<Self> {
+        let fb = folder_bin(folder)?;
+        let k11 = derive3(&base, "dedup-hash", &[&fb]);
+        Self::new(folder, BTreeMap::from([(0, base)]), k11)
+    }
+
+    /// K11 of a folder whose first epoch's K9 is `k9_0`.
+    pub fn k11_of(folder: &FolderId, k9_0: &SecretKey) -> Result<SecretKey> {
+        Ok(derive3(k9_0, "dedup-hash", &[&folder_bin(folder)?]))
+    }
+
+    /// Add K9 of later epochs; the newest becomes the write epoch.
     pub fn with_epochs(mut self, later: BTreeMap<u32, SecretKey>) -> Self {
-        if let Some((e, k)) = later.iter().next_back() {
+        self.epochs.extend(later);
+        if let Some((e, k)) = self.epochs.iter().next_back() {
             self.epoch = *e;
-            self.meta = k.derive("folder-metadata", &[self.folder.as_str().as_bytes()]);
+            self.meta = derive3(k, "folder-metadata", &[&self.folder_bin]);
         }
-        self.later = later;
         self
     }
 
-    /// Keep writing under epoch 0 while still reading later epochs (folders
-    /// shared with other users, Strongroom).
-    pub fn write_at_base(mut self) -> Self {
-        self.epoch = 0;
-        self.meta = self
-            .base
-            .derive("folder-metadata", &[self.folder.as_str().as_bytes()]);
-        self
+    /// Write under the oldest epoch held.
+    pub fn write_at_base(self) -> Self {
+        let first = self.epochs.keys().next().copied().unwrap_or(0);
+        self.write_at(first)
     }
 
-    /// Write under a later epoch this key set knows (a folder's newest
-    /// share epoch); falls back to epoch 0 when the epoch is unknown.
+    /// Write under `epoch` when it is held (else the keys stay as they are).
     pub fn write_at(mut self, epoch: u32) -> Self {
-        match self.later.get(&epoch) {
-            Some(k) => {
-                self.meta = k.derive("folder-metadata", &[self.folder.as_str().as_bytes()]);
-                self.epoch = epoch;
-                self
-            }
-            None => self.write_at_base(),
+        if let Some(k) = self.epochs.get(&epoch) {
+            self.meta = derive3(k, "folder-metadata", &[&self.folder_bin]);
+            self.epoch = epoch;
         }
+        self
     }
 
-    fn epoch_base(&self, epoch: u32) -> Result<&SecretKey> {
-        if epoch == 0 {
-            return Ok(&self.base);
-        }
-        self.later.get(&epoch).ok_or_else(|| {
+    fn epoch_key(&self, epoch: u32) -> Result<&SecretKey> {
+        self.epochs.get(&epoch).ok_or_else(|| {
             anyhow!(
                 "folder key epoch {epoch} is not known on this device yet (it arrives with the next sync)"
             )
         })
     }
 
-    /// Metadata keys of every known epoch, newest first: manifests and
-    /// thumbnails are opened with the first that fits.
-    pub fn meta_keys(&self) -> Vec<SecretKey> {
-        let scope: &[&[u8]] = &[self.folder.as_str().as_bytes()];
-        self.later
-            .values()
-            .rev()
-            .chain(std::iter::once(&self.base))
-            .map(|k| k.derive("folder-metadata", scope))
-            .collect()
+    /// The epochs held, oldest first.
+    pub fn epochs(&self) -> impl Iterator<Item = u32> + '_ {
+        self.epochs.keys().copied()
     }
 
-    /// Seed of the folder's Gear table (`crate::chunking`): derived from the
-    /// hash key, which stays the same across epochs, so a rotation does not
-    /// move any cut point.
-    pub fn chunker_seed(&self) -> [u8; 32] {
-        self.hash
-            .derive("chunker-seed", &[self.folder.as_str().as_bytes()])
-            .0
+    /// K9 of `epoch`, when held.
+    pub fn k9(&self, epoch: u32) -> Option<&SecretKey> {
+        self.epochs.get(&epoch)
     }
 
-    /// Alpha-0 decision: the chunk key is derived from the chunk's keyed hash
-    /// (convergent inside the folder and epoch), so the same content encrypts
-    /// to the same object on every device, which makes offline deduplication
-    /// work. Rotation therefore applies to new chunks only.
-    pub fn chunk_key(&self, epoch: u32, chunk: &ChunkId) -> Result<SecretKey> {
-        Ok(self.epoch_base(epoch)?.derive(
-            "chunk-key",
-            &[self.folder.as_str().as_bytes(), chunk.as_str().as_bytes()],
+    /// K10 of `epoch`, when held.
+    pub fn meta_of(&self, epoch: u32) -> Option<SecretKey> {
+        Some(derive3(
+            self.epochs.get(&epoch)?,
+            "folder-metadata",
+            &[&self.folder_bin],
         ))
     }
 
-    /// The nonce of one chunk object: a keyed hash of the exact bytes that
-    /// are encrypted (the packed chunk, `crate::pack`), under a key of the
-    /// folder and epoch. Two different encodings of one chunk (another zstd
-    /// version, raw against compressed) therefore never share a nonce under
-    /// the chunk key, while the same bytes always give the same nonce, so
-    /// objects stay deterministic and deduplicate (format 2, audit H1).
+    /// K10 of every epoch held, newest first.
+    pub fn meta_keys(&self) -> Vec<SecretKey> {
+        self.epochs
+            .values()
+            .rev()
+            .map(|k| derive3(k, "folder-metadata", &[&self.folder_bin]))
+            .collect()
+    }
+
+    /// K12 = derive(K11, "chunker-seed", folder): the folder's Gear table
+    /// seed (`crate::chunking`).
+    pub fn chunker_seed(&self) -> [u8; 32] {
+        derive3(&self.hash, "chunker-seed", &[&self.folder_bin]).0
+    }
+
+    /// K14 = derive(K9ₑ, "chunk-key", folder, chunk id): convergent inside
+    /// the folder and epoch, so the same content encrypts to the same
+    /// object on every device (offline deduplication).
+    pub fn chunk_key(&self, epoch: u32, chunk: &ChunkId) -> Result<SecretKey> {
+        Ok(derive3(
+            self.epoch_key(epoch)?,
+            "chunk-key",
+            &[&self.folder_bin, &chunk.as_bytes()],
+        ))
+    }
+
+    /// The nonce of one chunk object: keyed_hash(derive(K9ₑ, "chunk-nonce",
+    /// folder), packed)[..24], from the exact bytes that are encrypted.
     pub fn chunk_nonce(&self, epoch: u32, packed: &[u8]) -> Result<[u8; crypto::NONCE_LEN]> {
-        let k = self
-            .epoch_base(epoch)?
-            .derive("chunk-nonce", &[self.folder.as_str().as_bytes()]);
+        let k = derive3(self.epoch_key(epoch)?, "chunk-nonce", &[&self.folder_bin]);
         let mut n = [0u8; crypto::NONCE_LEN];
         n.copy_from_slice(&crypto::keyed_hash(&k, packed)[..crypto::NONCE_LEN]);
         Ok(n)
     }
 
-    /// Associated data of a chunk object: vault, folder, key epoch, chunk
-    /// id, plaintext length and packed length.
+    /// aad("chunk", [vault, folder, epoch u32, chunk id, plaintext length
+    /// u64, packed length u64]), binary ids.
     pub fn chunk_aad(
         &self,
         vault: &VaultId,
@@ -1208,10 +1266,10 @@ impl FolderKeys {
         crypto::aad(
             "chunk",
             &[
-                vault.as_str().as_bytes(),
-                self.folder.as_str().as_bytes(),
+                &vault.as_bytes(),
+                &self.folder_bin,
                 &epoch.to_le_bytes(),
-                chunk.as_str().as_bytes(),
+                &chunk.as_bytes(),
                 &plain_len.to_le_bytes(),
                 &packed_len.to_le_bytes(),
             ],

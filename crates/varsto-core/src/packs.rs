@@ -525,6 +525,13 @@ pub struct PackContext {
 #[cfg(feature = "format3")]
 pub trait PlaceSource: Send + Sync {
     fn places(&self, object: &str) -> Vec<PackLoc>;
+    /// Whether a place of `object` is a live copy: it carries no dead or
+    /// lost mark and its writer did not flag it dead (design section 5,
+    /// "Liveness of a place"). Writes and existence checks use only live
+    /// places; reads try them first.
+    fn is_live(&self, _object: &str, _loc: &PackLoc) -> bool {
+        true
+    }
 }
 
 /// (storage, key) of pack indexes read, of those no folder key opened, and
@@ -645,12 +652,24 @@ impl PackContext {
     }
 
     fn candidates(&self, object: &str) -> Vec<PackLoc> {
+        self.candidates_where(object, false)
+    }
+
+    /// Places of `object` that count as copies: the ones this process
+    /// wrote or the ledger gave, and the live places of the block maps.
+    fn live_candidates(&self, object: &str) -> Vec<PackLoc> {
+        self.candidates_where(object, true)
+    }
+
+    fn candidates_where(&self, object: &str, live_only: bool) -> Vec<PackLoc> {
         #[allow(unused_mut)]
         let mut out = self.locator.read().unwrap().candidates(object);
+        #[cfg(not(feature = "format3"))]
+        let _ = live_only;
         #[cfg(feature = "format3")]
         for s in self.sources.read().unwrap().iter() {
             for l in s.places(object) {
-                if l.valid() && !out.contains(&l) {
+                if l.valid() && !out.contains(&l) && (!live_only || s.is_live(object, &l)) {
                     out.push(l);
                 }
             }
@@ -870,11 +889,23 @@ impl PackStore {
     /// The live location of `object` here; with `relist`, a miss lists
     /// the storage again when the last listing is old.
     fn locate(&self, object: &str, relist: bool) -> Result<Option<PackLoc>> {
+        self.locate_where(object, relist, true)
+    }
+
+    /// `locate` over every place (`live_only` false: marked places too,
+    /// after the live ones), for reads.
+    fn locate_where(&self, object: &str, relist: bool, live_only: bool) -> Result<Option<PackLoc>> {
         self.ensure_listed()?;
+        let candidates = || {
+            if live_only {
+                self.ctx.live_candidates(object)
+            } else {
+                self.ctx.candidates(object)
+            }
+        };
         let find = || {
             let st = self.state.lock().unwrap();
-            self.ctx
-                .candidates(object)
+            candidates()
                 .into_iter()
                 .find(|l| l.valid() && st.packs.contains(&l.pack) && !st.is_dead(l))
         };
@@ -887,7 +918,7 @@ impl PackStore {
             .unwrap()
             .listed
             .is_none_or(|t| t.elapsed() > STALE);
-        if relist && stale && !self.ctx.candidates(object).is_empty() {
+        if relist && stale && !candidates().is_empty() {
             self.refresh()?;
             return Ok(find());
         }
@@ -903,10 +934,14 @@ impl PackStore {
     /// storage did not show (written since by another device, or held
     /// elsewhere): a request tells. Listed packs are included, since another
     /// thread may have added one since `locate` looked.
-    fn unlisted(&self, object: &str) -> Vec<PackLoc> {
+    fn unlisted(&self, object: &str, live_only: bool) -> Vec<PackLoc> {
         let st = self.state.lock().unwrap();
-        self.ctx
-            .candidates(object)
+        let candidates = if live_only {
+            self.ctx.live_candidates(object)
+        } else {
+            self.ctx.candidates(object)
+        };
+        candidates
             .into_iter()
             .filter(|l| l.valid() && !st.is_dead(l))
             .collect()
@@ -919,7 +954,7 @@ impl PackStore {
 
     fn read_member(&self, object: &str) -> Result<Option<Vec<u8>>> {
         for _ in 0..4 {
-            let Some(loc) = self.locate(object, false)? else {
+            let Some(loc) = self.locate_where(object, false, false)? else {
                 break;
             };
             match self
@@ -931,7 +966,7 @@ impl PackStore {
                 None => self.forget_pack(&loc.pack),
             }
         }
-        for loc in self.unlisted(object) {
+        for loc in self.unlisted(object, false) {
             if let Some(b) = self
                 .inner
                 .get_range(&pack_key(&loc.pack), loc.offset, loc.len)?
@@ -948,7 +983,7 @@ impl PackStore {
     /// Whether a pack not in the listing holds `object` here (one HEAD per
     /// pack, remembered in `checked`).
     fn unlisted_here(&self, object: &str, checked: &mut HashMap<String, bool>) -> Result<bool> {
-        for loc in self.unlisted(object) {
+        for loc in self.unlisted(object, true) {
             let here = match checked.get(&loc.pack) {
                 Some(v) => *v,
                 None => {
@@ -1250,6 +1285,11 @@ impl Storage for PackStore {
         let Some(obj) = object_of(key) else {
             return self.inner.delete(key);
         };
+        if cfg!(feature = "format3") {
+            // Format 3 removes blocks through dead marks and garbage
+            // collection (`gc3`), never member by member.
+            bail!("{key}: blocks are removed by garbage collection in storage format 3 (f3-switch: part B)");
+        }
         // Tombstones of other devices first: a pack they emptied goes.
         self.ensure_listed()?;
         self.unlisted_here(obj, &mut HashMap::new())?;
