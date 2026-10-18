@@ -4,6 +4,8 @@
 //! S3 or rclone target, disks mean directories and disk pools, devices mean
 //! files held by devices. Verified (by another device) is told from claimed.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -97,18 +99,20 @@ fn write(root: &Path, folder: &str, file: &str, len: usize, seed: u64) -> PathBu
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (protection)"]
 fn a_folder_only_on_this_device_is_red_then_disks_then_cloud() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let (mut a, _) = make(root, "a-home");
     let docs = write(root, "docs", "one.bin", 120_000, 1);
+    // A folder's records live on a storage, so there is one before the
+    // folder: a directory, one of the user's own disks.
+    a.add_storage(dir(root, "usb", false)).unwrap();
     a.add_folder("docs", &docs).unwrap();
 
     // Nothing is in the ledger yet: nothing to be protected.
     assert_eq!(protection(&a, "docs").state, "empty");
-    a.push("docs").unwrap();
-    // Published, but on no storage: the files exist on this device only.
+    a.pull("docs").unwrap();
+    // Read, but on no storage yet: the files exist on this device only.
     let p = protection(&a, "docs");
     assert_eq!(p.state, "device");
     assert_eq!(p.cloud.pct, 0.0);
@@ -121,8 +125,7 @@ fn a_folder_only_on_this_device_is_red_then_disks_then_cloud() {
     a.add_folder("empty", &empty).unwrap();
     assert_eq!(protection(&a, "empty").state, "empty");
 
-    // A directory is one of the user's own disks: 100 %, but no cloud copy.
-    a.add_storage(dir(root, "usb", false)).unwrap();
+    // Stored on the directory: 100 %, but no cloud copy.
     a.push("docs").unwrap();
     let p = protection(&a, "docs");
     assert_eq!(p.state, "disks");
@@ -131,12 +134,14 @@ fn a_folder_only_on_this_device_is_red_then_disks_then_cloud() {
     assert_eq!(p.pct, 100.0);
     assert_eq!(p.disks.bytes, p.total_bytes);
 
-    // A transferrer keeps no copy and does not count.
+    // A transferrer keeps no copy and does not count: the blocks are not on
+    // a storage yet, and a transferrer next to the storage changes nothing.
     let (mut b, _) = make(root, "b-home");
+    b.add_storage(dir(root, "keep", false)).unwrap();
     b.add_storage(dir(root, "stick", true)).unwrap();
     let pics = write(root, "pics", "p.bin", 60_000, 2);
     b.add_folder("pics", &pics).unwrap();
-    b.push("pics").unwrap();
+    b.pull("pics").unwrap();
     assert_eq!(protection(&b, "pics").state, "device");
 
     // The status carries the same numbers per folder.
@@ -202,7 +207,8 @@ fn a_disk_pool_counts_as_own_disks() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (protection)"]
+#[ignore = "f3-switch: port in part B (upkeep)"]
+// Waits for fsck emitting pack_verified.
 fn verified_is_told_from_claimed() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -223,7 +229,7 @@ fn verified_is_told_from_claimed() {
     );
 
     // Another device reads the objects back and says so.
-    let mut b = Engine::join(&root.join("b-home"), "phone", PASS, &key, shelf).unwrap();
+    let mut b = common::join_approved(&root.join("b-home"), "phone", PASS, &key, shelf, &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &root.join("b-docs"), false)
         .unwrap();

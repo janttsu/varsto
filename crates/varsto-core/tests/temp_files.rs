@@ -5,6 +5,8 @@
 //! never written through.
 #![cfg(unix)]
 
+mod common;
+
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use varsto_core::chunking::ChunkerParams;
@@ -14,7 +16,6 @@ use varsto_core::Engine;
 const PASS: &str = "correct horse battery staple";
 
 #[test]
-#[ignore = "f3-switch: port in part B (temp files)"]
 fn a_planted_link_under_the_old_temporary_name_is_not_written_through() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -35,7 +36,7 @@ fn a_planted_link_under_the_old_temporary_name_is_not_written_through() {
     fs::set_permissions(a_docs.join("report.txt"), fs::Permissions::from_mode(0o640)).unwrap();
     a.push("docs").unwrap();
 
-    let mut b = Engine::join(&root.join("b-home"), "desk", PASS, &key, storage).unwrap();
+    let mut b = common::join_approved(&root.join("b-home"), "desk", PASS, &key, storage, &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &b_docs, false).unwrap();
     // Another local user plants links where the temporary files used to go.

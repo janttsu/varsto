@@ -55,8 +55,8 @@ fn init(home: &Path, name: &str) -> (Engine, String) {
     (e, key)
 }
 
-fn join(home: &Path, name: &str, key: &str, storage: StorageSpec) -> Engine {
-    let mut e = Engine::join(home, name, PASS, key, storage).unwrap();
+fn join(owner: &mut Engine, home: &Path, name: &str, key: &str, storage: StorageSpec) -> Engine {
+    let mut e = common::join_approved(home, name, PASS, key, storage, owner);
     e.chunker = ChunkerParams::SMALL;
     e
 }
@@ -89,7 +89,6 @@ impl Lab {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (version history)"]
 fn an_overwrite_on_one_device_is_restored_on_another() {
     let lab = Lab::new();
     let store = dir("box", &lab.p("store"), false);
@@ -100,7 +99,7 @@ fn an_overwrite_on_one_device_is_restored_on_another() {
     let v1 = pseudo_random(120_000, 1);
     fs::write(a_dir.join("report.bin"), &v1).unwrap();
     a.sync(None).unwrap();
-    let mut b = join(&lab.p("b"), "phone", &key, store.clone());
+    let mut b = join(&mut a, &lab.p("b"), "phone", &key, store.clone());
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.sync(None).unwrap();
     assert!(b
@@ -203,7 +202,6 @@ fn an_overwrite_on_one_device_is_restored_on_another() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (version history)"]
 fn versions_share_unchanged_blocks() {
     let lab = Lab::new();
     let store = lab.p("store");
@@ -291,7 +289,8 @@ fn the_thinning_schedule_keeps_exactly_the_expected_versions() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (version history)"]
+#[ignore = "f3-switch: port in part B (upkeep)"]
+// Waits for garbage collection in trash upkeep.
 fn thinning_and_expiry_drop_only_unreferenced_blocks() {
     let lab = Lab::new();
     let store = lab.p("store");
@@ -394,7 +393,8 @@ fn thinning_and_expiry_drop_only_unreferenced_blocks() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (version history)"]
+#[ignore = "f3-switch: port in part B (upkeep)"]
+// Waits for garbage collection in trash upkeep.
 fn a_trash_storage_takes_the_blocks_only_versions_use() {
     let lab = Lab::new();
     let (one, cold, a_dir, b_dir) = (
@@ -441,7 +441,7 @@ fn a_trash_storage_takes_the_blocks_only_versions_use() {
     assert!(!st.by_storage.contains_key("one"));
 
     // On another device restoring needs the confirmed cold read.
-    let mut b = join(&lab.p("b"), "phone", &key, dir("one", &one, false));
+    let mut b = join(&mut a, &lab.p("b"), "phone", &key, dir("one", &one, false));
     b.add_storage(dir("glacier", &cold, true)).unwrap();
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.sync(None).unwrap();
@@ -497,7 +497,6 @@ fn history_can_be_turned_off_per_folder() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (version history)"]
 fn a_folder_kept_encrypted_here_keeps_versions_too() {
     let lab = Lab::new();
     let store = dir("box", &lab.p("store"), false);
@@ -507,7 +506,7 @@ fn a_folder_kept_encrypted_here_keeps_versions_too() {
     let v1 = pseudo_random(60_000, 50);
     fs::write(lab.p("a-docs").join("n.bin"), &v1).unwrap();
     a.sync(None).unwrap();
-    let mut b = join(&lab.p("b"), "phone", &key, store);
+    let mut b = join(&mut a, &lab.p("b"), "phone", &key, store);
     b.attach_folder("docs", &lab.p("b-docs"), false).unwrap();
     b.set_encrypted_here("docs", true).unwrap();
     b.sync(None).unwrap();

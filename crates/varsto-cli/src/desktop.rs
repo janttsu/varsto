@@ -3588,36 +3588,12 @@ fn api_unlocked(
 
 /// Folder membership of storage format 3 in the local API (work package
 /// 8b): requests, approval, roles, removal, recovery copies and the pairing
-/// question. Without the `format3` feature every route answers that it is
-/// not available in this build.
+/// question.
 mod f3_api {
     use super::*;
 
-    #[cfg(not(feature = "format3"))]
-    pub fn route(
-        _engine: &mut Engine,
-        _service: &mut ServiceState,
-        _method: Method,
-        _path: &str,
-        _query: &str,
-        _input: &Value,
-    ) -> Result<Value> {
-        bail!("folder membership of storage format 3 is not available in this build of Varsto")
-    }
-
-    #[cfg(not(feature = "format3"))]
-    pub fn remove_device(
-        _engine: &mut Engine,
-        _service: &mut ServiceState,
-        _input: &Value,
-    ) -> Result<Value> {
-        bail!("folder membership of storage format 3 is not available in this build of Varsto")
-    }
-
-    #[cfg(feature = "format3")]
     pub use real::*;
 
-    #[cfg(feature = "format3")]
     mod real {
         use super::*;
         use std::sync::{Condvar, Mutex as StdMutex};
@@ -3890,7 +3866,6 @@ mod tests {
     /// direction; a receive-only folder kept encrypted is refused before
     /// anything is attached.
     #[test]
-    #[ignore = "f3-switch: port in part B (folder grants in the desktop attach route)"]
     fn attaching_takes_selective_sync_and_the_direction() {
         let tmp = tempfile::tempdir().unwrap();
         let t = tmp.path();
@@ -3910,6 +3885,13 @@ mod tests {
         a.add_folder("notes", &t.join("a-notes")).unwrap();
         a.sync(None).unwrap();
         let mut b = Engine::join(&t.join("b"), "laptop", pass, &key, storage).unwrap();
+        // The folders open on the laptop once the phone approved its request.
+        for f in ["camera", "notes"] {
+            let req = b.f3_folder_request(f, "editor").unwrap();
+            a.f3_approve(f, "laptop", None, Some(&req.fingerprint))
+                .unwrap();
+        }
+        b.refresh_devices().unwrap();
 
         let refused = attach_request(
             &mut b,
@@ -5656,57 +5638,5 @@ mod tests {
         ] {
             assert!(APP_JS.contains(k), "script lacks {k}");
         }
-    }
-
-    /// A build without the feature answers every route with the same text.
-    #[cfg(not(feature = "format3"))]
-    #[test]
-    fn folder_membership_routes_say_not_available() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (mut a, _key) = Engine::init(
-            &tmp.path().join("a"),
-            "alpha",
-            "correct horse battery staple",
-        )
-        .unwrap();
-        let mut service = ServiceState::default();
-        for (m, path) in [
-            (Method::Get, "/api/folder/requests"),
-            (Method::Post, "/api/folder/request"),
-            (Method::Post, "/api/folder/approve"),
-            (Method::Post, "/api/folder/deny"),
-            (Method::Get, "/api/folder/members"),
-            (Method::Post, "/api/folder/role"),
-            (Method::Post, "/api/folder/resolve-epoch"),
-            (Method::Get, "/api/recovery/escrow"),
-            (Method::Post, "/api/recovery/escrow"),
-        ] {
-            let e = api_unlocked(
-                &mut a,
-                &mut service,
-                m,
-                path,
-                "",
-                &json!({"folder": "docs", "device": "x"}),
-            )
-            .unwrap_err();
-            assert!(
-                format!("{e:#}").contains("not available in this build"),
-                "{path}: {e:#}"
-            );
-        }
-        let e = api_unlocked(
-            &mut a,
-            &mut service,
-            Method::Post,
-            "/api/folder/remove",
-            "",
-            &json!({"folder": "docs", "device": "x", "confirm": true}),
-        )
-        .unwrap_err();
-        assert!(
-            format!("{e:#}").contains("not available in this build"),
-            "{e:#}"
-        );
     }
 }
