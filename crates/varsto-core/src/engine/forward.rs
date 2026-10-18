@@ -229,8 +229,14 @@ fn lease_dir(folder: &FolderId) -> String {
     format!("{LEASE_PREFIX}/{folder}/")
 }
 
+#[cfg(test)]
 fn lease_key(folder: &FolderId, slot: i64) -> String {
-    format!("{LEASE_PREFIX}/{folder}/{slot:012}.json")
+    slot_key(&lease_dir(folder), slot)
+}
+
+/// The lease object of `slot` in the lease directory `dir` (`.../`).
+fn slot_key(dir: &str, slot: i64) -> String {
+    format!("{dir}{slot:012}.json")
 }
 
 /// The slot of a lease object's key.
@@ -240,8 +246,9 @@ fn lease_slot(key: &str) -> Option<i64> {
 
 /// Where a transfer reads a block from. Copying is by ciphertext object,
 /// named by its hash, so any storage can be an endpoint, a pool disk that is
-/// attached only sometimes included (the mailbox of section 70 builds on
-/// this: a transfer then waits for its source or its target to be docked).
+/// attached only sometimes included (the mailbox, section 78 and
+/// `engine::mailbox`, builds on this: its tasks wait for their source or
+/// their target to be docked).
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Endpoint {
     /// This device's block cache.
@@ -263,7 +270,7 @@ impl Endpoint {
 }
 
 /// Where the bytes of a transfer are while it is in flight. Forwarding holds
-/// them in memory only; a durable outbox on this device is the mailbox's.
+/// them in memory only; the durable outbox is the mailbox's (section 78).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HeldAt {
     Memory,
@@ -773,6 +780,21 @@ impl Engine {
         on: &[usize],
         now: i64,
     ) -> Option<String> {
+        self.take_leases_in(&lease_dir(folder), opened, on, now)
+    }
+
+    /// Take the lease of the directory `dir` (`.../`) on the storages `on`:
+    /// forwarding takes one per folder, the mailbox one for the vault
+    /// (section 78). `None`: this device holds them all now; otherwise the
+    /// name of the device holding one (the leases taken in this attempt are
+    /// given back).
+    pub(super) fn take_leases_in(
+        &self,
+        dir: &str,
+        opened: &[(StorageSpec, Box<dyn Storage>)],
+        on: &[usize],
+        now: i64,
+    ) -> Option<String> {
         let me = self.vault.device_id.as_str().to_string();
         let slot = now.div_euclid(LEASE_SLOT_SECS);
         let body = serde_json::to_vec(&Lease {
@@ -795,7 +817,7 @@ impl Engine {
         };
         for &i in on {
             let backend = opened[i].1.as_ref();
-            let keys = backend.list(&lease_dir(folder)).unwrap_or_default();
+            let keys = backend.list(dir).unwrap_or_default();
             for key in &keys {
                 let Some(s) = lease_slot(key) else { continue };
                 if s < slot - 1 {
@@ -811,7 +833,7 @@ impl Engine {
             if busy.is_some() {
                 break;
             }
-            let key = lease_key(folder, slot);
+            let key = slot_key(dir, slot);
             match backend.put_if_absent(&key, &body) {
                 Ok(true) => taken.push(i),
                 Ok(false) => match holder_of(backend, &key) {
@@ -829,7 +851,7 @@ impl Engine {
         }
         let dev = busy?;
         for i in taken {
-            let _ = opened[i].1.delete(&lease_key(folder, slot));
+            let _ = opened[i].1.delete(&slot_key(dir, slot));
         }
         Some(
             DeviceId::from_hex(&dev)
@@ -845,10 +867,20 @@ impl Engine {
         opened: &[(StorageSpec, Box<dyn Storage>)],
         on: &[usize],
     ) {
+        self.release_leases_in(&lease_dir(folder), opened, on)
+    }
+
+    /// Give this device's leases of the directory `dir` back.
+    pub(super) fn release_leases_in(
+        &self,
+        dir: &str,
+        opened: &[(StorageSpec, Box<dyn Storage>)],
+        on: &[usize],
+    ) {
         let me = self.vault.device_id.as_str();
         for &i in on {
             let backend = opened[i].1.as_ref();
-            for key in backend.list(&lease_dir(folder)).unwrap_or_default() {
+            for key in backend.list(dir).unwrap_or_default() {
                 let ours = backend
                     .get_bounded(&key, 4096)
                     .ok()

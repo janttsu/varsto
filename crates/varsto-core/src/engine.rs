@@ -66,6 +66,7 @@ mod ledger_heads;
 mod ledger_recovery;
 mod ledger_upkeep;
 mod local_names;
+mod mailbox;
 mod manifest_upkeep;
 mod membership;
 #[cfg(feature = "format3")]
@@ -126,6 +127,7 @@ pub use ledger_recovery::{
     JunkReport, LedgerBehind, LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem,
     LedgerRebuildOptions, LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
+pub use mailbox::MailboxOptions;
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochForks, EpochRecord, Grant, KemRecord, Removal,
@@ -6002,6 +6004,15 @@ impl Engine {
                 now_utc,
             );
             self.disk_group_findings(&rec, &state, view, &ctx.pools, &mut report);
+            // Blocks a mailbox holds for their target: in transit, still short.
+            if report.state != crate::policy::PolicyState::Ok {
+                if let Some((n, bytes, text)) = self.mailbox_in_transit(view, &rec.folder_id, &seen)
+                {
+                    report.chunks_in_transit = n;
+                    report.bytes_in_transit = bytes;
+                    report.reasons.push(text);
+                }
+            }
             reports.push(report);
         }
         // Why a policy may not be met: a storage at its quota or leaving.
@@ -6494,6 +6505,12 @@ impl Engine {
         let mut local_roots: Vec<PathBuf> = Vec::new();
         if self.block_cache_root().is_dir() {
             local_roots.push(self.block_cache_root());
+        }
+        // Blocks the mailbox staged (section 78): the device where their
+        // target is docked takes them from here.
+        let outbox = crate::mailbox::Outbox::new(&self.home);
+        if outbox.root().is_dir() {
+            local_roots.push(outbox.root().to_path_buf());
         }
         Ok(crate::p2p::Snapshot {
             vault_id: self.vault.vault_id.clone(),

@@ -1728,6 +1728,24 @@
   "Send only: never apply other devices' changes here": "Vain lähetys: muiden laitteiden muutoksia ei koskaan tuoda tänne",
   "Receive only: never publish changes made here": "Vain vastaanotto: täällä tehtyjä muutoksia ei koskaan julkaista",
   "Forwarding blocks to the storages for «{s}»": "Välittää lohkoja tallennuspaikkoihin: «{s}»",
+  "or": "tai",
+  "from disk": "levyltä",
+  "waiting for": "odottaa:",
+  "staged on this device": "välivarastossa tällä laitteella",
+  "staged on": "välivarastossa laitteella",
+  "still to be read from disk": "vielä luettavana levyltä",
+  "keep it attached for about": "pidä se liitettynä noin",
+  "waiting for disk": "odottaa levyä",
+  "to be docked": "telakkaan",
+  "Mailbox settings": "Postilaatikon asetukset",
+  "Mailbox settings…": "Postilaatikon asetukset…",
+  "Staging leaves at least this much free space on this device's disk, after the write: a share or an amount, several separated by ; (the larger counts). Empty: 15 % or 50 GB, whichever is more. Staged copies are the first thing removed when the device needs space.": "Välivarastointi jättää tämän laitteen levylle kirjoituksen jälkeen vähintään näin paljon vapaata tilaa: osuus tai määrä, useampi puolipisteellä erotettuna (suurempi ratkaisee). Tyhjä: 15 % tai 50 GB sen mukaan, kumpi on suurempi. Välivarastoidut kopiot poistetaan ensimmäisinä, kun laite tarvitsee tilaa.",
+  "Keep blocks for disks that are away (mailbox)": "Säilytä lohkoja poissa oleville levyille (postilaatikko)",
+  "staged here; keeps": "välivarastossa täällä; pitää",
+  "free": "vapaana",
+  "Writing staged blocks to the disks and storages docked now": "Kirjoittaa välivarastoidut lohkot nyt liitettyihin levyihin ja tallennuspaikkoihin",
+  "Copying blocks from disk «{s}» to the mailbox": "Kopioi lohkoja levyltä «{s}» postilaatikkoon",
+  "Mailbox": "Postilaatikko",
   "Forwarding": "Välitys",
   "not set up here": "ei käytössä täällä",
   "Add credentials…": "Lisää tunnukset…",
@@ -1792,6 +1810,26 @@
   "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.": "Palautussanat ovat holviavain 24 sanana ja tallennusmuodossa 3 myös palautussanat toisena 24 sanan joukkona. Turvallisuuden vuoksi ne tulostetaan tämän tietokoneen komentoriviltä, joka kysyy salasanaasi: aja jokin alla olevista komennoista ja tulosta tai kopioi sanat käsin. Valitsimella --shares tulostuu myös kolme osaa, joista mitkä tahansa kaksi palauttavat avaimen."
  },
  "patterns": [
+  [
+   "^(.+) or (.+), whichever is more$",
+   "$1 tai $2 sen mukaan, kumpi on suurempi"
+  ],
+  [
+   "^(\\d+) blocks? \\((.+)\\) in transit to (.+) \\(staged on (.+)\\); staged copies do not count$",
+   "$1 lohkoa ($2) matkalla kohteeseen $3 (välivarastossa: $4); välivarastoidut kopiot eivät laske"
+  ],
+  [
+   "^(.+) staged from disk (.+) waits for it: docking it writes them$",
+   "$1 levyltä $2 välivarastoitua odottaa sitä: telakointi kirjoittaa ne"
+  ],
+  [
+   "^(.+) to copy from it to (.+) \\(about (\\d+) min of reading\\)$",
+   "$1 kopioitavana siltä kohteeseen $2 (noin $3 min lukemista)"
+  ],
+  [
+   "^keep it attached for about (\\d+) min: (.+) still to read for the mailbox$",
+   "pidä se liitettynä noin $1 min: postilaatikolle on vielä luettavana $2"
+  ],
   [
    "^Watching (\\d+) folder\\(s\\) · last sync (.+)$",
    "Valvoo $1 kansiota · viimeisin synkronointi $2"

@@ -180,10 +180,11 @@ impl Engine {
             .into_iter()
             .filter(|d| pool.is_none_or(|p| d.pool == p))
             .collect();
-        Ok(disksuggest::rank_with_moves(
+        Ok(disksuggest::rank_full(
             &rows,
             util::now_utc(),
             &self.move_waits(),
+            &self.mailbox_waits(),
         ))
     }
 

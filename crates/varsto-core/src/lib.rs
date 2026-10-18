@@ -43,6 +43,7 @@ pub mod ledger;
 pub mod ledger3;
 pub mod ledger_heads;
 pub mod logging;
+pub mod mailbox;
 pub mod manifest;
 #[cfg(feature = "format3")]
 pub mod manifest3;
@@ -81,6 +82,8 @@ pub mod snapshot3;
 pub mod staged_move;
 pub mod storage;
 pub mod storage_settings;
+#[cfg(feature = "format3")]
+pub mod storages3;
 pub mod strongroom;
 pub mod thumbs;
 #[cfg(feature = "format3")]

@@ -504,6 +504,13 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<upkeep::ForwardCmd>,
     },
+    /// The mailbox for offline pool disks: blocks staged from a docked disk
+    /// for a disk or storage that is away; show, run now, turn on or off,
+    /// set the free space it keeps.
+    Mailbox {
+        #[command(subcommand)]
+        cmd: Option<upkeep::MailboxCmd>,
+    },
     /// Automatic verification of blocks other devices wrote: show, run now, set the schedule.
     Verify {
         #[command(subcommand)]
@@ -4485,6 +4492,7 @@ fn run(cli: &Cli) -> Result<()> {
             print(cli, &h, varsto_core::help::render_text)?;
         }
         Cmd::Forward { cmd } => upkeep::forward(cli, &home, cmd)?,
+        Cmd::Mailbox { cmd } => upkeep::mailbox(cli, &home, cmd)?,
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
         Cmd::Import { cmd } => import::run(cli, &home, cmd)?,

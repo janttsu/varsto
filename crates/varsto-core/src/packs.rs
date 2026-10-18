@@ -229,11 +229,12 @@ pub fn build(
     (id, bytes, locs)
 }
 
-/// Place items of `sizes` bytes first-fit decreasing into bins of at most
-/// `limit` bytes (an item larger than `limit` gets a bin of its own). Each
-/// bin lists item indexes in their original order (blocks of a file stay
-/// next to each other inside a pack). Pushes, rewrites, compaction and
-/// repairs fill packs this way.
+/// Place members of the given sizes into bins of at most `limit` bytes,
+/// first fit decreasing: the largest member first, each into the first bin
+/// it fits. Returns the member indexes of every bin (a member larger than
+/// `limit` gets a bin of its own). Used by `PackStore` and by the pack-level
+/// moves of format 3 (`crate::storages3`), so full packs are nearly all
+/// members.
 pub fn first_fit_decreasing(sizes: &[usize], limit: usize) -> Vec<Vec<usize>> {
     let mut order: Vec<usize> = (0..sizes.len()).collect();
     order.sort_by_key(|&i| std::cmp::Reverse(sizes[i]));
@@ -248,12 +249,7 @@ pub fn first_fit_decreasing(sizes: &[usize], limit: usize) -> Vec<Vec<usize>> {
             None => bins.push((vec![i], n)),
         }
     }
-    bins.into_iter()
-        .map(|(mut idx, _)| {
-            idx.sort_unstable();
-            idx
-        })
-        .collect()
+    bins.into_iter().map(|(m, _)| m).collect()
 }
 
 /// A pack this process wrote, not yet listed in a pack index.
@@ -1026,7 +1022,11 @@ impl PackStore {
     fn write_packs(&self, fresh: &[(String, &[u8])]) -> Result<()> {
         let limit = self.target.min(top_class(self.target));
         let sizes: Vec<usize> = fresh.iter().map(|(_, b)| b.len()).collect();
-        for idx in first_fit_decreasing(&sizes, limit) {
+        let bins = first_fit_decreasing(&sizes, limit);
+        for mut idx in bins {
+            // The order of the push inside a pack (blocks of a file next
+            // to each other).
+            idx.sort_unstable();
             let group: Vec<(String, &[u8])> = idx.iter().map(|&i| fresh[i].clone()).collect();
             let (id, data, members) = build(&group, self.target);
             self.inner.put_if_absent(&pack_key(&id), &data)?;

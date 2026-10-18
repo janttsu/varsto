@@ -40,6 +40,10 @@ Alpha-0-format.md section 76. Commands, local API routes, event-stream events (`
 4. Update this table before publishing each storage format version, with the release number and reader status.
 5. Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.
 
+## The mailbox for offline pool disks (alpha-0-format.md section 78; storage format unchanged)
+
+New objects `vault/mailbox/<device>/<utc>.enc` (each device's list of staged objects, sealed under the device registry key; the writer deletes its older lists) and `vault/mailbox-leases/<slot>.json` (plain JSON leases as in section 70), the device-local `outbox/` directory (staged ciphertext objects, never a storage), `state/mailbox.json`, `state/mailbox.lock` and a `mailbox` block in `config.json`. Additive fields `chunks_in_transit` and `bytes_in_transit` in policy reports, `waiting_source_*` in move reports and the `source` kind of a move job's `waiting`. No new ledger event: delivered copies are `chunk_stored` claims (and, for move jobs, the `chunk_verified` and `chunk_dropped` events of section 59) as before. Earlier versions ignore the lists and leases, never stage, and read the claims as usual.
+
 ## Daily update channel after 0.0.1-alpha.13 (format version 1 unchanged)
 
 Device-local files only (alpha-0-format.md section 67): `update-state-daily.json` and `update-channel.json` in the device directory. Earlier versions ignore them. The download site gains `daily/latest/SHA256SUMS.sig`, signed with a separate daily key.
