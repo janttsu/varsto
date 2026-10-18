@@ -3883,6 +3883,7 @@ impl Engine {
             })
             .collect();
         let destinations = crate::storages3::carrier_destinations_held(&configured, &held);
+        let is_backup = rec.is_backup();
         let fk = self.folder_keys(rec)?;
         let folder_id = rec.folder_id.clone();
         let targets = self.write_targets(rec);
@@ -3902,14 +3903,17 @@ impl Engine {
             storages
                 .iter()
                 .filter(|(spec, _)| !standing.copies.contains(spec.name()))
+                // A backup's blocks never go to a transferrer (no device
+                // takes them from there).
                 .filter(|(spec, _)| {
                     !spec.is_carrier()
-                        || crate::storages3::carrier_wants(
-                            &held,
-                            &object,
-                            &me3,
-                            destinations.get(spec.name()).map(|v| v.as_slice()),
-                        )
+                        || !is_backup
+                            && crate::storages3::carrier_wants(
+                                &held,
+                                &object,
+                                &me3,
+                                destinations.get(spec.name()).map(|v| v.as_slice()),
+                            )
                 })
                 // The folder's placement; blocks moved away stay away.
                 .filter(|(spec, _)| targets.wants(spec.name(), Some(&standing)))
