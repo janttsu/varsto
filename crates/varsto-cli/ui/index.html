@@ -187,12 +187,11 @@
         <h3 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Accept a shared folder</h3>
         <label>Device name <input name="name" placeholder="my-laptop" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="12" placeholder="At least 12 characters" required></label>
-        <p class="muted small">Step 1: send the owner a request code from this device (it carries the device name above). Step 2: read its six-word fingerprint to the owner over a call or in person; they see the same words. Step 3: paste the sealed token they send back.</p>
+        <p class="muted small">Step 1: send the owner a request code from this device (it carries the device name above). Step 2: read its six-word fingerprint to the owner over a call or in person; they see the same words. Step 3: once they shared the folder, type the six words their device shows and accept through the storage they name.</p>
         <div class="row"><button type="button" id="sharerequest" class="secondary">Show my request code</button></div>
         <pre id="sharerequestout" class="hidden"></pre>
         <div id="sharerequestqr" class="qr-box hidden"></div>
-        <label>Share token <input name="token" required autocapitalize="none" autocomplete="off" spellcheck="false"></label>
-        <div class="row"><button type="button" id="sharetokenscan" class="secondary"><svg class="icon"><use href="#i-qr"/></svg>Scan QR code</button></div>
+        <label>The owner's six words <input name="owner_words" autocapitalize="none" autocomplete="off" spellcheck="false"></label>
         <label>Where the owner's vault is <select name="kind" id="sharekind"><option value="local-dir">A directory both of you can reach</option><option value="s3">An S3-compatible bucket</option></select></label>
         <div data-sharekind="local-dir"><label>Storage both of you can reach <input name="storage_path"></label></div>
         <div data-sharekind="s3" class="hidden">
@@ -204,7 +203,7 @@
           <p class="muted small">Credentials the owner gave you for this bucket. The secret is kept in this device's encrypted secret store.</p>
         </div>
         <div class="actions"><button type="submit">Accept</button></div>
-        <p class="muted small">You get the folder key only: this device can read and write that folder, nothing else of the other vault. A sealed token (vst1… or vst2…) can be opened only here, and this device checks that the owner confirmed its fingerprint; a plain token carries the key itself.</p>
+        <p class="muted small">You get the folder's keys only: this device can read and write that folder, nothing else of the other vault. They are sealed to this device's request, so only this device opens them, and it takes them only from the owner whose six words you confirm.</p>
       </form>
     </div>
   </section>
@@ -505,7 +504,7 @@
       <div class="card">
         <h2 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Shared folders</h2>
         <ul id="sharedlist" class="list"></ul>
-        <div id="sharedlist-empty" class="empty-state"><div class="empty-icon"><svg class="icon"><use href="#i-sharing"/></svg></div><p class="empty-title">Nothing shared yet</p><p class="muted">Open a folder under Files and press Share to create a token for another Varsto user. Ask them for their request code first to seal the token to their device.</p></div>
+        <div id="sharedlist-empty" class="empty-state"><div class="empty-icon"><svg class="icon"><use href="#i-sharing"/></svg></div><p class="empty-title">Nothing shared yet</p><p class="muted">Open a folder under Files and press Share to share it with another Varsto user. Ask them for the request code of their device first.</p></div>
         <p id="members" class="muted small"></p>
       </div>
       <div class="card" id="replicacard">
@@ -1096,7 +1095,7 @@
   </details>
   <details class="guide" data-guide="sharing">
     <summary>Sharing a folder</summary>
-    <p>You can give another person one folder, and nothing else of your vault. They send you a request code from their device, you compare a six-word fingerprint with them over a call or in person, and you send back a sealed token that only their device can open.</p>
+    <p>You can give another person one folder, and nothing else of your vault. They send you a request code from their device, you compare a six-word fingerprint with them over a call or in person, and you share the folder with that device. They accept it through a storage you both reach, after comparing the six words of your device.</p>
     <p>You can see who has a folder and remove a person from it on the Shared page.</p>
   </details>
   <details class="guide" data-guide="backups">

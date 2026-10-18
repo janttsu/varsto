@@ -1253,9 +1253,6 @@ fn link_info(link: &varsto_core::qr::Link) -> Result<Value> {
             v["fingerprint"] = json!(r.fingerprint);
             v["name"] = json!(r.name);
         }
-        Link::ShareToken(t) => {
-            v["folder"] = json!(varsto_core::vault::SealedShareToken::decode(t)?.name);
-        }
         Link::Pair { code, addresses } => {
             v["code"] = json!(format!("{}-{}-{}", &code[0..3], &code[3..6], &code[6..9]));
             v["addresses"] = json!(addresses);
@@ -1930,12 +1927,9 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             )
         }
         (Method::Post, "/api/share/accept") => {
-            let raw = s(input, "token")?;
-            let token = if varsto_core::vault::SealedShareToken::is_sealed(&raw) {
-                varsto_core::vault::ShareRequest::open_token(&st.home, &raw)?
-            } else {
-                varsto_core::vault::ShareToken::decode(&raw)?
-            };
+            // The owner device's six words, as the person typed them (none:
+            // the only folder shared with this request is taken).
+            let words = opt(input, "owner_words").filter(|w| !w.trim().is_empty());
             let storage_name = opt(input, "storage_name")
                 .filter(|n| !n.trim().is_empty())
                 .unwrap_or_else(|| "shared".into());
@@ -1944,13 +1938,18 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 &st.home,
                 &s(input, "name")?,
                 &s(input, "passphrase")?,
-                &token,
+                words.as_deref(),
                 spec,
                 secret,
             )?;
+            let folder = e
+                .folders()
+                .into_iter()
+                .next()
+                .map(|(r, _)| r.name.clone())
+                .unwrap_or_default();
             st.engine = Some(e);
-            varsto_core::vault::ShareRequest::clear(&st.home);
-            Ok(json!({"ok": true, "folder": token.name, "fingerprint": token.fingerprint}))
+            Ok(json!({"ok": true, "folder": folder}))
         }
         (Method::Post, "/api/join") => {
             // The storage that holds the vault: a directory, or an S3-compatible
@@ -2177,23 +2176,17 @@ fn api_unlocked(
                 Some(r) => varsto_core::share::ShareRole::parse(&r)?,
                 None => varsto_core::share::ShareRole::Editor,
             };
-            match opt(input, "to").filter(|c| !c.trim().is_empty()) {
-                Some(code) => {
-                    // The interface sends the words the user confirmed; they
-                    // must be the code's.
-                    let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
-                    let (sealed, req) =
-                        engine.share_create_sealed_as(&folder, &code, confirmed.as_deref(), role)?;
-                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()}))
-                }
-                None if !role.is_editor() => {
-                    bail!("a viewer's token must be sealed to their request code: paste it (a plain token cannot say what its holder may do)")
-                }
-                None => {
-                    let t = engine.share_create_plain(&folder)?;
-                    Ok(json!({"ok": true, "token": t.encode_plain()?, "folder": t.name, "sealed": false}))
-                }
-            }
+            let code = opt(input, "to")
+                .filter(|c| !c.trim().is_empty())
+                .ok_or_else(|| anyhow!("paste the recipient's request code"))?;
+            // The interface sends the words the user confirmed; they must
+            // be the code's.
+            let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
+            let added = engine.share_add(&folder, &code, confirmed.as_deref(), role)?;
+            service.request_sync();
+            let mut v = serde_json::to_value(&added)?;
+            v["ok"] = json!(true);
+            Ok(v)
         }
         (Method::Get, "/api/share/members") => {
             let folder = query_param(query, "folder")
