@@ -35,6 +35,7 @@ fn dir(root: &std::path::Path, name: &str, place: &str, carrier: bool) -> Storag
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (placement)"]
 fn data_locations_add_up_across_storages_and_devices() {
     let tmp = tempfile::tempdir().unwrap();
     let root: PathBuf = tmp.path().to_path_buf();

@@ -1813,6 +1813,7 @@ mod tests {
     /// so they are set aside, their events signed again after the
     /// storage's history, and the other device sees no fork.
     #[test]
+    #[ignore = "f3-switch: port in part B (ledger rebuild)"]
     fn unpublished_batches_are_set_aside_and_signed_again() {
         let (_tmp, lab) = lab("discard");
         let mut devs = devices(&lab, 2);

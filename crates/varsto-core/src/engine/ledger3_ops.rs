@@ -103,7 +103,7 @@ fn convert(ev: &Event) -> Option<Event3> {
 impl Engine {
     /// The ledger key id and key of this device's batches: the newest vault
     /// epoch held.
-    fn ledger_key3(&self) -> Result<(String, SecretKey)> {
+    pub(crate) fn ledger_key3(&self) -> Result<(String, SecretKey)> {
         let keys = self.vault_keys3();
         let e = keys.newest_epoch();
         let k = keys
@@ -207,6 +207,10 @@ impl Engine {
     pub(crate) fn view3(&self) -> Result<View3> {
         let context = self.view_context3();
         let mut slot = self.f3.view.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.is_none() {
+            // The view saved by an earlier process (`ledger/view.rec`).
+            *slot = self.load_view3();
+        }
         let fits = slot.as_ref().is_some_and(|c| {
             c.format == ViewCache::FORMAT && c.context == context && self.f3.ledger.cache_fits(c)
         });
@@ -214,14 +218,74 @@ impl Engine {
             *slot = Some(ViewCache::new(context));
         }
         let cache = slot.as_mut().expect("set above");
-        self.f3.ledger.update_view_with_roles(
+        let applied = self.f3.ledger.update_view_with_roles(
             cache,
             |id| self.key_for3(id),
             |d, seq| self.keep3(d, seq),
             |d, id| self.scope3(d, id),
             &self.f3.members.registry,
         )?;
+        if applied > 0 {
+            if let Err(e) = self.save_view3(cache) {
+                log::debug!("ledger view not saved: {e:#}");
+            }
+        }
         Ok(self.f3.ledger.finish(&cache.raw))
+    }
+
+    pub(crate) fn view3_path(&self) -> PathBuf {
+        self.home.join("ledger").join("view.rec")
+    }
+
+    /// The local key of the saved view, and its associated data.
+    fn view3_key(&self) -> (SecretKey, Vec<u8>) {
+        (
+            self.keys.master.derive("ledger3-view-cache", &[]),
+            crypto::aad(
+                "ledger3-view-cache",
+                &[
+                    self.vault.vault_id.as_str().as_bytes(),
+                    self.vault.device_id.as_str().as_bytes(),
+                ],
+            ),
+        )
+    }
+
+    pub(crate) fn load_view3(&self) -> Option<ViewCache> {
+        let blob = fs::read(self.view3_path()).ok()?;
+        let (key, aad) = self.view3_key();
+        ViewCache::open(&blob, &key, &aad).ok()
+    }
+
+    fn save_view3(&self, cache: &ViewCache) -> Result<()> {
+        let path = self.view3_path();
+        // Never recreate a ledger directory that was removed (reset, wipe).
+        if !path.parent().is_some_and(|p| p.is_dir()) {
+            return Ok(());
+        }
+        let (key, aad) = self.view3_key();
+        util::write_atomic(&path, &cache.seal(&key, &aad)?)
+    }
+
+    /// The view replayed from every local batch, without the one kept in
+    /// memory (tests: the kept view must equal it).
+    pub fn view3_replayed(&self) -> Result<View3> {
+        self.f3.ledger.view_with_roles(
+            |id| self.key_for3(id),
+            |d, seq| self.keep3(d, seq),
+            |d, id| self.scope3(d, id),
+            &self.f3.members.registry,
+        )
+    }
+
+    /// The pack-level view (`view3`), for tests and tools.
+    pub fn ledger_view3(&self) -> Result<View3> {
+        self.view3()
+    }
+
+    /// This device's newest batch.
+    pub fn own_head3(&self) -> u64 {
+        self.f3.ledger.head(&self.me3()).seq
     }
 
     /// Forget the view kept in memory (keys or roles changed).
@@ -293,7 +357,12 @@ impl Engine {
             if spec.is_carrier() {
                 continue;
             }
-            let done = self.f3.ledger.pushed(spec.name()).min(head.seq);
+            let mut done = self.f3.ledger.pushed(spec.name()).min(head.seq);
+            // A storage that lost the newest batch it was known to hold (or
+            // a new storage under a known name) is filled from the start.
+            if done > head.dropped && !backend.exists(&ledger3::checkpoint::batch_key(&me, done))? {
+                done = 0;
+            }
             for seq in done.max(head.dropped) + 1..=head.seq {
                 let Some(rec) = self.f3.ledger.get(&me, seq)? else {
                     continue;

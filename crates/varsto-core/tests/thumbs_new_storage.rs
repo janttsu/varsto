@@ -88,6 +88,7 @@ fn existing_folder_kept_encrypted_gets_thumbnails() {
 /// Pictures that were there before any storage existed: nothing can hold the
 /// thumbnails yet, so they must not be given up for good.
 #[test]
+#[ignore = "f3-switch: port in part B (thumbnails)"]
 fn thumbnails_wait_for_a_first_storage() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

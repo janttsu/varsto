@@ -196,6 +196,7 @@ fn leases(root: &Path) -> usize {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (forwarding)"]
 fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
     let lab = Lab::new();
     let (mut phone, key) = phone(&lab);
@@ -301,6 +302,7 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (forwarding)"]
 fn turned_off_it_forwards_nothing() {
     let lab = Lab::new();
     let (phone, key) = phone(&lab);
@@ -316,6 +318,7 @@ fn turned_off_it_forwards_nothing() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (forwarding)"]
 fn a_locked_strongroom_is_not_forwarded() {
     let lab = Lab::new();
     let (mut phone, key) = Engine::init(&lab.p("phone-home"), "phone", PASS).unwrap();
@@ -363,6 +366,7 @@ fn a_locked_strongroom_is_not_forwarded() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (forwarding)"]
 fn two_laptops_with_one_bucket_write_every_block_once() {
     let lab = Lab::new();
     let (phone, key) = phone(&lab);

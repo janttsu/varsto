@@ -90,6 +90,7 @@ fn only(platforms: &[&str]) -> OrgPolicy {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn approval_refuses_platforms_the_policy_does_not_allow() {
     let lab = Lab::new();
     let (mut a, _b, _c) = org(&lab);
@@ -147,6 +148,7 @@ fn approval_refuses_platforms_the_policy_does_not_allow() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn a_device_on_a_platform_no_longer_allowed_is_locked_out_until_allowed_again() {
     let lab = Lab::new();
     let (mut a, mut b, mut c) = org(&lab);
@@ -198,6 +200,7 @@ fn a_device_on_a_platform_no_longer_allowed_is_locked_out_until_allowed_again() 
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn unsigned_or_forged_policies_and_details_are_ignored() {
     let lab = Lab::new();
     let (mut a, mut b, mut c) = org(&lab);

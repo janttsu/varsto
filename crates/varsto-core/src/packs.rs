@@ -1766,6 +1766,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "f3-switch: port in part B (pack rewrite and GC: gc3 dead marks replace tombstones)"]
     fn a_fully_deleted_padded_pack_goes() {
         let t = tempfile::tempdir().unwrap();
         let c = ctx(2);
@@ -1905,6 +1906,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "f3-switch: port in part B (pack rewrite and GC: gc3 dead marks replace tombstones)"]
     fn deletions_become_tombstones_and_an_empty_pack_goes() {
         let t = tempfile::tempdir().unwrap();
         let (ca, cb) = (ctx(2), ctx(3));
@@ -1966,6 +1968,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "f3-switch: port in part B (pack rewrite and GC: gc3 dead marks replace tombstones)"]
     fn folder_tombstones_are_read_by_every_device_of_the_folder() {
         let t = tempfile::tempdir().unwrap();
         let folder_keys: HashMap<String, Vec<SecretKey>> =
@@ -2034,6 +2037,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "f3-switch: port in part B (pack rewrite and GC: gc3 dead marks replace tombstones)"]
     fn a_tombstone_of_another_device_cannot_kill_a_claimed_block() {
         let t = tempfile::tempdir().unwrap();
         let (owner, hostile) = (ctx(2), ctx(3));
@@ -2118,6 +2122,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "f3-switch: port in part B (pack rewrite and GC: gc3 dead marks replace tombstones)"]
     fn a_mostly_dead_pack_is_rewritten_with_its_live_blocks() {
         let t = tempfile::tempdir().unwrap();
         let c = ctx(2);

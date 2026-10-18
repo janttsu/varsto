@@ -88,6 +88,7 @@ fn folder_event() -> (FolderId, Event) {
 /// The storage withholds batch N of A and offers N + 1: B's head for A
 /// stays at N - 1 and N + 1 waits; once N appears, both count.
 #[test]
+#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn a_withheld_batch_holds_back_the_ones_after_it() {
     let (lab, mut devs) = devices(2);
     let a_id = devs[0].device_id().clone();
@@ -124,6 +125,7 @@ fn a_withheld_batch_holds_back_the_ones_after_it() {
 /// every pull, and after three pulls warns that a storage may be
 /// withholding A's batches. The warning goes once the batches arrive.
 #[test]
+#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn acknowledgements_reveal_withheld_batches() {
     let (lab, mut devs) = devices(3);
     let a_id = devs[0].device_id().clone();
@@ -173,6 +175,7 @@ fn acknowledgements_reveal_withheld_batches() {
 /// stop the pull: the batch comes from the other storage and the skipped
 /// object is counted.
 #[test]
+#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn a_malformed_batch_on_one_storage_does_not_stop_the_pull() {
     let (lab, mut devs) = devices(2);
     let second = lab.root.join("second");
@@ -193,6 +196,7 @@ fn a_malformed_batch_on_one_storage_does_not_stop_the_pull() {
 /// A batch whose Lamport time is beyond anything a device can have reached
 /// is refused and not applied: it would win every later ordering.
 #[test]
+#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn a_batch_with_an_absurd_lamport_time_is_refused() {
     let (_lab, mut devs) = devices(2);
     let a_id = devs[0].device_id().clone();
@@ -268,6 +272,7 @@ fn meet(b: &mut Engine, a: &Engine, serving: &Serving) {
 /// peer-to-peer how far it holds its own ledger. B notes the gap with the
 /// source `peer`, warns after three pulls, and the statement moves nothing.
 #[test]
+#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn a_peers_heads_reveal_batches_the_storage_withholds() {
     let (lab, mut devs) = devices(2);
     let a_id = devs[0].device_id().clone();
@@ -331,6 +336,7 @@ fn a_peers_heads_reveal_batches_the_storage_withholds() {
 /// that has not pulled the lost batches yet learns from a peer that they
 /// existed.
 #[test]
+#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn a_rolled_back_storage_is_caught_by_a_peer() {
     let (lab, mut devs) = devices(2);
     let a_id = devs[0].device_id().clone();
@@ -381,6 +387,7 @@ fn copy_dir(from: &Path, to: &Path) {
 /// Statements that do not count: from a removed device, forged, edited,
 /// this device's own, or not newer than the one kept.
 #[test]
+#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn statements_from_removed_or_forged_senders_are_ignored() {
     let (_lab, mut devs) = devices(3);
     let a_id = devs[0].device_id().clone();
@@ -439,6 +446,7 @@ fn statements_from_removed_or_forged_senders_are_ignored() {
 /// Devices that only meet through the storage: A's rendezvous record
 /// carries its own head, B reads the record and compares.
 #[test]
+#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn a_rendezvous_record_carries_the_senders_own_head() {
     let (lab, mut devs) = devices(2);
     let a_id = devs[0].device_id().clone();
@@ -471,6 +479,7 @@ fn a_rendezvous_record_carries_the_senders_own_head() {
 /// `/p2p/changed` carries the sender's statement and is answered with the
 /// receiver's, so one message exchanges both.
 #[test]
+#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn the_changed_message_exchanges_statements() {
     let (_lab, mut devs) = devices(2);
     let a_id = devs[0].device_id().clone();

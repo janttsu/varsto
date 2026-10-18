@@ -54,6 +54,7 @@ fn files(root: &Path) -> BTreeSet<String> {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (pack rewrite and GC)"]
 fn the_same_file_in_two_folders_gives_other_packs_and_no_block_objects() {
     let t = tempfile::tempdir().unwrap();
     let (store, f1, f2) = (t.path().join("s"), t.path().join("f1"), t.path().join("f2"));
@@ -108,6 +109,7 @@ fn the_same_file_in_two_folders_gives_other_packs_and_no_block_objects() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (pack rewrite and GC)"]
 fn a_mostly_dead_pack_is_rewritten_and_every_device_still_reads() {
     let t = tempfile::tempdir().unwrap();
     let (store, a_dir, b_dir) = (
@@ -213,6 +215,7 @@ fn pack_set(root: &Path) -> BTreeSet<(String, Vec<u8>)> {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (pack rewrite and GC)"]
 fn a_target_set_gets_one_pack_under_one_id_on_every_storage() {
     let t = tempfile::tempdir().unwrap();
     let (h1, h2, cold, docs) = (

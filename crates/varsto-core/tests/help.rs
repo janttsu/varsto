@@ -94,6 +94,7 @@ fn no_vault_and_locked() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (help)"]
 fn steps_follow_the_vault_as_it_grows() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

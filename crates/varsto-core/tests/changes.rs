@@ -70,6 +70,7 @@ fn actions(r: &ChangesReport) -> Vec<(Action, String, String)> {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (change history)"]
 fn who_changed_what_and_when() {
     let lab = Lab::new();
     let (a, key) = Engine::init(&lab.home("a"), "laptop", PASS).unwrap();

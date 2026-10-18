@@ -50,11 +50,28 @@ mod imp {
         bail!("{UNAVAILABLE}")
     }
 
-    pub fn join_recovery_words() -> Result<()> {
+    pub fn join_recovery_words(_engine: &mut varsto_core::engine::Engine) -> Result<Vec<String>> {
         bail!("{UNAVAILABLE}")
     }
 
     pub fn status_warnings(_engine: &mut varsto_core::engine::Engine) {}
+
+    pub fn folder_add_recovery_key(
+        _file: Option<&Path>,
+        _prompt: bool,
+    ) -> Result<Option<varsto_core::membership3::RecoveryKey>> {
+        Ok(None)
+    }
+
+    pub fn recovery_words_given(
+        _file: Option<&Path>,
+    ) -> Result<Option<zeroize::Zeroizing<String>>> {
+        Ok(None)
+    }
+
+    pub fn recovery_words_text(_file: Option<&Path>) -> Result<zeroize::Zeroizing<String>> {
+        bail!("{UNAVAILABLE}")
+    }
 }
 
 #[cfg(feature = "format3")]
@@ -335,8 +352,62 @@ mod imp {
         Ok(())
     }
 
-    pub fn join_recovery_words() -> Result<()> {
-        bail!("`join --recovery-words` is not wired yet: joining with the recovery words needs the format-3 join (work package 12), which opens the membership with the vault key and then rebuilds every folder with Membership::recover_all_folders")
+    /// `join --recovery-words`: after joining with the vault words, the
+    /// recovery words (asked hidden, or from VARSTO_RECOVERY_WORDS or a
+    /// pipe) open the recovery copy of every folder. Returns their names.
+    pub fn join_recovery_words(engine: &mut Engine) -> Result<Vec<String>> {
+        let k1 = recovery_words_input(false, None)?;
+        engine.recover_folders(&k1)
+    }
+
+    /// The recovery words as text (checked): a file, VARSTO_RECOVERY_WORDS,
+    /// a pipe or a hidden prompt.
+    pub fn recovery_words_text(file: Option<&Path>) -> Result<zeroize::Zeroizing<String>> {
+        let text =
+            crate::secret_input(file, "VARSTO_RECOVERY_WORDS", "Recovery words (24): ", true)?;
+        RecoveryKey::from_words(&text)?;
+        Ok(text)
+    }
+
+    /// The recovery words given for this command without asking: a file
+    /// or VARSTO_RECOVERY_WORDS.
+    pub fn recovery_words_given(file: Option<&Path>) -> Result<Option<zeroize::Zeroizing<String>>> {
+        if file.is_none()
+            && std::env::var("VARSTO_RECOVERY_WORDS")
+                .ok()
+                .is_none_or(|v| v.trim().is_empty())
+        {
+            return Ok(None);
+        }
+        let text = crate::secret_input(file, "VARSTO_RECOVERY_WORDS", "", false)?;
+        // Checked here, so a mistyped word does not create a folder first.
+        RecoveryKey::from_words(&text)?;
+        Ok(Some(text))
+    }
+
+    /// The recovery key for `folder add`: given (`recovery_words_given`),
+    /// else asked on a terminal (with `prompt`), where an empty answer
+    /// leaves the recovery copy for later. Without a terminal and without
+    /// words the folder is made without it, and `varsto status` warns.
+    pub fn folder_add_recovery_key(
+        file: Option<&Path>,
+        prompt: bool,
+    ) -> Result<Option<RecoveryKey>> {
+        use std::io::IsTerminal;
+        if let Some(text) = recovery_words_given(file)? {
+            return RecoveryKey::from_words(&text).map(Some);
+        }
+        if !prompt || !std::io::stdin().is_terminal() {
+            return Ok(None);
+        }
+        let text = zeroize::Zeroizing::new(rpassword::prompt_password(
+            "Recovery words (24) for the folder's recovery copy (Enter: write it later with `varsto recovery escrow`): ",
+        )?);
+        if text.trim().is_empty() {
+            return Ok(None);
+        }
+        varsto_core::logging::register_secret(text.trim());
+        RecoveryKey::from_words(text.trim()).map(Some)
     }
 
     /// The recovery warnings of `varsto status`, on standard error.
@@ -352,4 +423,7 @@ mod imp {
     }
 }
 
-pub use imp::{folder, join_recovery_words, recovery_escrow, recovery_kit, status_warnings};
+pub use imp::{
+    folder, folder_add_recovery_key, join_recovery_words, recovery_escrow, recovery_kit,
+    recovery_words_given, recovery_words_text, status_warnings,
+};

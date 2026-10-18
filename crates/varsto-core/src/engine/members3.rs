@@ -94,6 +94,56 @@ impl RecordTrust for EngineTrust<'_> {
     }
 }
 
+/// A storage whose reads of membership records (`vault/`) are kept in a
+/// local mirror as well.
+struct Tee<'a> {
+    inner: &'a dyn Storage,
+    mirror: &'a crate::storage::LocalDirStorage,
+}
+
+impl Tee<'_> {
+    fn keep(&self, key: &str, got: &Option<Vec<u8>>) {
+        if let Some(b) = got {
+            if key.starts_with("vault/") && key.ends_with(".rec") {
+                if let Err(e) = self.mirror.put_if_absent(key, b) {
+                    log::debug!("membership record {key} not kept locally: {e:#}");
+                }
+            }
+        }
+    }
+}
+
+impl Storage for Tee<'_> {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        self.inner.put_if_absent(key, data)
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let got = self.inner.get(key)?;
+        self.keep(key, &got);
+        Ok(got)
+    }
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        let got = self.inner.get_bounded(key, max)?;
+        self.keep(key, &got);
+        Ok(got)
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        self.inner.exists(key)
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.inner.list(prefix)
+    }
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
+        self.inner.list_after(prefix, start_after)
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        self.inner.delete(key)
+    }
+}
+
 /// The binary form of an id (16 bytes) of this vault.
 pub(crate) fn bin(id: &crate::ids::Id) -> Result<Id16> {
     crate::record::id16(id).ok_or_else(|| anyhow!("id {id} is not 16 bytes of hex"))
@@ -153,7 +203,17 @@ impl Engine {
             return Ok(None);
         }
         let vault = bin(&self.vault.vault_id)?;
-        let refs: Vec<&dyn Storage> = open.iter().map(|(_, b)| &**b).collect();
+        // Every membership record read is kept in a local mirror, so that
+        // a later process knows the membership without reading a storage.
+        let mirror = self.records_mirror3()?;
+        let teed: Vec<Tee> = open
+            .iter()
+            .map(|(_, b)| Tee {
+                inner: &**b,
+                mirror: &mirror,
+            })
+            .collect();
+        let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
         let lamport = self.clock.lamport;
         let (out, snapshot, keys, stamped) = {
             let Some(kem) = self.epochs.kem.as_ref() else {
@@ -167,6 +227,34 @@ impl Engine {
         self.adopt_members3(snapshot, keys)?;
         self.observe_clock(stamped)?;
         out.map(Some)
+    }
+
+    /// The local mirror of the membership records (`state/records3/`).
+    fn records_mirror3(&self) -> Result<crate::storage::LocalDirStorage> {
+        crate::storage::LocalDirStorage::new(
+            "records3".into(),
+            self.home.join("state").join("records3"),
+        )
+    }
+
+    /// The membership as the local mirror of its records gives it (an
+    /// engine just opened knows its devices and folders without a storage).
+    pub(crate) fn load_members3_local(&mut self) -> Result<()> {
+        let dir = self.home.join("state").join("records3");
+        if !dir.is_dir() || self.vault.member {
+            return Ok(());
+        }
+        let vault = bin(&self.vault.vault_id)?;
+        let mirror = self.records_mirror3()?;
+        let refs: Vec<&dyn Storage> = vec![&mirror];
+        let (snapshot, keys) = {
+            let Some(kem) = self.epochs.kem.as_ref() else {
+                return Ok(());
+            };
+            let m = Membership::open(vault, &refs, &self.keys.signer, kem, self.vault_keys3())?;
+            (Members3::of(&m), m.vault_keys.clone())
+        };
+        self.adopt_members3(snapshot, keys)
     }
 
     /// Read every membership record again (and publish this device's own
@@ -445,6 +533,23 @@ impl Engine {
             .ok_or_else(|| anyhow!("no storage to read the recovery copies from"))?;
         self.f3.recovery = Some(k1.clone());
         Ok(got)
+    }
+
+    /// `add_folder` with the recovery key given for this folder's escrow
+    /// (when the session holds none).
+    pub fn add_folder_with_recovery(
+        &mut self,
+        name: &str,
+        path: &Path,
+        k1: Option<crate::membership3::RecoveryKey>,
+    ) -> Result<FolderId> {
+        if self.f3.recovery.is_some() || k1.is_none() {
+            return self.add_folder(name, path);
+        }
+        self.f3.recovery = k1;
+        let out = self.add_folder(name, path);
+        self.f3.recovery = None;
+        out
     }
 
     /// Whether this session holds the recovery key.

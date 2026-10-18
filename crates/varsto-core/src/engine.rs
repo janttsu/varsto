@@ -1709,6 +1709,10 @@ impl Engine {
             platform_override: None,
             version_override: None,
         };
+        // The membership as this device last read it (no storage is read).
+        if let Err(e) = engine.load_members3_local() {
+            log::warn!("membership records kept here could not be read: {e:#}");
+        }
         let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
         engine.pending = pending;
         engine.ledger_alarm = ledger_recovery::Alarm::at_open(&engine, pending_lost);
@@ -4127,6 +4131,19 @@ impl Engine {
             self.save_state(&rec.folder_id, &state)?;
             return Ok(report);
         }
+        // Format 3: a viewer of the folder publishes nothing (its records
+        // would be refused by every reader). Keeping its local changes aside
+        // as `share_roles` does: f3-switch: part B.
+        if self
+            .f3
+            .members
+            .role(&self.me3(), &members3::bin(&rec.folder_id)?)
+            == Some(crate::membership3::Role::Viewer)
+        {
+            report.read_only = true;
+            report.batch_seq = self.commit_batch()?;
+            return Ok(report);
+        }
         let (scanned, changed) = match scan.filter(|s| s.folder == rec.folder_id) {
             // The pull of this sync scanned the folder moments ago, and the
             // state it saved carries what it found.
@@ -4513,9 +4530,21 @@ impl Engine {
             }
         }
         // The packs written, for the map record of this push.
+        // Packs written in this process by anything but this push (part B
+        // writers that make no map record yet) are left out: their blocks
+        // are written again where a target lacks them.
         let mut per_storage = Vec::new();
         for (spec, backend) in &storages {
-            let new = backend.take_new_packs();
+            let new: Vec<crate::packs::NewPack> = backend
+                .take_new_packs()
+                .into_iter()
+                .filter(|p| {
+                    p.members.iter().all(|(o, _)| {
+                        crate::storages3::object_bin(&ObjectName::from_hex(o).unwrap_or_default())
+                            .is_ok_and(|b| info.contains_key(&b))
+                    })
+                })
+                .collect();
             if !new.is_empty() {
                 per_storage.push((spec.name().to_string(), new));
             }
@@ -6164,7 +6193,8 @@ impl Engine {
             .get(path)
             .cloned()
             .ok_or_else(|| anyhow!("unknown file {path}"))?;
-        let view = self.view()?;
+        // Format 3: a live place of every block on a storage that keeps it.
+        let view = self.view3()?;
         let durable: HashSet<String> = self
             .config
             .storages
@@ -6173,14 +6203,10 @@ impl Engine {
             .map(|s| s.name().to_string())
             .collect();
         for c in &file.chunks {
-            let ok = view
-                .locate(&rec.folder_id, &c.chunk)
-                .map(|r| {
-                    r.storages
-                        .keys()
-                        .any(|k| durable.contains(k) || k.starts_with("replica:"))
-                })
-                .unwrap_or(false);
+            let ok = self
+                .block_copies3(&view, &rec.folder_id, &c.object)
+                .iter()
+                .any(|k| durable.contains(k) || k.starts_with("replica:"));
             if !ok {
                 bail!("{path} is not fully stored elsewhere yet; sync first");
             }
@@ -6815,13 +6841,31 @@ impl Engine {
             .collect();
         let mut packed = BTreeMap::new();
         if !dirs.is_empty() {
-            for rec in self.view()?.chunks.values() {
-                for (storage, loc) in &rec.storages {
-                    if let (Some(root), Some(p)) = (dirs.get(storage.as_str()), &loc.pack) {
-                        packed.insert(
-                            rec.object.clone(),
-                            (root.join(crate::packs::pack_key(&p.pack)), p.offset, p.len),
-                        );
+            // Format 3: places from the folders' block maps, packs held
+            // there by the pack-level view.
+            let view3 = self.view3()?;
+            for f in folder_keys.keys() {
+                let Ok(id) = members3::bin(f) else { continue };
+                let Ok(table) = self.table3(&id) else {
+                    continue;
+                };
+                let t = table.read().unwrap_or_else(|e| e.into_inner());
+                for row in t.scan().flatten() {
+                    if !crate::blockmap::place_is_live(&t, &row).unwrap_or(false) {
+                        continue;
+                    }
+                    for (storage, root) in &dirs {
+                        if view3.is_held(&row.place.pack, storage) {
+                            packed.insert(
+                                ObjectName::from_bytes(&row.object),
+                                (
+                                    root.join(crate::packs::pack_key(&hex::encode(row.place.pack))),
+                                    u64::from(row.place.offset),
+                                    u64::from(row.place.len),
+                                ),
+                            );
+                            break;
+                        }
                     }
                 }
             }

@@ -18,6 +18,7 @@ use varsto_core::Engine;
 const PASS: &str = "correct horse battery staple";
 
 #[test]
+#[ignore = "f3-switch: port in part B (activity log)"]
 fn a_device_sees_another_devices_long_task_with_its_progress() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

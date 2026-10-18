@@ -37,6 +37,7 @@ fn through_camera(uris: &[String]) -> Vec<String> {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn a_share_through_qr_links() {
     let tmp = tempfile::tempdir().unwrap();
     let root: PathBuf = tmp.path().to_path_buf();

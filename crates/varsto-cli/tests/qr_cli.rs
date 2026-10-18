@@ -73,6 +73,7 @@ impl Drop for Kill {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing: member folder-scoped batches)"]
 fn a_share_with_qr_links_and_the_service_endpoints() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

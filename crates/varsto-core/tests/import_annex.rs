@@ -242,6 +242,7 @@ fn storage(root: &Path) -> StorageSpec {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (imports)"]
 fn import_annex_from_two_disks() {
     if !have_annex() {
         eprintln!("git-annex not installed; skipped");

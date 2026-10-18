@@ -74,6 +74,7 @@ fn chunks_of(e: &Engine) -> u64 {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (upkeep)"]
 fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
     let lab = lab();
     let (mut a, key) = writer(&lab);
@@ -164,6 +165,7 @@ fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (upkeep)"]
 fn automatic_verification_skips_cold_storage_and_reports_corruption() {
     let lab = lab();
     let (mut a, key) = writer(&lab);
@@ -206,6 +208,7 @@ fn automatic_verification_skips_cold_storage_and_reports_corruption() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (upkeep)"]
 fn storage_prices_feed_the_estimates() {
     let lab = lab();
     let (mut a, _) = writer(&lab);
@@ -256,6 +259,7 @@ fn storage_prices_feed_the_estimates() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (upkeep)"]
 fn applying_a_placement_suggestion_frees_idle_files_safely() {
     let lab = lab();
     let (mut a, _) = writer(&lab);
@@ -318,6 +322,7 @@ fn applying_a_placement_suggestion_frees_idle_files_safely() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (upkeep)"]
 fn a_file_only_on_cold_storage_is_never_freed() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

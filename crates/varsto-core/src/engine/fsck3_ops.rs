@@ -414,7 +414,24 @@ impl Engine {
             }
         }
         report.finished_utc = util::now_utc();
-        Ok((report, Vec::new()))
+        // What could not be repaired stays queued, with its reason, and is
+        // tried again a day later (the losses notified once).
+        let queue = report
+            .unrepairable
+            .iter()
+            .map(|u| Damage {
+                folder: FolderId::default(),
+                chunk: ChunkId::from_hex(&u.object).unwrap_or_default(),
+                object: ObjectName::from_hex(&u.object).unwrap_or_default(),
+                storage: u.storage.clone(),
+                kind: u.kind,
+                found_by: "fsck".into(),
+                found_utc: now,
+                retry_utc: now + 24 * 3600,
+                reason: Some(u.reason.clone()),
+            })
+            .collect();
+        Ok((report, queue))
     }
 
     /// `gc3::repair_pack` for one damaged pack of `folder` on `storage`.

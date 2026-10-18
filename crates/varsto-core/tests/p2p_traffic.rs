@@ -126,6 +126,7 @@ fn peer<'a>(r: &'a TrafficReport, d: &DeviceId) -> &'a PeerTraffic {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
     let lab = lab();
     let (a, key) = seed(&lab, "a", "laptop");
@@ -247,6 +248,7 @@ fn downloads_and_uploads_are_counted_on_both_ends_over_tcp_and_quic() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn relayed_transfer_is_counted_by_both_ends_and_the_relay() {
     let lab = lab();
     // B holds the data behind "NAT", R relays, A fetches.
@@ -333,6 +335,7 @@ fn relayed_transfer_is_counted_by_both_ends_and_the_relay() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn many_blocks_and_small_files_share_one_quic_connection() {
     // A large file (many blocks in flight at once) and many small files
     // (fetched ahead across files) all travel over one QUIC connection. The

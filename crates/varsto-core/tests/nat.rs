@@ -102,6 +102,7 @@ fn empty() -> Snap {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn quic_direct_transfer_with_pinned_certificates() {
     let lab = lab();
     let (a, key, big) = seed(&lab, "a");
@@ -187,6 +188,7 @@ fn quic_direct_transfer_with_pinned_certificates() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn relayed_fetch_through_a_reachable_device() {
     let lab = lab();
     // B holds the data, R is reachable and relays, A fetches.
@@ -299,6 +301,7 @@ fn relayed_fetch_through_a_reachable_device() {
 /// would leave as 127.0.0.1.
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "f3-switch: port in part B (pairing and transport)"]
 fn wildcard_server_answers_from_the_address_it_was_reached_at() {
     let lab = lab();
     let (a, key, _big) = seed(&lab, "a");

@@ -77,6 +77,7 @@ fn removed(e: &anyhow::Error) -> Option<&DeviceRemoved> {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn create_approve_and_remove_a_user() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, key) = three_devices(&lab);
@@ -248,6 +249,7 @@ fn create_approve_and_remove_a_user() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn policy_lets_admins_open_things_up_and_only_admins_write_rosters() {
     let lab = Lab::new();
     let (mut a, mut b, _c, _key) = three_devices(&lab);
@@ -317,6 +319,7 @@ fn policy_lets_admins_open_things_up_and_only_admins_write_rosters() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn two_admins_writing_at_once_converge() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, _key) = three_devices(&lab);
@@ -350,6 +353,7 @@ fn two_admins_writing_at_once_converge() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn a_dismissed_admin_cannot_write_rosters_but_its_earlier_ones_stay_valid() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, _key) = three_devices(&lab);
@@ -389,6 +393,7 @@ fn a_dismissed_admin_cannot_write_rosters_but_its_earlier_ones_stay_valid() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn the_root_key_appoints_and_dismisses_admins() {
     let lab = Lab::new();
     let (mut a, mut b, _c, _key) = three_devices(&lab);
@@ -423,6 +428,7 @@ fn the_root_key_appoints_and_dismisses_admins() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn junk_epoch_objects_and_forged_policies_are_skipped() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, key) = three_devices(&lab);

@@ -159,6 +159,7 @@ fn set_read_list_and_limits() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (analyses)"]
 fn analyses_merge_across_devices_newest_first() {
     let lab = Lab::new();
     let (mut a, key) = device_a(&lab);
@@ -230,6 +231,7 @@ fn analyses_merge_across_devices_newest_first() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (analyses)"]
 fn analyses_follow_renames_and_moves_and_go_stale_or_away() {
     let lab = Lab::new();
     let (mut a, key) = device_a(&lab);

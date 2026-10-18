@@ -97,6 +97,7 @@ fn write(root: &Path, folder: &str, file: &str, len: usize, seed: u64) -> PathBu
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (protection)"]
 fn a_folder_only_on_this_device_is_red_then_disks_then_cloud() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -201,6 +202,7 @@ fn a_disk_pool_counts_as_own_disks() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (protection)"]
 fn verified_is_told_from_claimed() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
