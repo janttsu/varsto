@@ -11,7 +11,7 @@ During alpha development, storage formats may change without migration paths. On
 | 0 (alpha-0) | 0.0.1-alpha.0 | 0.0.1-alpha.0 to 0.0.1-alpha.3 (no `v0.0.1-alpha.3` tag exists; the last format-0 reader tag is `v0.0.1-alpha.2`) | none (`varsto pull` and `varsto fsck` of those versions) | see the format version 1 note below |
 | 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, including 0.0.1-alpha.13 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
 | 2 (blocks, packs and keyed chunker, alpha-0-format.md section 62) | 0.0.1-alpha.15 | 0.0.1-alpha.15 and later. Vaults of format 1 (0.0.1-alpha.14 and earlier) are not read: alpha.15 refuses them and says to recreate the vault | none yet (`varsto pull` and `varsto fsck` of the same version) | `v0.0.1-alpha.15` |
-| 3 (planned: signed records, folder key grants) | not yet assigned | not yet released | none yet | none yet |
+| 3 (pack-level ledger, folder block maps, signed records, alpha-0-format.md section 77) | not yet assigned | read by nothing older; vaults recreated; `FORMAT_VERSION` 3 set by the integration package. Not enabled: until then every build reads and writes format 2 | none yet | none yet |
 
 ## Format version 2 (0.0.1-alpha.15)
 
@@ -20,6 +20,17 @@ During alpha development, storage formats may change without migration paths. On
 ## Ledger heads between peers after 0.0.1-alpha.15 (format version 2 unchanged)
 
 Alpha-0-format.md section 74. A peer-to-peer message (`/p2p/heads`, the head statement on `/p2p/changed`), one optional field `head` in the rendezvous record `vault/peers/<device>.enc` and the device-local file `ledger/heads-seen.json`. Batches, checkpoints and the storage layout are unchanged. Older versions answer `404` to the new path, skip the new record field and never read the file, so devices of different versions work together; only the newer ones compare heads.
+
+## Format version 3, planned (format version 2 unchanged)
+
+Alpha-0-format.md section 77 describes storage format 3: packs of fixed size classes with a pack-level ledger, a signed block map per folder and writer, every published object as a SignedRecord, folder keys only as approved grants with recovery escrow, manifests, trash and snapshots as base + delta records, and TLS-only peer transport with exporter-bound tokens. It is built behind the `format3` cargo feature (off by default) and nothing in a default build reads or writes it; the shipped format stays 2, `FORMAT_VERSION` stays 2 and the format-2 row above is the one that applies to every release, until the integration package sets it to 3. Format 3 reads nothing older (no migration): a format-3 build will refuse a format-2 vault and the alpha.15 binary, which stays downloadable, is the reader of format 2 (release rule 3). When format 3 ships, this table gets its release number and reader status (release rule 4).
+## Format 3 peers and transport, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 75. Builds with the `format3` feature carry the format-3 peer records (`vault/peers/<device>/<seq>-0000.rec`, SignedRecords), TLS-only TCP, connection-bound tokens, signed beacons, the format-3 pairing hello and the head exchange with proofs (`ledger/watch.json`), but nothing switches to them before the format does: every build still reads, writes and speaks format 2.
+
+## Format 3 folder membership for people, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 76. Commands, local API routes, event-stream events (`folder.request`, `folder.changed`, `pair.ask`) and a pairing question for the format-3 membership records of section 6 of the design. No stored format changes: builds with the feature write `request`, `grant`, `folder`, `share-epoch` and `escrow` SignedRecords only when a person runs those commands, and no build reads them for anything else before the format flips.
 
 ## Release rules
 

@@ -869,6 +869,63 @@ impl<'a> Membership<'a> {
         self.refresh()
     }
 
+    /// Pairing (section 6): the person at this device ticked `folders` for
+    /// a device that is joining right now. Its own device record comes
+    /// only after it joined, so the keys of its hello (`pair::v3::Joiner`)
+    /// stand in for it while the grants are sealed to its K8: for every
+    /// folder a folder record that lists it with `role` and a grant of the
+    /// current epoch. Needs an owner of every folder; nothing is written
+    /// unless this device is an owner of all of them.
+    pub fn grant_to_joiner(
+        &mut self,
+        name: &str,
+        k6_public: &[u8],
+        k8_public: &[u8],
+        folders: &[Id16],
+        role: Role,
+    ) -> Result<Id16> {
+        let sign_pub = VerifyingKey::from_bytes(k6_public)?;
+        crate::kem::EncapsKey::from_bytes(k8_public)?;
+        let device = super::devices::device_id(&sign_pub);
+        for f in folders {
+            let epoch = self.folder_epochs(f).current();
+            if !self.registry.is_owner(&self.me, f, epoch) {
+                bail!("this device is not an owner of the folder");
+            }
+        }
+        if self.devices.get(&device).is_none() {
+            let stamp = self.next_stamp();
+            self.devices.insert(
+                DeviceRecord {
+                    device,
+                    name: name.to_string(),
+                    sign_pub: k6_public.to_vec(),
+                    kem_pub: k8_public.to_vec(),
+                    stamp,
+                },
+                self.vault_keys.newest_epoch(),
+            );
+        }
+        for f in folders {
+            let epoch = self.folder_epochs(f).current();
+            let stamp = self.next_stamp();
+            self.write_folder_record(
+                f,
+                None,
+                None,
+                vec![Participant {
+                    device,
+                    role,
+                    stamp,
+                }],
+                Vec::new(),
+            )?;
+            self.issue_grant(f, epoch, &device, role)?;
+        }
+        self.refresh()?;
+        Ok(device)
+    }
+
     /// Deny `device` (a `denied` entry; it is no longer listed as pending).
     pub fn deny(&mut self, folder: &Id16, device: &Id16) -> Result<()> {
         let epoch = self.folder_epochs(folder).current();

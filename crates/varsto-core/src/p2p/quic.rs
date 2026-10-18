@@ -301,20 +301,20 @@ impl quinn::UdpPoller for WritePoller {
 
 // ----- certificate pinning ----------------------------------------------------
 
-fn provider() -> Arc<rustls::crypto::CryptoProvider> {
+pub(super) fn provider() -> Arc<rustls::crypto::CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
 
-fn rejected() -> rustls::Error {
+pub(super) fn rejected() -> rustls::Error {
     rustls::Error::InvalidCertificate(rustls::CertificateError::ApplicationVerificationFailure)
 }
 
 /// Client side: the server must present the certificate whose hash the peer
 /// record announced. Names, validity dates and chains are irrelevant.
 #[derive(Debug)]
-struct PinnedServer {
-    expected: String,
-    algs: rustls::crypto::WebPkiSupportedAlgorithms,
+pub(super) struct PinnedServer {
+    pub(super) expected: String,
+    pub(super) algs: rustls::crypto::WebPkiSupportedAlgorithms,
 }
 
 impl client_danger::ServerCertVerifier for PinnedServer {
@@ -420,10 +420,30 @@ fn peer_hash(conn: &quinn::Connection) -> Option<String> {
     certs.first().map(|c| Identity::fingerprint(c))
 }
 
+/// The TLS exporter value of `conn` that format-3 tokens are keyed with
+/// (the same on both ends of the connection).
+#[cfg(feature = "format3")]
+pub(crate) fn exporter(conn: &quinn::Connection) -> Option<[u8; 32]> {
+    let mut out = [0u8; 32];
+    conn.export_keying_material(&mut out, super::v3::EXPORTER_LABEL, b"")
+        .ok()?;
+    Some(out)
+}
+
 // ----- wire format ------------------------------------------------------------
 
 fn request_bytes(verb: &str, target: &str, auth: &str) -> Vec<u8> {
     format!("{verb} {target}\nX-Varsto-Auth: {auth}\n\n").into_bytes()
+}
+
+/// The value of header line `name` in a request head.
+#[cfg_attr(not(feature = "format3"), allow(dead_code))]
+fn header_value(head: &[u8], name: &str) -> Option<String> {
+    let text = std::str::from_utf8(head).ok()?;
+    let prefix = format!("{name}: ");
+    text.lines()
+        .find_map(|l| l.strip_prefix(prefix.as_str()))
+        .map(|v| v.trim().to_string())
 }
 
 /// `(verb, target, auth)` from a request head.
@@ -486,8 +506,25 @@ async fn request_on(
     target: &str,
     auth: &str,
 ) -> Result<(u16, Vec<u8>)> {
+    request_on_for(conn, verb, target, auth, None).await
+}
+
+/// `request_on`, with `X-Varsto-For: <device>` when a relay asks for
+/// another device (format 3).
+async fn request_on_for(
+    conn: &quinn::Connection,
+    verb: &str,
+    target: &str,
+    auth: &str,
+    for_device: Option<&DeviceId>,
+) -> Result<(u16, Vec<u8>)> {
+    let mut head = request_bytes(verb, target, auth);
+    if let Some(d) = for_device {
+        head.pop(); // the blank line goes after the extra header
+        head.extend_from_slice(format!("X-Varsto-For: {d}\n\n").as_bytes());
+    }
     let (mut send, recv) = conn.open_bi().await.context("open stream")?;
-    send.write_all(&request_bytes(verb, target, auth)).await?;
+    send.write_all(&head).await?;
     send.finish()?;
     read_response(recv).await
 }
@@ -511,11 +548,22 @@ struct Serving {
     /// Connections we already serve streams on (so a registration is served once).
     served: Mutex<BTreeSet<usize>>,
     traffic: Arc<Traffic>,
+    /// Format 3: requests are authenticated by the certificate and a token
+    /// bound to the connection (`v3::Responder`), not by the vault key.
+    #[cfg(feature = "format3")]
+    v3: Option<Arc<super::v3::Responder>>,
 }
 
 impl Serving {
     fn peer_key(&self) -> SecretKey {
         self.peer_key.lock().unwrap().clone()
+    }
+
+    fn is_v3(&self) -> bool {
+        #[cfg(feature = "format3")]
+        return self.v3.is_some();
+        #[cfg(not(feature = "format3"))]
+        false
     }
 
     /// How a request on `conn` reached us: through the relay `via` (a
@@ -570,6 +618,29 @@ pub struct Node {
     /// service then asks STUN again instead of waiting for the next period.
     restun: std::sync::atomic::AtomicBool,
     pub local_addr: SocketAddr,
+    /// `varsto-p2p/1` (format 2) or `varsto-p2p/3`.
+    alpn: &'static [u8],
+}
+
+/// How requests are authenticated.
+enum Mode {
+    /// Format 2: the keyed-hash token of the vault key.
+    Keyed,
+    #[cfg(feature = "format3")]
+    V3(Arc<super::v3::Responder>),
+}
+
+impl Mode {
+    fn alpn(&self) -> &'static [u8] {
+        match self {
+            Mode::Keyed => ALPN,
+            #[cfg(feature = "format3")]
+            Mode::V3(_) => super::v3::ALPN,
+        }
+    }
+    fn admits_self(&self) -> bool {
+        matches!(self, Mode::Keyed)
+    }
 }
 
 impl Node {
@@ -595,6 +666,53 @@ impl Node {
         snapshot: Arc<Mutex<Option<Arc<Snapshot>>>>,
         traffic: Arc<Traffic>,
     ) -> Result<Arc<Node>> {
+        Self::start_inner(
+            std_sock,
+            identity,
+            me,
+            peer_key,
+            snapshot,
+            traffic,
+            Mode::Keyed,
+        )
+    }
+
+    /// Format 3 (design section 8): ALPN `varsto-p2p/3`; the handshake
+    /// admits only certificates of the responder's directory (never this
+    /// device's own), and every request is checked by `responder`.
+    #[cfg(feature = "format3")]
+    pub fn start_v3(
+        addr: SocketAddr,
+        identity: Identity,
+        responder: Arc<super::v3::Responder>,
+        snapshot: Arc<Mutex<Option<Arc<Snapshot>>>>,
+        traffic: Arc<Traffic>,
+    ) -> Result<Arc<Node>> {
+        let std_sock = UdpSocket::bind(addr).with_context(|| format!("bind p2p UDP {addr}"))?;
+        let me = responder.me().clone();
+        let node = Self::start_inner(
+            std_sock,
+            identity,
+            me,
+            SecretKey::random(),
+            snapshot,
+            traffic,
+            Mode::V3(responder.clone()),
+        )?;
+        node.set_known(responder.directory().infos());
+        Ok(node)
+    }
+
+    fn start_inner(
+        std_sock: UdpSocket,
+        identity: Identity,
+        me: DeviceId,
+        peer_key: SecretKey,
+        snapshot: Arc<Mutex<Option<Arc<Snapshot>>>>,
+        traffic: Arc<Traffic>,
+        mode: Mode,
+    ) -> Result<Arc<Node>> {
+        let alpn = mode.alpn();
         std_sock.set_nonblocking(true)?;
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -602,7 +720,13 @@ impl Node {
             .enable_all()
             .build()
             .context("p2p runtime")?;
-        let allowed = Arc::new(Mutex::new(BTreeSet::from([identity.sha256.clone()])));
+        // Format 2 admits its own certificate (the reachability self-probe);
+        // format 3 never does.
+        let allowed = Arc::new(Mutex::new(if mode.admits_self() {
+            BTreeSet::from([identity.sha256.clone()])
+        } else {
+            BTreeSet::new()
+        }));
         let prov = provider();
         let mut tls = rustls::ServerConfig::builder_with_provider(prov.clone())
             .with_protocol_versions(&[&rustls::version::TLS13])
@@ -616,7 +740,7 @@ impl Node {
                 PrivateKeyDer::Pkcs8(identity.key.clone().into()),
             )
             .context("p2p server certificate")?;
-        tls.alpn_protocols = vec![ALPN.to_vec()];
+        tls.alpn_protocols = vec![alpn.to_vec()];
         let mut server = quinn::ServerConfig::with_crypto(Arc::new(
             quinn::crypto::rustls::QuicServerConfig::try_from(tls).context("quic server config")?,
         ));
@@ -646,6 +770,11 @@ impl Node {
             registrants: Mutex::new(HashMap::new()),
             served: Mutex::new(BTreeSet::new()),
             traffic,
+            #[cfg(feature = "format3")]
+            v3: match &mode {
+                Mode::V3(r) => Some(r.clone()),
+                Mode::Keyed => None,
+            },
         });
         let (ep, sv) = (endpoint.clone(), serving.clone());
         rt.spawn(async move {
@@ -675,6 +804,7 @@ impl Node {
             last_round: Mutex::new(None),
             restun: std::sync::atomic::AtomicBool::new(false),
             local_addr,
+            alpn,
         }))
     }
 
@@ -697,11 +827,13 @@ impl Node {
     pub fn set_known(&self, peers: Vec<PeerInfo>) {
         let mut allowed = self.serving.allowed.lock().unwrap();
         allowed.clear();
-        allowed.insert(self.identity.sha256.clone());
+        if !self.serving.is_v3() {
+            allowed.insert(self.identity.sha256.clone());
+        }
         allowed.extend(
             peers
                 .iter()
-                .filter(|p| !p.cert_sha256.is_empty())
+                .filter(|p| !p.cert_sha256.is_empty() && p.cert_sha256 != self.identity.sha256)
                 .map(|p| p.cert_sha256.clone()),
         );
         *self.serving.known.lock().unwrap() = peers;
@@ -846,7 +978,7 @@ impl Node {
                 PrivateKeyDer::Pkcs8(self.identity.key.clone().into()),
             )
             .context("p2p client certificate")?;
-        tls.alpn_protocols = vec![ALPN.to_vec()];
+        tls.alpn_protocols = vec![self.alpn.to_vec()];
         let mut cfg = quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls).context("quic client config")?,
         ));
@@ -976,10 +1108,39 @@ impl Node {
         auth: &str,
         punch: bool,
     ) -> Result<(u16, Vec<u8>)> {
+        self.request_auth(addr, cert_sha256, path, punch, &|_: &quinn::Connection| {
+            auth.to_string()
+        })
+    }
+
+    /// Format 3: `request`, with the token made for the connection the
+    /// request goes out on, from its TLS exporter value.
+    #[cfg(feature = "format3")]
+    pub fn request_with(
+        &self,
+        addr: SocketAddr,
+        cert_sha256: &str,
+        path: &str,
+        punch: bool,
+        token: &dyn Fn(&[u8; 32]) -> String,
+    ) -> Result<(u16, Vec<u8>)> {
+        self.request_auth(addr, cert_sha256, path, punch, &|c: &quinn::Connection| {
+            exporter(c).map(|e| token(&e)).unwrap_or_default()
+        })
+    }
+
+    fn request_auth(
+        &self,
+        addr: SocketAddr,
+        cert_sha256: &str,
+        path: &str,
+        punch: bool,
+        auth_for: &dyn Fn(&quinn::Connection) -> String,
+    ) -> Result<(u16, Vec<u8>)> {
         self.rt.block_on(async {
             let reused = self.reusable(addr, cert_sha256).await.is_some();
             let conn = self.connect(addr, cert_sha256, punch).await?;
-            match request_on(&conn, "GET", path, auth).await {
+            match request_on(&conn, "GET", path, &auth_for(&conn)).await {
                 Ok(r) => Ok(r),
                 // A kept connection can outlive the other end (it restarted,
                 // or its address changed): open a new one and ask again once,
@@ -991,7 +1152,7 @@ impl Node {
                     conn.close(0u32.into(), b"stale");
                     self.forget(addr, &conn).await;
                     let conn = self.connect(addr, cert_sha256, punch).await?;
-                    request_on(&conn, "GET", path, auth).await
+                    request_on(&conn, "GET", path, &auth_for(&conn)).await
                 }
                 Err(e) => Err(e),
             }
@@ -1009,6 +1170,10 @@ impl Node {
     /// Does our own public address lead back to us? True means other devices
     /// can connect directly, so the record may say `reachable`.
     pub fn probe_self(&self, addr: SocketAddr) -> bool {
+        // Format 3 never dials its own certificate.
+        if self.serving.is_v3() {
+            return false;
+        }
         let path = "/p2p/info";
         let auth = auth_header(&self.serving.peer_key(), &self.serving.me, path);
         matches!(
@@ -1027,7 +1192,19 @@ impl Node {
         cert_sha256: &str,
     ) -> Result<()> {
         let path = format!("/p2p/register/{}", self.serving.me);
-        let auth = auth_header(&self.serving.peer_key(), &self.serving.me, &path);
+        let keyed = auth_header(&self.serving.peer_key(), &self.serving.me, &path);
+        #[cfg(feature = "format3")]
+        let v3 = self.serving.v3.clone();
+        let auth_for = |conn: &quinn::Connection| -> String {
+            #[cfg(feature = "format3")]
+            if let Some(r) = &v3 {
+                return exporter(conn)
+                    .map(|e| r.token(&e, relay, &path))
+                    .unwrap_or_default();
+            }
+            let _ = conn;
+            keyed.clone()
+        };
         self.rt.block_on(async {
             let mut last = anyhow!("relay has no address");
             for addr in addrs {
@@ -1042,8 +1219,13 @@ impl Node {
                         continue;
                     }
                 };
-                let (status, body) =
-                    request_on(&conn, "REGISTER", self.serving.me.as_str(), &auth).await?;
+                let (status, body) = request_on(
+                    &conn,
+                    "REGISTER",
+                    self.serving.me.as_str(),
+                    &auth_for(&conn),
+                )
+                .await?;
                 if status != 200 {
                     bail!(
                         "relay refused registration: {status} {}",
@@ -1090,6 +1272,28 @@ impl Node {
         path: &str,
         auth: &str,
     ) -> Result<(u16, Vec<u8>)> {
+        self.registrant_auth(dev, path, &|_: &quinn::Connection| auth.to_string())
+    }
+
+    /// Format 3: `request_registrant` with a token bound to that connection.
+    #[cfg(feature = "format3")]
+    pub fn request_registrant_with(
+        &self,
+        dev: &DeviceId,
+        path: &str,
+        token: &dyn Fn(&[u8; 32]) -> String,
+    ) -> Result<(u16, Vec<u8>)> {
+        self.registrant_auth(dev, path, &|c: &quinn::Connection| {
+            exporter(c).map(|e| token(&e)).unwrap_or_default()
+        })
+    }
+
+    fn registrant_auth(
+        &self,
+        dev: &DeviceId,
+        path: &str,
+        auth_for: &dyn Fn(&quinn::Connection) -> String,
+    ) -> Result<(u16, Vec<u8>)> {
         let conn = self
             .serving
             .registrants
@@ -1101,7 +1305,7 @@ impl Node {
         let r = self.rt.block_on(async {
             tokio::time::timeout(
                 Duration::from_secs(60),
-                request_on(&conn, "GET", path, auth),
+                request_on(&conn, "GET", path, &auth_for(&conn)),
             )
             .await
         });
@@ -1179,6 +1383,13 @@ async fn serve_stream(
     // The device the answer goes to, once its token checked out, and the
     // path asked for: the traffic counters charge the answer to it.
     let mut served: Option<(DeviceId, String)> = None;
+    #[cfg(feature = "format3")]
+    if let Some(r) = sv.v3.clone() {
+        let ci = super::v3::ConnInfo::of_quic(&conn, via.is_some());
+        let (status, body, peer, target) = serve_v3(&sv, &r, &ci, &head, &conn).await;
+        let to = peer.map(|p| (p, target));
+        return answer_counted(&mut send, &sv, &conn, &path_label, to, status, &body).await;
+    }
     let (status, body) = match parse_request(&head) {
         Err(_) => (400, b"bad request".to_vec()),
         Ok((verb, target, auth)) => match verb.as_str() {
@@ -1202,22 +1413,140 @@ async fn serve_stream(
             _ => (405, b"unknown verb".to_vec()),
         },
     };
+    answer_counted(&mut send, &sv, &conn, &path_label, served, status, &body).await
+}
+
+/// Write the answer; when it went to an authenticated device, count it.
+async fn answer_counted(
+    send: &mut quinn::SendStream,
+    sv: &Serving,
+    conn: &quinn::Connection,
+    path_label: &str,
+    served: Option<(DeviceId, String)>,
+    status: u16,
+    body: &[u8],
+) -> Result<()> {
     let Some((peer, target)) = served else {
-        return write_response(&mut send, status, &body).await;
+        return write_response(send, status, body).await;
     };
     let _active = sv.traffic.begin(&peer);
-    let result = write_response(&mut send, status, &body).await;
+    let result = write_response(send, status, body).await;
     if result.is_ok() {
         sv.traffic.record(
             &peer,
             Direction::Out,
             body.len() as u64,
             is_object(&target, status),
-            &path_label,
+            path_label,
             Some(conn.remote_address()),
         );
     }
     result
+}
+
+/// Format 3: one request on `conn`, checked by `r`: `(status, body, the
+/// device it was for when it was authenticated, the path)`.
+#[cfg(feature = "format3")]
+async fn serve_v3(
+    sv: &Arc<Serving>,
+    r: &Arc<super::v3::Responder>,
+    ci: &super::v3::ConnInfo,
+    head: &[u8],
+    conn: &quinn::Connection,
+) -> (u16, Vec<u8>, Option<DeviceId>, String) {
+    let Ok((verb, target, auth)) = parse_request(head) else {
+        return (400, b"bad request".to_vec(), None, String::new());
+    };
+    let for_device = header_value(head, "X-Varsto-For").unwrap_or_default();
+    match verb.as_str() {
+        "GET" => {
+            if let Some(rest) = target.strip_prefix("/p2p/via/") {
+                let (status, body) = relay_v3(sv, r, ci, &target, rest, &auth).await;
+                return (status, body, None, target);
+            }
+            let snap = sv.snapshot.lock().unwrap().clone();
+            let (r, ci, t) = (r.clone(), ci.clone(), target.clone());
+            let (status, body, peer) = tokio::task::spawn_blocking(move || {
+                r.handle(snap.as_deref(), &ci, &t, &auth, &for_device)
+            })
+            .await
+            .unwrap_or_else(|_| (500, b"internal error".to_vec(), None));
+            (status, body, peer, target)
+        }
+        "REGISTER" => {
+            let Ok(dev) = DeviceId::from_hex(&target) else {
+                return (400, b"bad device".to_vec(), None, target);
+            };
+            let path = format!("/p2p/register/{dev}");
+            match r.authorize(ci, &auth, &path) {
+                Ok(asker) if asker == dev => {
+                    log(&format!(
+                        "relay: {} registered from {}",
+                        dev.short(),
+                        conn.remote_address()
+                    ));
+                    sv.registrants.lock().unwrap().insert(dev, conn.clone());
+                    (200, Vec::new(), None, target)
+                }
+                Ok(_) => (
+                    403,
+                    b"certificate does not match the device record".to_vec(),
+                    None,
+                    target,
+                ),
+                Err((status, body)) => (status, body, None, target),
+            }
+        }
+        _ => (405, b"unknown verb".to_vec(), None, target),
+    }
+}
+
+/// Format 3 relay: the asker's token is bound to its connection with us, so
+/// it cannot travel on; we check it and ask the registrant on our own
+/// connection with it, with a token of ours and `X-Varsto-For` naming the
+/// asker (the registrant trusts us as a device of its directory).
+#[cfg(feature = "format3")]
+async fn relay_v3(
+    sv: &Serving,
+    r: &super::v3::Responder,
+    ci: &super::v3::ConnInfo,
+    target: &str,
+    rest: &str,
+    auth: &str,
+) -> (u16, Vec<u8>) {
+    let Some((device, inner)) = rest.split_once('/') else {
+        return (400, b"bad relay path".to_vec());
+    };
+    let Ok(dev) = DeviceId::from_hex(device) else {
+        return (400, b"bad device".to_vec());
+    };
+    let inner = format!("/{inner}");
+    let asker = match r.authorize(ci, auth, target) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let reg = sv.registrants.lock().unwrap().get(&dev).cloned();
+    let Some(reg) = reg else {
+        return (502, b"device is not registered with this relay".to_vec());
+    };
+    let Some(exp) = exporter(&reg) else {
+        return (502, b"relay: no exporter on the registration".to_vec());
+    };
+    let token = r.token(&exp, &dev, &inner);
+    let _active = sv.traffic.begin_relay(&dev, &asker);
+    match request_on_for(&reg, "GET", &inner, &token, Some(&asker)).await {
+        Ok(x) => {
+            sv.traffic
+                .record_relay(&dev, &asker, x.1.len() as u64, is_object(&inner, x.0));
+            x
+        }
+        Err(e) => {
+            if reg.close_reason().is_some() {
+                sv.registrants.lock().unwrap().remove(&dev);
+            }
+            (502, format!("relay: {e}").into_bytes())
+        }
+    }
 }
 
 /// `REGISTER <device>`: the client must hold the certificate the device's
