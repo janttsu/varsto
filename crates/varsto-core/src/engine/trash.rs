@@ -2111,7 +2111,14 @@ impl Engine {
             if rec.is_removed() || rec.is_backup() {
                 continue;
             }
-            let ok = self.with_key(&rec).is_ok()
+            // A folder attached here and never synced yet is not pulled
+            // in the background (it would download every file behind the
+            // sync that is about to): it counts as not pulled.
+            let never_synced = self
+                .load_state(&fid)
+                .is_ok_and(|s| s.files.is_empty() && s.local_index.is_empty());
+            let ok = !never_synced
+                && self.with_key(&rec).is_ok()
                 && !self.is_held(&fid)
                 && self.pull(fid.as_str()).is_ok();
             if !ok {

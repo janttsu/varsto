@@ -67,6 +67,8 @@ pub struct ServiceState {
     pub p2p_peers: Vec<varsto_core::p2p::PeerAddr>,
     pub p2p_lan_peers: usize,
     pub p2p_chunks: u64,
+    /// Bytes of the blocks received from peers since start.
+    pub p2p_bytes: u64,
     /// Removable disks of every pool as of the last check (every 30 seconds).
     pub disks: Vec<varsto_core::pool::DiskStatus>,
     /// The next pool disk to dock, recomputed after syncs and disk changes
@@ -916,6 +918,7 @@ impl ServiceState {
             }
             left_out.extend(ps.storages_unavailable.iter().cloned());
             self.p2p_chunks += pl.chunks_from_peers;
+            self.p2p_bytes += pl.bytes_from_peers;
             updated += pl.files_updated;
             deleted += pl.files_deleted;
             conflicts += pl.conflicts;
@@ -1030,7 +1033,12 @@ struct P2p {
     /// This device has announced itself (record published, snapshot made,
     /// peers told) since the service started, before its first sync.
     announced: AtomicBool,
+    /// When an unknown certificate last made us read the records again.
+    knock_read: Mutex<Option<Instant>>,
 }
+
+/// An unknown certificate makes the records be read again at most this often.
+const KNOCK_REREAD: Duration = Duration::from_secs(5);
 
 type BeaconKeys = std::collections::BTreeMap<[u8; 16], varsto_core::crypto::VerifyingKey>;
 
@@ -1253,6 +1261,7 @@ impl P2p {
             portmap_thread,
             lan_new,
             announced: AtomicBool::new(false),
+            knock_read: Mutex::new(None),
         })
     }
 
@@ -1274,6 +1283,22 @@ impl P2p {
                 crate::readcache::invalidate_all();
                 varsto_core::events::publish("peers.changed", json!({}));
             });
+    }
+
+    /// Did a certificate the directory does not name knock since the last
+    /// read of the records, and is a read due (at most every
+    /// `KNOCK_REREAD`)? A stranger knocking costs a listing of the peer
+    /// records now and then, nothing more.
+    fn take_unknown_knock(&self) -> bool {
+        let mut last = self.knock_read.lock().unwrap();
+        if last.is_some_and(|t| t.elapsed() < KNOCK_REREAD) {
+            return false;
+        }
+        if !self.responder.take_unknown() {
+            return false;
+        }
+        *last = Some(Instant::now());
+        true
     }
 
     /// Did a LAN device nobody had heard appear? Clears the flag.
@@ -2176,7 +2201,11 @@ pub fn run(opts: Options) -> Result<()> {
                 next_watch = Instant::now() + WATCH_MIN;
             }
             let lan_new = p2p.as_ref().is_some_and(|p| p.take_lan_new());
-            if unlocked_now && (lan_new || Instant::now() >= next_watch) {
+            // A device whose certificate our directory does not name yet
+            // knocked (it published its record after our last read): read
+            // the records again, at most every few seconds.
+            let knocked = p2p.as_ref().is_some_and(|p| p.take_unknown_knock());
+            if unlocked_now && (lan_new || knocked || Instant::now() >= next_watch) {
                 next_watch = Instant::now() + watch_every;
                 watch_every = (watch_every * 2).min(WATCH_MAX);
                 let found = st.engine.as_mut().map(|e| e.refresh_devices());
@@ -2190,7 +2219,7 @@ pub fn run(opts: Options) -> Result<()> {
                     Some(Err(e)) => log::debug!("device check failed: {e:#}"),
                 }
                 if let Some(p) = &p2p {
-                    if grew || lan_new || p.records_changed(&st) {
+                    if grew || lan_new || knocked || p.records_changed(&st) {
                         p.refresh_before_sync(&mut st);
                         crate::readcache::invalidate_all();
                         varsto_core::events::publish("peers.changed", json!({}));

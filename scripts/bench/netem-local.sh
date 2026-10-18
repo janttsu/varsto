@@ -95,8 +95,10 @@ r = json.loads(out)
 pulls = [x.get("pull", {}) for x in (r if isinstance(r, list) else [r]) if isinstance(x, dict)]
 down = sum(p.get("chunks_downloaded", 0) for p in pulls)
 peers = sum(p.get("chunks_from_peers", 0) for p in pulls)
+peer_bytes = sum(p.get("bytes_from_peers", 0) for p in pulls)
+all_bytes = sum(p.get("bytes_downloaded", 0) for p in pulls)
 print(json.dumps({"kind": "pull", "mode": mode, "seconds": round(secs, 1), "mb_s": round(nbytes / secs / 1e6, 1),
-                  "chunks": down, "from_peers": peers, "files": got}))
+                  "chunks": down, "from_peers": peers, "bytes": all_bytes, "bytes_from_peers": peer_bytes, "files": got}))
 PY
   api "$R" POST /api/quit '{}' >/dev/null 2>&1 || true
   if [ "$mode" = p2p ]; then mv "$work/s3/bench/packs.away" "$work/s3/bench/packs"; fi

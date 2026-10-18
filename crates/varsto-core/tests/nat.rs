@@ -101,6 +101,9 @@ fn quic_direct_transfer_with_pinned_certificates() {
     let r = b.pull("docs").unwrap();
     assert!(r.files_unavailable.is_empty(), "{:?}", r.files_unavailable);
     assert!(r.chunks_from_peers >= 2, "{}", r.chunks_from_peers);
+    // Every block came from the laptop: the bytes say so too.
+    assert_eq!(r.bytes_from_peers, r.bytes_downloaded, "{r:?}");
+    assert!(r.bytes_from_peers >= 200_000, "{r:?}");
     assert_eq!(fs::read(lab.dir("b").join("big.bin")).unwrap(), big);
     assert_eq!(
         fs::read(lab.dir("b").join("note.txt")).unwrap(),

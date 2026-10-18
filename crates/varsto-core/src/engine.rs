@@ -343,6 +343,10 @@ pub struct PullReport {
     /// Chunks fetched from peers instead of storages.
     #[serde(default)]
     pub chunks_from_peers: u64,
+    /// Of `bytes_downloaded`, the bytes of the chunks that came from peers
+    /// (the rest came from storages).
+    #[serde(default)]
+    pub bytes_from_peers: u64,
     pub folder: String,
     pub manifests_applied: u64,
     pub files_updated: u64,
@@ -5371,7 +5375,7 @@ impl Engine {
                 None
             };
             let mut write_chunk = |cref: &ChunkRef, fetched: Fetched| -> Result<()> {
-                let (storage_name, ct) = match fetched {
+                let (storage_name, ct, from_peer) = match fetched {
                     Fetched::Got {
                         source,
                         bytes,
@@ -5380,7 +5384,7 @@ impl Engine {
                         if from_peer {
                             report.chunks_from_peers += 1;
                         }
-                        (source, bytes)
+                        (source, bytes, from_peer)
                     }
                     Fetched::Failed(e) => return Err(e),
                     Fetched::Missing(needs_disk) => {
@@ -5412,6 +5416,9 @@ impl Engine {
                 progress.advance(plain.len() as u64);
                 report.chunks_downloaded += 1;
                 report.bytes_downloaded += plain.len() as u64;
+                if from_peer {
+                    report.bytes_from_peers += plain.len() as u64;
+                }
                 // A block that came from a peer says nothing about a storage: "peer:<id>"
                 // is not one (it would show up as a storage holding the block).
                 if !storage_name.starts_with("peer:") {

@@ -358,6 +358,8 @@ impl client_danger::ServerCertVerifier for PinnedServer {
 struct KnownClients {
     allowed: Arc<Mutex<BTreeSet<String>>>,
     algs: rustls::crypto::WebPkiSupportedAlgorithms,
+    /// Told about a refused certificate (`Responder::note_unknown`).
+    responder: Arc<super::v3::Responder>,
 }
 
 impl server_danger::ClientCertVerifier for KnownClients {
@@ -374,6 +376,7 @@ impl server_danger::ClientCertVerifier for KnownClients {
         if self.allowed.lock().unwrap().contains(&hash) {
             Ok(server_danger::ClientCertVerified::assertion())
         } else {
+            self.responder.note_unknown();
             Err(rejected())
         }
     }
@@ -658,6 +661,7 @@ impl Node {
             .with_protocol_versions(&[&rustls::version::TLS13])
             .context("tls versions")?
             .with_client_cert_verifier(Arc::new(KnownClients {
+                responder: responder.clone(),
                 allowed: allowed.clone(),
                 algs: prov.signature_verification_algorithms,
             }))

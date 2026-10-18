@@ -763,6 +763,33 @@ fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
     assert!(a.policy_check().unwrap().is_empty());
 }
 
+/// A device that synced before it attached the folder (it read the
+/// folder's records then) downloads every file at the sync after the
+/// attach, and its report counts the blocks and bytes it fetched.
+#[test]
+fn a_folder_attached_after_a_sync_is_downloaded_and_counted() {
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    let big: Vec<u8> = (0..150_000u32).map(|i| (i % 249) as u8).collect();
+    fs::write(lab.a_dir.join("big.bin"), &big).unwrap();
+    fs::write(lab.a_dir.join("note.txt"), b"counted").unwrap();
+    a.push("docs").unwrap();
+    let mut b = common::join_approved(&lab.b_home, "desk", PASS, &key, lab.storage.clone(), &mut a);
+    b.chunker = ChunkerParams::SMALL;
+    b.sync(None).unwrap();
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
+    let reports = b.sync(Some("docs")).unwrap();
+    let pull = &reports[0].0;
+    assert_eq!(fs::read(lab.b_dir.join("big.bin")).unwrap(), big);
+    assert_eq!(pull.files_updated, 2, "{pull:?}");
+    assert!(pull.chunks_downloaded >= 3, "{pull:?}");
+    assert_eq!(pull.bytes_downloaded, big.len() as u64 + 7, "{pull:?}");
+    assert_eq!(pull.bytes_from_peers, 0, "no peers: all from the storage");
+}
+
 #[test]
 fn peers_serve_chunks_when_the_storage_has_none() {
     use varsto_core::p2p;
