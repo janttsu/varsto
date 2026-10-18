@@ -107,7 +107,10 @@ fn another_device_verifies_packs_automatically() {
     })
     .unwrap();
     let r = b.auto_verify().unwrap();
-    assert_eq!((r.due, r.blocks_verified, r.left_for_next_run), (packs, 1, 1));
+    assert_eq!(
+        (r.due, r.blocks_verified, r.left_for_next_run),
+        (packs, 1, 1)
+    );
     assert!(r.bytes_downloaded >= 256 << 10, "a whole pack: {r:?}");
     a.sync(None).unwrap();
     let some = verified_elsewhere(&a);

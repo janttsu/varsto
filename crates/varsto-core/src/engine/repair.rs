@@ -383,7 +383,6 @@ impl Engine {
             .map(|r| r.name.clone())
             .unwrap_or_else(|| folder.short().to_string())
     }
-
 }
 
 /// Add `found` to `queue`, one entry per (object, storage); a copy found

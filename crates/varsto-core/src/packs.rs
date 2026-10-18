@@ -566,7 +566,6 @@ impl PackStore {
         }
         Ok(())
     }
-
 }
 
 impl Storage for PackStore {
@@ -638,10 +637,7 @@ impl Storage for PackStore {
         };
         let st = self.state.lock().unwrap();
         for (obj, locs) in self.ctx.all_objects() {
-            if !locs
-                .iter()
-                .any(|l| l.valid() && st.packs.contains(&l.pack))
-            {
+            if !locs.iter().any(|l| l.valid() && st.packs.contains(&l.pack)) {
                 continue;
             }
             let k = chunk_key(&obj);
@@ -764,7 +760,6 @@ impl Storage for PackStore {
     fn take_new_packs(&self) -> Vec<NewPack> {
         std::mem::take(&mut self.state.lock().unwrap().new_packs)
     }
-
 }
 
 /// One group of `group_by_pack`: the lane, and (item, object, place) of

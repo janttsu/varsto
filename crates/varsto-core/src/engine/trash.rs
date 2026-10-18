@@ -1204,9 +1204,7 @@ impl Engine {
             .config
             .storages
             .iter()
-            .filter(|s| {
-                !s.is_carrier() && !s.is_cold() && !s.is_data_only() && s.name() != ts_name
-            })
+            .filter(|s| !s.is_carrier() && !s.is_cold() && !s.is_data_only() && s.name() != ts_name)
             .cloned()
             .collect();
         let ts = self.open_spec(&ts_spec)?;
@@ -1260,7 +1258,14 @@ impl Engine {
                 let mut publish = None;
                 if !run.new_packs.is_empty() {
                     let lamport = crate::gc3::Commit::tick(sink);
-                    let p = w.publish(out.writer, out.meta, &run.new_packs, lamport, Some(t), &view)?;
+                    let p = w.publish(
+                        out.writer,
+                        out.meta,
+                        &run.new_packs,
+                        lamport,
+                        Some(t),
+                        &view,
+                    )?;
                     events.extend(p.events.clone());
                     publish = Some(p);
                 }
@@ -2195,12 +2200,18 @@ impl Engine {
                             if gc.drops_waiting == 1 { "y" } else { "ies" }
                         ));
                     }
-                    report.notes.extend(gc.skipped.iter().map(|s| format!("not collected: {s}")));
+                    report
+                        .notes
+                        .extend(gc.skipped.iter().map(|s| format!("not collected: {s}")));
                     if !gc.waiting_for.is_empty() {
                         report.notes.push(format!(
                             "deleted blocks are freed once {} {} synced",
                             gc.waiting_for.join(", "),
-                            if gc.waiting_for.len() == 1 { "has" } else { "have" }
+                            if gc.waiting_for.len() == 1 {
+                                "has"
+                            } else {
+                                "have"
+                            }
                         ));
                     }
                 }

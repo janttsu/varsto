@@ -14,8 +14,7 @@
 use super::*;
 use crate::blockmap::MapRow;
 use crate::fsck3::{
-    AcceptorProbe, FolderInput, Fsck3Input, Fsck3Options, Fsck3Report, PackVerdict,
-    StorageDesc,
+    AcceptorProbe, FolderInput, Fsck3Input, Fsck3Options, Fsck3Report, PackVerdict, StorageDesc,
 };
 use crate::gc3::{Commit, StorageInfo, StorageSet};
 use crate::ledger3::events::Event as Event3;
@@ -160,8 +159,7 @@ impl Engine {
                 .packs
                 .keys()
                 .map(|id| {
-                    members.get(id).copied().unwrap_or(1)
-                        * view.holders(id).len().max(1) as u64
+                    members.get(id).copied().unwrap_or(1) * view.holders(id).len().max(1) as u64
                 })
                 .sum();
             task.step("verify", total, activity::Unit::Items);
@@ -213,7 +211,6 @@ impl Engine {
             now_utc: util::now_utc(),
         };
         let out = crate::fsck3::fsck(&input, &Fsck3Options { verify });
-        drop(input);
         drop(guards);
         let events = verified.into_inner().unwrap_or_else(|e| e.into_inner());
         if !events.is_empty() && !self.vault.member {
@@ -280,7 +277,9 @@ impl Engine {
             )
         {
             let pack = hash32(&i.pack);
-            out.push(repair::pack_damage(view, &pack, &i.storage, kind, "fsck", now));
+            out.push(repair::pack_damage(
+                view, &pack, &i.storage, kind, "fsck", now,
+            ));
         }
         out
     }
@@ -480,7 +479,9 @@ impl Engine {
                     };
                     if done {
                         if rows.is_empty() {
-                            report.repaired.push(copy(&pack, format!("storage {src}"), size));
+                            report
+                                .repaired
+                                .push(copy(&pack, format!("storage {src}"), size));
                         }
                         for r in &rows {
                             report.repaired.push(copy(
@@ -611,7 +612,8 @@ impl Engine {
             }
             let fetched: HashMap<[u8; 32], Vec<u8>> =
                 here.iter().map(|(o, (b, _))| (*o, b.clone())).collect();
-            let r = self.repair_pack3(&folder, &d.storage, &pack, &damaged, &fetched, &all, &view)?;
+            let r =
+                self.repair_pack3(&folder, &d.storage, &pack, &damaged, &fetched, &all, &view)?;
             for o in &r.from_same_place {
                 report.repaired.push(copy(o, "another storage".into(), 0));
             }

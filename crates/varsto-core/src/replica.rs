@@ -235,7 +235,8 @@ impl Replica {
             // under packs/ that is not a pack is junk left by something
             // else: skipped, not a reason to stop.
             let pack = crate::packs::pack_of_key(&key);
-            if key.starts_with("chunks/") || (key.starts_with(crate::packs::PREFIX) && pack.is_none())
+            if key.starts_with("chunks/")
+                || (key.starts_with(crate::packs::PREFIX) && pack.is_none())
             {
                 if report.skipped_junk == 0 {
                     log::warn!(

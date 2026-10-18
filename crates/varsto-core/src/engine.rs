@@ -7438,7 +7438,12 @@ impl Engine {
             let Some(key) = self.key_for3(&rec.key_id) else {
                 continue;
             };
-            let Some(pk) = self.f3.members.devices.get(&rec.device).and_then(|r| r.signing_key())
+            let Some(pk) = self
+                .f3
+                .members
+                .devices
+                .get(&rec.device)
+                .and_then(|r| r.signing_key())
             else {
                 continue;
             };

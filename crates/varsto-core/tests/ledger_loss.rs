@@ -80,7 +80,14 @@ fn two_devices() -> (Lab, Engine, Engine) {
     fs::create_dir_all(root.join("a-docs/sub")).unwrap();
     fs::write(root.join("a-docs/sub/three.bin"), pseudo_random(90_000, 3)).unwrap();
     a.sync(None).unwrap();
-    let mut b = common::join_approved(&root.join("b"), "phone", PASS, &key, storage.clone(), &mut a);
+    let mut b = common::join_approved(
+        &root.join("b"),
+        "phone",
+        PASS,
+        &key,
+        storage.clone(),
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &root.join("b-docs"), false)
         .unwrap();

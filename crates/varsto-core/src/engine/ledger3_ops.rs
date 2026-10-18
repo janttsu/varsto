@@ -71,11 +71,7 @@ pub(crate) fn key_for3_in(
 }
 
 /// `Engine::scope3` over the membership alone.
-pub(crate) fn scope3_in(
-    m: &members3::Members3,
-    device: &Id16,
-    key_id: &str,
-) -> Option<EventScope> {
+pub(crate) fn scope3_in(m: &members3::Members3, device: &Id16, key_id: &str) -> Option<EventScope> {
     match EventScope::of_key_id(key_id)? {
         EventScope::Full => m.devices.get(device).map(|_| EventScope::Full),
         EventScope::Member(f) => {

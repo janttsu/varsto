@@ -511,7 +511,12 @@ fn expiry_deletes_only_what_no_live_snapshot_uses() {
     let up = a.trash_upkeep_at(s1.expires_utc + DAY + 60).unwrap();
     assert!(up.blocks_dropped > 0, "{up:?}");
     let left = stored(&a, &lab.p("one"), &id);
-    assert!(left.len() < before.len(), "{} of {}", left.len(), before.len());
+    assert!(
+        left.len() < before.len(),
+        "{} of {}",
+        left.len(),
+        before.len()
+    );
     let out = lab.p("out");
     let r = a
         .restore_snapshot("bk", SnapshotPick::Latest, &out, &[], false, false)

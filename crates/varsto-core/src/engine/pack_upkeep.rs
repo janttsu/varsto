@@ -623,8 +623,7 @@ impl Engine {
             let readers = self.folder_readers3(&folder);
             let key = hex::encode(folder);
             let maps = st.maps.entry(key.clone()).or_default();
-            deleted +=
-                crate::gc3::prune_map(&list, &view, &folder, &me, &readers, maps)?.deleted;
+            deleted += crate::gc3::prune_map(&list, &view, &folder, &me, &readers, maps)?.deleted;
             if let Some(floor) = crate::manifest3::prune_floor(&view, &folder, &me, &readers) {
                 let m = st.manifests.entry(key).or_default();
                 for (s, cold) in &list {

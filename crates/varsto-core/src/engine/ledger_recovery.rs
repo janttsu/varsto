@@ -916,8 +916,7 @@ impl Engine {
             } = &mut *self;
             let members = &f3.members;
             let key_for = |id: &str| super::ledger3_ops::key_for3_in(epochs, members, id);
-            let scope_of =
-                |d: &Id16, id: &str| super::ledger3_ops::scope3_in(members, d, id);
+            let scope_of = |d: &Id16, id: &str| super::ledger3_ops::scope3_in(members, d, id);
             let pubkey_of = |d: &Id16| -> Option<crypto::VerifyingKey> {
                 members
                     .devices
@@ -991,7 +990,9 @@ impl Engine {
         report.reenrolled = rep.enrolled;
         report.notes.extend(rep.skipped.iter().cloned());
         if !rep.new_batches.is_empty() {
-            report.notes.push(format!("signed again: {}", rep.describe()));
+            report
+                .notes
+                .push(format!("signed again: {}", rep.describe()));
         }
         self.ledger_alarm.local.clear();
         self.ledger_alarm.storage_ahead = None;

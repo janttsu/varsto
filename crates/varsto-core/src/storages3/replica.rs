@@ -76,8 +76,7 @@ pub fn replicate(
     for key in src.list("")? {
         round.report.objects_seen += 1;
         let pack = packs::pack_of_key(&key).and_then(pack_id);
-        let junk = key.starts_with("chunks/")
-            || (key.starts_with(packs::PREFIX) && pack.is_none());
+        let junk = key.starts_with("chunks/") || (key.starts_with(packs::PREFIX) && pack.is_none());
         if junk {
             if round.report.skipped_junk == 0 {
                 log::warn!(

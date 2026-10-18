@@ -54,8 +54,6 @@ impl Engine {
         if !self.manifest_policy.prune || !self.pending.is_empty() || !self.f3.pending.is_empty() {
             return Ok(());
         }
-        crate::logged_op_plain!("manifest upkeep", "", {
-            self.prune_records3().map(|_| ())
-        })
+        crate::logged_op_plain!("manifest upkeep", "", { self.prune_records3().map(|_| ()) })
     }
 }

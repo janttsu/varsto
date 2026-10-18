@@ -415,8 +415,11 @@ impl Engine {
                     {
                         Some(c.storage.clone())
                     } else {
-                        let claimers: BTreeSet<DeviceId> =
-                            c.claimed_by.iter().map(|d| DeviceId::from_bytes(d)).collect();
+                        let claimers: BTreeSet<DeviceId> = c
+                            .claimed_by
+                            .iter()
+                            .map(|d| DeviceId::from_bytes(d))
+                            .collect();
                         names.resolve(&c.storage, &claimers)
                     };
                     let Some(local) = local.filter(|l| readable.contains_key(l)) else {
@@ -437,22 +440,14 @@ impl Engine {
                 name: name.clone(),
                 lane: lanes[name],
                 remote: remote.contains(name),
-                items: items
-                    .remove(name)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect(),
+                items: items.remove(name).unwrap_or_default().into_iter().collect(),
                 read: Box::new(move |id: &str| {
                     backend.get_bounded(&crate::packs::pack_key(id), crate::storage::MAX_PACK)
                 }),
             })
             .collect();
-        let task = crate::activity::start(
-            crate::activity::SCRUB,
-            "",
-            0,
-            crate::activity::Unit::Bytes,
-        );
+        let task =
+            crate::activity::start(crate::activity::SCRUB, "", 0, crate::activity::Unit::Bytes);
         task.set_phase("storage");
         let out = crate::scrub3::scrub_packs(
             &targets,
@@ -605,7 +600,8 @@ impl Engine {
                             return true;
                         }
                         let mut pack = [0u8; 32];
-                        if hex::decode_to_slice(name, &mut pack).is_ok() && view.pack(&pack).is_some()
+                        if hex::decode_to_slice(name, &mut pack).is_ok()
+                            && view.pack(&pack).is_some()
                         {
                             damage.push(super::repair::pack_damage(
                                 &view,

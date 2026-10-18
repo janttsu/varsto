@@ -386,7 +386,12 @@ impl Engine {
     /// for a predecessor. The pull has just asked every storage for them; a
     /// gap that stays for `WITHHOLD_PULLS` pulls in a row is reported as a
     /// storage that may be withholding batches (`LedgerHealth::warnings`).
-    pub(super) fn watch_freshness3(&mut self, view: &crate::ledger3::LedgerView, malformed: u64, refused: u64) {
+    pub(super) fn watch_freshness3(
+        &mut self,
+        view: &crate::ledger3::LedgerView,
+        malformed: u64,
+        refused: u64,
+    ) {
         let me = self.me3();
         let known: BTreeSet<crate::record::Id16> =
             self.f3.members.devices.devices.keys().copied().collect();
@@ -395,8 +400,7 @@ impl Engine {
             None => seq,
         };
         // device -> (held, seen, source)
-        let mut lacking: BTreeMap<crate::record::Id16, (u64, u64, &'static str)> =
-            BTreeMap::new();
+        let mut lacking: BTreeMap<crate::record::Id16, (u64, u64, &'static str)> = BTreeMap::new();
         for (reader, acks) in &view.acks {
             if *reader == me || !known.contains(reader) {
                 continue;

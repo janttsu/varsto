@@ -400,8 +400,11 @@ impl Engine {
                 if c.claimed_by.is_empty() || c.claimed_by.contains(&me) {
                     continue;
                 }
-                let claimers: BTreeSet<DeviceId> =
-                    c.claimed_by.iter().map(|d| DeviceId::from_bytes(d)).collect();
+                let claimers: BTreeSet<DeviceId> = c
+                    .claimed_by
+                    .iter()
+                    .map(|d| DeviceId::from_bytes(d))
+                    .collect();
                 let Some(local) = names.resolve(&c.storage, &claimers) else {
                     continue;
                 };

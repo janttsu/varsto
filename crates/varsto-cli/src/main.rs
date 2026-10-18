@@ -4623,11 +4623,24 @@ fn run(cli: &Cli) -> Result<()> {
             print(cli, &r, |r| {
                 let summary = match &r.format3 {
                     Some(f) => f.describe(),
-                    None => format!("referenced {} | with storage copy {} | missing {:?} | corrupt {:?}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_missing, r.objects_corrupt),
+                    None => format!(
+                        "referenced {} | with storage copy {} | missing {:?} | corrupt {:?}",
+                        r.chunks_referenced,
+                        r.chunks_with_storage_copy,
+                        r.chunks_missing,
+                        r.objects_corrupt
+                    ),
                 };
                 summary
-                    + &format!(" | repairs queued {} | cold skipped {:?}", r.repairs_queued, r.storages_skipped_cold)
-                    + &if r.ledger_health.is_ok() { String::new() } else { format!("\nledger: {}", r.ledger_health.describe()) }
+                    + &format!(
+                        " | repairs queued {} | cold skipped {:?}",
+                        r.repairs_queued, r.storages_skipped_cold
+                    )
+                    + &if r.ledger_health.is_ok() {
+                        String::new()
+                    } else {
+                        format!("\nledger: {}", r.ledger_health.describe())
+                    }
             })?;
             let mut repaired_all = false;
             if *fix && r.repairs_queued > 0 {
