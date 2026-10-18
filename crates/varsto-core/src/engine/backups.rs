@@ -21,7 +21,7 @@
 //! any record is deleted; a base stays while an unexpired differential
 //! names it. The blocks only expired snapshots used are collected by
 //! garbage collection, which counts the unexpired snapshots of a backup as
-//! references (`backup_references3`).
+//! references (`backup_gc_references3`).
 //!
 //! A restore writes one snapshot (or some of its paths) into a directory the
 //! user names, which must be empty unless overwriting is asked for.
@@ -206,7 +206,12 @@ fn blocks_of<'a>(files: impl Iterator<Item = &'a FileEntry>) -> Vec<(ChunkId, Ob
     files
         .flat_map(|f| f.chunks.iter())
         .filter(|c| seen.insert(c.object))
-        .map(|c| (ChunkId::from_bytes(&c.chunk), ObjectName::from_bytes(&c.object)))
+        .map(|c| {
+            (
+                ChunkId::from_bytes(&c.chunk),
+                ObjectName::from_bytes(&c.object),
+            )
+        })
         .collect()
 }
 
@@ -228,7 +233,7 @@ fn snapshot_rows(view: &View3, backup: &Id16) -> Vec<((Id16, u64), SnapRec)> {
         .filter(|(_, r)| r.taken)
         .map(|((_, d, s), r)| ((*d, *s), r.clone()))
         .collect();
-    out.sort_by(|a, b| (a.1.taken_utc, a.0 .1, a.0 .0).cmp(&(b.1.taken_utc, b.0 .1, b.0 .0)));
+    out.sort_by_key(|a| (a.1.taken_utc, a.0 .1, a.0 .0));
     out
 }
 
@@ -1188,7 +1193,9 @@ impl Engine {
                 }
                 report.snapshots_deleted += seqs.len() as u64;
                 for s in &seqs {
-                    cache.snapshots.remove(&snap_key(&DeviceId::from_bytes(&d), *s));
+                    cache
+                        .snapshots
+                        .remove(&snap_key(&DeviceId::from_bytes(&d), *s));
                 }
             }
             self.save_backup_cache(&rec.folder_id, &cache)?;
@@ -1196,17 +1203,46 @@ impl Engine {
         self.remove_backup_if_done(rec, &view, stopped, report)
     }
 
-    /// The unexpired snapshots of a backup, loaded from the storages: what
-    /// garbage collection treats as references of the backup
-    /// (`trash3::Refs`).
-    pub(super) fn backup_references3(
+    /// What references the blocks of a backup for garbage collection: the
+    /// objects of its unexpired snapshots (and of the bases they build on),
+    /// read from the hot storages, with how far each source's snapshot
+    /// stream was read. Collection waits for a source whose announced
+    /// snapshots are not all loaded here (`gc3::References::behind`).
+    pub(super) fn backup_gc_references3(
         &self,
         rec: &FolderRecord,
         now: i64,
-    ) -> Result<(BackupSnapshots, View3)> {
+    ) -> Result<crate::gc3::ReferenceSet> {
         let view = self.view3()?;
+        let fb = members3::bin(&rec.folder_id)?;
         let (snaps, _) = self.load_snapshots3(rec, &view, false, now)?;
-        Ok((snaps, view))
+        let complete = snaps.wanted(&view, now).is_empty();
+        let mut refs = crate::gc3::ReferenceSet {
+            objects: snaps.reference_set(&view, now),
+            kinds: [crate::record::Kind::Snapshot].into_iter().collect(),
+            ..Default::default()
+        };
+        for ((kind, scope, device), stream) in &view.streams {
+            if *kind != crate::record::Kind::Snapshot.code() || *scope != fb {
+                continue;
+            }
+            // Every unexpired snapshot is loaded: the stream is read as far
+            // as it is announced (expired ones need no reading).
+            let applied = if complete {
+                stream.newest().unwrap_or(0)
+            } else {
+                stream
+                    .records
+                    .keys()
+                    .copied()
+                    .filter(|q| snaps.is_loaded(device, *q))
+                    .max()
+                    .unwrap_or(0)
+            };
+            refs.applied
+                .insert((crate::record::Kind::Snapshot, *device), applied);
+        }
+        Ok(refs)
     }
 
     /// A stopped backup goes once its last snapshot has expired.

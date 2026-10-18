@@ -143,6 +143,11 @@ fn restic_backup_of_the_mirror_restores_byte_for_byte() {
             storage.to_str().unwrap(),
         ],
     );
+    // The mirror device asks for every folder and the laptop approves it.
+    for folder in ["docs", "photos"] {
+        ok(&b, &["folder", "request", folder]);
+        ok(&a, &["folder", "approve", folder, "nas", "--yes"]);
+    }
 
     let mirror = root.join("mirror");
     let repo = root.join("repo");

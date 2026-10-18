@@ -115,10 +115,10 @@ impl Engine {
         if storages.is_empty() {
             bail!("no storage to write the record to");
         }
-        let mut highest = self.highest_seq3(storages, stream)?;
-        for _ in 0..8 {
-            highest += 1;
-            let sealed = self.with_writer3(|rw| rw.seal(stream, highest, highest, key, &body(highest)))?;
+        let highest = self.highest_seq3(storages, stream)?;
+        for highest in (highest + 1..).take(8) {
+            let sealed =
+                self.with_writer3(|rw| rw.seal(stream, highest, highest, key, &body(highest)))?;
             let mut taken = false;
             for (name, bytes) in &sealed.parts {
                 if !storages[0].1.put_if_absent(name, bytes)? {

@@ -308,7 +308,14 @@ fn snapshots_restore_byte_for_byte() {
     .unwrap();
     b.sync(None).unwrap();
     let err = b
-        .restore_snapshot("photos-backup", SnapshotPick::Seq(1), &lab.p("early"), &[], false, false)
+        .restore_snapshot(
+            "photos-backup",
+            SnapshotPick::Seq(1),
+            &lab.p("early"),
+            &[],
+            false,
+            false,
+        )
         .unwrap_err();
     assert!(err.to_string().contains("holds no key"), "{err}");
     approve_backup(&mut a, &mut b, "photos-backup");
@@ -352,10 +359,9 @@ fn devices_and_transferrers_never_receive_backup_contents() {
     let fb: [u8; 16] = hex::decode(id.as_str()).unwrap().try_into().unwrap();
     assert!(!stored(&a, &lab.p("one"), &id).is_empty());
     assert!(stored(&a, &lab.p("usb"), &id).is_empty());
-    assert!(view
-        .streams
-        .keys()
-        .all(|(kind, scope, _)| *kind != varsto_core::record::Kind::Manifest.code() || *scope != fb));
+    assert!(view.streams.keys().all(|(kind, scope, _)| *kind
+        != varsto_core::record::Kind::Manifest.code()
+        || *scope != fb));
 
     let mut b = Engine::join(
         &lab.p("desktop"),
@@ -380,10 +386,9 @@ fn devices_and_transferrers_never_receive_backup_contents() {
     a.sync(None).unwrap();
     // Still no manifest of the backup anywhere.
     let view = a.ledger_view3().unwrap();
-    assert!(view
-        .streams
-        .keys()
-        .all(|(kind, scope, _)| *kind != varsto_core::record::Kind::Manifest.code() || *scope != fb));
+    assert!(view.streams.keys().all(|(kind, scope, _)| *kind
+        != varsto_core::record::Kind::Manifest.code()
+        || *scope != fb));
     assert_eq!(a.ledger_view3().unwrap(), a.view3_replayed().unwrap());
 }
 
@@ -497,7 +502,10 @@ fn expiry_deletes_only_what_no_live_snapshot_uses() {
         vec![2]
     );
     // Its record goes unless the live snapshot builds on it.
-    assert_eq!(snapshot_records(&lab.p("one")) as u64, 2 - r.snapshots_deleted);
+    assert_eq!(
+        snapshot_records(&lab.p("one")) as u64,
+        2 - r.snapshots_deleted
+    );
     let out = lab.p("out");
     let r = a
         .restore_snapshot("bk", SnapshotPick::Latest, &out, &[], false, false)
@@ -560,7 +568,11 @@ fn a_differential_snapshot_keeps_its_base_until_it_expires() {
     assert_eq!(r.snapshots_deleted, 0);
     assert_eq!(snapshot_records(&lab.p("one")), 2);
     assert_eq!(
-        a.backup_snapshots("bk").unwrap().iter().map(|s| s.seq).collect::<Vec<_>>(),
+        a.backup_snapshots("bk")
+            .unwrap()
+            .iter()
+            .map(|s| s.seq)
+            .collect::<Vec<_>>(),
         vec![2]
     );
     let out = lab.p("out");

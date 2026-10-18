@@ -81,7 +81,12 @@ impl Engine {
 
     fn thumb_get(&self, folder: &FolderId, hash: &[u8; 32]) -> Option<Vec<u8>> {
         let blob = fs::read(self.thumb_file(folder, hash)).ok()?;
-        crypto::decrypt(&self.thumb_cache_key(), &self.thumb_aad(folder, hash), &blob).ok()
+        crypto::decrypt(
+            &self.thumb_cache_key(),
+            &self.thumb_aad(folder, hash),
+            &blob,
+        )
+        .ok()
     }
 
     /// Forget a removed folder's thumbnails on this device.
