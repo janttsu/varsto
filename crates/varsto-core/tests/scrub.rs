@@ -60,7 +60,8 @@ impl Lab {
 }
 
 /// Device A with the given storages and a folder "docs": one large file
-/// (several blocks) and small ones (one block each), all in one pack.
+/// (several blocks) and small ones (one block each), in three pushes: three
+/// packs on every storage.
 fn device(lab: &Lab, storages: &[StorageSpec]) -> Engine {
     let (mut a, _) = Engine::init(&lab.p("a-home"), "laptop", PASS).unwrap();
     for s in storages {
@@ -68,20 +69,37 @@ fn device(lab: &Lab, storages: &[StorageSpec]) -> Engine {
     }
     a.add_folder("docs", &lab.p("a-docs")).unwrap();
     fs::write(lab.p("a-docs/big.bin"), pseudo_random(2 << 20, 7)).unwrap();
+    a.sync(None).unwrap();
     for i in 0..6 {
         fs::write(
             lab.p(&format!("a-docs/note-{i}.txt")),
             pseudo_random(3_000 + i * 100, 100 + i as u64),
         )
         .unwrap();
+        if i % 3 == 2 {
+            a.sync(None).unwrap();
+        }
     }
-    a.sync(None).unwrap();
     a
 }
 
 /// Block objects of a storage directory (all in packs).
 fn objects(root: &Path) -> Vec<String> {
     common::object_names(root).into_iter().collect()
+}
+
+/// Packs in a storage directory: storage format 3 scrubs whole packs.
+fn pack_count(root: &Path) -> u64 {
+    common::pack_files(root).len() as u64
+}
+
+/// The distinct packs that hold `objects`.
+fn packs_of(root: &Path, objects: &[&String]) -> u64 {
+    objects
+        .iter()
+        .filter_map(|o| common::pack_path(root, o))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len() as u64
 }
 
 /// Copy a directory tree (files only, no clobber of other files).
@@ -111,7 +129,6 @@ fn set_mtime(path: &Path, t: SystemTime) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (verification)"]
 fn damaged_objects_this_device_wrote_are_found_and_repaired() {
     let lab = Lab::new();
     let mut a = device(
@@ -127,8 +144,9 @@ fn damaged_objects_this_device_wrote_are_found_and_repaired() {
     assert!(!lab.p("box").join("chunks").exists());
     common::corrupt_object(&lab.p("box"), &all[0]);
     common::corrupt_object(&lab.p("box"), &all[1]);
-    let total = common::object_count(&lab.p("box")) as u64;
-    let batches = a.ledger_entries().unwrap().len();
+    let total = pack_count(&lab.p("box"));
+    let bad = packs_of(&lab.p("box"), &[&all[0], &all[1]]);
+    let batches = a.own_head3();
 
     let r = a
         .scrub(&ScrubOptions {
@@ -137,15 +155,15 @@ fn damaged_objects_this_device_wrote_are_found_and_repaired() {
             ..Default::default()
         })
         .unwrap();
-    // Every object the ledger places on "box", all written by this device.
+    // Every pack the ledger places on "box", all written by this device.
     assert_eq!(r.objects_checked, total, "{r:?}");
-    assert_eq!(r.corrupt.len(), 2, "{r:?}");
+    assert_eq!(r.corrupt.len() as u64, bad, "{r:?}");
     assert_eq!(r.missing.len(), 0, "{r:?}");
-    assert_eq!(r.queued_for_repair, 2);
+    assert_eq!(r.queued_for_repair, bad);
     assert_eq!(r.files_checked, 0, "--storage alone reads no local files");
     // Nothing recorded: the writer's own check is no verification.
-    assert_eq!(a.ledger_entries().unwrap().len(), batches);
-    assert_eq!(a.repair_status().queued, 2);
+    assert_eq!(a.own_head3(), batches);
+    assert_eq!(a.repair_status().queued, bad);
 
     let rep = a.repair(&RepairOptions::service()).unwrap();
     assert_eq!(rep.repaired.len(), 2, "{rep:?}");
@@ -163,18 +181,18 @@ fn damaged_objects_this_device_wrote_are_found_and_repaired() {
     assert!(again.targets.iter().any(|t| t.label == "storage spare"));
     assert!(again.files_checked >= 7);
     let st = a.scrub_status();
-    assert_eq!(st.totals.problems_found, 2);
+    assert_eq!(st.totals.problems_found, bad);
     assert!(st.targets.contains_key("storage:box"));
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (verification)"]
 fn the_budget_spreads_a_pass_over_several_runs() {
     let lab = Lab::new();
     let mut a = device(&lab, &[dir("box", &lab.p("box"), false)]);
-    let total = common::object_count(&lab.p("box")) as u64;
+    let total = pack_count(&lab.p("box"));
+    assert!(total >= 3);
     let mut s = a.scrub_schedule().clone();
-    // One byte: every run reads its first object only.
+    // One byte: every run reads its first pack only.
     s.max_local_bytes = 1;
     a.set_scrub_schedule(s).unwrap();
     let only_box = ScrubOptions {
@@ -214,7 +232,6 @@ fn the_budget_spreads_a_pass_over_several_runs() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (verification)"]
 fn cold_storage_is_read_only_when_included() {
     let lab = Lab::new();
     let mut a = device(
@@ -420,7 +437,7 @@ fn a_damaged_file_without_a_good_copy_is_left_in_place() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (verification)"]
+#[ignore = "f3-switch: port in part B (disks and pools): the scrub finds the bad pack on the disk, but PoolStorage::drop_bad_copy leaves its file there"]
 fn a_bad_copy_on_a_pool_disk_is_dropped_and_written_again() {
     let lab = Lab::new();
     let mounts = lab.p("mounts");
