@@ -5,6 +5,8 @@
 //! the file changed, dropped with a deleted file, size limits, and kept
 //! encrypted on the storage.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use varsto_core::chunking::ChunkerParams;
@@ -66,9 +68,15 @@ fn device_a(lab: &Lab) -> (Engine, String) {
     (a, key)
 }
 
-fn device_b(lab: &Lab, key: &str) -> Engine {
-    let mut b =
-        small(Engine::join(&lab.home("b"), "phone", PASS, key, lab.storage.clone()).unwrap());
+fn device_b(lab: &Lab, a: &mut Engine, key: &str) -> Engine {
+    let mut b = small(common::join_approved(
+        &lab.home("b"),
+        "phone",
+        PASS,
+        key,
+        lab.storage.clone(),
+        a,
+    ));
     b.attach_folder("docs", &lab.dir("b"), false).unwrap();
     b.sync(None).unwrap();
     b
@@ -162,7 +170,7 @@ fn set_read_list_and_limits() {
 fn analyses_merge_across_devices_newest_first() {
     let lab = Lab::new();
     let (mut a, key) = device_a(&lab);
-    let mut b = device_b(&lab, &key);
+    let mut b = device_b(&lab, &mut a, &key);
     a.set_analysis(
         "docs",
         "trip.txt",
@@ -174,7 +182,7 @@ fn analyses_merge_across_devices_newest_first() {
     assert_eq!(a.exchange_notes().unwrap().published, 1);
     // Sealed on the storage: no text, tag or path in the clear.
     let mut found = 0;
-    for e in walkdir::WalkDir::new(lab.root.join("storage").join("vault/notes"))
+    for e in walkdir::WalkDir::new(lab.root.join("storage").join("notes"))
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
@@ -221,7 +229,7 @@ fn analyses_merge_across_devices_newest_first() {
     b.exchange_notes().unwrap();
     assert!(b.analysis("docs", "trip.txt").unwrap().is_none());
     // One record per device.
-    let records = walkdir::WalkDir::new(lab.root.join("storage").join("vault/notes"))
+    let records = walkdir::WalkDir::new(lab.root.join("storage").join("notes"))
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
@@ -263,7 +271,7 @@ fn analyses_follow_renames_and_moves_and_go_stale_or_away() {
     );
 
     // The other device sees both where the files are now.
-    let mut b = device_b(&lab, &key);
+    let mut b = device_b(&lab, &mut a, &key);
     b.exchange_notes().unwrap();
     assert_eq!(
         b.analysis("docs", "2026/receipt.txt")

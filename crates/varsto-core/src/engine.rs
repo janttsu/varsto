@@ -4782,6 +4782,22 @@ impl Engine {
         let view3 = self.view3()?;
         let (manifests, changed) = self.pull_folder_records3(&folder3, &view3)?;
         let me3 = self.me3();
+        // Change history (`changes_ops`): started once from what is held,
+        // then fed by the paths every writer's records changed. Never in
+        // the way of syncing.
+        {
+            let mut hist = self.open_history(&rec.folder_id);
+            let _ = self.history_backfill3(&mut hist, &state, &manifests);
+            for (dev3, paths) in &changed {
+                if *dev3 == me3 {
+                    continue;
+                }
+                if let Some(v) = manifests.views.get(dev3) {
+                    let _ = self.history_from_view3(&mut hist, dev3, v, Some(paths));
+                }
+            }
+            let _ = hist.save();
+        }
         for (dev3, paths) in changed {
             if dev3 == me3 {
                 continue;
@@ -4844,187 +4860,11 @@ impl Engine {
             state.last_seen.insert(dev, v.seq);
             self.prefetched.clear();
         }
-        // The change history of section 57 is fed from manifests (format 2:
-        // `history_from_manifest`; f3-switch: part B feeds it from the
-        // manifest deltas).
         if encrypted_here {
             self.cache_wanted(&rec, &fk, &mut state, &storages, &mut report)?;
         }
         self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
-        Ok(report)
-    }
-
-    /// The format-2 manifest pull of `pull_inner` (f3-switch: part B
-    /// deletes it).
-    #[allow(clippy::too_many_arguments)]
-    fn pull_manifests2(
-        &mut self,
-        rec: &FolderRecord,
-        fk: &FolderKeys,
-        root: &Path,
-        state: &mut FolderState,
-        storages: &OpenStorages,
-        ignore: &mut Option<IgnoreMatcher>,
-        send_only: bool,
-        encrypted_here: bool,
-        report: &mut PullReport,
-    ) -> Result<PullReport> {
-        let mut state = std::mem::take(state);
-        let mut ignore = std::mem::take(ignore);
-        let mut report = std::mem::take(report);
-        let (rec, fk, root, storages) = (rec.clone(), fk, root.to_path_buf(), storages);
-        let newest = self.newest_manifests(&rec.folder_id, &state.last_seen, storages)?;
-
-        // A revoked device's manifests count only up to the last one its
-        // accepted ledger batches announced.
-        let capped = if self.devices.revoked.is_empty() {
-            BTreeMap::new()
-        } else {
-            self.view()?.manifests
-        };
-        let metas = fk.meta_keys();
-        // Changes made by read-only members (after they stopped being
-        // editors) are not taken, even when another device relays them.
-        let viewer_clocks = self.share_viewer_clocks(&rec);
-        let refused = |f: &FileState| {
-            viewer_clocks
-                .get(&f.modified_by)
-                .is_some_and(|c| f.modified_clock > *c)
-        };
-        // Change history (`changes_ops`): started once from what is held,
-        // then fed by every manifest taken. Never in the way of syncing.
-        let mut hist = self.open_history(&rec.folder_id);
-        let _ = self.history_backfill(&mut hist, &rec, &state, storages);
-        for (dev, (seq, idx)) in newest {
-            if !self.share_manifest_source_ok(&rec, &dev) {
-                // A device that is not a participant of the shared folder.
-                continue;
-            }
-            if self.devices.devices.contains_key(&dev)
-                && !self.is_revoked(&dev)
-                && !self.trusted(&dev)
-            {
-                // A device of the vault that is not trusted: not in the
-                // organization's roster, on a platform its policy refuses,
-                // or enrolled with an old key. What it writes is not taken
-                // (its manifest stays unread until it is trusted again).
-                continue;
-            }
-            if !self.share_writer_ok(&rec, &dev) {
-                // A read-only member: what it publishes is not taken. Its
-                // manifest stays unread (`last_seen` does not move), so a
-                // later role as editor takes its newest one.
-                if seq > state.last_seen.get(&dev).copied().unwrap_or(0) {
-                    report.writes_refused.push(self.member_name(&dev));
-                }
-                continue;
-            }
-            let seq = if self.is_revoked(&dev) {
-                seq.min(
-                    capped
-                        .get(&(rec.folder_id.clone(), dev.clone()))
-                        .copied()
-                        .unwrap_or(0),
-                )
-            } else {
-                seq
-            };
-            if seq <= state.last_seen.get(&dev).copied().unwrap_or(0) {
-                continue;
-            }
-            let key = Manifest::storage_key(&rec.folder_id, &dev, seq);
-            let Some(blob) = storages[idx].1.get(&key)? else {
-                continue;
-            };
-            let Some(m) = metas.iter().find_map(|meta| {
-                Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, meta).ok()
-            }) else {
-                if self.share_access_lost(&rec.folder_id) {
-                    // Removed from the shared folder: newer manifests are
-                    // under a key this device will not get.
-                    continue;
-                }
-                if !self.trusted(&dev) {
-                    // Not a trusted full device (a member, a replica, a
-                    // removed device, or a name planted on the storage):
-                    // what does not open is skipped, so nobody but a
-                    // trusted device can stop this folder's pull.
-                    log::warn!(folder:% = rec.folder_id, device:% = dev, seq = seq; "manifest does not open: skipped");
-                    continue;
-                }
-                bail!(
-                    "manifest {seq} of device {} does not open with any key this device holds (a newer vault key has not arrived yet?)",
-                    dev.short()
-                );
-            };
-            self.observe_clock(m.lamport)?;
-            // The newest files first (by their modification time), so that
-            // what was just made arrives first on a large pull.
-            let mut entries: Vec<(&String, &FileState)> = m.files.iter().collect();
-            entries.sort_by(|a, b| b.1.mtime.cmp(&a.1.mtime).then(a.0.cmp(b.0)));
-            if send_only {
-                for (path, remote) in &entries {
-                    if !refused(remote)
-                        && !matches!(
-                            manifest::merge(state.files.get(*path), remote),
-                            Merge::KeepLocal
-                        )
-                    {
-                        state.not_applied.insert((*path).clone(), (*remote).clone());
-                    }
-                }
-                let _ = self.history_from_manifest(&mut hist, &m, &blob, &refused);
-                report.manifests_applied += 1;
-                state.last_seen.insert(dev, seq);
-                continue;
-            }
-            // Too many deletions at once: held (this manifest stays unread
-            // until the user decides, so nothing of it is lost).
-            if let Some(pause) = self.hold_remote_deletions(&rec, &root, &mut state, &dev, &entries)
-            {
-                self.prefetched.clear();
-                self.commit_batch()?;
-                self.save_state(&rec.folder_id, &state)?;
-                return Err(pause.into());
-            }
-            report.manifests_applied += 1;
-            let fetch_ahead = !encrypted_here && !self.mount_is_selective(&rec.folder_id);
-            let mut ahead_from = 0;
-            for (i, (path, remote)) in entries.iter().enumerate() {
-                if fetch_ahead && i >= ahead_from {
-                    ahead_from = self.prefetch_small(&entries, i, &state, storages);
-                }
-                if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
-                    continue;
-                }
-                if refused(remote) {
-                    continue;
-                }
-                self.merge_one(
-                    &rec,
-                    fk,
-                    &root,
-                    &mut state,
-                    path,
-                    remote,
-                    storages,
-                    &mut report,
-                )?;
-            }
-            let _ = self.history_from_manifest(&mut hist, &m, &blob, &refused);
-            state.last_seen.insert(dev, seq);
-            // Whatever was fetched ahead and not used (a file that failed
-            // earlier in its batch) is not kept past its manifest.
-            self.prefetched.clear();
-        }
-        let _ = hist.save();
-        if encrypted_here {
-            self.cache_wanted(&rec, fk, &mut state, storages, &mut report)?;
-        }
-        self.commit_batch()?;
-        self.save_state(&rec.folder_id, &state)?;
-        self.prune_carriers(&rec)?;
         Ok(report)
     }
 

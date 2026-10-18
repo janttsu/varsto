@@ -62,7 +62,7 @@ fn downloads_wait_below_the_limit_and_resume_when_space_is_back() {
     }
     a.push("space-docs").unwrap();
 
-    let mut b = Engine::join(&root.join("b"), "desk", PASS, &key, storage).unwrap();
+    let mut b = common::join_approved(&root.join("b"), "desk", PASS, &key, storage, &mut a);
     b.chunker = ChunkerParams::SMALL;
     let b_dir = root.join("b-docs");
     fs::create_dir_all(&b_dir).unwrap();
@@ -199,7 +199,7 @@ fn a_folder_kept_encrypted_here_waits_for_space_in_the_device_directory() {
     a.push("space-pics").unwrap();
 
     let b_home = root.join("b");
-    let mut b = Engine::join(&b_home, "phone", PASS, &key, storage).unwrap();
+    let mut b = common::join_approved(&b_home, "phone", PASS, &key, storage, &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("space-pics", &root.join("b-pics"), false)
         .unwrap();

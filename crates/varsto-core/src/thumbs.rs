@@ -471,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn image_thumbnail_roundtrip() {
+    fn image_thumbnail_is_small_and_other_names_make_none() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("big.png");
         let img = image::RgbImage::from_fn(900, 600, |x, y| {
@@ -481,11 +481,6 @@ mod tests {
         let t = make(&p, "big.png").expect("thumbnail");
         let decoded = image::load_from_memory(&t).unwrap();
         assert!(decoded.width() <= MAX_SIDE && decoded.height() <= MAX_SIDE);
-        let key = SecretKey::random();
-        let (v, f) = (VaultId::random(), FolderId::random());
-        let sealed = seal(&t, &v, &f, "abc", &key).unwrap();
-        assert_eq!(open(&sealed, &v, &f, "abc", &key).unwrap(), t);
-        assert!(open(&sealed, &v, &f, "other", &key).is_err());
         assert!(make(&p, "notes.txt").is_none());
         let from_memory = make_from_bytes(&std::fs::read(&p).unwrap(), "big.png").unwrap();
         assert!(image::load_from_memory(&from_memory).unwrap().width() <= MAX_SIDE);

@@ -5,6 +5,8 @@
 //! unchanged; a device whose filesystem does not take a name writes it
 //! under a mapped local name and reads it back without seeing a change.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -112,14 +114,14 @@ impl Lab {
         }
         let push = a.push("docs").unwrap();
         assert_eq!(push.files_changed, names.len() as u64);
-        let mut b = Engine::join(
+        let mut b = common::join_approved(
             &self.dir("b-home"),
             "other",
             PASS,
             &key,
             self.storage.clone(),
-        )
-        .unwrap();
+            &mut a,
+        );
         b.chunker = ChunkerParams::SMALL;
         b.set_local_rules(rules);
         b.attach_folder("docs", &self.dir("b-docs"), false).unwrap();
