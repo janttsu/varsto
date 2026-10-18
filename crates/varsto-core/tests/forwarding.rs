@@ -284,7 +284,6 @@ fn turned_off_it_forwards_nothing() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (Strongroom: a Strongroom folder in format 3)"]
 fn a_locked_strongroom_is_not_forwarded() {
     let lab = Lab::new();
     let (mut phone, key) = Engine::init(&lab.p("phone-home"), "phone", PASS).unwrap();

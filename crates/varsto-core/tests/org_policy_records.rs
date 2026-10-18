@@ -140,7 +140,6 @@ fn tampered_and_junk_policy_records_are_refused() {
 }
 
 #[test]
-#[ignore = "f3-switch: needs organizations on format 3 (part B, membership)"]
 fn a_members_policy_needs_the_organization_to_allow_it() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -155,6 +154,8 @@ fn a_members_policy_needs_the_organization_to_allow_it() {
     c.sync(None).unwrap();
     assert!(c.org().is_some());
     assert_ne!(min_copies(&c), Some(3), "a member's policy is adopted");
+    // B learns it, and may no longer set one.
+    b.sync(None).unwrap();
     assert!(b.set_policy("docs", copies(4)).is_err());
 
     // The organization lets members set policies: B's record counts.
