@@ -98,6 +98,8 @@ impl Engine {
     /// `fsck` of format 3 over the hot storages (cold ones are left
     /// unchecked: reading them costs a retrieval).
     pub fn fsck3(&mut self, verify: bool) -> Result<Fsck3Report> {
+        let task = activity::start(activity::FSCK, "", 0, activity::Unit::Items);
+        task.set_phase("scan");
         self.pull_ledger_once()?;
         let view = self.view3()?;
         let storages = self.open_storages(false)?;
@@ -138,7 +140,33 @@ impl Engine {
             keys: &keys,
             trust: &trust,
         };
-        let verify_pack = |c: &crate::fsck3::PackCheck| -> PackVerdict {
+        // With `--verify` every claimed pack is read whole: the task counts
+        // the blocks the folders' maps place in each (a pack nobody here
+        // can open counts as one), and good packs are recorded with
+        // `pack_verified` (another device's check of a copy is what counts
+        // as independent verification).
+        let mut members: HashMap<[u8; 32], u64> = HashMap::new();
+        if verify {
+            for (_, _, t, _) in &folders {
+                let t = t.read().unwrap_or_else(|e| e.into_inner());
+                let mut seen: HashSet<([u8; 32], u32)> = HashSet::new();
+                for r in t.scan().flatten() {
+                    if seen.insert((r.place.pack, r.place.offset)) {
+                        *members.entry(r.place.pack).or_default() += 1;
+                    }
+                }
+            }
+            let total: u64 = view
+                .packs
+                .keys()
+                .map(|id| {
+                    members.get(id).copied().unwrap_or(1)
+                        * view.holders(id).len().max(1) as u64
+                })
+                .sum();
+            task.step("verify", total, activity::Unit::Items);
+        }
+        let verify_one = |c: &crate::fsck3::PackCheck| -> PackVerdict {
             match crate::blockmap::class_of_len(c.class_len)
                 .map(|class| crate::gc3::verify_pack(c.backend, &c.pack, class))
             {
@@ -156,6 +184,24 @@ impl Engine {
                 Some(Err(e)) => PackVerdict::Unreadable(format!("{e:#}")),
             }
         };
+        let verified: std::sync::Mutex<Vec<Event3>> = Default::default();
+        let counter = task.counter();
+        let verify_pack = |c: &crate::fsck3::PackCheck| -> PackVerdict {
+            for _ in 0..members.get(&c.pack).copied().unwrap_or(1) {
+                counter.advance(1);
+            }
+            let verdict = verify_one(c);
+            if verdict == PackVerdict::Ok {
+                verified
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(Event3::PackVerified(crate::ledger3::events::PackOn {
+                        storage: c.storage.to_string(),
+                        pack: c.pack,
+                    }));
+            }
+            verdict
+        };
         let input = Fsck3Input {
             view: &view,
             storages: &descs,
@@ -166,7 +212,15 @@ impl Engine {
             verify_pack: if verify { Some(&verify_pack) } else { None },
             now_utc: util::now_utc(),
         };
-        crate::fsck3::fsck(&input, &Fsck3Options { verify })
+        let out = crate::fsck3::fsck(&input, &Fsck3Options { verify });
+        drop(input);
+        drop(guards);
+        let events = verified.into_inner().unwrap_or_else(|e| e.into_inner());
+        if !events.is_empty() && !self.vault.member {
+            self.f3.pending.extend(events);
+            self.commit_batch()?;
+        }
+        out
     }
 
     /// The ciphertext of `row`'s block from this device: the block cache,

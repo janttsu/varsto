@@ -207,8 +207,6 @@ fn a_disk_pool_counts_as_own_disks() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (upkeep)"]
-// Waits for fsck emitting pack_verified.
 fn verified_is_told_from_claimed() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

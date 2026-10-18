@@ -377,7 +377,12 @@ impl Engine {
         // 1. Every record up to date, then the references.
         let view = self.view3()?;
         let (manifests, _) = self.pull_folder_records3(&folder, &view)?;
-        let refs = self.gc_references3(rec, &manifests, now)?;
+        // A backup's blocks are referenced by its unexpired snapshots.
+        let refs = if rec.is_backup() {
+            self.backup_gc_references3(rec, now)?
+        } else {
+            self.gc_references3(rec, &manifests, now)?
+        };
         // 2. Marks.
         let marks = self.with_map_writer3(&folder, epoch, &view, |w, t, out, sink| {
             crate::gc3::mark_round(&standing, w, t, &view, out, &refs, &writers, sink)
@@ -458,7 +463,7 @@ impl Engine {
         }
         self.flush_pending3()?;
         let storages = self.gc_storages3(&mut report.skipped);
-        let attached: Vec<FolderRecord> = self
+        let mut attached: Vec<FolderRecord> = self
             .config
             .folders
             .iter()
@@ -467,6 +472,15 @@ impl Engine {
             .filter(|r| !r.is_removed() && !r.is_backup())
             .filter_map(|r| self.with_key(r).ok())
             .collect();
+        // Backups (not attached as folders): their snapshots decide.
+        attached.extend(
+            self.keyring
+                .folders
+                .values()
+                .filter(|r| r.is_backup() && !r.is_removed() && !stale.contains(&r.folder_id))
+                .filter_map(|r| self.with_key(r).ok())
+                .collect::<Vec<_>>(),
+        );
         let mut collecting = None;
         for rec in &attached {
             if let Err(e) = self.gc_folder3(rec, &storages, now, &mut report) {

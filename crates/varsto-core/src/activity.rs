@@ -291,6 +291,21 @@ impl Guard {
     pub fn id(&self) -> u64 {
         self.task.id
     }
+    /// A handle that counts on this task from other threads (the readers
+    /// of a parallel verification); the task ends with the guard.
+    pub fn counter(&self) -> Counter {
+        Counter(self.task.clone())
+    }
+}
+
+/// Counts on a task from any thread (`Guard::counter`).
+#[derive(Clone)]
+pub struct Counter(Arc<Task>);
+
+impl Counter {
+    pub fn advance(&self, n: u64) {
+        self.0.add(n);
+    }
 }
 
 impl Drop for Guard {
