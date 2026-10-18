@@ -2677,59 +2677,82 @@ impl Engine {
             .ok_or_else(|| anyhow!("this device has no storage to publish the removal to"))?;
         let mut deleted = 0u64;
         if purge {
-            let view = self.view3()?;
-            let packs: Vec<[u8; 32]> = view
-                .packs
-                .keys()
-                .filter(|p| view.pack_folder(p) == Some(id))
-                .copied()
-                .collect();
-            let storages = self.open_storages(true)?;
-            let task = activity::start(
-                activity::FOLDER_PURGE,
-                &rec.name,
-                (packs.len() * storages.len()) as u64,
-                activity::Unit::Items,
-            );
-            // The drops are recorded and pushed before anything is deleted.
-            let mut gone = Vec::new();
-            for (spec, backend) in &storages {
-                for p in &packs {
-                    let key = crate::packs::pack_key(&hex::encode(p));
-                    if backend.exists(&key).unwrap_or(false) {
-                        self.f3.pending.push(crate::ledger3::events::Event::PackDropped(
-                            crate::ledger3::events::PackOn {
-                                storage: spec.name().to_string(),
-                                pack: *p,
-                            },
-                        ));
-                        gone.push((spec.name().to_string(), key));
-                    }
-                }
-            }
-            self.commit3()?;
-            for (name, key) in gone {
-                if let Some((_, backend)) = storages.iter().find(|(s, _)| s.name() == name) {
-                    backend.delete(&key)?;
-                    deleted += 1;
-                }
-                task.advance(1);
-            }
-            let hex_id = hex::encode(id);
-            for (_, backend) in storages {
-                for prefix in ["manifests", "maps", "trash", "access", "notes", "thumbs", "snapshots"] {
-                    for key in backend.list(&format!("{prefix}/{hex_id}/"))? {
-                        backend.delete(&key)?;
-                        deleted += 1;
-                    }
-                }
-            }
+            let (packs, records) = self.purge_folder3(&id, &rec.name)?;
+            deleted = packs + records;
         }
         self.forget_folder(&rec.folder_id, removed_utc)?;
         if purge {
             self.forget_trash(&rec.folder_id);
         }
         Ok(deleted)
+    }
+
+    /// Delete what a removed folder left on this device's storages: its
+    /// packs (dropped in one batch first) and its records (manifests, maps,
+    /// trash, access, notes, thumbnails, snapshots, Strongroom key wraps).
+    /// Returns (pack objects deleted, records deleted).
+    pub(super) fn purge_folder3(&mut self, id: &crate::record::Id16, name: &str) -> Result<(u64, u64)> {
+        let view = self.view3()?;
+        let packs: Vec<[u8; 32]> = view
+            .packs
+            .keys()
+            .filter(|p| view.pack_folder(p) == Some(*id))
+            .copied()
+            .collect();
+        let storages = self.open_storages(true)?;
+        let task = activity::start(
+            activity::FOLDER_PURGE,
+            name,
+            (packs.len() * storages.len()) as u64,
+            activity::Unit::Items,
+        );
+        // The drops are recorded and pushed before anything is deleted.
+        let mut gone = Vec::new();
+        for (spec, backend) in &storages {
+            for p in &packs {
+                let key = crate::packs::pack_key(&hex::encode(p));
+                if backend.exists(&key).unwrap_or(false) {
+                    self.f3.pending.push(crate::ledger3::events::Event::PackDropped(
+                        crate::ledger3::events::PackOn {
+                            storage: spec.name().to_string(),
+                            pack: *p,
+                        },
+                    ));
+                    gone.push((spec.name().to_string(), key));
+                }
+            }
+        }
+        self.commit3()?;
+        let (mut objects, mut records) = (0u64, 0u64);
+        for (name, key) in gone {
+            if let Some((_, backend)) = storages.iter().find(|(s, _)| s.name() == name) {
+                backend.delete(&key)?;
+                objects += 1;
+            }
+            task.advance(1);
+        }
+        let hex_id = hex::encode(id);
+        for (spec, backend) in storages {
+            if spec.is_data_only() {
+                continue;
+            }
+            for prefix in [
+                "manifests",
+                "maps",
+                "trash",
+                "access",
+                "notes",
+                "thumbs",
+                "snapshots",
+                "vault/strongroom",
+            ] {
+                for key in backend.list(&format!("{prefix}/{hex_id}/"))? {
+                    backend.delete(&key)?;
+                    records += 1;
+                }
+            }
+        }
+        Ok((objects, records))
     }
 
     /// The vault's folders (backups are listed by `backups`).
@@ -3260,8 +3283,6 @@ impl Engine {
         changed_folders |= self.pull_placement_records()?;
         // Quotas and drains of the storages (`quotas`): newest per storage wins.
         self.pull_storage_settings()?;
-        // Strongroom conversions and key lists (S-012).
-        self.pull_strongroom_records()?;
         changed_folders |= self.dedupe_folder_names();
         if changed_devices {
             self.save_devices()?;
@@ -6269,10 +6290,14 @@ impl Engine {
         }
         self.ensure_unique_folder_name(name)?;
         fs::create_dir_all(path)?;
-        let folder_id = FolderId::random();
+        // Format 3: the id comes from the key (`membership3::strongrooms`),
+        // the key wraps travel in a `strongroom` record, the key is never
+        // granted.
         let folder_key = SecretKey::random();
+        let folder_id = self.strongroom_id_for(&folder_key);
         let info =
             crate::strongroom::enroll(key, method, &self.vault.vault_id, &folder_id, &folder_key)?;
+        self.publish_strongroom3(name, &folder_key, &info, None, &[], false)?;
         let rec = FolderRecord {
             folder_id: folder_id.clone(),
             name: name.to_string(),
@@ -6317,7 +6342,6 @@ impl Engine {
         self.pending.push(Event::FolderAdded {
             folder: folder_id.clone(),
         });
-        self.publish_registry()?;
         self.commit_batch()?;
         Ok(folder_id)
     }

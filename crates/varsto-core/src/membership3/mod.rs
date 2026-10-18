@@ -59,6 +59,7 @@ pub mod keys;
 pub mod member_view;
 pub mod members;
 pub mod requests;
+pub mod strongrooms;
 mod session;
 mod store;
 pub mod trust;

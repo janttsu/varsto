@@ -76,6 +76,8 @@ pub struct Membership<'a> {
     /// A revocation of this device by a device of the vault (this device
     /// cannot open the epoch record that backs it: it gets no key of it).
     pub own_revocation: Option<RevocationRecord>,
+    /// The newest key wraps of every Strongroom folder.
+    pub strongrooms: BTreeMap<Id16, super::strongrooms::StrongroomRecord>,
     /// Vault epoch numbers that hold a record signed by a device of the
     /// vault.
     vault_signed: BTreeSet<u32>,
@@ -124,6 +126,7 @@ impl<'a> Membership<'a> {
             refused: RecordsRefused::default(),
             vault_kept,
             own_revocation: None,
+            strongrooms: BTreeMap::new(),
             vault_signed: BTreeSet::new(),
             lamport: 0,
         };
@@ -284,6 +287,26 @@ impl<'a> Membership<'a> {
         }
         self.members = members;
         self.read_folder_keys()?;
+        // Strongroom key wraps, from owners of their folders.
+        {
+            let ring = KeyRing::vault_only(self.me, &self.vault_keys);
+            let trust = Trust {
+                devices: &self.devices,
+                revoked: &self.revoked,
+                folders: Some(&self.registry),
+                members: None,
+            };
+            let mut counter = std::mem::take(&mut self.refused);
+            let got = super::strongrooms::read_strongrooms(
+                self.storages,
+                self.vault,
+                &ring,
+                &trust,
+                &mut counter,
+            );
+            self.refused = counter;
+            self.strongrooms = got?;
+        }
         let mut lamport = self.lamport;
         for st in self.registry.folders.values() {
             lamport = lamport.max(st.max_lamport);
@@ -896,6 +919,79 @@ impl<'a> Membership<'a> {
         }
         self.refresh()?;
         Ok(folder)
+    }
+
+    /// Create a Strongroom folder: its first folder record (this device the
+    /// owner, `others` taking part with their roles) and its key wraps. Its
+    /// key K13 is never granted or escrowed here; the folder id comes from
+    /// the key (`strongrooms::creation_nonce`), so the caller knows it
+    /// before (`strongroom_folder_id`).
+    pub fn create_strongroom(
+        &mut self,
+        name: &str,
+        k13: &SecretKey,
+        mut record: super::strongrooms::StrongroomRecord,
+        others: &[(Id16, Role)],
+    ) -> Result<Id16> {
+        let nonce = super::strongrooms::creation_nonce(k13);
+        let folder = folder_id(&self.me, &nonce);
+        let stamp = Stamp {
+            lamport: self.lamport + 1,
+            device: self.me,
+        };
+        let mut participants = vec![Participant {
+            device: self.me,
+            role: Role::Owner,
+            stamp,
+        }];
+        for (d, r) in others {
+            if *d != self.me {
+                participants.push(Participant {
+                    device: *d,
+                    role: *r,
+                    stamp,
+                });
+            }
+        }
+        self.write_folder_record(
+            &folder,
+            Some(nonce),
+            Some((name.to_string(), BTreeMap::new())),
+            participants,
+            Vec::new(),
+        )?;
+        self.refresh()?;
+        record.folder = folder;
+        self.write_strongroom(record)?;
+        Ok(folder)
+    }
+
+    /// The id a Strongroom with key `k13` created by this device gets.
+    pub fn strongroom_folder_id(&self, k13: &SecretKey) -> Id16 {
+        folder_id(&self.me, &super::strongrooms::creation_nonce(k13))
+    }
+
+    /// Publish a Strongroom's key wraps (a new list of enrolled keys). Only
+    /// an owner of the folder may.
+    pub fn write_strongroom(
+        &mut self,
+        mut record: super::strongrooms::StrongroomRecord,
+    ) -> Result<()> {
+        let folder = record.folder;
+        let epoch = self.folder_epochs(&folder).current();
+        if !self.registry.is_owner(&self.me, &folder, epoch) {
+            bail!("this device is not an owner of the folder");
+        }
+        record.stamp = self.next_stamp();
+        let key = self.newest_registry();
+        self.writer().write(
+            &self.ring(),
+            &super::strongrooms::StrongroomRecord::stream(folder, self.me),
+            None,
+            &key,
+            &record,
+        )?;
+        self.refresh()
     }
 
     fn write_grant(

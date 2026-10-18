@@ -865,7 +865,6 @@ fn peers_serve_chunks_when_the_storage_has_none() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (Strongroom)"]
 fn strongroom_folder_needs_the_security_key_on_every_device() {
     use varsto_core::strongroom::{Method, SecurityKey, SoftwareKey};
     let lab = lab();

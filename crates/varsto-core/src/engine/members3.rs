@@ -40,6 +40,8 @@ pub(crate) struct Members3 {
     pub cutoffs: BTreeMap<Id16, u64>,
     /// On a member device of another vault: what its grants say.
     pub member: Option<MemberInfo>,
+    /// The newest key wraps of every Strongroom folder.
+    pub strongrooms: BTreeMap<Id16, crate::membership3::strongrooms::StrongroomRecord>,
     /// Read at least once in this process.
     pub read: bool,
 }
@@ -85,6 +87,7 @@ impl Members3 {
             vault_forks: m.vault_forks.clone(),
             cutoffs,
             member: None,
+            strongrooms: m.strongrooms.clone(),
             read: true,
         }
     }
@@ -108,6 +111,7 @@ impl Members3 {
             own_revocation: None,
             vault_forks: BTreeMap::new(),
             cutoffs: v.cutoffs,
+            strongrooms: BTreeMap::new(),
             read: true,
         }
     }
@@ -249,6 +253,26 @@ impl Engine {
     /// this device, its K8.
     pub(crate) fn keys3<'a>(&'a self, vault_keys: &'a VaultKeys) -> KeyRing<'a> {
         let m = &self.f3.members;
+        // A Strongroom's key is held only while it is unlocked here.
+        let now = util::now_utc();
+        let mut extra = Vec::new();
+        for (fid, (k13, until)) in &self.unlocked {
+            let Ok(f) = bin(fid) else { continue };
+            if *until <= now {
+                continue;
+            }
+            let keys = crate::membership3::FolderKeys {
+                folder: f,
+                epochs: BTreeMap::from([(0, k13.clone())]),
+                k11: crate::membership3::grants::k11_of(&f, k13),
+            };
+            if let Some(k) = keys.k10(0) {
+                extra.push((KeyId::Meta { folder: f, epoch: 0 }, k));
+            }
+            if let Some(k) = keys.share_ledger(0) {
+                extra.push((KeyId::ShareLedger { folder: f, epoch: 0 }, k));
+            }
+        }
         KeyRing {
             me: self.me3(),
             vault: vault_keys,
@@ -256,7 +280,7 @@ impl Engine {
             devices: Some(&m.devices),
             folders: Some(&m.granted),
             recovery: None,
-            extra: Vec::new(),
+            extra,
             members: Some(&m.members),
         }
     }
@@ -523,6 +547,10 @@ impl Engine {
         }
         self.f3.members = snapshot;
         self.observe_clock(lamport)?;
+        // A folder another device converted into a Strongroom (or gave a
+        // new Strongroom key) takes the old one's place here before the
+        // old one, now removed, is forgotten.
+        self.adopt_conversions3()?;
         self.sync_keyring3()?;
         self.sync_devices3()
     }
@@ -592,6 +620,18 @@ impl Engine {
             if rec.shared != shared {
                 rec.shared = shared;
                 changed = true;
+            }
+            if let Some(info) = self
+                .f3
+                .members
+                .strongrooms
+                .get(&id)
+                .and_then(|r| r.info().ok())
+            {
+                if rec.strongroom.as_ref() != Some(&info) {
+                    rec.strongroom = Some(info);
+                    changed = true;
+                }
             }
             if let Some(k) = keys {
                 for (e, k9) in &k.epochs {

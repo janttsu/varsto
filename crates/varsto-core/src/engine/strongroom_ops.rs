@@ -1,22 +1,28 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Strongroom conversion and key management (S-012).
+//! Strongroom conversion and key management (S-012) on storage format 3
+//! (`docs/spec/format-3-design.md` section 5, "Strongroom keys and
+//! conversion"; `alpha-0-format.md` section 77.16).
 //!
-//! Converting a folder: the folder gets a new folder id and a new random
-//! key wrapped by the security key; every current file is re-encrypted under
-//! the new key (from the local copy, or downloaded under the old key first);
-//! the new chunks and a manifest are stored and recorded in the ledger;
-//! a conversion record tells the other devices; only then is the folder
-//! switched here and are the old manifests, chunks, thumbnails, policy and
-//! folder records deleted from the storages. Each step can be repeated: the
-//! conversion is journalled in the encrypted keyring, uploads are
-//! put-if-absent, and nothing old is removed before the new copy exists.
-//! A new folder id keeps old and new objects, manifests and ledger facts
-//! apart, so a device that still writes under the old key cannot mix the two.
+//! A Strongroom's key K13 takes the place of K9 for its folder. It is never
+//! granted and never under the vault key: a `strongroom` record carries its
+//! wraps, one per enrolled security key, and each device unwraps it with a
+//! touch. The folder id comes from the key (`membership3::strongrooms`).
+//!
+//! Converting a folder makes a new folder (new id, new K13) whose record
+//! names the old one in `converted_from`: every current file is brought to
+//! this device (placeholders are fetched under the old key) and pushed into
+//! the new folder; only then is the old folder removed (its folder record
+//! carries `removed`) and are its packs and records deleted from the
+//! storages. Each step can be repeated: the conversion is journalled in the
+//! encrypted keyring, and nothing old is removed before the new copy
+//! exists. A new key for a Strongroom (`rekey`) is the same conversion from
+//! a Strongroom to a Strongroom. The other devices take the new folder in
+//! the old one's place when they read its record.
 
 use super::*;
-use crate::strongroom::{
-    self, Conversion, ConversionRecord, EnrolledKey, KeysRecord, SecurityKey, StrongroomInfo,
-};
+use crate::membership3::strongrooms::StrongroomRecord;
+use crate::strongroom::{self, Conversion, EnrolledKey, SecurityKey, StrongroomInfo};
+
 
 /// What a conversion did.
 #[derive(Clone, Debug, Serialize, Default)]
@@ -56,6 +62,7 @@ pub struct StrongroomKeySummary {
     pub added_utc: i64,
 }
 
+
 fn mtime_ns(md: &fs::Metadata) -> i64 {
     md.modified()
         .ok()
@@ -65,6 +72,61 @@ fn mtime_ns(md: &fs::Metadata) -> i64 {
 }
 
 impl Engine {
+    // ----- records --------------------------------------------------------------
+
+    /// The id of a Strongroom this device makes with key `k13`.
+    pub fn strongroom_id_for(&self, k13: &SecretKey) -> FolderId {
+        let nonce = crate::membership3::strongrooms::creation_nonce(k13);
+        FolderId::from_bytes(&crate::membership3::folders::folder_id(&self.me3(), &nonce))
+    }
+
+    /// Create the Strongroom folder `name` with key `k13` in the
+    /// membership records (folder record and key wraps). `others` take
+    /// part with their roles; `converted_from` names the folder it
+    /// replaces.
+    pub(super) fn publish_strongroom3(
+        &mut self,
+        name: &str,
+        k13: &SecretKey,
+        info: &StrongroomInfo,
+        converted_from: Option<(crate::record::Id16, Vec<(crate::record::Id16, u64)>)>,
+        others: &[(crate::record::Id16, crate::membership3::Role)],
+        rekey: bool,
+    ) -> Result<()> {
+        let id = members3::bin(&self.strongroom_id_for(k13))?;
+        if self.f3.members.strongrooms.contains_key(&id) {
+            return Ok(()); // a resumed conversion wrote it already
+        }
+        let (from, covered) = match converted_from {
+            Some((f, c)) => (Some(f), c),
+            None => (None, Vec::new()),
+        };
+        let record = StrongroomRecord {
+            folder: id,
+            epoch: 0,
+            wraps: StrongroomRecord::wraps_of(info)?,
+            check_hex: info.check_hex.clone(),
+            updated_utc: info.updated_utc,
+            stamp: Default::default(),
+            escrow: None,
+            converted_from: from,
+            covered,
+            rekey,
+        };
+        let others = others.to_vec();
+        let k13 = k13.clone();
+        let name = name.to_string();
+        self.with_enrolled3(|m| {
+            if m.registry.get(&id).is_none() {
+                m.create_strongroom(&name, &k13, record, &others)?;
+            } else {
+                m.write_strongroom(record)?;
+            }
+            Ok(())
+        })?
+        .ok_or_else(|| anyhow!("this device has no storage to publish the Strongroom to"))
+    }
+
     // ----- conversion ---------------------------------------------------------
 
     /// The new folder id and key wraps of an interrupted conversion of
@@ -108,8 +170,8 @@ impl Engine {
                         ..Default::default()
                     });
                 }
-                let id = FolderId::random();
                 let fk = SecretKey::random();
+                let id = self.strongroom_id_for(&fk);
                 let info = strongroom::enroll(key, method, &self.vault.vault_id, &id, &fk)?;
                 (id, info, fk)
             }
@@ -117,21 +179,21 @@ impl Engine {
         self.convert_to_strongroom_with(folder, &new_id, &fk, info, unlock_minutes)
     }
 
-    /// Convert `folder` into a Strongroom whose new id, key and key wraps
-    /// were made already (the command line touched the security key and
-    /// hands them to the running service). Steps, each safe to repeat:
+    /// Convert `folder` into a Strongroom whose key and key wraps were made
+    /// already (the command line touched the security key and hands them to
+    /// the running service; `new_id` is `strongroom_id_for` the key).
+    /// Steps, each safe to repeat:
     ///
     /// 1. journal the conversion in the keyring, sync the folder under its
-    ///    old key (refused while remote versions could not be downloaded);
-    /// 2. re-encrypt every current file under the new key and store each
-    ///    chunk on every storage that takes it (at least one non-carrier
-    ///    storage must hold every chunk), publish the manifest, commit the
-    ///    ledger batch;
-    /// 3. publish the conversion record, then switch this device to the new
-    ///    folder (selective mount, unlocked for `unlock_minutes`) and publish
-    ///    its folder record;
-    /// 4. delete the old copies from every storage
-    ///    (`finish_strongroom_conversions`, retried on every sync).
+    ///    old key (refused while remote versions could not be downloaded),
+    ///    and bring every current file here (placeholders are fetched);
+    /// 2. publish the new folder's records, switch this device to it
+    ///    (selective mount, unlocked for `unlock_minutes`) and push every
+    ///    file into it; files that were placeholders become placeholders
+    ///    again;
+    /// 3. remove the old folder (`finish_strongroom_conversions`: its
+    ///    record carries `removed`, its packs and records are deleted;
+    ///    retried on every sync).
     pub fn convert_to_strongroom_with(
         &mut self,
         folder: &str,
@@ -141,26 +203,15 @@ impl Engine {
         unlock_minutes: u64,
     ) -> Result<ConvertReport> {
         crate::logged_op_plain!("convert to strongroom with", folder, {
-            self.convert_to_strongroom_with_inner(folder, new_id, folder_key, info, unlock_minutes)
+            self.convert_into(folder, new_id, folder_key, info, unlock_minutes, false)
         })
-    }
-
-    fn convert_to_strongroom_with_inner(
-        &mut self,
-        folder: &str,
-        new_id: &FolderId,
-        folder_key: &SecretKey,
-        info: StrongroomInfo,
-        unlock_minutes: u64,
-    ) -> Result<ConvertReport> {
-        self.convert_into(folder, new_id, folder_key, info, unlock_minutes, false)
     }
 
     /// Rotate a Strongroom's key: the conversion above, from a Strongroom to
     /// a Strongroom. The folder gets a new id and a new random key wrapped
     /// for every enrolled security key (`strongroom::rewrap_enrolled`), its
-    /// content is re-encrypted, and the old copies (chunks, manifests, the
-    /// old key wraps) are deleted from the storages. The folder must be
+    /// content is re-encrypted, and the old copies (packs, records, the old
+    /// key wraps) are deleted from the storages. The folder must be
     /// unlocked here under its current key. Run it again with the same new
     /// key to resume (`strongroom_conversion` names it).
     pub fn rekey_strongroom_with(
@@ -172,19 +223,8 @@ impl Engine {
         unlock_minutes: u64,
     ) -> Result<ConvertReport> {
         crate::logged_op_plain!("rekey strongroom with", folder, {
-            self.rekey_strongroom_with_inner(folder, new_id, folder_key, info, unlock_minutes)
+            self.convert_into(folder, new_id, folder_key, info, unlock_minutes, true)
         })
-    }
-
-    fn rekey_strongroom_with_inner(
-        &mut self,
-        folder: &str,
-        new_id: &FolderId,
-        folder_key: &SecretKey,
-        info: StrongroomInfo,
-        unlock_minutes: u64,
-    ) -> Result<ConvertReport> {
-        self.convert_into(folder, new_id, folder_key, info, unlock_minutes, true)
     }
 
     /// Rotate a Strongroom's key with the security keys this device can
@@ -207,8 +247,8 @@ impl Engine {
         if !self.is_unlocked(&rec.folder_id) {
             self.unlock_strongroom_enrolled(folder, unlock_minutes)?;
         }
-        let id = FolderId::random();
         let fk = SecretKey::random();
+        let id = self.strongroom_id_for(&fk);
         let new_info =
             strongroom::rewrap_enrolled(&self.home, &self.vault.vault_id, &id, &fk, &info)?;
         self.rekey_strongroom_with(folder, &id, &fk, new_info, unlock_minutes)
@@ -227,8 +267,12 @@ impl Engine {
             bail!("a member device cannot convert folders of the owner's vault");
         }
         // The key and the wraps come from the caller (the command line): the
-        // key must be the one the wraps' commitment names.
+        // key must be the one the wraps' commitment names, and the id the
+        // one the key gives.
         info.verify_key(new_id, folder_key)?;
+        if &self.strongroom_id_for(folder_key) != new_id {
+            bail!("the new folder id is not the one this key gives (use `strongroom_id_for`)");
+        }
         let rec = self
             .keyring
             .find(folder)
@@ -252,9 +296,10 @@ impl Engine {
             });
         }
         if rec.shared {
-            bail!("a shared folder cannot become a Strongroom (other users hold its key)");
+            bail!("a shared folder cannot become a Strongroom (other people hold its key)");
         }
         let old_id = rec.folder_id.clone();
+        let old_bin = members3::bin(&old_id)?;
         match self.keyring.converting.get(&old_id) {
             Some(c) if &c.new_folder != new_id => bail!(
                 "a conversion of {} is already in progress; run the same command again to resume it with its security key",
@@ -275,18 +320,23 @@ impl Engine {
             }
         }
 
-        // 1. Bring the folder up to date under its old key.
+        // 1. Bring the folder up to date under its old key, every file here.
         let id = old_id.to_string();
         self.pull(&id)?;
-        if let Some(other) = self.conversion_record(&old_id)? {
-            if &other.new_folder != new_id {
-                self.keyring.converting.remove(&old_id);
-                self.save_keyring()?;
-                bail!(
-                    "{} was converted into a Strongroom by another device already; sync to adopt it",
-                    rec.name
-                );
-            }
+        let new_bin = members3::bin(new_id)?;
+        if self
+            .f3
+            .members
+            .strongrooms
+            .values()
+            .any(|r| r.converted_from == Some(old_bin) && r.folder != new_bin)
+        {
+            self.keyring.converting.remove(&old_id);
+            self.save_keyring()?;
+            bail!(
+                "{} was converted into a Strongroom by another device already; sync to adopt it",
+                rec.name
+            );
         }
         self.push(&id)?;
         let (rec, root) = self.resolve_folder(&id)?;
@@ -303,119 +353,82 @@ impl Engine {
                     .join(", ")
             );
         }
-        let me = self.vault.device_id.clone();
-        let mut covered = state.last_seen.clone();
-        covered.insert(me.clone(), state.published_seq);
-
-        // 2. Re-encrypt under the new key.
         let mut report = ConvertReport {
             folder: rec.name.clone(),
             old_folder_id: old_id.to_string(),
             folder_id: new_id.to_string(),
             ..Default::default()
         };
-        let old_keys = self.folder_keys(&rec)?;
-        let new_keys = FolderKeys::from_folder_key(new_id, folder_key.clone())?;
-        let readable = self.open_storages(false)?;
-        let targets: Vec<(StorageSpec, Box<dyn Storage>)> = self
-            .open_storages(true)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
-        if targets.is_empty() {
-            bail!("no storage to hold the re-encrypted copy: add one first");
-        }
-        let previous = self.load_state(new_id)?; // a resumed conversion
-        let mut new_state = FolderState {
-            published_seq: previous.published_seq,
-            published_hash: previous.published_hash,
-            accessed: state.accessed.clone(),
-            ..Default::default()
-        };
-        let tmp_dir = self.home.join("convert-tmp");
-        fs::create_dir_all(&tmp_dir)?;
+        let live: Vec<FileState> = state.files.values().filter(|f| !f.deleted).cloned().collect();
         let task = crate::activity::start(
             crate::activity::STRONGROOM_CONVERT,
             &rec.name,
-            state.files.values().filter(|f| !f.deleted).count() as u64,
+            live.len() as u64,
             crate::activity::Unit::Items,
         );
-        // The re-encrypted blocks of many files go into one pack per
-        // storage (`crate::packs`), not one pack per file.
-        let mut batch = ConvertBatch::default();
-        for file in state.files.values() {
-            if file.deleted {
-                new_state.files.insert(file.path.clone(), file.clone());
-                continue;
-            }
+        let mut fetched = Vec::new();
+        for file in &live {
             task.advance(1);
             let disk = self.disk_of(&root, &state, &file.path);
-            let local = fs::metadata(&disk).ok().filter(|md| {
+            let here = fs::metadata(&disk).ok().filter(|md| {
                 state.local_index.get(&file.path).is_some_and(|ix| {
                     ix.size == md.len()
                         && ix.mtime == mtime_ns(md)
                         && ix.content_hash == file.content_hash
                 })
             });
-            if local.is_none() && disk.exists() {
+            if here.is_none() && disk.exists() {
                 bail!(
                     "{} changed during the conversion; run the command again",
                     file.path
                 );
             }
-            let source = if local.is_some() {
-                disk.clone()
-            } else {
-                let tmp = tmp_dir.join(format!("{}", report.files));
-                let mut pr = PullReport::default();
-                self.download_to(&rec, &old_keys, &tmp, file, &readable, &mut pr)
-                    .with_context(|| {
-                        format!(
-                            "{}: download it under the old key to re-encrypt it",
-                            file.path
-                        )
-                    })?;
-                report.files_fetched += 1;
-                tmp
-            };
-            let result = self.reencrypt_file(&source, &old_keys, &new_keys, file, &mut batch);
-            if source != disk {
-                let _ = fs::remove_file(&source);
+            if here.is_none() {
+                self.fetch_file(&id, &file.path).with_context(|| {
+                    format!(
+                        "{}: download it under the old key to re-encrypt it",
+                        file.path
+                    )
+                })?;
+                fetched.push(file.path.clone());
             }
-            let (chunks, content_hash) = result?;
-            if batch.bytes >= crate::packs::HOT_TARGET {
-                self.store_converted(&mut batch, &new_keys.folder, &targets, &mut report)?;
-            }
-            if let Some(md) = local {
-                new_state.local_index.insert(
-                    file.path.clone(),
-                    LocalIndexEntry {
-                        size: md.len(),
-                        mtime: mtime_ns(&md),
-                        content_hash: content_hash.clone(),
-                        ..Default::default()
-                    },
-                );
-                new_state.pinned.insert(file.path.clone());
-            }
-            new_state.files.insert(
-                file.path.clone(),
-                FileState {
-                    content_hash,
-                    chunks,
-                    ..file.clone()
-                },
-            );
             report.files += 1;
         }
-        self.store_converted(&mut batch, &new_keys.folder, &targets, &mut report)?;
-        let _ = fs::remove_dir_all(&tmp_dir);
-        let mut new_rec = FolderRecord {
+        report.files_fetched = fetched.len() as u64;
+        let mut covered: Vec<(crate::record::Id16, u64)> = state
+            .last_seen
+            .iter()
+            .filter_map(|(d, s)| Some((members3::bin(d).ok()?, *s)))
+            .collect();
+        covered.push((self.me3(), state.published_seq));
+        let others: Vec<(crate::record::Id16, crate::membership3::Role)> = self
+            .f3
+            .members
+            .registry
+            .get(&old_bin)
+            .map(|st| {
+                st.participants()
+                    .into_iter()
+                    .map(|p| (p.device, p.role))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // 2. The new folder's records, then switch here and push into it.
+        self.publish_strongroom3(
+            &rec.name,
+            folder_key,
+            &info,
+            Some((old_bin, covered)),
+            &others,
+            rekey,
+        )?;
+        let new_rec = FolderRecord {
             folder_id: new_id.clone(),
             name: rec.name.clone(),
-            key_hex: folder_key.to_hex(),
+            key_hex: String::new(),
             k11_hex: String::new(),
-            created_by: me.clone(),
+            created_by: self.vault.device_id.clone(),
             created_utc: util::now_utc(),
             shared: false,
             policy: rec.policy.clone(),
@@ -427,32 +440,6 @@ impl Engine {
             epoch_keys: BTreeMap::new(),
             backup: None,
         };
-        self.publish_manifest(&new_rec, &mut new_state)?;
-        self.ensure_manifest_everywhere(&new_rec, &new_state)?;
-        self.save_state(new_id, &new_state)?;
-        self.pending.push(Event::FolderAdded {
-            folder: new_id.clone(),
-        });
-        self.commit_batch()?;
-
-        // 3. Tell the other devices, then switch here.
-        let record = ConversionRecord {
-            old_folder: old_id.clone(),
-            new_folder: new_id.clone(),
-            device: me.clone(),
-            converted_utc: util::now_utc(),
-            covered,
-            rekey,
-        };
-        let fr_key = self.folder_record_key_now();
-        let blob = record.seal(&self.vault.vault_id, &fr_key)?;
-        let key = ConversionRecord::storage_key(&old_id);
-        for (_, backend) in self.metadata_storages(true)? {
-            // Replaced on a resumed conversion: `covered` may have grown.
-            backend.delete(&key)?;
-            backend.put_if_absent(&key, &blob)?;
-        }
-        new_rec.key_hex = String::new();
         self.keyring.folders.remove(&old_id);
         self.keyring.folders.insert(new_id.clone(), new_rec);
         if let Some(c) = self.keyring.converting.get_mut(&old_id) {
@@ -471,8 +458,6 @@ impl Engine {
             folder_safety::rekey_marker(&m.path, &old_id, new_id);
         }
         self.config.save(&self.home)?;
-        // File analyses stay with the files (content hashes are per key).
-        self.notes_rekeyed(&old_id, new_id, &state, &new_state);
         let _ = fs::remove_file(self.state_path(&old_id));
         self.unlocked.remove(&old_id);
         self.unlocked.insert(
@@ -482,140 +467,20 @@ impl Engine {
                 util::now_utc() + unlock_minutes as i64 * 60,
             ),
         );
-        self.publish_registry()?;
+        let new_name = new_id.to_string();
+        let pushed = self.push(&new_name)?;
+        report.chunks_uploaded = pushed.chunks_uploaded;
+        report.bytes_uploaded = pushed.bytes_uploaded;
+        for p in &fetched {
+            self.free_file(&new_name, p)?;
+        }
+        // File analyses stay with the files (content hashes are per key).
+        let new_state = self.load_state(new_id)?;
+        self.notes_rekeyed(&old_id, new_id, &state, &new_state);
 
-        // 4. Remove the old copies.
+        // 3. Remove the old folder.
         report.cleanup = self.finish_strongroom_conversions();
         Ok(report)
-    }
-
-    /// Write the blocks collected in `batch` to every target as packs and
-    /// claim them. A pool with no disk attached (or no room) gets them from
-    /// a later push, like any other new block; some storage must take them.
-    fn store_converted(
-        &mut self,
-        batch: &mut ConvertBatch,
-        folder: &FolderId,
-        targets: &[(StorageSpec, Box<dyn Storage>)],
-        report: &mut ConvertReport,
-    ) -> Result<()> {
-        let blocks = std::mem::take(&mut batch.blocks);
-        batch.bytes = 0;
-        batch.seen.clear();
-        if blocks.is_empty() {
-            return Ok(());
-        }
-        let members: Vec<(String, &[u8])> = blocks
-            .iter()
-            .map(|(_, o, ct)| (o.as_str().to_string(), ct.as_slice()))
-            .collect();
-        let mut held = false;
-        for (spec, backend) in targets {
-            let written = match backend.put_pack(&members) {
-                Ok(w) => w,
-                Err(e)
-                    if matches!(
-                        pool::pool_error(&e),
-                        Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
-                    ) =>
-                {
-                    continue;
-                }
-                Err(e) => return Err(e),
-            };
-            held = true;
-            for ((chunk, object, ct), new) in blocks.iter().zip(written) {
-                if new {
-                    report.chunks_uploaded += 1;
-                    report.bytes_uploaded += ct.len() as u64;
-                }
-                self.pending.push(Event::ChunkStored {
-                    folder: folder.clone(),
-                    chunk: chunk.clone(),
-                    object: object.clone(),
-                    storage: spec.name().to_string(),
-                    size: ct.len() as u64,
-                    pack: None,
-                });
-            }
-        }
-        if !held {
-            bail!("no storage took the re-encrypted blocks; attach a disk or add a storage and run again");
-        }
-        Ok(())
-    }
-
-    /// Re-encrypt one file under the new key, checking it against the old
-    /// content hash on the way, and add every chunk to `batch`. Returns the
-    /// new chunk list and content hash.
-    fn reencrypt_file(
-        &mut self,
-        source: &Path,
-        old: &FolderKeys,
-        new: &FolderKeys,
-        file: &FileState,
-        batch: &mut ConvertBatch,
-    ) -> Result<(Vec<ChunkRef>, String)> {
-        let handle = fs::File::open(source)?;
-        let mut old_hash = KeyedHasher::new(&old.hash);
-        let mut new_hash = KeyedHasher::new(&new.hash);
-        let mut chunks = Vec::new();
-        for chunk in Chunker::new(
-            std::io::BufReader::new(handle),
-            self.chunker_for(file.size, new),
-        )? {
-            let chunk = chunk?;
-            old_hash.update(&chunk);
-            new_hash.update(&chunk);
-            let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&new.hash, &chunk));
-            let ct = crate::chunk_seal::seal_chunk(
-                new,
-                &self.vault.vault_id,
-                &chunk_id,
-                new.epoch,
-                &chunk,
-            )?;
-            let object = ObjectName::from_bytes(&crypto::hash(&ct));
-            if batch.seen.insert(object.clone()) {
-                batch.bytes += ct.len();
-                batch.blocks.push((chunk_id.clone(), object.clone(), ct));
-            }
-            self.pending.push(Event::ChunkOnDevice {
-                folder: new.folder.clone(),
-                chunk: chunk_id.clone(),
-                object: object.clone(),
-                size: chunk.len() as u64,
-            });
-            chunks.push(ChunkRef {
-                chunk: chunk_id,
-                object,
-                size: chunk.len() as u64,
-                epoch: new.epoch,
-            });
-        }
-        if hex::encode(old_hash.finalize()) != file.content_hash {
-            bail!(
-                "{} changed during the conversion; run the command again",
-                file.path
-            );
-        }
-        Ok((chunks, hex::encode(new_hash.finalize())))
-    }
-
-    fn conversion_record(&self, old: &FolderId) -> Result<Option<ConversionRecord>> {
-        let fr_keys = self.folder_record_keys();
-        for (_, backend) in self.metadata_storages(false)? {
-            if let Some(blob) = backend.get(&ConversionRecord::storage_key(old))? {
-                if let Ok(r) = fr_keys
-                    .iter()
-                    .find_map(|k| ConversionRecord::open(&blob, &self.vault.vault_id, old, k).ok())
-                    .ok_or(())
-                {
-                    return Ok(Some(r));
-                }
-            }
-        }
-        Ok(None)
     }
 
     fn save_keyring(&self) -> Result<()> {
@@ -627,10 +492,11 @@ impl Engine {
         )
     }
 
-    /// Delete the old copies of every switched conversion from the storages
-    /// of this device; a conversion leaves the keyring (and the old key this
-    /// device) only when every storage was cleaned. Never fails: what could
-    /// not be done is reported and retried on the next sync.
+    /// Remove the old folder of every switched conversion: its folder
+    /// record carries `removed`, its packs and records leave this device's
+    /// storages. A conversion leaves the keyring only when that worked.
+    /// Never fails: what could not be done is reported and retried on the
+    /// next sync.
     pub fn finish_strongroom_conversions(&mut self) -> CleanupReport {
         let mut report = CleanupReport::default();
         let pending: Vec<Conversion> = self
@@ -640,21 +506,15 @@ impl Engine {
             .filter(|c| c.switched)
             .cloned()
             .collect();
-        if pending.is_empty() {
-            return report;
-        }
-        // The new folder record, in case an earlier run stopped before it.
-        if let Err(e) = self.publish_registry() {
-            report
-                .failures
-                .push(format!("publish folder records: {e:#}"));
-        }
         let mut done = Vec::new();
         for c in pending {
-            let before = report.failures.len();
-            self.remove_old_copies(&c.old, &mut report);
-            if report.failures.len() == before {
-                done.push(c.old.folder_id.clone());
+            match self.remove_old_copies(&c.old) {
+                Ok((objects, records)) => {
+                    report.objects_deleted += objects;
+                    report.records_deleted += records;
+                    done.push(c.old.folder_id.clone());
+                }
+                Err(e) => report.failures.push(format!("{}: {e:#}", c.old.name)),
             }
         }
         if !done.is_empty() {
@@ -668,263 +528,113 @@ impl Engine {
         report
     }
 
-    /// Every object, manifest, thumbnail and record of the old folder, on
-    /// every storage of this device (cold ones too). Objects are found from
-    /// the ledger and from the old manifests (opened with the old key).
-    fn remove_old_copies(&mut self, old: &FolderRecord, report: &mut CleanupReport) {
-        let storages = match self.open_storages(true) {
-            Ok(s) => s,
-            Err(e) => {
-                report.failures.push(format!("open storages: {e:#}"));
-                return;
+    /// The old folder's removal and every pack and record of it on this
+    /// device's storages. Returns (block objects in the deleted packs,
+    /// records deleted).
+    fn remove_old_copies(&mut self, old: &FolderRecord) -> Result<(u64, u64)> {
+        let id = members3::bin(&old.folder_id)?;
+        let removed = self
+            .f3
+            .members
+            .registry
+            .get(&id)
+            .is_none_or(|st| st.is_removed());
+        if !removed {
+            self.with_enrolled3(|m| m.remove_folder(&id))?
+                .ok_or_else(|| anyhow!("no storage to publish the removal to"))?;
+        }
+        // The blocks the deleted packs held (one pack holds many).
+        let objects: BTreeSet<[u8; 32]> = match self.table3(&id) {
+            Ok(t) => {
+                let t = t.read().unwrap_or_else(|e| e.into_inner());
+                t.scan().filter_map(|r| r.ok()).map(|r| r.object).collect()
             }
+            Err(_) => BTreeSet::new(),
         };
-        let mut objects: BTreeSet<ObjectName> = BTreeSet::new();
-        if let Ok(view) = self.view() {
-            for ((folder, _), r) in view.chunks.iter() {
-                if folder == &old.folder_id {
-                    objects.insert(r.object.clone());
-                }
-            }
-        }
-        let meta = old.keys().ok().map(|k| k.meta);
-        let manifest_prefix = format!("manifests/{}/", old.folder_id);
-        for (_, backend) in storages.iter().filter(|(s, _)| !s.is_data_only()) {
-            let Ok(keys) = backend.list(&manifest_prefix) else {
-                continue; // reported when deleting below
-            };
-            for key in keys {
-                let Some((dev, file)) = key
-                    .strip_prefix(&manifest_prefix)
-                    .and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let (Ok(dev), Some(seq)) = (
-                    DeviceId::from_hex(dev),
-                    file.strip_suffix(".enc")
-                        .and_then(|s| s.parse::<u64>().ok()),
-                ) else {
-                    continue;
-                };
-                let (Some(meta), Ok(Some(blob))) = (&meta, backend.get(&key)) else {
-                    continue;
-                };
-                if let Ok(m) =
-                    Manifest::open(&blob, &self.vault.vault_id, &old.folder_id, &dev, seq, meta)
-                {
-                    for f in m.files.values() {
-                        objects.extend(f.chunks.iter().map(|c| c.object.clone()));
-                    }
-                }
-            }
-        }
-        let record_key = FolderRecord::storage_key(&old.created_by, &old.folder_id);
-        for (spec, backend) in &storages {
-            let r: Result<()> = (|| {
-                let present: HashSet<String> = backend.list("chunks/")?.into_iter().collect();
-                for o in &objects {
-                    let key = chunk_storage_key(o);
-                    if present.contains(&key) {
-                        backend.delete(&key)?;
-                        report.objects_deleted += 1;
-                    }
-                }
-                if spec.is_data_only() {
-                    return Ok(());
-                }
-                for key in backend.list(&manifest_prefix)? {
-                    backend.delete(&key)?;
-                    report.manifests_deleted += 1;
-                }
-                let prefixes = [
-                    format!("thumbs/{}/", old.folder_id),
-                    format!("{}{}/", vault::PolicyRecord::PREFIX, old.folder_id),
-                    // A re-keyed Strongroom's old key wraps.
-                    format!("{}{}/", KeysRecord::PREFIX, old.folder_id),
-                    // Last-accessed records under the old key name files.
-                    format!("vault/access/{}/", old.folder_id),
-                    // So do file analyses.
-                    super::notes::folder_prefix(&old.folder_id),
-                ];
-                for prefix in prefixes {
-                    for key in backend.list(&prefix)? {
-                        backend.delete(&key)?;
-                        report.records_deleted += 1;
-                    }
-                }
-                // The old folder record holds the old key under the vault
-                // key: it must go. The conversion record (no key) stays, for
-                // devices that have not synced since.
-                if backend.exists(&record_key)? {
-                    backend.delete(&record_key)?;
-                    report.records_deleted += 1;
-                }
-                Ok(())
-            })();
-            if let Err(e) = r {
-                report.failures.push(format!("{}: {e:#}", spec.name()));
-            }
-        }
+        let (packs, records) = self.purge_folder3(&id, &old.name)?;
+        let objects = if packs == 0 { 0 } else { objects.len() as u64 };
+        let _ = fs::remove_file(self.state_path(&old.folder_id));
+        Ok((objects, records))
     }
 
-    /// Learn conversions and key-list changes that other devices published
-    /// (called from `pull_registry`).
-    pub(super) fn pull_strongroom_records(&mut self) -> Result<()> {
-        if self.vault.member {
-            return Ok(());
-        }
-        let fr_keys = self.folder_record_keys();
-        let mut changed = false;
-        let mut conversions: BTreeMap<FolderId, ConversionRecord> = BTreeMap::new();
-        for (_, backend) in self.metadata_storages(false)? {
-            for key in backend.list(KeysRecord::PREFIX)? {
-                let Some((fid, stamp)) = key
-                    .strip_prefix(KeysRecord::PREFIX)
-                    .and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let Ok(fid) = FolderId::from_hex(fid) else {
-                    continue;
-                };
-                let stamp: i64 = stamp
-                    .strip_suffix(".enc")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-                let Some(local) = self
-                    .keyring
-                    .folders
-                    .get(&fid)
-                    .and_then(|r| r.strongroom.as_ref())
-                else {
-                    continue;
-                };
-                if stamp <= local.updated_utc {
-                    continue;
-                }
-                if let Some(blob) = backend.get(&key)? {
-                    if let Ok(r) = fr_keys
-                        .iter()
-                        .find_map(|k| KeysRecord::open(&blob, &self.vault.vault_id, &fid, k).ok())
-                        .ok_or(())
-                    {
-                        if let Some(f) = self.keyring.folders.get_mut(&fid) {
-                            if f.strongroom
-                                .as_ref()
-                                .is_some_and(|i| r.info.updated_utc > i.updated_utc)
-                            {
-                                f.strongroom = Some(r.info);
-                                changed = true;
-                            }
-                        }
-                    }
-                }
-            }
-            for key in backend.list(ConversionRecord::PREFIX)? {
-                let Some(old) = key
-                    .strip_prefix(ConversionRecord::PREFIX)
-                    .and_then(|r| r.strip_suffix(".enc"))
-                    .and_then(|r| FolderId::from_hex(r).ok())
-                else {
-                    continue;
-                };
-                // A Strongroom is "converted" again when its key is rotated.
-                let known = self.keyring.folders.contains_key(&old);
-                if !known || self.keyring.converting.contains_key(&old) {
-                    continue;
-                }
-                if let Some(blob) = backend.get(&key)? {
-                    if let Ok(r) = fr_keys
-                        .iter()
-                        .find_map(|k| {
-                            ConversionRecord::open(&blob, &self.vault.vault_id, &old, k).ok()
-                        })
-                        .ok_or(())
-                    {
-                        conversions.insert(old, r);
-                    }
-                }
-            }
-        }
-        for (_, c) in conversions {
-            // Wait until the new folder's record has arrived too.
-            if self.keyring.folders.contains_key(&c.new_folder) {
-                self.adopt_conversion(&c)?;
-                changed = true;
-            }
-        }
-        if changed {
-            self.save_keyring()?;
-        }
-        Ok(())
-    }
-
-    /// Another device converted a folder into a Strongroom: mount the new
-    /// folder in the old one's place (selective, locked), replace the plain
-    /// copies that are stored elsewhere with placeholders, forget the old
-    /// key once the old copies are removed. Files with changes the
+    /// Another device converted a folder into a Strongroom (or gave one a
+    /// new key): mount the new folder in the old one's place (selective,
+    /// locked), replace the plain copies that the converted copy includes
+    /// with placeholders, and forget the old folder. Files with changes the
     /// converted copy may not include stay as they are: after the next
     /// unlock they are synced like new local files (identical content
     /// merges, different content becomes a conflict copy).
-    fn adopt_conversion(&mut self, c: &ConversionRecord) -> Result<()> {
-        let Some(old) = self.keyring.folders.get(&c.old_folder).cloned() else {
-            return Ok(());
-        };
-        let me = self.vault.device_id.clone();
-        if let Some(root) = self
-            .config
-            .folders
-            .iter()
-            .find(|m| m.folder_id == old.folder_id)
-            .map(|m| m.path.clone())
-        {
-            let state = self.load_state(&old.folder_id)?;
-            let included = state.published_seq <= c.covered.get(&me).copied().unwrap_or(0);
-            if included {
-                for f in state.files.values().filter(|f| !f.deleted) {
-                    let disk = self.disk_of(&root, &state, &f.path);
-                    let Ok(md) = fs::metadata(&disk) else {
-                        continue;
-                    };
-                    let synced = state.local_index.get(&f.path).is_some_and(|ix| {
-                        ix.content_hash == f.content_hash
-                            && ix.size == md.len()
-                            && ix.mtime == mtime_ns(&md)
-                    });
-                    if synced {
-                        fs::remove_file(&disk)?;
-                        Self::write_placeholder(&disk, f)?;
-                    }
-                }
-            }
-            for m in self
+    pub(super) fn adopt_conversions3(&mut self) -> Result<()> {
+        let me = self.me3();
+        let found: Vec<(FolderId, FolderId, Option<u64>)> = self
+            .f3
+            .members
+            .strongrooms
+            .values()
+            .filter_map(|r| {
+                let old = FolderId::from_bytes(&r.converted_from?);
+                let covered = r.covered.iter().find(|(d, _)| *d == me).map(|(_, s)| *s);
+                Some((old, FolderId::from_bytes(&r.folder), covered))
+            })
+            .filter(|(old, new, _)| {
+                self.keyring
+                    .folders
+                    .get(old)
+                    .is_some_and(|f| !f.is_removed())
+                    && !self.keyring.converting.contains_key(old)
+                    && old != new
+            })
+            .collect();
+        for (old_id, new_id, covered) in found {
+            let Some(old) = self.keyring.folders.get(&old_id).cloned() else {
+                continue;
+            };
+            if let Some(root) = self
                 .config
                 .folders
-                .iter_mut()
-                .filter(|m| m.folder_id == old.folder_id)
+                .iter()
+                .find(|m| m.folder_id == old_id)
+                .map(|m| m.path.clone())
             {
-                m.folder_id = c.new_folder.clone();
-                m.selective = true;
-                folder_safety::rekey_marker(&m.path, &old.folder_id, &c.new_folder);
+                let state = self.load_state(&old_id)?;
+                let included = state.published_seq <= covered.unwrap_or(0);
+                if included {
+                    for f in state.files.values().filter(|f| !f.deleted) {
+                        let disk = self.disk_of(&root, &state, &f.path);
+                        let Ok(md) = fs::metadata(&disk) else {
+                            continue;
+                        };
+                        let synced = state.local_index.get(&f.path).is_some_and(|ix| {
+                            ix.content_hash == f.content_hash
+                                && ix.size == md.len()
+                                && ix.mtime == mtime_ns(&md)
+                        });
+                        if synced {
+                            fs::remove_file(&disk)?;
+                            Self::write_placeholder(&disk, f)?;
+                        }
+                    }
+                }
+                for m in self
+                    .config
+                    .folders
+                    .iter_mut()
+                    .filter(|m| m.folder_id == old_id)
+                {
+                    m.folder_id = new_id.clone();
+                    m.selective = true;
+                    folder_safety::rekey_marker(&m.path, &old_id, &new_id);
+                }
+                self.config.save(&self.home)?;
+                let _ = fs::remove_file(self.state_path(&old_id));
+                // The converting device carried the analyses over.
+                self.forget_notes(&old_id);
             }
-            self.config.save(&self.home)?;
-            let _ = fs::remove_file(self.state_path(&old.folder_id));
-            // The converting device carried the analyses over.
-            self.forget_notes(&old.folder_id);
+            self.unlocked.remove(&old.folder_id);
+            self.keyring.folders.remove(&old.folder_id);
+            self.save_keyring()?;
         }
-        self.unlocked.remove(&old.folder_id);
-        self.keyring.folders.remove(&old.folder_id);
-        self.keyring.converting.insert(
-            old.folder_id.clone(),
-            Conversion {
-                old,
-                new_folder: c.new_folder.clone(),
-                info: None,
-                switched: true,
-            },
-        );
-        self.save_keyring()
+        Ok(())
     }
 
     // ----- enrolled keys ------------------------------------------------------
@@ -1061,47 +771,49 @@ impl Engine {
         let updated = util::now_utc().max(info.updated_utc + 1);
         let mut new_info = StrongroomInfo::from_keys(keys, updated)?;
         new_info.check_hex = info.check_hex.clone();
-        let mut new_rec = rec.clone();
-        new_rec.strongroom = Some(new_info.clone());
-        self.keyring
-            .folders
-            .insert(rec.folder_id.clone(), new_rec.clone());
-        self.save_keyring()?;
         if self.vault.member {
-            return Ok(n);
+            bail!("a member device cannot change the keys of the owner's Strongroom");
         }
-        let record = KeysRecord {
-            folder_id: rec.folder_id.clone(),
-            device: self.vault.device_id.clone(),
-            info: new_info,
+        let id = members3::bin(&rec.folder_id)?;
+        let old = self.f3.members.strongrooms.get(&id).cloned();
+        let record = StrongroomRecord {
+            folder: id,
+            epoch: 0,
+            wraps: StrongroomRecord::wraps_of(&new_info)?,
+            check_hex: new_info.check_hex.clone(),
+            updated_utc: updated,
+            stamp: Default::default(),
+            escrow: None,
+            converted_from: old.as_ref().and_then(|o| o.converted_from),
+            covered: old.as_ref().map(|o| o.covered.clone()).unwrap_or_default(),
+            rekey: old.as_ref().is_some_and(|o| o.rekey),
         };
-        let fr_key = self.folder_record_key_now();
-        let blob = record.seal(&self.vault.vault_id, &fr_key)?;
-        let key = record.storage_key();
-        let prefix = format!("{}{}/", KeysRecord::PREFIX, rec.folder_id);
-        let folder_key = FolderRecord::storage_key(&new_rec.created_by, &new_rec.folder_id);
-        let folder_blob = new_rec.seal(&self.vault.vault_id, &fr_key)?;
+        self.with_enrolled3(|m| m.write_strongroom(record))?
+            .ok_or_else(|| anyhow!("this device has no storage to publish the keys to"))?;
+        let mut new_rec = rec.clone();
+        new_rec.strongroom = Some(new_info);
+        self.keyring.folders.insert(rec.folder_id.clone(), new_rec);
+        self.save_keyring()?;
+        // This device's older lists hold wraps of keys that may be gone now
+        // (another owner's go when it writes its next list).
+        let prefix = format!(
+            "vault/strongroom/{}/{}/",
+            hex::encode(id),
+            hex::encode(self.me3())
+        );
         for (_, backend) in self.metadata_storages(true)? {
-            backend.put_if_absent(&key, &blob)?;
-            // Older lists, and the folder record's first copy, hold wraps
-            // of keys that may be gone now.
-            for k in backend.list(&prefix)? {
-                if k != key {
-                    backend.delete(&k)?;
+            let names = backend.list(&prefix)?;
+            let seq = |k: &String| {
+                crate::record::RecordName::parse_as(crate::record::Kind::Strongroom, k)
+                    .map(|n| n.seq)
+            };
+            let newest = names.iter().filter_map(seq).max().unwrap_or(0);
+            for k in &names {
+                if seq(k).is_some_and(|s| s < newest) {
+                    backend.delete(k)?;
                 }
             }
-            backend.delete(&folder_key)?;
-            backend.put_if_absent(&folder_key, &folder_blob)?;
         }
         Ok(n)
     }
-}
-
-/// Re-encrypted blocks of a Strongroom conversion not written yet: (chunk,
-/// object, bytes).
-#[derive(Default)]
-struct ConvertBatch {
-    blocks: Vec<(ChunkId, ObjectName, Vec<u8>)>,
-    bytes: usize,
-    seen: HashSet<ObjectName>,
 }
