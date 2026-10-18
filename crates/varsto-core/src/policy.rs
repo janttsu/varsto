@@ -122,6 +122,13 @@ pub struct PolicyReport {
     pub reasons: Vec<String>,
     /// What will break the policy if nothing is done.
     pub warnings: Vec<String>,
+    /// Blocks short of the rules that a mailbox holds staged for their
+    /// target (section 72): *in transit*. They still count as short: a
+    /// staged copy is not a copy.
+    #[serde(default)]
+    pub chunks_in_transit: u64,
+    #[serde(default)]
+    pub bytes_in_transit: u64,
 }
 
 pub fn evaluate(
@@ -235,6 +242,8 @@ pub fn evaluate(
         oldest_verification_days: oldest_ok.map(|t| (now_utc - t) / 86_400),
         reasons,
         warnings,
+        chunks_in_transit: 0,
+        bytes_in_transit: 0,
     }
 }
 

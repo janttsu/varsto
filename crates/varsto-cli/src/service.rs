@@ -83,6 +83,8 @@ pub struct ServiceState {
     pub repair: Option<varsto_core::engine::RepairStatus>,
     /// Forwarding other devices' blocks to the storages: on or off, last run.
     pub forward: Option<varsto_core::engine::ForwardStatus>,
+    /// The mailbox for offline pool disks: what is staged and what it waits for.
+    pub mailbox: Option<varsto_core::mailbox::MailboxStatus>,
     /// Bit-rot check: schedule, last run, passes and damaged files waiting.
     pub scrub: Option<varsto_core::scrub::ScrubStatus>,
     /// Backups: when expiry last ran, the last snapshot taken here, and the
@@ -139,6 +141,12 @@ impl ServiceState {
         // recursion limit.
         v["forward"] = json!(self.forward);
         v["forward_text"] = json!(self.forward.as_ref().map(|f| f.describe()));
+        v["mailbox"] = json!(self.mailbox);
+        v["mailbox_text"] = json!(self
+            .mailbox
+            .as_ref()
+            .filter(|m| !m.groups.is_empty())
+            .map(|m| m.describe()));
         v
     }
     fn summary_base(&self) -> Value {
@@ -446,6 +454,40 @@ impl ServiceState {
             }
         }
         self.forward = Some(engine.forward_status());
+    }
+    /// The mailbox for offline pool disks (section 72): after a sync, and
+    /// whenever a pool disk came or went. Staged objects go first when the
+    /// device needs its space back (checked every 30 seconds). Returns
+    /// whether anything was staged or written.
+    pub fn mailbox_if_due(&mut self, engine: &mut Engine, after_sync: bool) -> bool {
+        let mut worked = false;
+        if !self.paused && engine.mailbox_due(after_sync) {
+            match engine.mailbox_run(&varsto_core::engine::MailboxOptions::service()) {
+                Ok(r) => {
+                    worked = r.staged + r.delivered > 0;
+                    if r.delivered > 0 {
+                        notify(
+                            "Varsto mailbox",
+                            &format!(
+                                "Wrote {} staged object(s) ({}) to {}.",
+                                r.delivered,
+                                varsto_core::util::human_bytes(r.delivered_bytes),
+                                r.delivered_to
+                                    .keys()
+                                    .cloned()
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
+                    }
+                }
+                Err(e) => log::warn!("mailbox failed: {e:#}"),
+            }
+        } else {
+            engine.mailbox_make_room();
+        }
+        self.mailbox = Some(engine.mailbox_status());
+        worked
     }
     /// Before a sync: look after the ledger. A lost or damaged local ledger
     /// (or no ledger anywhere) is rebuilt from the storages at once, before
@@ -1995,10 +2037,13 @@ pub fn run(opts: Options) -> Result<()> {
                 Some(Err(e)) => log::warn!("disk check failed: {e:#}"),
                 None => {}
             }
-            // A disk came, or one has room it had not: go on with the moves.
+            // A disk came, or one has room it had not: the mailbox stages
+            // from it or writes to it, then the moves go on (a move reads
+            // what the mailbox staged).
             let st = &mut *st;
             if let Some(e) = st.engine.as_mut() {
-                let ran = st.service.moves_if_due(e, false);
+                let staged = st.service.mailbox_if_due(e, false);
+                let ran = st.service.moves_if_due(e, false) || staged;
                 st.service.move_jobs = varsto_core::staged_move::list_active(e.home());
                 if ran {
                     st.service.suggest_disks(e);
@@ -2206,6 +2251,7 @@ pub fn run(opts: Options) -> Result<()> {
                         st.service.scrub_if_due(e);
                         st.service.repair_if_due(e);
                         st.service.forward_if_due(e);
+                        st.service.mailbox_if_due(e, true);
                         st.service.drains_if_due(e);
                         st.service.backups_if_due(e);
                         st.service.trash_if_due(e);
@@ -2216,7 +2262,7 @@ pub fn run(opts: Options) -> Result<()> {
                             log::info!("device details not published: {err:#}");
                         }
                     }
-                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, drains, backups, trash, restic, disk suggestions, device details)");
+                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, mailbox, drains, backups, trash, restic, disk suggestions, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),

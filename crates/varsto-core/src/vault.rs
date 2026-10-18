@@ -1547,6 +1547,12 @@ pub struct Config {
         skip_serializing_if = "crate::engine::ForwardSettings::is_default"
     )]
     pub forward: crate::engine::ForwardSettings,
+    /// The mailbox for offline pool disks (`engine::mailbox`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::mailbox::MailboxSettings::is_default"
+    )]
+    pub mailbox: crate::mailbox::MailboxSettings,
 }
 
 /// A backup taken on this device (local, never published).

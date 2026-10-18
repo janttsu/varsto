@@ -19,6 +19,10 @@ During alpha development, storage formats may change without migration paths. On
 4. Update this table before publishing each storage format version, with the release number and reader status.
 5. Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.
 
+## The mailbox for offline pool disks (alpha-0-format.md section 72; storage format unchanged)
+
+New objects `vault/mailbox/<device>/<utc>.enc` (each device's list of staged objects, sealed under the device registry key; the writer deletes its older lists) and `vault/mailbox-leases/<slot>.json` (plain JSON leases as in section 70), the device-local `outbox/` directory (staged ciphertext objects, never a storage), `state/mailbox.json`, `state/mailbox.lock` and a `mailbox` block in `config.json`. Additive fields `chunks_in_transit` and `bytes_in_transit` in policy reports, `waiting_source_*` in move reports and the `source` kind of a move job's `waiting`. No new ledger event: delivered copies are `chunk_stored` claims (and, for move jobs, the `chunk_verified` and `chunk_dropped` events of section 59) as before. Earlier versions ignore the lists and leases, never stage, and read the claims as usual.
+
 ## Forwarding (alpha-0-format.md section 70; storage format unchanged)
 
 New objects `vault/forward-leases/<folder>/<slot>.json` (plain JSON leases, deleted by their holder or once they lapse), a device-local `forward` block in `config.json` and `state/forward.json`. No new ledger event: forwarded copies are `chunk_stored` claims as before. Earlier versions ignore the leases (they never forward, so they never write the same blocks twice through forwarding) and read the claims as usual.

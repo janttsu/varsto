@@ -33,6 +33,7 @@ pub mod import;
 pub mod kem;
 pub mod ledger;
 pub mod logging;
+pub mod mailbox;
 pub mod manifest;
 pub mod media;
 pub mod names;

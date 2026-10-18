@@ -48,6 +48,38 @@ fn ok(home: &Path, args: &[&str]) -> serde_json::Value {
     serde_json::from_str(&stdout).unwrap_or(serde_json::Value::String(stdout))
 }
 
+/// `varsto mailbox`: status, settings and a run without a service.
+#[test]
+fn mailbox_through_the_cli() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("a");
+    ok(&home, &["init", "--name", "laptop"]);
+    let s = ok(&home, &["mailbox"]);
+    assert_eq!(s["enabled"], true);
+    assert_eq!(s["keep_free"], serde_json::json!(["15%", "50000000000"]));
+    let s = ok(
+        &home,
+        &[
+            "mailbox",
+            "set",
+            "--keep-free",
+            "20%",
+            "--keep-free",
+            "100GB",
+        ],
+    );
+    assert_eq!(s["keep_free"], serde_json::json!(["20%", "100000000000"]));
+    let s = ok(&home, &["mailbox", "set", "--off"]);
+    assert_eq!(s["enabled"], false);
+    let (fine, _, err) = varsto(&home, &["mailbox", "set", "--keep-free", "lots"]);
+    assert!(!fine && err.contains("lots"), "{err}");
+    let s = ok(&home, &["mailbox", "set", "--on", "--default-keep-free"]);
+    assert_eq!(s["enabled"], true);
+    assert_eq!(s["keep_free"], serde_json::json!(["15%", "50000000000"]));
+    let r = ok(&home, &["mailbox", "run"]);
+    assert_eq!(r["staged"], 0);
+}
+
 #[test]
 fn two_devices_through_the_cli() {
     let tmp = tempfile::tempdir().unwrap();

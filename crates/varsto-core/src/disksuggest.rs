@@ -16,6 +16,8 @@
 //! | file system | 25 when its last forced check corrected errors, plus `10 × min(age / 365 days, 1)` |
 //! | unseen | `20 × min(days since last seen / 365, 1)` |
 //! | staged move | `65 × min(room / bytes left, 1)`, at least `MIN_SCORE`, when an open move job (`staged_move`) waits for room on the disk's pool |
+//! | mailbox | `60 × (staged bytes docking it writes / all staged bytes waiting for a target)`, at least `MIN_SCORE` (section 72) |
+//! | mailbox source | `45 × (bytes waiting to be read from it / all such bytes)`, at least `MIN_SCORE`; on an attached disk: "keep it attached for about N min" |
 //!
 //! `share` is the share of the disk's bytes whose last check is older than
 //! the pool's `verify_after_days` (never-checked copies included) and `late`
@@ -30,6 +32,7 @@
 //! twice) are never suggested; they are listed with a warning.
 
 use crate::blockdev::FsckVerdict;
+use crate::mailbox::MailboxWait;
 use crate::pool::DiskStatus;
 use crate::staged_move::MoveWait;
 use crate::util;
@@ -49,6 +52,8 @@ pub const W_FSCK_CORRECTED: f64 = 25.0;
 pub const W_FSCK_AGE: f64 = 10.0;
 pub const W_UNSEEN: f64 = 20.0;
 pub const W_MOVE: f64 = 65.0;
+pub const W_MAILBOX: f64 = 60.0;
+pub const W_MAILBOX_SOURCE: f64 = 45.0;
 
 const DAY: i64 = 86_400;
 
@@ -76,7 +81,8 @@ pub const REMIND_EVERY_SECS: i64 = 7 * DAY;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SuggestReason {
     /// "overdue", "only_copy", "fetch", "repair", "fill", "reclaimable",
-    /// "fsck" or "unseen".
+    /// "fsck", "unseen", "move", "mailbox", "mailbox_source" or
+    /// "keep_attached".
     pub kind: String,
     pub points: f64,
     pub text: String,
@@ -134,6 +140,9 @@ pub struct DiskSuggestions {
     /// needed.
     #[serde(default)]
     pub new_disk_needed: Vec<NewDiskNeeded>,
+    /// What the mailbox waits for (section 72).
+    #[serde(default)]
+    pub mailbox: Vec<MailboxWait>,
 }
 
 /// An open move job that no known disk of its pool can continue.
@@ -189,6 +198,18 @@ pub fn reasons(d: &DiskStatus, now: i64) -> Vec<SuggestReason> {
 
 /// `reasons`, with the open move jobs that wait for room on the pool.
 pub fn reasons_with(d: &DiskStatus, now: i64, moves: &[MoveWait]) -> Vec<SuggestReason> {
+    reasons_full(d, now, moves, &[])
+}
+
+/// `reasons_with`, with what the mailbox (section 72) waits for: staged
+/// objects that docking the disk writes, and objects waiting to be read
+/// from it.
+pub fn reasons_full(
+    d: &DiskStatus,
+    now: i64,
+    moves: &[MoveWait],
+    mailbox: &[MailboxWait],
+) -> Vec<SuggestReason> {
     let mut out = Vec::new();
     let mut add = |kind: &str, points: f64, text: String| {
         if points >= 0.05 {
@@ -352,6 +373,51 @@ pub fn reasons_with(d: &DiskStatus, now: i64, moves: &[MoveWait]) -> Vec<Suggest
             );
         }
     }
+    // The mailbox: staged objects waiting for this disk, and objects
+    // waiting to be read from it. The disk that unblocks the most staged
+    // data ranks highest.
+    if !d.retired && !d.failing {
+        for role in ["target", "source"] {
+            let total: u64 = mailbox
+                .iter()
+                .filter(|w| w.role == role)
+                .map(|w| w.bytes)
+                .sum();
+            let mine: Vec<&MailboxWait> = mailbox
+                .iter()
+                .filter(|w| w.role == role && w.pool == d.pool && w.disk_ids.contains(&d.disk_id))
+                .collect();
+            let bytes: u64 = mine.iter().map(|w| w.bytes).sum();
+            if total == 0 || bytes == 0 {
+                continue;
+            }
+            let share = (bytes as f64 / total as f64).min(1.0);
+            let texts: Vec<&str> = mine.iter().map(|w| w.text.as_str()).collect();
+            if role == "target" {
+                add(
+                    "mailbox",
+                    (W_MAILBOX * share).max(MIN_SCORE),
+                    texts.join("; "),
+                );
+            } else if d.attached {
+                let minutes: u64 = mine.iter().map(|w| w.minutes).sum::<u64>().max(1);
+                add(
+                    "keep_attached",
+                    (W_MAILBOX_SOURCE * share).max(MIN_SCORE),
+                    format!(
+                        "keep it attached for about {minutes} min: {} still to read for the mailbox",
+                        util::human_bytes(bytes)
+                    ),
+                );
+            } else {
+                add(
+                    "mailbox_source",
+                    (W_MAILBOX_SOURCE * share).max(MIN_SCORE),
+                    texts.join("; "),
+                );
+            }
+        }
+    }
     // Long unseen.
     if !d.attached {
         if d.last_seen_utc > 0 {
@@ -376,7 +442,17 @@ pub fn suggest(d: &DiskStatus, now: i64) -> DiskSuggestion {
 
 /// Score one disk, counting the open move jobs that wait for room.
 pub fn suggest_with(d: &DiskStatus, now: i64, moves: &[MoveWait]) -> DiskSuggestion {
-    let reasons = reasons_with(d, now, moves);
+    suggest_full(d, now, moves, &[])
+}
+
+/// `suggest_with`, counting what the mailbox waits for.
+pub fn suggest_full(
+    d: &DiskStatus,
+    now: i64,
+    moves: &[MoveWait],
+    mailbox: &[MailboxWait],
+) -> DiskSuggestion {
+    let reasons = reasons_full(d, now, moves, mailbox);
     // `sum` of no f64 is -0.0: start from 0.
     let score: f64 = reasons.iter().fold(0.0, |s, r| s + r.points);
     let summary = if reasons.is_empty() {
@@ -415,9 +491,20 @@ pub fn rank(disks: &[DiskStatus], now: i64) -> DiskSuggestions {
 /// with room for one ranks higher, and a job no known disk can continue
 /// says a new disk is needed.
 pub fn rank_with_moves(disks: &[DiskStatus], now: i64, moves: &[MoveWait]) -> DiskSuggestions {
+    rank_full(disks, now, moves, &[])
+}
+
+/// `rank_with_moves`, with what the mailbox (section 72) waits for.
+pub fn rank_full(
+    disks: &[DiskStatus],
+    now: i64,
+    moves: &[MoveWait],
+    mailbox: &[MailboxWait],
+) -> DiskSuggestions {
     let mut out = DiskSuggestions {
         computed_utc: now,
         moves: moves.to_vec(),
+        mailbox: mailbox.to_vec(),
         ..Default::default()
     };
     for m in moves.iter().filter(|m| m.bytes_left > 0) {
@@ -477,7 +564,7 @@ pub fn rank_with_moves(disks: &[DiskStatus], now: i64, moves: &[MoveWait]) -> Di
             });
             continue;
         }
-        let s = suggest_with(d, now, moves);
+        let s = suggest_full(d, now, moves, mailbox);
         if d.attached {
             out.attached.push(s);
         } else {
@@ -769,6 +856,43 @@ mod tests {
         sort_disks(&mut rows, "free", true).unwrap();
         assert_eq!(order(&rows), ["Bravo", "alpha", "charlie"]);
         assert!(sort_disks(&mut rows, "colour", false).is_err());
+    }
+
+    #[test]
+    fn the_disk_that_unblocks_the_most_staged_data_ranks_first() {
+        let wait = |disk: &str, role: &str, bytes: u64| MailboxWait {
+            pool: "shelf".into(),
+            disk_ids: vec![format!("id-{disk}")],
+            role: role.into(),
+            bytes,
+            minutes: 3,
+            text: format!("{bytes} for {disk}"),
+        };
+        let mut a = disk("A");
+        a.attached = true;
+        let b = disk("B");
+        let c = disk("C");
+        // An overdue disk would win without the mailbox.
+        let d = overdue(disk("D"), 0.1, 200);
+        let mailbox = vec![
+            wait("B", "target", 30 * GB),
+            wait("C", "target", 10 * GB),
+            wait("A", "source", 5 * GB),
+        ];
+        let r = rank_full(&[a, b, c, d], NOW, &[], &mailbox);
+        let order: Vec<&str> = r.ranked.iter().map(|s| s.label.as_str()).collect();
+        assert_eq!(order, ["B", "C", "D"]);
+        let top = r.top.unwrap();
+        assert_eq!(top.reasons[0].kind, "mailbox");
+        assert_eq!(top.reasons[0].points, W_MAILBOX * 0.75);
+        // The docked source says how long to keep it attached.
+        let att = &r.attached[0];
+        assert_eq!(att.label, "A");
+        assert!(att
+            .reasons
+            .iter()
+            .any(|r| r.kind == "keep_attached" && r.text.contains("about 3 min")));
+        assert_eq!(r.mailbox.len(), 3);
     }
 
     #[test]

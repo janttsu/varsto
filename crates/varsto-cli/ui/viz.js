@@ -58,7 +58,7 @@
     repair: "Repairing", verify: "Verifying", scrub: "Bit-rot check", fsck: "Checking storage", data_move: "Moving data", drain: "Draining",
     backup_snapshot: "Backup", restore: "Restoring", sync_scan: "Scanning", restic: "Backup", storage_removal: "Removing storage",
     ledger_rebuild: "Rebuilding ledger", import: "Importing", trash_restore: "Restoring from trash", trash_purge: "Emptying trash", trash_move: "Moving trash",
-    folder_purge: "Deleting folder data", strongroom_convert: "Encrypting folder", history_restore: "Restoring version", forward: "Forwarding", move: "Moving data", p2p: "Peer traffic", relay: "Relay", disk_fill_: "Filling disk"
+    folder_purge: "Deleting folder data", strongroom_convert: "Encrypting folder", history_restore: "Restoring version", forward: "Forwarding", mailbox: "Mailbox", move: "Moving data", p2p: "Peer traffic", relay: "Relay", disk_fill_: "Filling disk"
   };
   function kindText(k) { return T(KINDS[k] || k.replace(/_/g, " ")); }
 

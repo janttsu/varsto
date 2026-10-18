@@ -1704,9 +1704,47 @@
   "Send only: never apply other devices' changes here": "Endast sändning: andra enheters ändringar tillämpas aldrig här",
   "Receive only: never publish changes made here": "Endast mottagning: ändringar som görs här publiceras aldrig",
   "Forwarding blocks to the storages for «{s}»": "För vidare block till lagringsplatserna åt «{s}»",
+  "or": "eller",
+  "from disk": "från disken",
+  "waiting for": "väntar på",
+  "staged on this device": "mellanlagrat på den här enheten",
+  "staged on": "mellanlagrat på",
+  "still to be read from disk": "återstår att läsa från disken",
+  "keep it attached for about": "håll den ansluten i cirka",
+  "waiting for disk": "väntar på att disken",
+  "to be docked": "ska dockas",
+  "Mailbox settings": "Brevlådans inställningar",
+  "Mailbox settings…": "Brevlådans inställningar…",
+  "Staging leaves at least this much free space on this device's disk, after the write: a share or an amount, several separated by ; (the larger counts). Empty: 15 % or 50 GB, whichever is more. Staged copies are the first thing removed when the device needs space.": "Mellanlagringen lämnar minst så här mycket ledigt utrymme på enhetens disk efter skrivningen: en andel eller en mängd, flera åtskilda med ; (den större gäller). Tomt: 15 % eller 50 GB, det som är mest. Mellanlagrade kopior tas bort först när enheten behöver utrymme.",
+  "Keep blocks for disks that are away (mailbox)": "Spara block åt diskar som är borta (brevlåda)",
+  "staged here; keeps": "mellanlagrat här; håller",
+  "free": "ledigt",
+  "Writing staged blocks to the disks and storages docked now": "Skriver mellanlagrade block till de diskar och lagringsplatser som är anslutna nu",
+  "Copying blocks from disk «{s}» to the mailbox": "Kopierar block från disken «{s}» till brevlådan",
+  "Mailbox": "Brevlåda",
   "Forwarding": "Vidarebefordran"
  },
  "patterns": [
+  [
+   "^(.+) or (.+), whichever is more$",
+   "$1 eller $2, det som är mest"
+  ],
+  [
+   "^(\\d+) blocks? \\((.+)\\) in transit to (.+) \\(staged on (.+)\\); staged copies do not count$",
+   "$1 block ($2) på väg till $3 (mellanlagrade på $4); mellanlagrade kopior räknas inte"
+  ],
+  [
+   "^(.+) staged from disk (.+) waits for it: docking it writes them$",
+   "$1 mellanlagrat från disken $2 väntar på den: dockning skriver dem"
+  ],
+  [
+   "^(.+) to copy from it to (.+) \\(about (\\d+) min of reading\\)$",
+   "$1 att kopiera från den till $2 (cirka $3 min läsning)"
+  ],
+  [
+   "^keep it attached for about (\\d+) min: (.+) still to read for the mailbox$",
+   "håll den ansluten i cirka $1 min: $2 återstår att läsa åt brevlådan"
+  ],
   [
    "^Watching (\\d+) folder\\(s\\) · last sync (.+)$",
    "Bevakar $1 mappar · senaste synkronisering $2"

@@ -172,10 +172,13 @@ fn job_text(j: &MoveJob) -> String {
 
 /// The open jobs as lines for `varsto status` (empty when there are none).
 pub fn status_lines(home: &Path) -> Vec<String> {
-    staged_move::list_active(home)
+    let mut out: Vec<String> = staged_move::list_active(home)
         .iter()
         .map(|j| format!("move {}", j.line()))
-        .collect()
+        .collect();
+    // What the mailbox carries for disks that are away (section 72).
+    out.extend(varsto_core::mailbox::MailboxState::load(home).summary_lines());
+    out
 }
 
 pub fn move_cmd(cli: &Cli, home: &Path, cmd: &MoveCmd) -> Result<()> {

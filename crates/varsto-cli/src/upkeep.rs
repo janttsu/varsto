@@ -93,6 +93,100 @@ pub fn forward(cli: &Cli, home: &Path, cmd: &Option<ForwardCmd>) -> Result<()> {
 }
 
 #[derive(Subcommand)]
+pub enum MailboxCmd {
+    /// Show what is staged here or on other devices and what it waits for (the default).
+    Show,
+    /// Run now: stage from the docked disks, write to the targets docked now.
+    Run,
+    /// Turn the mailbox on or off, or change the free space it keeps (only the options given change).
+    Set {
+        /// Turn the mailbox on.
+        #[arg(long, conflicts_with = "off")]
+        on: bool,
+        /// Turn the mailbox off (staged objects stay until their tasks finish).
+        #[arg(long)]
+        off: bool,
+        /// Free space staging leaves on this device's disk, as a share or an
+        /// amount ("15%", "50GB"); repeat it, and the largest counts.
+        #[arg(long)]
+        keep_free: Vec<String>,
+        /// Go back to the default free space (15 % or 50 GB, whichever is more).
+        #[arg(long, conflicts_with = "keep_free")]
+        default_keep_free: bool,
+    },
+}
+
+/// `varsto mailbox`: the mailbox for offline pool disks (spec section 72).
+/// A run goes through the background service when one runs, because it
+/// knows the peers that staged blocks come from.
+pub fn mailbox(cli: &Cli, home: &Path, cmd: &Option<MailboxCmd>) -> Result<()> {
+    use varsto_core::mailbox::{MailboxReport, MailboxStatus};
+    let lines = |s: &MailboxStatus| -> String {
+        let mut out = vec![s.describe()];
+        if s.enabled {
+            out.push(format!(
+                "outbox: {} object(s), {}; keeps {} free on this disk",
+                s.held_objects,
+                varsto_core::util::human_bytes(s.held_bytes),
+                s.keep_free_text
+            ));
+            for g in &s.groups {
+                out.push(format!("  {}", g.text));
+            }
+        }
+        out.join("\n")
+    };
+    match cmd.as_ref().unwrap_or(&MailboxCmd::Show) {
+        MailboxCmd::Show => {
+            let engine = crate::open_engine(home)?;
+            print(cli, &engine.mailbox_status(), lines)?;
+        }
+        MailboxCmd::Run => {
+            if let Some(v) = crate::call_service(home, "/api/mailbox/run", serde_json::json!({}))? {
+                let r: MailboxReport = serde_json::from_value(v)?;
+                print(cli, &r, |r| r.describe())?;
+                return Ok(());
+            }
+            let mut engine = crate::open_engine(home)?;
+            let r = engine.mailbox_run(&varsto_core::engine::MailboxOptions::manual())?;
+            print(cli, &r, |r| {
+                format!(
+                    "{} (no service running: blocks other devices staged were not fetched from them)",
+                    r.describe()
+                )
+            })?;
+        }
+        MailboxCmd::Set {
+            on,
+            off,
+            keep_free,
+            default_keep_free,
+        } => {
+            let mut engine = crate::open_engine(home)?;
+            let mut s = engine.mailbox_settings();
+            if *on {
+                s.enabled = true;
+            }
+            if *off {
+                s.enabled = false;
+            }
+            if !keep_free.is_empty() {
+                s.keep_free = keep_free
+                    .iter()
+                    .map(|k| varsto_core::freespace::MinFree::parse(k))
+                    .collect::<Result<_>>()?;
+            }
+            if *default_keep_free {
+                s.keep_free.clear();
+            }
+            engine.set_mailbox_settings(s)?;
+            print(cli, &engine.mailbox_status(), lines)?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Subcommand)]
 pub enum VerifyCmd {
     /// Show the schedule, the last run and the next one (the default).
     Show,

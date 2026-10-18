@@ -3029,6 +3029,39 @@ fn api_unlocked(
             service.forward = Some(engine.forward_status());
             Ok(serde_json::to_value(r)?)
         }
+        // The mailbox for offline pool disks (section 72).
+        (Method::Get, "/api/mailbox") => Ok(serde_json::to_value(engine.mailbox_status())?),
+        (Method::Post, "/api/mailbox") => {
+            let mut s = engine.mailbox_settings();
+            if let Some(on) = input.get("enabled").and_then(|v| v.as_bool()) {
+                s.enabled = on;
+            }
+            match input.get("keep_free") {
+                Some(Value::Array(list)) => {
+                    s.keep_free = list
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .filter(|v| !v.trim().is_empty())
+                        .map(varsto_core::freespace::MinFree::parse)
+                        .collect::<Result<_>>()?;
+                }
+                Some(Value::String(one)) if one.trim().is_empty() || one == "default" => {
+                    s.keep_free.clear();
+                }
+                Some(Value::String(one)) => {
+                    s.keep_free = vec![varsto_core::freespace::MinFree::parse(one)?];
+                }
+                _ => {}
+            }
+            engine.set_mailbox_settings(s)?;
+            service.mailbox = Some(engine.mailbox_status());
+            Ok(serde_json::to_value(engine.mailbox_status())?)
+        }
+        (Method::Post, "/api/mailbox/run") => {
+            let r = engine.mailbox_run(&varsto_core::engine::MailboxOptions::manual())?;
+            service.mailbox = Some(engine.mailbox_status());
+            Ok(serde_json::to_value(r)?)
+        }
         (Method::Get, "/api/verify") => Ok(serde_json::to_value(engine.verify_status())?),
         (Method::Post, "/api/verify") => {
             let mut sched = engine.verify_schedule().clone();
@@ -3874,6 +3907,60 @@ mod tests {
             p["policy_state"], "violated",
             "default policy wants a cloud copy: {p}"
         );
+    }
+
+    /// `/api/mailbox`: the status and the settings (section 72).
+    #[test]
+    fn the_mailbox_api_shows_the_status_and_changes_the_settings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let (engine, _) = Engine::init(&home, "laptop", "pass phrase 123").unwrap();
+        let mut st = State {
+            home,
+            engine: Some(engine),
+            token: "t".into(),
+            bound: "127.0.0.1:0".into(),
+            traffic: Arc::default(),
+            service: ServiceState::default(),
+            pair: None,
+            link: None,
+        };
+        let v = api(&mut st, Method::Get, "/api/mailbox", "", &json!({})).unwrap();
+        assert_eq!(v["enabled"], true);
+        assert_eq!(v["keep_free"], json!(["15%", "50000000000"]));
+        assert_eq!(v["keep_free_text"], "15 % or 50.0 GB, whichever is more");
+        assert_eq!(v["groups"], json!([]));
+        let v = api(
+            &mut st,
+            Method::Post,
+            "/api/mailbox",
+            "",
+            &json!({"keep_free": ["10GB", "5%"], "enabled": false}),
+        )
+        .unwrap();
+        assert_eq!(v["enabled"], false);
+        assert_eq!(v["keep_free"], json!(["10000000000", "5%"]));
+        assert!(st.service.mailbox.is_some());
+        assert!(api(
+            &mut st,
+            Method::Post,
+            "/api/mailbox",
+            "",
+            &json!({"keep_free": ["lots"]})
+        )
+        .is_err());
+        let v = api(
+            &mut st,
+            Method::Post,
+            "/api/mailbox",
+            "",
+            &json!({"keep_free": "default", "enabled": true}),
+        )
+        .unwrap();
+        assert_eq!(v["keep_free"], json!(["15%", "50000000000"]));
+        let r = api(&mut st, Method::Post, "/api/mailbox/run", "", &json!({})).unwrap();
+        assert_eq!(r["staged"], 0);
+        assert_eq!(r["enabled"], true);
     }
 
     #[test]

@@ -258,6 +258,35 @@ impl Engine {
         jobs::set_state(&self.home, id, state)
     }
 
+    /// The blocks an open job still has to move (planned from the ledger as
+    /// a run would): for the mailbox (section 72), which stages those whose
+    /// only copy is on a docked disk while the target cannot take them.
+    pub(super) fn move_job_pending(&self, job: &MoveJob) -> Result<HashSet<(FolderId, ChunkId)>> {
+        let (rec, _) = self.resolve_folder(&job.folder_id)?;
+        let mreq = MoveRequest {
+            folder: job.folder_id.clone(),
+            from: job.from.clone(),
+            to: job.to.clone(),
+            idle_days: job.idle_days,
+            dry_run: true,
+            confirm_cold_read: job.confirm_cold_read,
+        };
+        let ex = StagedExtras {
+            staged: true,
+            paths: job.paths.clone(),
+            keep_source: job.keep_source,
+            job_id: Some(job.id.clone()),
+            ..Default::default()
+        };
+        let plan = self.plan_move(&rec, &mreq, &ex)?;
+        Ok(plan
+            .items
+            .into_iter()
+            .filter(|i| !i.on_to)
+            .map(|i| (rec.folder_id.clone(), i.chunk))
+            .collect())
+    }
+
     // ----- running -------------------------------------------------------------
 
     /// Run a job once: move what fits now, then stop. A job that waits for
@@ -427,6 +456,24 @@ impl Engine {
                 ),
             });
             j.room_sig = self.room_signature(&to_spec);
+            false
+        } else if report.waiting_source_blocks > 0 {
+            // The only copies are on source disks that are away.
+            let disks = report
+                .waiting_source_disks
+                .iter()
+                .map(|d| format!("«{d}»"))
+                .collect::<Vec<_>>()
+                .join(" or ");
+            j.waiting = Some(Waiting {
+                kind: "source".to_string(),
+                disk: report.waiting_source_disks.first().cloned(),
+                text: format!(
+                    "attach disk {disks} of pool {} to continue the move: {} are only there (the mailbox keeps a copy for the move once it is docked)",
+                    j.from,
+                    util::human_bytes(report.waiting_source_bytes)
+                ),
+            });
             false
         } else {
             true
@@ -648,6 +695,22 @@ impl Engine {
                 let Some(to) = self.config.storages.iter().find(|s| s.name() == j.to) else {
                     return false;
                 };
+                // Waiting for a source disk: ready once one is docked.
+                if let Some(w) = j.waiting.as_ref().filter(|w| w.kind == "source") {
+                    let docked = self
+                        .config
+                        .storages
+                        .iter()
+                        .find(|s| s.name() == j.from && s.is_data_only())
+                        .and_then(|s| self.open_pool(s).ok())
+                        .is_some_and(|p| {
+                            p.disks().into_iter().any(|d| {
+                                w.disk.as_deref().is_none_or(|l| l == d.label)
+                                    && p.mount_of(&d.id).is_some()
+                            })
+                        });
+                    return docked || (after_sync && !to.is_data_only());
+                }
                 if !to.is_data_only() {
                     return after_sync;
                 }

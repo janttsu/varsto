@@ -56,7 +56,7 @@ impl DiskFetchSettings {
     fn link_secs(&self, bytes: u64) -> f64 {
         bytes as f64 * 8.0 / (self.link_mbit_per_sec.max(0.1) * 1e6)
     }
-    fn disk_secs(&self, bytes: u64) -> f64 {
+    pub(super) fn disk_secs(&self, bytes: u64) -> f64 {
         bytes as f64 / (self.disk_mb_per_sec.max(0.1) * 1e6)
     }
 }
