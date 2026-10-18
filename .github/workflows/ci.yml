@@ -268,6 +268,10 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: rclone (the phone's S3 bucket for the screenshot vault)
+        run: |
+          curl -fsS https://rclone.org/install.sh | sudo bash >/dev/null 2>&1 || true
+          rclone version | head -1
       - name: Emulator - install, start, vault, screenshots
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -325,10 +329,11 @@ jobs:
           home="$HOME/Library/Application Support/Varsto"
           bin=smoke/Varsto.app/Contents/Helpers/varsto
           export VARSTO_PASSPHRASE=ci-finder-passphrase-1
-          "$bin" --home "$home" init --name ci-mac >/dev/null
+          init="$("$bin" --home "$home" init --name ci-mac --json)"
+          rw="$(echo "$init" | python3 -c 'import json,re,sys; k=json.load(sys.stdin)["kit"].split("RECOVERY WORDS")[1]; print(" ".join(re.findall(r"\d+\.\s+([a-z]+)", k)))')"
           mkdir -p "$RUNNER_TEMP/storage" "$RUNNER_TEMP/files"
           "$bin" --home "$home" storage add-local box "$RUNNER_TEMP/storage"
-          "$bin" --home "$home" folder add docs "$RUNNER_TEMP/files"
+          VARSTO_RECOVERY_WORDS="$rw" "$bin" --home "$home" folder add docs "$RUNNER_TEMP/files"
           echo "hello from finder" > "$RUNNER_TEMP/files/note.txt"
           echo "second file" > "$RUNNER_TEMP/files/other.txt"
           "$bin" --home "$home" sync

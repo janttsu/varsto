@@ -1897,8 +1897,11 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         }
         (Method::Post, "/api/init") => {
             let (e, key) = Engine::init(&st.home, &s(input, "name")?, &s(input, "passphrase")?)?;
+            // The kit with the vault words and the recovery words, shown once:
+            // a folder's recovery copy (`recovery_words` of /api/folder) needs them.
+            let kit = e.recovery_kit_text()?;
             st.engine = Some(e);
-            Ok(json!({"ok": true, "vault_key": key}))
+            Ok(json!({"ok": true, "vault_key": key, "kit": kit}))
         }
         (Method::Post, "/api/share/request") => {
             let name = opt(input, "name").filter(|n| !n.trim().is_empty());

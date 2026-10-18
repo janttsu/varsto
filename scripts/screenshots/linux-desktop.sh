@@ -25,9 +25,10 @@ xfce4-panel --disable-wm-check >/dev/null 2>&1 &
 sleep 4
 t="$work/tray"; mkdir -p "$t/files" "$t/storage"
 export VARSTO_PASSPHRASE=shots-passphrase-123
-"$bin" --home "$t/home" init --name laptop >/dev/null
+init="$("$bin" --home "$t/home" init --name laptop --json)"
+rw="$(echo "$init" | python3 -c 'import json,re,sys; k=json.load(sys.stdin)["kit"].split("RECOVERY WORDS")[1]; print(" ".join(re.findall(r"\d+\.\s+([a-z]+)", k)))')"
 "$bin" --home "$t/home" storage add-local box "$t/storage" >/dev/null
-"$bin" --home "$t/home" folder add Documents "$t/files" >/dev/null
+VARSTO_RECOVERY_WORDS="$rw" "$bin" --home "$t/home" folder add Documents "$t/files" >/dev/null
 printf 'notes\n' > "$t/files/notes.md"
 "$bin" --home "$t/home" sync >/dev/null
 nohup "$bin" --home "$t/home" tray > "$work/tray.log" 2>&1 &
