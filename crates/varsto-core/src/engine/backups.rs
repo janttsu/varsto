@@ -257,6 +257,7 @@ impl Engine {
             folder_id: FolderId::random(),
             name: name.trim().to_string(),
             key_hex: SecretKey::random().to_hex(),
+            k11_hex: String::new(),
             created_by: me.clone(),
             created_utc: now,
             shared: false,

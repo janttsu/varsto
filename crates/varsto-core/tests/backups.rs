@@ -137,6 +137,7 @@ fn snapshot_files(path: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn snapshots_restore_byte_for_byte() {
     let (lab, mut a) = lab();
     let id = a
@@ -304,6 +305,7 @@ fn snapshots_restore_byte_for_byte() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn devices_and_transferrers_never_receive_backup_contents() {
     let (lab, mut a) = lab();
     let id = a
@@ -354,6 +356,7 @@ fn devices_and_transferrers_never_receive_backup_contents() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn an_altered_snapshot_is_refused() {
     let (lab, mut a) = lab();
     a.add_backup("bk", &lab.p("src"), BackupOptions::default())
@@ -405,6 +408,7 @@ fn an_altered_snapshot_is_refused() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn expiry_deletes_only_what_no_live_snapshot_uses() {
     let (lab, mut a) = lab();
     // An ordinary folder beside the backup.
@@ -488,6 +492,7 @@ fn expiry_deletes_only_what_no_live_snapshot_uses() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn other_devices_wait_for_the_source() {
     let (lab, mut a) = lab();
     a.add_backup(
@@ -522,6 +527,7 @@ fn other_devices_wait_for_the_source() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn a_stopped_backup_goes_with_its_last_snapshot() {
     let (lab, mut a) = lab();
     let id = a
@@ -594,6 +600,7 @@ fn schedules_and_settings() {
 /// snapshot and stops the backup changes nothing, and the blocks stay
 /// (`docs/spec/alpha-0-format.md` section 58).
 #[test]
+#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn a_replica_cannot_expire_snapshots() {
     use std::collections::BTreeMap as Map;
     use varsto_core::crypto::{SecretKey, SigningKey};

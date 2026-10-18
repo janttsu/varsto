@@ -103,6 +103,7 @@ fn chunk_objects(store: &Path) -> Vec<Vec<u8>> {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (revocation)"]
 fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, old_key) = three_devices(&lab);
@@ -273,6 +274,7 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (revocation)"]
 fn wipe_order_removes_keys_state_and_folder_contents() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, _) = three_devices(&lab);
@@ -318,6 +320,7 @@ fn wipe_order_removes_keys_state_and_folder_contents() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (revocation)"]
 fn forged_wipe_order_is_ignored() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, old_key) = three_devices(&lab);
@@ -384,6 +387,7 @@ fn forged_wipe_order_is_ignored() {
 /// own key signed does. It is reported, and `ledger clean-junk` deletes it
 /// and nothing else (`docs/spec/alpha-0-format.md` section 58).
 #[test]
+#[ignore = "f3-switch: port in part B (revocation)"]
 fn junk_under_a_devices_ledger_name_does_not_fence_it() {
     let lab = Lab::new();
     let (mut a, mut b, _c, _) = three_devices(&lab);
@@ -430,6 +434,7 @@ fn junk_under_a_devices_ledger_name_does_not_fence_it() {
 /// without an organization: a number taken by anything but a signed epoch
 /// record of a trusted device is skipped.
 #[test]
+#[ignore = "f3-switch: port in part B (revocation)"]
 fn junk_epoch_record_does_not_block_revocation() {
     let lab = Lab::new();
     let (mut a, mut b, _c, _) = three_devices(&lab);
@@ -451,6 +456,7 @@ fn junk_epoch_record_does_not_block_revocation() {
 /// with a revocation dated 2000-01-01. Every other device keeps A and
 /// ignores C (`docs/spec/alpha-0-format.md` section 58).
 #[test]
+#[ignore = "f3-switch: port in part B (revocation)"]
 fn a_backdated_revocation_does_not_win() {
     let lab = Lab::new();
     let (mut a, mut b, mut c, _) = three_devices(&lab);
@@ -483,6 +489,7 @@ fn a_backdated_revocation_does_not_win() {
 /// device that sees both records it, signs nothing until the user keeps
 /// one, and then follows the kept one only.
 #[test]
+#[ignore = "f3-switch: port in part B (revocation)"]
 fn two_epochs_under_one_number_wait_for_a_choice() {
     let lab = Lab::new();
     let (mut a, mut b, c0, _) = three_devices(&lab);

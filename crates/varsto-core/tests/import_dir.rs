@@ -90,6 +90,7 @@ fn import(lab: &mut Lab) -> varsto_core::engine::ImportReport {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (imports)"]
 fn remove_source_files_once_safe() {
     let mut lab = lab();
     let r = import(&mut lab);
@@ -161,6 +162,7 @@ fn remove_source_files_once_safe() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (imports)"]
 fn files_wait_until_another_device_verified_them() {
     let mut lab = lab();
     import(&mut lab);

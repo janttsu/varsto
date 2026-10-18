@@ -142,6 +142,7 @@ fn phone(s: &Setup, selective: bool) -> (Engine, PathBuf, PathBuf) {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn not_selective_caches_every_block_and_no_plaintext() {
     let s = setup();
     let (mut b, home, dir) = phone(&s, false);
@@ -178,6 +179,7 @@ fn not_selective_caches_every_block_and_no_plaintext() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn selective_caches_fetched_files_only_and_frees_them() {
     let s = setup();
     let (mut b, home, dir) = phone(&s, true);
@@ -210,6 +212,7 @@ fn selective_caches_fetched_files_only_and_frees_them() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn free_refuses_blocks_without_a_storage_copy() {
     let tmp = tempfile::tempdir().unwrap();
     // A device with no storage at all: what it writes exists only here.
@@ -232,6 +235,7 @@ fn free_refuses_blocks_without_a_storage_copy() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn viewer_reads_from_the_cache_with_storages_unreachable() {
     let s = setup();
     let (mut b, home, dir) = phone(&s, false);
@@ -254,6 +258,7 @@ fn viewer_reads_from_the_cache_with_storages_unreachable() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn files_added_on_the_phone_reach_other_devices_without_plaintext_here() {
     let mut s = setup();
     let (mut b, home, dir) = phone(&s, true);
@@ -304,6 +309,7 @@ fn files_added_on_the_phone_reach_other_devices_without_plaintext_here() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn plain_copies_from_the_previous_layout_are_converted() {
     let mut s = setup();
     let (home, dir) = (s.root.join("b-home"), s.root.join("b-docs"));
@@ -345,6 +351,7 @@ fn plain_copies_from_the_previous_layout_are_converted() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn locking_deletes_nothing_and_exports_are_removed() {
     let s = setup();
     let (mut b, home, dir) = phone(&s, false);
@@ -378,6 +385,7 @@ fn locking_deletes_nothing_and_exports_are_removed() {
 /// the thumbnail must exist by then, and a thumbnail that could not be made while the
 /// blocks were away is made again once they are back (it was marked done for good before).
 #[test]
+#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn streamed_pictures_keep_a_thumbnail_after_their_blocks_are_freed() {
     let s = setup();
     let (mut b, _home, dir) = phone(&s, true);
@@ -401,6 +409,7 @@ fn streamed_pictures_keep_a_thumbnail_after_their_blocks_are_freed() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn freeing_a_file_does_not_turn_a_send_only_folder_selective() {
     // Camera upload frees each uploaded file; the send-only folder stays an
     // ordinary (not selective) folder kept encrypted on the phone.

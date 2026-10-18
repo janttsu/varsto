@@ -172,6 +172,56 @@ impl<'a> Membership<'a> {
         self.revoked.contains(device)
     }
 
+    /// Every device removed from the vault (accepted revocations).
+    pub fn revoked_set(&self) -> &BTreeSet<Id16> {
+        &self.revoked
+    }
+
+    /// The Lamport time the next record of this device is stamped after.
+    pub fn lamport(&self) -> u64 {
+        self.lamport
+    }
+
+    /// Stamp the next records after `lamport` (the engine's clock), so
+    /// that a role given now holds for the ledger batches that follow.
+    pub fn observe_lamport(&mut self, lamport: u64) {
+        self.lamport = self.lamport.max(lamport);
+    }
+
+    /// Remove `folder` from the vault: an owner's folder record whose
+    /// `removed` stamp makes every device stop syncing it.
+    pub fn remove_folder(&mut self, folder: &Id16) -> Result<()> {
+        let epoch = self.folder_epochs(folder).current();
+        if !self.registry.is_owner(&self.me, folder, epoch) {
+            bail!("this device is not an owner of the folder");
+        }
+        let stamp = self.next_stamp();
+        let st = self
+            .registry
+            .get(folder)
+            .ok_or_else(|| anyhow!("no folder {}", hex::encode(folder)))?;
+        let rec = FolderRecord {
+            id: *folder,
+            name: st.name.clone(),
+            settings: st.settings.clone(),
+            stamp,
+            creation: None,
+            participants: Vec::new(),
+            denied: Vec::new(),
+            members: Vec::new(),
+            removed: Some(stamp),
+        };
+        let key = self.newest_registry();
+        self.writer().write(
+            &self.ring(),
+            &FolderRegistry::stream(*folder, self.me),
+            None,
+            &key,
+            &rec,
+        )?;
+        self.refresh()
+    }
+
     // ----- reading ---------------------------------------------------------
 
     /// Read every membership record again.
@@ -638,6 +688,15 @@ impl<'a> Membership<'a> {
     /// Publish this device's record (name, K6, K8) under the newest
     /// registry key.
     pub fn enrol(&mut self, name: &str) -> Result<()> {
+        self.enrol_with(name, None)
+    }
+
+    /// `enrol` with the device's system and version in its record.
+    pub fn enrol_with(
+        &mut self,
+        name: &str,
+        details: Option<super::devices::DeviceDetails>,
+    ) -> Result<()> {
         let stamp = self.next_stamp();
         let rec = DeviceRecord {
             device: self.me,
@@ -645,6 +704,7 @@ impl<'a> Membership<'a> {
             sign_pub: self.sign.public().to_bytes(),
             kem_pub: self.kem.public().to_bytes(),
             stamp,
+            details,
         };
         let key = self.newest_registry();
         self.writer().write(
@@ -697,6 +757,7 @@ impl<'a> Membership<'a> {
             participants,
             denied,
             members,
+            removed: None,
         };
         let key = self.newest_registry();
         self.writer().write(
@@ -1004,6 +1065,7 @@ impl<'a> Membership<'a> {
                     sign_pub: k6_public.to_vec(),
                     kem_pub: k8_public.to_vec(),
                     stamp,
+                    details: None,
                 },
                 self.vault_keys.newest_epoch(),
             );

@@ -12,6 +12,15 @@
 //!
 //! Cold storages (F-043) are written but never read without an explicit
 //! confirmation; alpha-0 simply never reads them.
+//!
+//! Storage format 3 (`docs/spec/format-3-design.md`): the ledger is
+//! `ledger3` (`ledger3_ops`), membership and folder keys come from signed
+//! records and grants (`members3`), block places from the folder block map
+//! and manifests are base + delta records (`folder3`). Parts of the engine
+//! that still speak format 2 are marked `f3-switch: part B`; they are
+//! compiled but see an empty format-2 ledger.
+// f3-switch: format-2 paths are kept until part B ports or deletes them.
+#![allow(dead_code)]
 
 use crate::activity;
 use crate::chunking::{Chunker, ChunkerParams};
@@ -55,19 +64,23 @@ mod disk_insert;
 mod disk_suggest;
 mod drain;
 mod fetch;
+mod folder3;
 mod folder_rules;
 mod folder_safety;
 mod forward;
+mod fsck3_ops;
 mod guide;
 mod help;
 mod history;
 mod imports;
+mod ledger3_ops;
 mod ledger_heads;
 mod ledger_recovery;
 mod ledger_upkeep;
 mod local_names;
 mod mailbox;
 mod manifest_upkeep;
+mod members3;
 mod membership;
 #[cfg(feature = "format3")]
 mod membership3_ops;
@@ -86,6 +99,7 @@ mod staged_moves;
 mod storage_directory;
 mod strongroom_ops;
 mod trash;
+mod trash3_io;
 mod verify;
 mod view;
 mod viz;
@@ -550,6 +564,9 @@ pub struct FsckReport {
     /// Whether this device's ledger needs a rebuild (`ledger_recovery`).
     #[serde(default)]
     pub ledger_health: LedgerHealth,
+    /// The format-3 report the counters above are taken from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format3: Option<crate::fsck3::Fsck3Report>,
 }
 
 /// What `disk add` did.
@@ -708,7 +725,11 @@ pub struct Engine {
     keys: Keys,
     config: Config,
     keyring: Keyring,
+    /// The format-2 ledger store, kept empty in a format-3 vault
+    /// (`state/f2-ledger`) for the parts not ported yet (f3-switch: part B).
     ledger: LedgerStore,
+    /// The format-3 ledger, membership and folder records (`ledger3_ops`).
+    f3: ledger3_ops::Core3,
     /// The current logical clock value (in memory, see `tick`).
     clock: Clock,
     /// The end of the reservation written to `clock.json`: values up to it
@@ -1114,7 +1135,12 @@ impl Engine {
         let vault_key_hex = keys.master.to_hex();
         crate::logging::register_key(keys.master.as_bytes());
         let epochs = membership::VaultEpochs::genesis(&keys.master);
-        Self::write_new(home, vault, keys, passphrase, epochs).map(|e| (e, vault_key_hex))
+        let mut engine = Self::write_new(home, vault, keys, passphrase, epochs)?;
+        // The recovery key (K1) is made now and shown once with the kit
+        // (`recovery_kit_text`); folders added in this session are escrowed
+        // under it at once.
+        engine.f3.recovery = Some(crate::membership3::RecoveryKey::generate());
+        Ok((engine, vault_key_hex))
     }
 
     /// Join an existing vault with its vault key, through a storage that holds it.
@@ -1197,13 +1223,38 @@ impl Engine {
         if meta.format_version != crate::FORMAT_VERSION {
             bail!("{}", crate::format_mismatch(meta.format_version));
         }
-        let master = SecretKey::from_hex(vault_key_hex)?;
-        let epochs = membership::discover_epochs(backend.as_ref(), &meta.vault_id, &master)?;
-        util::private_home(home)?;
-        let keys = Keys {
-            master,
-            signer: signer.unwrap_or_else(crypto::SigningKey::generate),
+        let given = SecretKey::from_hex(vault_key_hex)?;
+        let signer = signer.unwrap_or_else(crypto::SigningKey::generate);
+        let kem = crate::kem::DecapsKey::generate();
+        // The vault words are the newest vault key: its epoch is found on
+        // the storage and the chain of vault epoch records gives the older
+        // keys down to K3₀ (an out-of-date key is refused).
+        let vault_keys = {
+            let refs: Vec<&dyn Storage> = vec![backend.as_ref()];
+            let m = crate::membership3::Membership::join(
+                members3::bin(&meta.vault_id)?,
+                &refs,
+                &signer,
+                &kem,
+                given,
+            )?;
+            if m.devices.devices.is_empty() {
+                bail!(
+                    "this vault key does not open the records on storage {}: check the vault words",
+                    storage.name()
+                );
+            }
+            m.vault_keys.clone()
         };
+        let master = vault_keys
+            .k3_0()
+            .cloned()
+            .ok_or_else(|| anyhow!("the vault key of epoch 0 is not reached from these words"))?;
+        let mut epochs = membership::VaultEpochs::genesis(&master);
+        epochs.keys = vault_keys.keys.clone();
+        epochs.kem = Some(kem);
+        util::private_home(home)?;
+        let keys = Keys { master, signer };
         let device_id = ledger::device_id_for(&keys.signer.public());
         let vault = LocalVault {
             format_version: crate::FORMAT_VERSION,
@@ -1381,6 +1432,7 @@ impl Engine {
     ) -> Result<Engine> {
         keys.save(home, passphrase, &vault.vault_id, &vault.device_id)?;
         util::write_json(&home.join("vault.json"), &vault)?;
+        let f3 = ledger3_ops::Core3::open(home, &vault.vault_id)?;
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
@@ -1394,7 +1446,8 @@ impl Engine {
             keys,
             config: Config::default(),
             keyring: Keyring::default(),
-            ledger: LedgerStore::open(&home.join("ledger"))?,
+            ledger: LedgerStore::open(&home.join("state").join("f2-ledger"))?,
+            f3,
             clock: Clock::default(),
             clock_reserved: 0,
             clock_writes: 0,
@@ -1525,6 +1578,7 @@ impl Engine {
             folder_id: token.folder_id.clone(),
             name: token.name.clone(),
             key_hex: token.key_hex.clone(),
+            k11_hex: String::new(),
             created_by: device_id,
             created_utc: util::now_utc(),
             shared: true,
@@ -1621,7 +1675,8 @@ impl Engine {
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
             config: Config::load(home)?,
-            ledger: LedgerStore::open(&home.join("ledger"))?,
+            ledger: LedgerStore::open(&home.join("state").join("f2-ledger"))?,
+            f3: ledger3_ops::Core3::open(home, &vault.vault_id)?,
             clock: clock.clone(),
             // The file holds the end of the last reservation: the values
             // below it may have been handed out before the last exit.
@@ -1654,6 +1709,10 @@ impl Engine {
             platform_override: None,
             version_override: None,
         };
+        // The membership as this device last read it (no storage is read).
+        if let Err(e) = engine.load_members3_local() {
+            log::warn!("membership records kept here could not be read: {e:#}");
+        }
         let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
         engine.pending = pending;
         engine.ledger_alarm = ledger_recovery::Alarm::at_open(&engine, pending_lost);
@@ -1890,14 +1949,9 @@ impl Engine {
         spec: &StorageSpec,
         inner: Box<dyn Storage>,
     ) -> crate::packs::PackStore {
-        self.ensure_pack_keys();
-        // Reads find blocks at the places the ledger gives: a fresh engine
-        // hands them over before its first storage is used.
-        if self.pack_caches.view_generation().is_none() {
-            if let Err(e) = self.view() {
-                log::debug!("packs: no ledger places yet: {e:#}");
-            }
-        }
+        // Reads find blocks at the places the folders' block maps give
+        // (format 3: no pack indexes, no tombstone lists).
+        self.ensure_tables3();
         if let StorageSpec::LocalDir { name, path, .. } = spec {
             crate::packs::debug_registry::root(name, path);
         }
@@ -2140,6 +2194,13 @@ impl Engine {
         };
         if let Some(existing) = backend.get(VaultMeta::STORAGE_KEY)? {
             let existing: VaultMeta = serde_json::from_slice(&existing)?;
+            if existing.format_version != crate::FORMAT_VERSION {
+                self.forget_storages();
+                bail!(
+                    "{}",
+                    crate::storage_holds_other_format(spec.name(), existing.format_version)
+                );
+            }
             if existing.vault_id != meta.vault_id {
                 bail!("storage {} belongs to another vault", spec.name());
             }
@@ -2148,8 +2209,14 @@ impl Engine {
         }
         self.config.storages.push(spec);
         self.config.save(&self.home)?;
+        // This device's record and the batches signed before the first
+        // storage existed (its enrolment) go out now.
         self.publish_registry()?;
-        // The other devices list this storage too (not configured there).
+        if !self.vault.member {
+            self.push_own_batches()?;
+        }
+        // The other devices list this storage too (not configured there;
+        // f3-switch: part B, as a `storage-names` record).
         self.publish_storage_names();
         Ok(())
     }
@@ -2473,11 +2540,33 @@ impl Engine {
             bail!("this device is a member of a shared folder only; it cannot create folders in the owner's vault");
         }
         self.ensure_unique_folder_name(name)?;
+        crate::names::check_display_name(name)?;
         fs::create_dir_all(path)?;
+        // Format 3: the folder record (this device the owner), a random K9₀
+        // granted to this device, and the escrow under the recovery key when
+        // this session holds it (else `status` warns until it is written).
+        let k1 = self.f3.recovery.clone();
+        let id = self
+            .with_enrolled3(|m| m.create_folder(name, BTreeMap::new(), k1.as_ref()))?
+            .ok_or_else(|| {
+                anyhow!("add a storage first: a folder's records live on the vault's storages")
+            })?;
+        let granted = self
+            .f3
+            .members
+            .granted
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow!("the grant of the new folder did not open here"))?;
+        let k9_0 = granted
+            .epochs
+            .get(&0)
+            .ok_or_else(|| anyhow!("the grant of the new folder has no first epoch"))?;
         let rec = FolderRecord {
-            folder_id: FolderId::random(),
+            folder_id: FolderId::from_bytes(&id),
             name: name.to_string(),
-            key_hex: SecretKey::random().to_hex(),
+            key_hex: k9_0.to_hex(),
+            k11_hex: granted.k11.to_hex(),
             created_by: self.vault.device_id.clone(),
             created_utc: util::now_utc(),
             shared: false,
@@ -2513,7 +2602,6 @@ impl Engine {
         });
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
-        self.publish_registry()?;
         self.commit_batch()?;
         Ok(id)
     }
@@ -2554,6 +2642,10 @@ impl Engine {
             .any(|m| m.folder_id == rec.folder_id)
         {
             bail!("folder {} is already attached", rec.name);
+        }
+        // Format 3: a folder opens only with a grant to this device.
+        if !rec.is_strongroom() {
+            self.folder_keys3(&rec)?;
         }
         fs::create_dir_all(path)?;
         self.config.folders.push(FolderMount {
@@ -3038,6 +3130,11 @@ impl Engine {
     /// The record with a usable key: a Strongroom folder must be unlocked.
     fn with_key(&self, rec: &FolderRecord) -> Result<FolderRecord> {
         if !rec.is_strongroom() {
+            // Format 3: a folder this device has no grant for is known by
+            // name only.
+            if rec.key_hex.is_empty() && rec.epoch_keys.is_empty() {
+                self.folder_keys3(rec)?;
+            }
             return Ok(rec.clone());
         }
         match self.unlocked.get(&rec.folder_id) {
@@ -3100,7 +3197,14 @@ impl Engine {
 
     // ----- registry (device and folder records) -----------------------------
 
+    /// Publish this device's device record when the registry lacks it, and
+    /// read the membership (format 3, `members3`).
     fn publish_registry(&mut self) -> Result<()> {
+        self.refresh_members3()
+    }
+
+    /// The format-2 device and folder records (f3-switch: part B deletes it).
+    fn publish_registry2(&mut self) -> Result<()> {
         let rec = self.own_record();
         let reg_key = self.registry_key_now();
         let fr_key = self.folder_record_key_now();
@@ -3142,7 +3246,16 @@ impl Engine {
         Ok(self.devices.devices.len() != before)
     }
 
+    /// Read the membership records: devices, folders, grants to this
+    /// device (format 3, `members3`). Policies, placement, storage
+    /// settings, Strongroom records and device details are format-2
+    /// records still (f3-switch: part B).
     fn pull_registry(&mut self) -> Result<()> {
+        self.refresh_members3()
+    }
+
+    /// The format-2 registry (f3-switch: part B deletes it).
+    fn pull_registry2(&mut self) -> Result<()> {
         let reg_keys = self.registry_keys();
         let fr_keys = self.folder_record_keys();
         let mut changed_devices = false;
@@ -3354,7 +3467,15 @@ impl Engine {
 
     // ----- ledger mailbox ----------------------------------------------------
 
+    /// Seal the events recorded since the last batch into this device's
+    /// next format-3 batch and push it (`ledger3_ops::commit3`).
     fn commit_batch(&mut self) -> Result<Option<u64>> {
+        self.commit3()
+    }
+
+    /// The format-2 batch of the events recorded (f3-switch: part B
+    /// deletes it).
+    fn commit_batch2(&mut self) -> Result<Option<u64>> {
         // Blocks written since: their places into the claims, pack indexes
         // and tombstone lists out (`pack_upkeep`).
         self.settle_packs();
@@ -4010,6 +4131,19 @@ impl Engine {
             self.save_state(&rec.folder_id, &state)?;
             return Ok(report);
         }
+        // Format 3: a viewer of the folder publishes nothing (its records
+        // would be refused by every reader). Keeping its local changes aside
+        // as `share_roles` does: f3-switch: part B.
+        if self
+            .f3
+            .members
+            .role(&self.me3(), &members3::bin(&rec.folder_id)?)
+            == Some(crate::membership3::Role::Viewer)
+        {
+            report.read_only = true;
+            report.batch_seq = self.commit_batch()?;
+            return Ok(report);
+        }
         let (scanned, changed) = match scan.filter(|s| s.folder == rec.folder_id) {
             // The pull of this sync scanned the folder moments ago, and the
             // state it saved carries what it found.
@@ -4022,30 +4156,9 @@ impl Engine {
         report.files_scanned = scanned;
         report.files_changed = changed;
         (report.files_ignored, report.metadata_changed) = self.scan_extra;
-        // Unpublished changes (this scan's, or ones a pull's scan recorded
-        // before it): publish them first.
-        // Only with peers: without them nobody can fetch from this device
-        // before the upload, and the sync keeps to one ledger batch.
-        let has_peers = self.peers.as_ref().is_some_and(|p| !p.is_empty());
-        if has_peers && Manifest::files_hash(&state.files) != state.published_hash {
-            // Tell the other devices about the new files before uploading
-            // them: they fetch the blocks from this device peer to peer while
-            // the storages receive their copies (a large file would otherwise
-            // reach them only once its whole upload is done). A device that
-            // cannot reach this one finds the blocks on the storages later.
-            report.manifest_seq = self.publish_manifest(&rec, &mut state)?;
-            self.ensure_manifest_everywhere(&rec, &state)?;
-            // Now, not at the end of the sync: the other devices learn of the
-            // new manifest from this batch.
-            let cycle = self.cycle.take();
-            let committed = self.commit_batch();
-            self.cycle = cycle;
-            committed?;
-            self.save_state(&rec.folder_id, &state)?;
-            self.refresh_snapshot();
-            self.notify_peers_changed();
-            log::debug!("push {}: file list published before the upload", rec.name);
-        }
+        // Format 3 publishes the file list after the upload, with the map
+        // record of the blocks (publishing it first for peers to fetch from
+        // this device: f3-switch: part B).
         // A folder added with many pictures shows its first thumbnails
         // before the (possibly hours long) upload, not only after it.
         report.thumbnails = self.make_thumbnails(
@@ -4055,13 +4168,24 @@ impl Engine {
             THUMBS_EARLY_PER_PASS,
             THUMBS_EARLY_TIME,
         )?;
-        self.upload_missing(&rec, &root, &state, &mut report)?;
+        // One action (design section 3, "Writer"): packs, then one map
+        // delta listing their members, then the manifest delta and the trash
+        // record, then one batch with `pack_stored` for every (pack,
+        // storage) and `record_published` for every record.
+        let folder = members3::bin(&rec.folder_id)?;
+        let epoch = self.folder_keys(&rec)?.epoch;
+        let written = self.upload_missing(&rec, &root, &state, &mut report)?;
+        let view3 = self.view3()?;
+        self.publish_map3(&folder, epoch, &written, &view3)?;
         report.thumbnails +=
             self.make_thumbnails(&rec, &root, &mut state, THUMBS_PER_PASS, THUMBS_PASS_TIME)?;
-        if let Some(seq) = self.publish_manifest(&rec, &mut state)? {
+        if let Some(seq) = self.publish_manifest3(&folder, epoch, &state)? {
             report.manifest_seq = Some(seq);
+            state.published_seq = seq;
+            state.published_hash = Manifest::files_hash(&state.files);
+            // This device's own versions enter its change history as published.
+            let _ = self.history_from_own(&rec, &state, util::now_utc());
         }
-        self.ensure_manifest_everywhere(&rec, &state)?;
         // Deletions found by this scan, restores and purges reach the
         // other devices' trash.
         self.trash_publish(&rec, util::now_utc())?;
@@ -4074,70 +4198,57 @@ impl Engine {
     /// already show on every storage. Files whose chunks are all known are
     /// skipped without reading them; the others are re-chunked (chunking and
     /// encryption are deterministic, so the objects are identical).
+    /// Write the blocks of the current files that a target storage lacks
+    /// (no live place of the block's object on it, design section 3,
+    /// "Dedup for a writer") into packs, one per target set, and return the
+    /// packs written for the map record of the push. Files whose blocks are
+    /// all held are skipped without reading them; the others are chunked
+    /// again (chunking and encryption are deterministic, so the objects are
+    /// identical).
     fn upload_missing(
         &mut self,
         rec: &FolderRecord,
         root: &Path,
         state: &FolderState,
         report: &mut PushReport,
-    ) -> Result<()> {
-        let storages = self.open_storages(true)?;
+    ) -> Result<Vec<crate::blockmap::WrittenPack>> {
+        // Transferrers take part in format 3 through `held` (f3-switch:
+        // part B); they are not written by a push here.
+        let storages: OpenStorages = self
+            .open_storages(true)?
+            .into_iter()
+            .filter(|(s, _)| !s.is_carrier())
+            .collect();
         if storages.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
+        let view3 = self.view3()?;
+        let table = self.table3(&members3::bin(&rec.folder_id)?)?;
+        // Quotas count from the format-2 view (empty here; f3-switch: part
+        // B counts the size classes of the packs claimed).
         let view = self.view()?;
         let fk = self.folder_keys(rec)?;
         let folder_id = rec.folder_id.clone();
-        let me = self.vault.device_id.clone();
-        let carrier_need = self.carrier_destinations(&view, &folder_id);
         let targets = self.write_targets(rec);
         // Storages with a quota take what fits; the rest goes to the other
         // storages, or waits here for the next push.
         let gate = self.quota_gate(&view);
-        // A backup goes to its storages only (never a transferrer), and
-        // blocks dropped by an expiry are written again when a new snapshot
-        // uses them.
-        let backup = rec.is_backup();
+        // (chunk id, plaintext length, epoch) of every object written.
+        let mut info: HashMap<crate::ledger3::ObjectBin, crate::blockmap::ChunkInfo> =
+            HashMap::new();
         let missing_on = |cref: &ChunkRef| -> Vec<String> {
-            // The ledger record must be for this very object: after a key
-            // change the same chunk id can stand for two objects.
-            let known = view
-                .locate(&folder_id, &cref.chunk)
-                .filter(|r| r.object == cref.object);
-            let held_elsewhere = known
-                .map(|r| r.devices.iter().any(|d| d != &me))
-                .unwrap_or(false);
+            let Ok(object) = crate::storages3::object_bin(&cref.object) else {
+                return Vec::new();
+            };
+            let held = {
+                let t = table.read().unwrap_or_else(|e| e.into_inner());
+                crate::storages3::block_copies(&view3, &*t, &object)
+            };
             storages
                 .iter()
-                .filter(|(spec, _)| {
-                    !known
-                        .map(|r| r.storages.contains_key(spec.name()))
-                        .unwrap_or(false)
-                })
-                // The folder's placement, and blocks moved away stay away.
-                .filter(|(spec, _)| {
-                    if backup {
-                        !spec.is_carrier() && targets.wants(spec.name(), None)
-                    } else {
-                        targets.wants(spec.name(), known)
-                    }
-                })
-                // A carrier only takes what no other device has yet (F-048),
-                // or, with destinations, what one of them still lacks.
-                .filter(|(spec, _)| {
-                    if !spec.is_carrier() {
-                        return true;
-                    }
-                    match carrier_need.get(spec.name()) {
-                        Some(targets) => {
-                            !targets.is_empty()
-                                && known
-                                    .map(|r| targets.iter().any(|t| !r.devices.contains(t)))
-                                    .unwrap_or(true)
-                        }
-                        None => !held_elsewhere,
-                    }
-                })
+                .filter(|(spec, _)| !held.contains(spec.name()))
+                // The folder's placement.
+                .filter(|(spec, _)| targets.wants(spec.name(), None))
                 .map(|(spec, _)| spec.name().to_string())
                 .collect()
         };
@@ -4327,6 +4438,12 @@ impl Engine {
                         if targets.is_empty() {
                             continue;
                         }
+                        if let (Ok(o), Ok(c)) = (
+                            crate::storages3::object_bin(&expected.object),
+                            crate::storages3::object_bin(&expected.chunk),
+                        ) {
+                            info.insert(o, (c, expected.size as u32, expected.epoch));
+                        }
                         let job = UploadJob {
                             targets,
                             chunk: expected.chunk.clone(),
@@ -4382,6 +4499,12 @@ impl Engine {
                     if targets.is_empty() {
                         continue;
                     }
+                    if let (Ok(o), Ok(c)) = (
+                        crate::storages3::object_bin(&object),
+                        crate::storages3::object_bin(&chunk_id),
+                    ) {
+                        info.insert(o, (c, expected.size as u32, expected.epoch));
+                    }
                     let job = UploadJob {
                         targets,
                         chunk: chunk_id,
@@ -4406,10 +4529,33 @@ impl Engine {
                 report.storages_full.push(msg);
             }
         }
+        // The packs written, for the map record of this push.
+        // Packs written in this process by anything but this push (part B
+        // writers that make no map record yet) are left out: their blocks
+        // are written again where a target lacks them.
+        let mut per_storage = Vec::new();
+        for (spec, backend) in &storages {
+            let new: Vec<crate::packs::NewPack> = backend
+                .take_new_packs()
+                .into_iter()
+                .filter(|p| {
+                    p.members.iter().all(|(o, _)| {
+                        crate::storages3::object_bin(&ObjectName::from_hex(o).unwrap_or_default())
+                            .is_ok_and(|b| info.contains_key(&b))
+                    })
+                })
+                .collect();
+            if !new.is_empty() {
+                per_storage.push((spec.name().to_string(), new));
+            }
+        }
         if let Some(e) = first_error {
+            // Packs written before the failure are claimed by nobody: the
+            // next push writes their blocks again and garbage collection
+            // takes the orphans after 7 days (design section 3).
             return Err(e);
         }
-        Ok(())
+        crate::blockmap::written_packs(&per_storage, &|o| info.get(o).copied())
     }
 
     /// Encrypted thumbnails for image and video files that have none yet (F-046).
@@ -4899,9 +5045,107 @@ impl Engine {
             }
         }
 
-        // Newest manifest per other device, across storages: only what the
-        // ledger announced since the last applied one (`manifest_upkeep`).
-        let newest = self.newest_manifests(&rec.folder_id, &state.last_seen, &storages)?;
+        // Format 3: the map and manifest records the ledger announced past
+        // what was applied, accepted by the record rule (a viewer's or an
+        // untrusted device's manifests never count); the paths each writer
+        // changed are merged.
+        let folder3 = members3::bin(&rec.folder_id)?;
+        let view3 = self.view3()?;
+        let (manifests, changed) = self.pull_folder_records3(&folder3, &view3)?;
+        let me3 = self.me3();
+        for (dev3, paths) in changed {
+            if dev3 == me3 {
+                continue;
+            }
+            let Some(v) = manifests.views.get(&dev3) else {
+                continue;
+            };
+            let dev = DeviceId::from_bytes(&dev3);
+            let states: Vec<(String, FileState)> = paths
+                .iter()
+                .filter_map(|p| v.files.get(p))
+                .map(|e| (e.path.clone(), e.to_state()))
+                .collect();
+            let mut entries: Vec<(&String, &FileState)> =
+                states.iter().map(|(p, f)| (p, f)).collect();
+            entries.sort_by(|a, b| b.1.mtime.cmp(&a.1.mtime).then(a.0.cmp(b.0)));
+            if send_only {
+                for (path, remote) in &entries {
+                    if !matches!(
+                        manifest::merge(state.files.get(*path), remote),
+                        Merge::KeepLocal
+                    ) {
+                        state.not_applied.insert((*path).clone(), (*remote).clone());
+                    }
+                }
+                report.manifests_applied += 1;
+                state.last_seen.insert(dev, v.seq);
+                continue;
+            }
+            // Too many deletions at once: held (the writer's view stays
+            // applied in the records, its changes wait for the user).
+            if let Some(pause) = self.hold_remote_deletions(&rec, &root, &mut state, &dev, &entries)
+            {
+                self.prefetched.clear();
+                self.commit_batch()?;
+                self.save_state(&rec.folder_id, &state)?;
+                return Err(pause.into());
+            }
+            report.manifests_applied += 1;
+            let fetch_ahead = !encrypted_here && !self.mount_is_selective(&rec.folder_id);
+            let mut ahead_from = 0;
+            for (i, (path, remote)) in entries.iter().enumerate() {
+                if fetch_ahead && i >= ahead_from {
+                    ahead_from = self.prefetch_small(&entries, i, &state, &storages);
+                }
+                if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
+                    continue;
+                }
+                self.merge_one(
+                    &rec,
+                    &fk,
+                    &root,
+                    &mut state,
+                    path,
+                    remote,
+                    &storages,
+                    &mut report,
+                )?;
+            }
+            state.last_seen.insert(dev, v.seq);
+            self.prefetched.clear();
+        }
+        // The change history of section 57 is fed from manifests (format 2:
+        // `history_from_manifest`; f3-switch: part B feeds it from the
+        // manifest deltas).
+        if encrypted_here {
+            self.cache_wanted(&rec, &fk, &mut state, &storages, &mut report)?;
+        }
+        self.commit_batch()?;
+        self.save_state(&rec.folder_id, &state)?;
+        Ok(report)
+    }
+
+    /// The format-2 manifest pull of `pull_inner` (f3-switch: part B
+    /// deletes it).
+    #[allow(clippy::too_many_arguments)]
+    fn pull_manifests2(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        root: &Path,
+        state: &mut FolderState,
+        storages: &OpenStorages,
+        ignore: &mut Option<IgnoreMatcher>,
+        send_only: bool,
+        encrypted_here: bool,
+        report: &mut PullReport,
+    ) -> Result<PullReport> {
+        let mut state = std::mem::take(state);
+        let mut ignore = std::mem::take(ignore);
+        let mut report = std::mem::take(report);
+        let (rec, fk, root, storages) = (rec.clone(), fk, root.to_path_buf(), storages);
+        let newest = self.newest_manifests(&rec.folder_id, &state.last_seen, storages)?;
 
         // A revoked device's manifests count only up to the last one its
         // accepted ledger batches announced.
@@ -4922,7 +5166,7 @@ impl Engine {
         // Change history (`changes_ops`): started once from what is held,
         // then fed by every manifest taken. Never in the way of syncing.
         let mut hist = self.open_history(&rec.folder_id);
-        let _ = self.history_backfill(&mut hist, &rec, &state, &storages);
+        let _ = self.history_backfill(&mut hist, &rec, &state, storages);
         for (dev, (seq, idx)) in newest {
             if !self.share_manifest_source_ok(&rec, &dev) {
                 // A device that is not a participant of the shared folder.
@@ -5020,7 +5264,7 @@ impl Engine {
             let mut ahead_from = 0;
             for (i, (path, remote)) in entries.iter().enumerate() {
                 if fetch_ahead && i >= ahead_from {
-                    ahead_from = self.prefetch_small(&entries, i, &state, &storages);
+                    ahead_from = self.prefetch_small(&entries, i, &state, storages);
                 }
                 if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
                     continue;
@@ -5030,12 +5274,12 @@ impl Engine {
                 }
                 self.merge_one(
                     &rec,
-                    &fk,
+                    fk,
                     &root,
                     &mut state,
                     path,
                     remote,
-                    &storages,
+                    storages,
                     &mut report,
                 )?;
             }
@@ -5047,7 +5291,7 @@ impl Engine {
         }
         let _ = hist.save();
         if encrypted_here {
-            self.cache_wanted(&rec, &fk, &mut state, &storages, &mut report)?;
+            self.cache_wanted(&rec, fk, &mut state, storages, &mut report)?;
         }
         self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
@@ -5949,7 +6193,8 @@ impl Engine {
             .get(path)
             .cloned()
             .ok_or_else(|| anyhow!("unknown file {path}"))?;
-        let view = self.view()?;
+        // Format 3: a live place of every block on a storage that keeps it.
+        let view = self.view3()?;
         let durable: HashSet<String> = self
             .config
             .storages
@@ -5958,14 +6203,10 @@ impl Engine {
             .map(|s| s.name().to_string())
             .collect();
         for c in &file.chunks {
-            let ok = view
-                .locate(&rec.folder_id, &c.chunk)
-                .map(|r| {
-                    r.storages
-                        .keys()
-                        .any(|k| durable.contains(k) || k.starts_with("replica:"))
-                })
-                .unwrap_or(false);
+            let ok = self
+                .block_copies3(&view, &rec.folder_id, &c.object)
+                .iter()
+                .any(|k| durable.contains(k) || k.starts_with("replica:"));
             if !ok {
                 bail!("{path} is not fully stored elsewhere yet; sync first");
             }
@@ -6285,6 +6526,7 @@ impl Engine {
             folder_id: folder_id.clone(),
             name: name.to_string(),
             key_hex: String::new(),
+            k11_hex: String::new(),
             created_by: self.vault.device_id.clone(),
             created_utc: util::now_utc(),
             shared: false,
@@ -6599,13 +6841,31 @@ impl Engine {
             .collect();
         let mut packed = BTreeMap::new();
         if !dirs.is_empty() {
-            for rec in self.view()?.chunks.values() {
-                for (storage, loc) in &rec.storages {
-                    if let (Some(root), Some(p)) = (dirs.get(storage.as_str()), &loc.pack) {
-                        packed.insert(
-                            rec.object.clone(),
-                            (root.join(crate::packs::pack_key(&p.pack)), p.offset, p.len),
-                        );
+            // Format 3: places from the folders' block maps, packs held
+            // there by the pack-level view.
+            let view3 = self.view3()?;
+            for f in folder_keys.keys() {
+                let Ok(id) = members3::bin(f) else { continue };
+                let Ok(table) = self.table3(&id) else {
+                    continue;
+                };
+                let t = table.read().unwrap_or_else(|e| e.into_inner());
+                for row in t.scan().flatten() {
+                    if !crate::blockmap::place_is_live(&t, &row).unwrap_or(false) {
+                        continue;
+                    }
+                    for (storage, root) in &dirs {
+                        if view3.is_held(&row.place.pack, storage) {
+                            packed.insert(
+                                ObjectName::from_bytes(&row.object),
+                                (
+                                    root.join(crate::packs::pack_key(&hex::encode(row.place.pack))),
+                                    u64::from(row.place.offset),
+                                    u64::from(row.place.len),
+                                ),
+                            );
+                            break;
+                        }
                     }
                 }
             }
@@ -7195,17 +7455,20 @@ impl Engine {
         };
         let reports = self.policy_reports(&view, util::now_utc(), state_of).ok();
         let mut protection = self.protection_with(&view, reports.as_deref(), state_of)?;
+        // Format 3: copies of blocks from the pack-level view and the
+        // folders' block maps.
+        let view3 = self.view3()?;
         let mut folders = Vec::new();
         for (rec, mount) in self.folders() {
             let state = state_of(&rec.folder_id)?;
-            let mut chunks = BTreeSet::new();
+            let mut chunks: BTreeMap<ChunkId, ObjectName> = BTreeMap::new();
             let mut bytes = 0u64;
             let mut files = 0u64;
             for f in state.files.values().filter(|f| !f.deleted) {
                 files += 1;
                 bytes += f.size;
                 for c in &f.chunks {
-                    chunks.insert(c.chunk.clone());
+                    chunks.insert(c.chunk.clone(), c.object.clone());
                 }
             }
             // Blocks of files that are on this device (not placeholders).
@@ -7226,19 +7489,27 @@ impl Engine {
                 .filter(|s| s.is_carrier())
                 .map(|s| s.name())
                 .collect();
+            let table = match members3::bin(&rec.folder_id) {
+                Ok(f) if !rec.key_hex.is_empty() || !rec.epoch_keys.is_empty() => {
+                    Some(self.table3(&f)?)
+                }
+                _ => None,
+            };
             let mut without = 0u64;
             let mut verified = 0u64;
             let mut blocks = BlockCounts::default();
-            for c in &chunks {
-                let rec_c = view.locate(&rec.folder_id, c);
-                let kept: Vec<(&String, &ledger::Location)> = rec_c
-                    .map(|r| {
-                        r.storages
-                            .iter()
-                            .filter(|(n, _)| !carriers.contains(n.as_str()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+            for (c, object) in &chunks {
+                let kept: Vec<crate::storages3::BlockCopy> =
+                    match (&table, crate::storages3::object_bin(object)) {
+                        (Some(t), Ok(obj)) => {
+                            let t = t.read().unwrap_or_else(|e| e.into_inner());
+                            crate::storages3::block_copy_details(&view3, &*t, &obj)
+                                .into_iter()
+                                .filter(|b| !carriers.contains(b.storage.as_str()))
+                                .collect()
+                        }
+                        _ => Vec::new(),
+                    };
                 let is_here = here.contains(c);
                 if kept.is_empty() {
                     without += 1;
@@ -7249,7 +7520,7 @@ impl Engine {
                     }
                     continue;
                 }
-                let checked = kept.iter().any(|(n, l)| l.independently_verified(n));
+                let checked = kept.iter().any(|b| b.independently_verified);
                 if checked {
                     verified += 1;
                 }
@@ -7380,12 +7651,12 @@ impl Engine {
                 .collect(),
             member: self.vault.member,
             folders,
-            ledger_batches: view.batches,
+            ledger_batches: view3.batches,
             lamport: self.clock.lamport,
-            forked_devices: view
+            forked_devices: view3
                 .forked
                 .iter()
-                .map(|d| d.to_string())
+                .map(hex::encode)
                 .chain(if self.forked_self {
                     Some(self.vault.device_id.to_string())
                 } else {
@@ -7408,6 +7679,80 @@ impl Engine {
     }
 
     fn fsck_inner(&mut self, verify_content: bool) -> Result<FsckReport> {
+        // Format 3: `fsck3` over the pack-level view, the block maps and the
+        // manifests; the format-2 counters are filled from its report.
+        let f = self.fsck3(verify_content)?;
+        let view3 = self.view3()?;
+        let mut damage = Vec::new();
+        for (i, kind) in f
+            .missing_copies
+            .iter()
+            .map(|i| (i, repair::DamageKind::Missing))
+            .chain(
+                f.corrupt_copies
+                    .iter()
+                    .chain(&f.wrong_length)
+                    .map(|i| (i, repair::DamageKind::Corrupt)),
+            )
+        {
+            let mut pack = [0u8; 32];
+            let _ = hex::decode_to_slice(&i.pack, &mut pack);
+            let folder = view3
+                .pack_folder(&pack)
+                .map(|f| FolderId::from_bytes(&f))
+                .unwrap_or_else(|| FolderId::from_bytes(&[0; 16]));
+            damage.push(repair::Damage {
+                folder,
+                chunk: ObjectName::from_bytes(&pack),
+                object: ObjectName::from_bytes(&pack),
+                storage: i.storage.clone(),
+                kind,
+                found_by: "fsck".into(),
+                found_utc: util::now_utc(),
+                retry_utc: 0,
+                reason: None,
+            });
+        }
+        let cold: Vec<String> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| s.is_cold())
+            .map(|s| s.name().to_string())
+            .collect();
+        let mut report = FsckReport {
+            chunks_referenced: f.blocks.referenced,
+            chunks_with_storage_copy: f.blocks.live,
+            chunks_verified_elsewhere: 0,
+            chunks_claimed_only: 0,
+            chunks_missing: f
+                .damaged_files
+                .iter()
+                .map(|d| format!("{}/{}", d.folder, d.path))
+                .collect(),
+            claims_without_object: f.missing_copies.len() as u64,
+            objects_unreferenced: f.orphans.len() as u64,
+            objects_verified_now: f.copies_verified_now,
+            objects_corrupt: f
+                .corrupt_copies
+                .iter()
+                .chain(&f.wrong_length)
+                .map(|i| format!("{}@{}", i.pack, i.storage))
+                .collect(),
+            forked_devices: f.forked_devices.clone(),
+            storages_skipped_cold: cold,
+            repairs_queued: damage.len() as u64,
+            format3: Some(f),
+            ..Default::default()
+        };
+        self.queue_damage(damage)?;
+        let _ = self.ledger_lost_everywhere(false);
+        report.ledger_health = self.ledger_health();
+        Ok(report)
+    }
+
+    /// The format-2 fsck (f3-switch: part B deletes it).
+    fn fsck_inner2(&mut self, verify_content: bool) -> Result<FsckReport> {
         let (mut report, found) = self.fsck_scan(verify_content)?;
         let mut damage = Vec::new();
         repair::merge_damage(&mut damage, found);

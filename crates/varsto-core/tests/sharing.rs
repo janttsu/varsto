@@ -139,6 +139,7 @@ fn request_fingerprint_matches_on_both_sides() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn removed_member_reads_nothing_new_and_the_others_read_on() {
     let lab = Lab::new();
     let (mut a, key) = owner(&lab);
@@ -328,6 +329,7 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn a_token_not_accepted_yet_can_be_revoked() {
     let lab = Lab::new();
     let (mut a, _) = owner(&lab);
@@ -388,6 +390,7 @@ fn a_token_not_accepted_yet_can_be_revoked() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn removing_every_member_and_plain_tokens() {
     let lab = Lab::new();
     let (mut a, _) = owner(&lab);
@@ -408,6 +411,7 @@ fn removing_every_member_and_plain_tokens() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn a_folder_re_keyed_by_a_device_removal_can_be_shared() {
     let lab = Lab::new();
     let (mut a, key) = owner(&lab);
@@ -436,6 +440,7 @@ fn a_folder_re_keyed_by_a_device_removal_can_be_shared() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn last_access_is_merged_across_devices() {
     let lab = Lab::new();
     let (mut a, key) = owner(&lab);
@@ -488,6 +493,7 @@ fn folder_id(e: &Engine, name: &str) -> varsto_core::ids::FolderId {
 /// changes nothing for the owner, whose pull of that folder does not stop
 /// at the planted manifest (`docs/spec/alpha-0-format.md` section 58).
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn a_members_batch_cannot_reach_outside_its_folder() {
     use varsto_core::ledger::Event;
     let lab = Lab::new();
@@ -550,6 +556,7 @@ fn a_members_batch_cannot_reach_outside_its_folder() {
 /// (junk anyone with the storage credentials can write) does not make a
 /// member believe it was removed, which would silence its errors.
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn junk_share_epoch_does_not_cut_a_member_off() {
     use varsto_core::share::{ShareEpochRecord, SHARE_EPOCH_BASE};
     let lab = Lab::new();

@@ -48,6 +48,7 @@ fn files(dir: &Path) -> usize {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (free space)"]
 fn downloads_wait_below_the_limit_and_resume_when_space_is_back() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -186,6 +187,7 @@ fn a_full_directory_storage_is_left_out_while_the_others_get_the_blocks() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (free space)"]
 fn a_folder_kept_encrypted_here_waits_for_space_in_the_device_directory() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

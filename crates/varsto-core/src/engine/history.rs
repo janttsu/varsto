@@ -266,7 +266,9 @@ impl Engine {
         {
             return Ok(());
         }
-        let view = self.view()?;
+        // Format 3: a block is readable when a storage holds a live place
+        // of it (block map and pack-level view).
+        let view = self.view3()?;
         let me = self.vault.device_id.clone();
         let now = util::now_utc();
         let mut out = Vec::new();
@@ -275,8 +277,9 @@ impl Engine {
                 continue;
             }
             let readable = prev.chunks.iter().all(|c| {
-                view.locate(&rec.folder_id, &c.chunk)
-                    .is_some_and(|r| r.object == c.object && !r.storages.is_empty())
+                !self
+                    .block_copies3(&view, &rec.folder_id, &c.object)
+                    .is_empty()
                     || self.cached_object(&c.object).is_some()
             });
             if !readable {

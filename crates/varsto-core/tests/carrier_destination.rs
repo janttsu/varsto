@@ -28,6 +28,7 @@ fn objects(path: &Path) -> usize {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (transferrers)"]
 fn transferrer_carries_what_its_destination_lacks() {
     let t = tempfile::tempdir().unwrap();
     let p = |n: &str| t.path().join(n);

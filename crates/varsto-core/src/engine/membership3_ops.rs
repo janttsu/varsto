@@ -19,9 +19,7 @@
 
 use super::*;
 use crate::membership3::escrow::MissingEscrow;
-use crate::membership3::{
-    EpochStart, Membership, PendingRequest, RecoveryKey, Removed, Role, VaultKeys,
-};
+use crate::membership3::{EpochStart, Membership, PendingRequest, RecoveryKey, Removed, Role};
 use crate::record::{id16, Id16};
 use std::collections::BTreeMap;
 
@@ -204,40 +202,22 @@ impl Engine {
         if self.vault.member {
             bail!("this device is a member of a shared folder only; it has no folder membership of its own");
         }
-        if self.epochs.kem.is_none() {
-            if !enrol {
-                return Ok(None);
-            }
-            self.epochs.kem = Some(crate::kem::DecapsKey::generate());
-            self.save_epochs()?;
+        if enrol {
+            return self.with_enrolled3(f);
         }
-        let vault = id16(&self.vault.vault_id)
-            .ok_or_else(|| anyhow!("the vault id is not 16 bytes of hex"))?;
-        let name = self.vault.device_name.clone();
-        let open = self.metadata_storages(true)?;
-        let refs: Vec<&dyn crate::storage::Storage> = open.iter().map(|(_, b)| &**b).collect();
-        let kem = self.epochs.kem.as_ref().expect("made above");
-        let mut m = Membership::open(
-            vault,
-            &refs,
-            &self.keys.signer,
-            kem,
-            VaultKeys {
-                keys: self.epochs.keys.clone(),
-            },
-        )?;
-        if m.devices.get(&m.me).is_none() {
-            if !enrol {
-                return Ok(None);
-            }
-            m.enrol(&name)?;
-        }
-        f(&mut m).map(Some)
+        Ok(self
+            .with_members3(|m| {
+                if m.devices.get(&m.me).is_none() {
+                    return Ok(None);
+                }
+                f(m).map(Some)
+            })?
+            .flatten())
     }
 
-    fn with_enrolled3<R>(&mut self, f: impl FnOnce(&mut Membership<'_>) -> Result<R>) -> Result<R> {
+    fn enrolled3<R>(&mut self, f: impl FnOnce(&mut Membership<'_>) -> Result<R>) -> Result<R> {
         self.with_membership3(true, f)?
-            .ok_or_else(|| anyhow!("this device could not be enrolled"))
+            .ok_or_else(|| anyhow!("this device could not be enrolled: add a storage first"))
     }
 
     /// Create a folder in the membership records (this device the owner).
@@ -246,7 +226,7 @@ impl Engine {
     /// comes to be. Returns the folder id (hex).
     pub fn f3_folder_create(&mut self, name: &str, k1: Option<&RecoveryKey>) -> Result<String> {
         crate::names::check_display_name(name)?;
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             if m.registry.folders.values().any(|s| s.name == name) {
                 bail!("a folder named {name} exists already");
             }
@@ -262,7 +242,7 @@ impl Engine {
         if role == Role::Owner {
             bail!("a request asks for editor or viewer; an owner makes you an owner afterwards");
         }
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let id = find_folder(m, folder)?;
             if m.registry.get(&id).and_then(|s| s.role(&m.me)).is_some() {
                 bail!("this device is a participant of the folder already");
@@ -286,7 +266,7 @@ impl Engine {
 
     /// This device's own fingerprint: the six words an owner compares.
     pub fn f3_own_fingerprint(&mut self) -> Result<String> {
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let me = m.devices.get(&m.me).cloned().expect("enrolled");
             Ok(crate::membership3::fingerprint(&me.sign_pub, &me.kem_pub))
         })
@@ -334,7 +314,7 @@ impl Engine {
         fingerprint: Option<&str>,
     ) -> Result<FolderMembers> {
         let role = role.map(parse_role).transpose()?;
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let id = find_folder(m, folder)?;
             let dev = find_device(m, device)?;
             let pending = m.list_requests(&id)?;
@@ -361,7 +341,7 @@ impl Engine {
 
     /// Deny `device` for `folder`.
     pub fn f3_deny(&mut self, folder: &str, device: &str) -> Result<FolderMembers> {
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let id = find_folder(m, folder)?;
             let dev = find_device(m, device)?;
             m.deny(&id, &dev)?;
@@ -371,7 +351,7 @@ impl Engine {
 
     /// Participants, denied devices and pending requests of `folder`.
     pub fn f3_members(&mut self, folder: &str) -> Result<FolderMembers> {
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let id = find_folder(m, folder)?;
             members_of(m, &id)
         })
@@ -394,7 +374,7 @@ impl Engine {
     /// keys back; removing the device does, with a new folder epoch.)
     pub fn f3_set_role(&mut self, folder: &str, device: &str, role: &str) -> Result<FolderMembers> {
         let role = parse_role(role)?;
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let id = find_folder(m, folder)?;
             let dev = find_device(m, device)?;
             let epoch = m.folder_epochs(&id).current();
@@ -430,10 +410,11 @@ impl Engine {
             .into_iter()
             .filter_map(|d| {
                 let dev = DeviceId::from_hex(&d.device_id).ok()?;
-                Some((id16(&dev)?, self.ledger.head(&dev).seq))
+                let id = id16(&dev)?;
+                Some((id, self.f3.ledger.head(&id).seq))
             })
             .collect();
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let id = find_folder(m, folder)?;
             let dev = find_device(m, device)?;
             let started: EpochStart = m.start_folder_epoch(
@@ -471,7 +452,7 @@ impl Engine {
         epoch: u32,
         keep: &str,
     ) -> Result<FolderMembers> {
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let id = find_folder(m, folder)?;
             let issuer = find_device(m, keep)?;
             m.resolve_folder_epoch(&id, epoch, &issuer)?;
@@ -506,7 +487,7 @@ impl Engine {
         folder: Option<&str>,
         k1: &RecoveryKey,
     ) -> Result<Vec<MissingRecoveryCopy>> {
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let only = folder.map(|f| find_folder(m, f)).transpose()?;
             let mut written = Vec::new();
             for e in m.missing_escrows()? {
@@ -552,7 +533,7 @@ impl Engine {
         role: &str,
     ) -> Result<String> {
         let role = parse_role(role)?;
-        self.with_enrolled3(|m| {
+        self.enrolled3(|m| {
             let ids = folders
                 .iter()
                 .map(|f| find_folder(m, f))

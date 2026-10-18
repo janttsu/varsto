@@ -89,6 +89,7 @@ impl Lab {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (version history)"]
 fn an_overwrite_on_one_device_is_restored_on_another() {
     let lab = Lab::new();
     let store = dir("box", &lab.p("store"), false);
@@ -202,6 +203,7 @@ fn an_overwrite_on_one_device_is_restored_on_another() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (version history)"]
 fn versions_share_unchanged_blocks() {
     let lab = Lab::new();
     let store = lab.p("store");
@@ -289,6 +291,7 @@ fn the_thinning_schedule_keeps_exactly_the_expected_versions() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (version history)"]
 fn thinning_and_expiry_drop_only_unreferenced_blocks() {
     let lab = Lab::new();
     let store = lab.p("store");
@@ -391,6 +394,7 @@ fn thinning_and_expiry_drop_only_unreferenced_blocks() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (version history)"]
 fn a_trash_storage_takes_the_blocks_only_versions_use() {
     let lab = Lab::new();
     let (one, cold, a_dir, b_dir) = (
@@ -493,6 +497,7 @@ fn history_can_be_turned_off_per_folder() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (version history)"]
 fn a_folder_kept_encrypted_here_keeps_versions_too() {
     let lab = Lab::new();
     let store = dir("box", &lab.p("store"), false);

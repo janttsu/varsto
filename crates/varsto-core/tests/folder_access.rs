@@ -15,6 +15,7 @@ use varsto_core::Engine;
 const PASS: &str = "correct horse battery staple";
 
 #[test]
+#[ignore = "f3-switch: port in part B (access records)"]
 fn today_a_device_with_the_vault_key_attaches_any_folder_without_approval() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

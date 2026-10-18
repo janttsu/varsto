@@ -111,6 +111,18 @@ enum Cmd {
         #[arg(long, default_value_t = default_device_name())]
         name: String,
     },
+    /// Unlock the running background service with the passphrase. With
+    /// --with-recovery-key it also keeps the recovery words for this session
+    /// (in memory only, until it stops or is locked): folders added and
+    /// folder epochs started meanwhile get their recovery copy at once.
+    Unlock {
+        #[arg(long)]
+        with_recovery_key: bool,
+        /// File with the recovery words (24); without it VARSTO_RECOVERY_WORDS,
+        /// a pipe or a hidden prompt.
+        #[arg(long, value_name = "FILE", requires = "with_recovery_key")]
+        recovery_file: Option<PathBuf>,
+    },
     /// Join an existing vault through a storage that holds it.
     Join {
         /// Name of this device (default: the computer's name).
@@ -146,10 +158,9 @@ enum Cmd {
         /// Allow an http:// endpoint outside this computer (no transport encryption).
         #[arg(long, requires = "s3_endpoint")]
         s3_insecure_http: bool,
-        /// Storage format 3: also give the recovery words, so that every
-        /// folder with a recovery copy is rebuilt on this device. Not wired yet
-        /// (work package 12 connects it: open the membership with the vault
-        /// key, then `Membership::recover_all_folders` with these words).
+        /// Also give the recovery words (asked hidden, or from
+        /// VARSTO_RECOVERY_WORDS): every folder with a recovery copy opens on
+        /// this device. The vault words alone give folder names, no content.
         #[arg(long)]
         recovery_words: bool,
     },
@@ -1532,9 +1543,18 @@ enum FolderCmd {
         name: String,
     },
     /// Create a folder in the vault and sync `path` into it.
+    ///
+    /// The folder's key gets a recovery copy at once under the recovery
+    /// key: its 24 words come from --recovery-file, VARSTO_RECOVERY_WORDS,
+    /// the copy `varsto unlock --with-recovery-key` gave the background
+    /// service, or a hidden prompt (Enter writes it later with `varsto
+    /// recovery escrow`; `varsto status` warns until then).
     Add {
         name: String,
         path: PathBuf,
+        /// File with the recovery words (24).
+        #[arg(long, value_name = "FILE")]
+        recovery_file: Option<PathBuf>,
     },
     /// Sync an existing folder of the vault into `path` on this device.
     Attach {
@@ -3253,12 +3273,39 @@ fn run(cli: &Cli) -> Result<()> {
     let home = home(cli)?;
     match &cli.cmd {
         Cmd::Log { cmd } => logcmd::run(&home, cmd, cli.json)?,
+        Cmd::Unlock {
+            with_recovery_key,
+            recovery_file,
+        } => {
+            let Some((sf, _)) = service::status(&home) else {
+                bail!("no background service is running here: start it with `varsto service start` (a command that opens the vault itself asks for the recovery words when it needs them)");
+            };
+            let pass = passphrase()?;
+            let words = if *with_recovery_key {
+                Some(f3cmd::recovery_words_text(recovery_file.as_deref())?)
+            } else {
+                None
+            };
+            service::http_post(
+                &format!("http://127.0.0.1:{}/api/unlock", sf.port),
+                &sf.token,
+                &serde_json::json!({"passphrase": pass.as_str(), "recovery_words": words.as_deref().map(|w| w.as_str())})
+                    .to_string(),
+            )?;
+            if words.is_some() {
+                println!("The background service is unlocked and keeps the recovery words until it stops or is locked.");
+            } else {
+                println!("The background service is unlocked.");
+            }
+        }
         Cmd::Init { name } => {
             let (engine, vault_key) = Engine::init(&home, name, &passphrase()?)?;
+            // The kit: the vault words and the recovery words, shown once.
+            let kit = engine.recovery_kit_text()?;
             if cli.json {
                 println!(
                     "{}",
-                    serde_json::json!({ "vault_id": engine.vault_id().to_string(), "device_id": engine.device_id().to_string(), "vault_key": vault_key })
+                    serde_json::json!({ "vault_id": engine.vault_id().to_string(), "device_id": engine.device_id().to_string(), "vault_key": vault_key, "kit": kit })
                 );
             } else {
                 println!(
@@ -3268,7 +3315,10 @@ fn run(cli: &Cli) -> Result<()> {
                 );
                 println!("Vault key (needed to join other devices; shown once, keep it offline):");
                 println!("  {vault_key}");
-                println!("Next: print the recovery kit (`varsto recovery kit`) and, once storages are added, see `varsto recovery guide` for everything to keep in case all your devices are lost.");
+                println!();
+                print!("{kit}");
+                println!("Write both word sets down now; they are not shown again. `varsto folder add` asks for the recovery words to make the folder's recovery copy (or give them to the background service once with `varsto unlock --with-recovery-key`).");
+                println!("Next: once storages are added, see `varsto recovery guide` for everything to keep in case all your devices are lost.");
             }
         }
         Cmd::Join {
@@ -3285,9 +3335,6 @@ fn run(cli: &Cli) -> Result<()> {
             s3_insecure_http,
             recovery_words,
         } => {
-            if *recovery_words {
-                f3cmd::join_recovery_words()?;
-            }
             let mut s3_secret: Option<String> = None;
             // The vault key first: it may come from standard input, which the
             // secret prompt below must not touch.
@@ -3358,6 +3405,13 @@ fn run(cli: &Cli) -> Result<()> {
             if let Some(secret) = s3_secret {
                 engine.store_secret(storage_name, &secret)?;
             }
+            // Format 3: the vault words give names and the ledger; the
+            // recovery words open every folder that has a recovery copy.
+            let recovered = if *recovery_words {
+                f3cmd::join_recovery_words(&mut engine)?
+            } else {
+                Vec::new()
+            };
             let folders = engine.folders();
             if cli.json {
                 println!(
@@ -3371,12 +3425,21 @@ fn run(cli: &Cli) -> Result<()> {
                     engine.device_id()
                 );
                 for (r, _) in folders {
-                    println!(
-                        "  folder {} ({}): attach it with `varsto folder attach {} <path>`",
-                        r.name,
-                        r.folder_id.short(),
-                        r.name
-                    );
+                    if recovered.contains(&r.name) || !r.key_hex.is_empty() {
+                        println!(
+                            "  folder {} ({}): attach it with `varsto folder attach {} <path>`",
+                            r.name,
+                            r.folder_id.short(),
+                            r.name
+                        );
+                    } else {
+                        println!(
+                            "  folder {} ({}): ask for it with `varsto folder request {}`, then approve it on a device that has it",
+                            r.name,
+                            r.folder_id.short(),
+                            r.name
+                        );
+                    }
                 }
             }
         }
@@ -4049,9 +4112,19 @@ fn run(cli: &Cli) -> Result<()> {
                 } => {
                     placing::folder_placement(cli, &mut engine, folder, storage, place, *every)?;
                 }
-                FolderCmd::Add { name, path } => {
-                    let id = engine.add_folder(name, path)?;
+                FolderCmd::Add {
+                    name,
+                    path,
+                    recovery_file,
+                } => {
+                    let k1 = if engine.has_recovery_key() {
+                        None
+                    } else {
+                        f3cmd::folder_add_recovery_key(recovery_file.as_deref(), true)?
+                    };
+                    let id = engine.add_folder_with_recovery(name, path, k1)?;
                     println!("folder {name} ({}) created", id.short());
+                    f3cmd::status_warnings(&mut engine);
                 }
                 FolderCmd::Attach {
                     name_or_id,
@@ -7085,10 +7158,19 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
         Ok(std::path::absolute(p)?.display().to_string())
     };
     let (path, body) = match cmd {
-        FolderCmd::Add { name, path } => (
-            "/api/folder",
-            serde_json::json!({"name": name, "path": abs(path)?, "plain": true}),
-        ),
+        FolderCmd::Add {
+            name,
+            path,
+            recovery_file,
+        } => {
+            // The service may hold the words already (`unlock
+            // --with-recovery-key`); given here they are used for this folder.
+            let words = f3cmd::recovery_words_given(recovery_file.as_deref())?;
+            (
+                "/api/folder",
+                serde_json::json!({"name": name, "path": abs(path)?, "plain": true, "recovery_words": words.as_deref().map(|w| w.as_str())}),
+            )
+        }
         FolderCmd::Attach {
             name_or_id,
             path,
@@ -7138,7 +7220,7 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
         .map(|i| i.chars().take(8).collect::<String>())
         .unwrap_or_default();
     Ok(Some(match cmd {
-        FolderCmd::Add { name, path } => format!(
+        FolderCmd::Add { name, path, .. } => format!(
             "folder {name} ({id}) created at {}; the background service is syncing it",
             path.display()
         ),

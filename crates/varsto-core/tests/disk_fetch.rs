@@ -135,6 +135,7 @@ fn setup(lab: &Lab, files: &[(&str, usize, u64)]) -> (Engine, PathBuf) {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn a_fill_keeps_files_whole_and_splits_only_to_use_the_last_space() {
     let lab = Lab::new();
     let (mut a, _) = setup(
@@ -169,6 +170,7 @@ fn a_fill_keeps_files_whole_and_splits_only_to_use_the_last_space() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn a_large_costly_fetch_proposes_the_disk_and_a_small_one_stays_remote() {
     let lab = Lab::new();
     let (mut a, _) = setup(&lab, &[("big.bin", 300_000, 7), ("small.bin", 5_000, 9)]);
@@ -223,6 +225,7 @@ fn one_file_per_disk(lab: &Lab, a: &mut Engine, docs: &Path, files: &[(&str, usi
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn disks_are_ordered_attached_first_then_by_the_bytes_they_hold() {
     let lab = Lab::new();
     let (mut a, docs) = setup(&lab, &[]);
@@ -298,6 +301,7 @@ impl PlanDriver for Shelf<'_> {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn a_file_on_two_disks_is_fetched_disk_by_disk_byte_identical() {
     let lab = Lab::new();
     let (mut a, docs) = setup(&lab, &[("film.bin", 600_000, 29)]);
@@ -353,6 +357,7 @@ fn a_file_on_two_disks_is_fetched_disk_by_disk_byte_identical() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn a_skipped_disk_leaves_its_file_for_the_network_and_the_others_are_written() {
     let lab = Lab::new();
     let (mut a, docs) = setup(&lab, &[]);

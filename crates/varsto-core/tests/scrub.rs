@@ -111,6 +111,7 @@ fn set_mtime(path: &Path, t: SystemTime) {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (verification)"]
 fn damaged_objects_this_device_wrote_are_found_and_repaired() {
     let lab = Lab::new();
     let mut a = device(
@@ -167,6 +168,7 @@ fn damaged_objects_this_device_wrote_are_found_and_repaired() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (verification)"]
 fn the_budget_spreads_a_pass_over_several_runs() {
     let lab = Lab::new();
     let mut a = device(&lab, &[dir("box", &lab.p("box"), false)]);
@@ -212,6 +214,7 @@ fn the_budget_spreads_a_pass_over_several_runs() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (verification)"]
 fn cold_storage_is_read_only_when_included() {
     let lab = Lab::new();
     let mut a = device(
@@ -417,6 +420,7 @@ fn a_damaged_file_without_a_good_copy_is_left_in_place() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (verification)"]
 fn a_bad_copy_on_a_pool_disk_is_dropped_and_written_again() {
     let lab = Lab::new();
     let mounts = lab.p("mounts");

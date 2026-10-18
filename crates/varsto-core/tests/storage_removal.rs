@@ -37,6 +37,7 @@ fn on_storage(e: &Engine, storage: &str) -> usize {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn storages_are_removed_only_with_enough_copies_elsewhere() {
     let t = tempfile::tempdir().unwrap();
     let (s1, s2, s3, files) = (

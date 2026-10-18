@@ -79,6 +79,11 @@ pub struct FolderRecord {
     pub denied: Vec<Denied>,
     /// Member devices (other people's) this record lists.
     pub members: Vec<MemberKeys>,
+    /// The folder is removed from the vault from this stamp on (every
+    /// device stops syncing it; files stay on disk). Counts from an owner,
+    /// like every entry, and is final: adding the folder again makes a new
+    /// folder.
+    pub removed: Option<Stamp>,
 }
 
 impl RecordBody for FolderRecord {
@@ -105,6 +110,7 @@ impl RecordBody for FolderRecord {
         }
         let mine = |s: &Stamp| s.device == meta.device;
         if !mine(&self.stamp)
+            || self.removed.as_ref().is_some_and(|s| !mine(s))
             || !self.participants.iter().all(|p| mine(&p.stamp))
             || !self.denied.iter().all(|d| mine(&d.stamp))
             || !self.members.iter().all(|m| mine(&m.stamp))
@@ -156,6 +162,9 @@ pub struct FolderState {
     /// Member devices (other people's) the owners listed, newest entry
     /// per device.
     pub members: BTreeMap<Id16, MemberKeys>,
+    /// The oldest accepted removal of the folder (an owner's record with
+    /// `removed`): the folder is gone from then on.
+    pub removed: Option<Stamp>,
 }
 
 /// Ordered so that the replay is the same in any reading order, even for
@@ -165,6 +174,7 @@ enum Entry {
     Name(String, BTreeMap<String, String>),
     Set(Id16, Option<Role>),
     Member(MemberKeys),
+    Removed,
 }
 
 impl FolderState {
@@ -186,6 +196,7 @@ impl FolderState {
             max_lamport: 0,
             history: BTreeMap::from([(creator, vec![(Stamp::default(), Some(Role::Owner))])]),
             members: BTreeMap::new(),
+            removed: None,
         };
         let mut all: Vec<(Stamp, Id16, Entry)> = Vec::new();
         for r in records {
@@ -203,6 +214,9 @@ impl FolderState {
             }
             for m in &r.body.members {
                 all.push((m.stamp, w, Entry::Member(m.clone())));
+            }
+            if let Some(stamp) = r.body.removed {
+                all.push((stamp, w, Entry::Removed));
             }
         }
         all.sort();
@@ -237,6 +251,11 @@ impl FolderState {
                         st.members.insert(m.device, m);
                     }
                 }
+                Entry::Removed => {
+                    if st.removed.is_none_or(|r| stamp < r) {
+                        st.removed = Some(stamp);
+                    }
+                }
             }
         }
         Some(st)
@@ -245,6 +264,11 @@ impl FolderState {
     /// The device's current role (`None`: not a participant, or denied).
     pub fn role(&self, device: &Id16) -> Option<Role> {
         self.entries.get(device).and_then(|(r, _)| *r)
+    }
+
+    /// Whether an owner removed the folder from the vault.
+    pub fn is_removed(&self) -> bool {
+        self.removed.is_some()
     }
 
     pub fn is_denied(&self, device: &Id16) -> bool {

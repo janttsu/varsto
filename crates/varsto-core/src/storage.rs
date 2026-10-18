@@ -994,6 +994,12 @@ impl Storage for CountingStorage {
     }
     fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
         self.calls.gets.fetch_add(1, Ordering::Relaxed);
+        if key.starts_with("ledger/") {
+            self.calls.ledger_gets.fetch_add(1, Ordering::Relaxed);
+        }
+        if key.starts_with("manifests/") {
+            self.calls.manifest_gets.fetch_add(1, Ordering::Relaxed);
+        }
         if key.starts_with("chunks/") {
             self.calls.chunk_gets.fetch_add(1, Ordering::Relaxed);
         }

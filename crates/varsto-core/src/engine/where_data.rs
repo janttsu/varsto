@@ -174,21 +174,33 @@ impl Engine {
         devices.insert(me.clone(), device_entry(&me));
         let mut copy_sum = 0u128;
 
+        // Format 3: copies from the block maps and the pack-level view;
+        // devices from the `held` flags of their manifests.
+        let view3 = self.view3()?;
+        let me3 = self.me3();
         for (rec, mount) in self.folders() {
             let state = self.load_state(&rec.folder_id)?;
-            // Unique blocks of current files, with the manifest size as fallback.
-            let mut chunks: BTreeMap<&ChunkId, u64> = BTreeMap::new();
+            let folder3 = members3::bin(&rec.folder_id)?;
+            let has_keys = !rec.key_hex.is_empty() || !rec.epoch_keys.is_empty();
+            let table = if has_keys {
+                Some(self.table3(&folder3)?)
+            } else {
+                None
+            };
+            let held = self.load_manifests3(&folder3).held_index();
+            // Unique blocks of current files, with their manifest sizes.
+            let mut chunks: BTreeMap<&ObjectName, u64> = BTreeMap::new();
             for f in state.files.values().filter(|f| !f.deleted) {
                 for c in &f.chunks {
-                    chunks.entry(&c.chunk).or_insert(c.size);
+                    chunks.entry(&c.object).or_insert(c.size);
                 }
             }
-            let here: HashSet<&ChunkId> = match &mount {
+            let here: HashSet<&ObjectName> = match &mount {
                 Some(_) => state
                     .files
                     .values()
                     .filter(|f| !f.deleted && state.local_index.contains_key(&f.path))
-                    .flat_map(|f| f.chunks.iter().map(|c| &c.chunk))
+                    .flat_map(|f| f.chunks.iter().map(|c| &c.object))
                     .collect(),
                 None => HashSet::new(),
             };
@@ -198,17 +210,15 @@ impl Engine {
                 attached: mount.is_some(),
                 ..Default::default()
             };
-            for (chunk, manifest_size) in chunks {
-                let record = view.locate(&rec.folder_id, chunk);
-                let size = record
-                    .map(|r| r.size)
-                    .filter(|s| *s > 0)
-                    .unwrap_or(manifest_size);
+            for (object, size) in chunks {
                 folder.bytes += size;
                 folder.blocks += 1;
                 let mut kept = 0u64;
-                if let Some(r) = record {
-                    for (name, loc) in &r.storages {
+                let obj = crate::storages3::object_bin(object)?;
+                if let Some(t) = &table {
+                    let t = t.read().unwrap_or_else(|e| e.into_inner());
+                    for c in crate::storages3::block_copy_details(&view3, &*t, &obj) {
+                        let name = c.storage.clone();
                         let s = storages.entry(name.clone()).or_insert_with(|| {
                             let replica = name.starts_with("replica:");
                             StorageShare {
@@ -219,7 +229,7 @@ impl Engine {
                         });
                         s.bytes += size;
                         s.blocks += 1;
-                        if loc.independently_verified(name) {
+                        if c.independently_verified {
                             s.verified_bytes += size;
                         }
                         *folder.storages.entry(name.clone()).or_default() += size;
@@ -227,14 +237,15 @@ impl Engine {
                             kept += 1;
                         }
                     }
-                    for d in r.devices.iter().filter(|d| **d != me) {
-                        let e = devices.entry(d.clone()).or_insert_with(|| device_entry(d));
-                        e.bytes += size;
-                        e.blocks += 1;
-                        *folder.devices.entry(d.to_string()).or_default() += size;
-                    }
                 }
-                if here.contains(chunk) {
+                for d3 in held.holders(&obj).iter().filter(|d| **d != me3) {
+                    let d = DeviceId::from_bytes(d3);
+                    let e = devices.entry(d.clone()).or_insert_with(|| device_entry(&d));
+                    e.bytes += size;
+                    e.blocks += 1;
+                    *folder.devices.entry(d.to_string()).or_default() += size;
+                }
+                if here.contains(object) {
                     let e = devices.get_mut(&me).expect("this device is listed");
                     e.bytes += size;
                     e.blocks += 1;

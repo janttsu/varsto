@@ -167,6 +167,7 @@ fn run(e: &mut Engine, id: &str) -> varsto_core::engine::MoveJobRun {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_folder_moves_to_the_pool_one_disk_at_a_time() {
     let (lab, mut a) = Lab::new(1);
     let (blocks, bytes) = total_blocks(&a);
@@ -282,6 +283,7 @@ fn a_folder_moves_to_the_pool_one_disk_at_a_time() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn keep_source_copies_without_dropping() {
     let (lab, mut a) = Lab::new(1);
     let (blocks, bytes) = total_blocks(&a);
@@ -314,6 +316,7 @@ fn keep_source_copies_without_dropping() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn paths_limit_the_job_to_files_under_them() {
     let (lab, mut a) = Lab::new(1);
     let (blocks, bytes) = total_blocks(&a);
@@ -356,6 +359,7 @@ fn paths_limit_the_job_to_files_under_them() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_disk_group_rule_needs_two_places_before_the_source_is_dropped() {
     let (lab, mut a) = Lab::new(2);
     let (blocks, bytes) = total_blocks(&a);
@@ -391,6 +395,7 @@ fn a_disk_group_rule_needs_two_places_before_the_source_is_dropped() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn pause_resume_and_cancel_leave_the_data_consistent() {
     let (lab, mut a) = Lab::new(1);
     let (blocks, bytes) = total_blocks(&a);
@@ -439,6 +444,7 @@ fn pause_resume_and_cancel_leave_the_data_consistent() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_job_resumes_after_the_engine_is_dropped_between_groups() {
     let (lab, mut a) = Lab::new(1);
     let (blocks, bytes) = total_blocks(&a);

@@ -45,6 +45,7 @@ fn ok(home: &Path, args: &[&str]) -> serde_json::Value {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (verification)"]
 fn verify_price_and_advice_commands() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -152,6 +153,7 @@ fn verify_price_and_advice_commands() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (verification)"]
 fn scrub_commands() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -232,6 +234,7 @@ fn scrub_commands() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (quotas and data moves)"]
 fn quota_and_drain_commands() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

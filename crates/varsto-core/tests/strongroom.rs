@@ -106,6 +106,7 @@ fn two_devices_with_docs(lab: &Lab) -> (Engine, Engine) {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (Strongroom)"]
 fn converting_a_folder_re_encrypts_it_and_removes_the_old_copies() {
     let lab = lab();
     let (mut a, mut b) = two_devices_with_docs(&lab);
@@ -204,6 +205,7 @@ fn converting_a_folder_re_encrypts_it_and_removes_the_old_copies() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (Strongroom)"]
 fn an_interrupted_conversion_deletes_nothing_and_resumes_with_the_same_key() {
     let lab = lab();
     let (mut a, mut b) = two_devices_with_docs(&lab);
@@ -286,6 +288,7 @@ fn an_interrupted_conversion_deletes_nothing_and_resumes_with_the_same_key() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (Strongroom)"]
 fn backup_key_opens_the_strongroom_and_the_last_key_stays() {
     let lab = lab();
     let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
@@ -372,6 +375,7 @@ fn backup_key_opens_the_strongroom_and_the_last_key_stays() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (Strongroom)"]
 fn rekeying_a_strongroom_re_encrypts_it_under_a_new_key_for_every_enrolled_key() {
     let lab = lab();
     let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
@@ -454,6 +458,7 @@ fn rekeying_a_strongroom_re_encrypts_it_under_a_new_key_for_every_enrolled_key()
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (Strongroom)"]
 fn a_wrong_folder_key_is_refused_by_unlock_convert_and_rekey() {
     let lab = lab();
     let (mut a, _key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();

@@ -114,6 +114,11 @@ pub fn section9_allows(class: WriterClass, kind: Kind) -> bool {
                 | Device
                 | Settings
                 | StorageNames
+                | Replica
+                | OrgManifest
+                | OrgRoster
+                | OrgLog
+                | Mailbox
         ),
         WriterClass::FullEditor => {
             matches!(
@@ -124,7 +129,15 @@ pub fn section9_allows(class: WriterClass, kind: Kind) -> bool {
         WriterClass::FullViewer => matches!(kind, Access | Batch),
         WriterClass::FullNoGrant => matches!(
             kind,
-            Request | Device | Peer | Policy | Placement | Settings | StorageNames | Batch
+            Request
+                | Device
+                | Peer
+                | Policy
+                | Placement
+                | Settings
+                | StorageNames
+                | Mailbox
+                | Batch
         ),
         WriterClass::MemberEditor => matches!(kind, Manifest | BlockMap | Trash | Batch),
         WriterClass::MemberViewer | WriterClass::Replica => kind == Batch,

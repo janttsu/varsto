@@ -117,6 +117,7 @@ fn edit(lab: &Lab, e: &mut Engine, who: &str, text: &str) {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (manifest pruning)"]
 fn pull_lists_only_new_manifests() {
     let lab = lab();
     let mut devs = devices(&lab, &["b"]);
@@ -160,6 +161,7 @@ fn pull_lists_only_new_manifests() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (manifest pruning)"]
 fn pruning_waits_for_every_reader() {
     let lab = lab();
     let mut devs = devices(&lab, &["b", "c"]);

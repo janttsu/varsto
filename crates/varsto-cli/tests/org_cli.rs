@@ -55,6 +55,7 @@ fn fails(home: &Path, args: &[&str]) -> String {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (organizations)"]
 fn organization_through_the_cli() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

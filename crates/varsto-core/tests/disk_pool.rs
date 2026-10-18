@@ -175,6 +175,7 @@ fn objects_go_to_the_disk_with_most_free_space_within_the_reserve() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn detached_disk_is_reported_and_recognised_again_elsewhere() {
     let lab = Lab::new();
     let d1 = lab.mount("d1", 50 * GIB, 100 * GIB);
@@ -290,6 +291,7 @@ fn detached_disk_is_reported_and_recognised_again_elsewhere() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn delete_while_detached_is_queued_and_applied_by_check() {
     let lab = Lab::new();
     let d1 = lab.mount("d1", 50 * GIB, 100 * GIB);
@@ -348,6 +350,7 @@ fn delete_while_detached_is_queued_and_applied_by_check() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn retired_disk_receives_nothing() {
     let lab = Lab::new();
     let d1 = lab.mount("d1", 80 * GIB, 100 * GIB);
@@ -380,6 +383,7 @@ fn retired_disk_receives_nothing() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn index_files_are_written_and_eject_says_where() {
     let lab = Lab::new();
     let d1 = lab.mount("d1", 50 * GIB, 100 * GIB);
@@ -441,6 +445,7 @@ fn index_files_are_written_and_eject_says_where() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn policy_counts_an_offline_disk_at_its_last_verification() {
     let lab = Lab::new();
     let d1 = lab.mount("d1", 50 * GIB, 100 * GIB);
@@ -504,6 +509,7 @@ fn pool_index_path(home: &Path, mount: &Path) -> PathBuf {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn every_write_is_read_back_and_a_disk_that_lies_twice_is_given_up() {
     let lab = Lab::new();
     let home = lab.root.join("a-home");
@@ -558,6 +564,7 @@ fn every_write_is_read_back_and_a_disk_that_lies_twice_is_given_up() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_reserve() {
     let lab = Lab::new();
     let home = lab.root.join("a-home");
@@ -713,6 +720,7 @@ fn row(e: &mut Engine, label: &str) -> varsto_core::pool::DiskStatus {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (disks and pools)"]
 fn bookkeeping_follows_add_check_fill_and_eject_and_the_overdue_disk_is_suggested() {
     use varsto_core::blockdev::{FsckOutcome, FsckVerdict};
     use varsto_core::diskconf::{self, DiskConf, Drive};

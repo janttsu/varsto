@@ -988,6 +988,13 @@ impl Engine {
     /// was shared may have used one) but write under epoch 0, or under the
     /// folder's newest share epoch once a member was removed (`share_ops`).
     pub(super) fn folder_keys(&self, rec: &FolderRecord) -> Result<FolderKeys> {
+        // Format 3: only what grants (or escrow) gave this device.
+        self.folder_keys3(rec)
+    }
+
+    /// The format-2 folder keys, epochs derived from the vault key
+    /// (f3-switch: part B deletes it).
+    pub(super) fn folder_keys2(&self, rec: &FolderRecord) -> Result<FolderKeys> {
         let fk = rec.keys()?;
         let mut later: BTreeMap<u32, SecretKey> = BTreeMap::new();
         if !self.vault.member {

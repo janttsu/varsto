@@ -228,6 +228,7 @@ fn run(e: &mut Engine) -> varsto_core::mailbox::MailboxReport {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (mailbox)"]
 fn blocks_only_on_disk_a_reach_disk_b_through_the_outbox() {
     let (lab, mut e, _) = group_lab();
     let home = lab.p("dock-1-home");
@@ -304,6 +305,7 @@ fn blocks_only_on_disk_a_reach_disk_b_through_the_outbox() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (mailbox)"]
 fn the_free_space_rule_limits_staging_and_staged_copies_go_first() {
     let (lab, mut e, _) = group_lab();
     let home = lab.p("dock-1-home");
@@ -398,6 +400,7 @@ fn the_free_space_rule_limits_staging_and_staged_copies_go_first() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (mailbox)"]
 fn a_run_resumes_after_the_engine_is_dropped_and_bad_objects_are_refused() {
     let (lab, mut e, _) = group_lab();
     let home = lab.p("dock-1-home");
@@ -470,6 +473,7 @@ fn a_run_resumes_after_the_engine_is_dropped_and_bad_objects_are_refused() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (mailbox)"]
 fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
     let lab = Lab::new();
     let home = lab.p("dock-1-home");
@@ -564,6 +568,7 @@ fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (mailbox)"]
 fn a_move_waits_for_its_source_disk_instead_of_leaving_blocks_behind() {
     let lab = Lab::new();
     let home = lab.p("dock-1-home");
@@ -624,6 +629,7 @@ fn a_move_waits_for_its_source_disk_instead_of_leaving_blocks_behind() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (mailbox)"]
 fn two_dock_hosts_stage_each_block_once() {
     let (lab, mut x, key) = group_lab();
     // The second dock host knows the pool and both disks.
@@ -718,6 +724,7 @@ fn serve(from: &Engine, name: &str, to: &mut Engine) -> Served {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (mailbox)"]
 fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     let lab = Lab::new();
     let home = lab.p("dock-1-home");

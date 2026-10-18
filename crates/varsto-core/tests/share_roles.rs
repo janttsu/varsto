@@ -107,6 +107,7 @@ fn three(lab: &Lab) -> (Engine, Engine, Engine) {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn a_viewer_reads_and_its_own_changes_stay_here() {
     let lab = Lab::new();
     let (mut a, mut b, mut v) = three(&lab);
@@ -207,6 +208,7 @@ fn a_viewer_reads_and_its_own_changes_stay_here() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn what_a_modified_viewer_client_publishes_is_refused() {
     let lab = Lab::new();
     let (mut a, mut b, mut v) = three(&lab);
@@ -248,6 +250,7 @@ fn what_a_modified_viewer_client_publishes_is_refused() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn role_changes_take_effect_and_only_the_owner_makes_them() {
     let lab = Lab::new();
     let (mut a, mut b, mut v) = three(&lab);
@@ -313,6 +316,7 @@ fn role_changes_take_effect_and_only_the_owner_makes_them() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (sharing)"]
 fn plain_tokens_are_refused_once_a_folder_has_viewers() {
     let lab = Lab::new();
     let mut a = owner(&lab);

@@ -12,7 +12,7 @@ name = "varsto"
 path = "src/main.rs"
 
 [features]
-default = ["mimalloc"]
+default = ["mimalloc", "format3"]
 # Use FSEvents instead of kqueue for folder watching (native macOS builds).
 fsevents = ["notify/macos_fsevent"]
 # `--software` security keys (a secret in a file): tests and the lab only.

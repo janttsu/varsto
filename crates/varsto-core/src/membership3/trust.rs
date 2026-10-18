@@ -126,6 +126,15 @@ impl RecordTrust for Trust<'_> {
             Kind::Folder | Kind::ShareEpoch | Kind::Escrow => true,
             Kind::Grant => *scope != VAULT_SCOPE || !revoked,
             Kind::Request | Kind::Placement => !revoked,
+            // A Strongroom's key wraps are its owners' to write.
+            Kind::Strongroom => {
+                !revoked
+                    && self
+                        .folders
+                        .and_then(|f| f.get(scope))
+                        .and_then(|s| s.role(device))
+                        == Some(Role::Owner)
+            }
             Kind::Manifest
             | Kind::BlockMap
             | Kind::Trash

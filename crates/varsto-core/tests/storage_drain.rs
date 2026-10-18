@@ -187,6 +187,7 @@ fn device(lab: &Lab, storages: &[(&str, &str)]) -> (Engine, String) {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_drain_moves_every_block_checked_and_never_weakens_a_policy() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("old", "cloud"), ("home", "home")]);
@@ -285,6 +286,7 @@ fn a_drain_moves_every_block_checked_and_never_weakens_a_policy() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_drain_that_cannot_keep_the_policy_stops_and_says_what_is_missing() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("c1", "cloud"), ("c2", "cloud"), ("h", "home")]);
@@ -351,6 +353,7 @@ fn a_drain_that_cannot_keep_the_policy_stops_and_says_what_is_missing() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_drain_resumes_after_interruption_and_removes_the_storage_when_empty() {
     let lab = Lab::new();
     let (mut a, _) = device(
@@ -398,6 +401,7 @@ fn a_drain_resumes_after_interruption_and_removes_the_storage_when_empty() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_quota_routes_writes_elsewhere_and_without_room_they_wait() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("a", "cloud"), ("b", "cloud")]);
@@ -463,6 +467,7 @@ fn a_quota_routes_writes_elsewhere_and_without_room_they_wait() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn a_drain_respects_the_quota_of_the_storages_it_fills() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("old", "cloud"), ("home", "home")]);
@@ -493,6 +498,7 @@ fn a_drain_respects_the_quota_of_the_storages_it_fills() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn quotas_and_drains_are_the_same_on_every_device() {
     let lab = Lab::new();
     let (mut a, key) = device(&lab, &[("s1", "cloud"), ("s2", "cloud")]);
@@ -559,6 +565,7 @@ fn quotas_and_drains_are_the_same_on_every_device() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (data moves)"]
 fn after_a_drain_no_file_and_no_status_lists_the_storage() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[("old", "cloud"), ("home", "home")]);

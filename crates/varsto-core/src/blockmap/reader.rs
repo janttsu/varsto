@@ -120,6 +120,25 @@ impl PlaceSource for RwLock<MapTable> {
         out.dedup_by(|a, b| a.1 == b.1);
         out.into_iter().map(|(_, l)| l).collect()
     }
+
+    fn is_live(&self, object: &str, loc: &PackLoc) -> bool {
+        let mut bin = [0u8; 32];
+        let mut pack = [0u8; 32];
+        if hex::decode_to_slice(object, &mut bin).is_err()
+            || hex::decode_to_slice(&loc.pack, &mut pack).is_err()
+        {
+            return false;
+        }
+        let Ok(t) = self.read() else {
+            return false;
+        };
+        let Ok(rows) = t.rows_of(&bin) else {
+            return false;
+        };
+        rows.iter()
+            .filter(|r| r.place.pack == pack && u64::from(r.place.offset) == loc.offset)
+            .any(|r| super::dedup::place_is_live(&t, r).unwrap_or(false))
+    }
 }
 
 /// Pull new map records of the table's folder from one metadata storage.
