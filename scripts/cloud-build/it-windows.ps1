@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
 # Cross-platform integration test, Windows side: join the vault through the S3
 # bucket, pull the Linux file, push one back, enable p2p and run the service.
-param([string]$VaultKey, [string]$S3Endpoint, [string]$S3Region, [string]$S3Bucket, [string]$S3Key, [string]$S3Secret, [string]$PublicIp)
+param([string]$Phase = "all", [string]$VaultKey, [string]$S3Endpoint, [string]$S3Region, [string]$S3Bucket, [string]$S3Key, [string]$S3Secret, [string]$PublicIp)
 $ErrorActionPreference = "Stop"; $ProgressPreference = "SilentlyContinue"
 Set-Location C:\it
 Expand-Archive -Force varsto-windows.zip -DestinationPath .\unzipped
@@ -9,7 +9,13 @@ $exe = (Get-ChildItem .\unzipped -Recurse -Filter varsto.exe | Select-Object -Fi
 $env:VARSTO_PASSPHRASE = "integration-test-passphrase"; $env:VARSTO_S3_SECRET = $S3Secret
 $H = "C:\it\home"; New-Item -ItemType Directory -Force C:\it\files | Out-Null
 $env:VARSTO_VAULT_KEY = $VaultKey
-& $exe --home $H join --name windows --storage-name cloud --s3-endpoint $S3Endpoint --s3-region $S3Region --s3-bucket $S3Bucket --s3-access-key-id $S3Key
+if ($Phase -ne "finish") {
+  & $exe --home $H join --name windows --storage-name cloud --s3-endpoint $S3Endpoint --s3-region $S3Region --s3-bucket $S3Bucket --s3-access-key-id $S3Key
+  # Format 3: ask for the folder; an owner approves it, then -Phase finish follows.
+  & $exe --home $H folder request shared
+  if ($Phase -eq "request") { Write-Host "WINDOWS_REQUESTED"; exit 0 }
+}
+& $exe --home $H sync
 & $exe --home $H folder attach shared C:\it\files
 & $exe --home $H sync
 if (-not (Test-Path C:\it\files\from-linux.bin)) { throw "file from Linux did not arrive through S3" }
