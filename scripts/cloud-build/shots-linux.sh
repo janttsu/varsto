@@ -18,9 +18,10 @@ xfce4-panel --disable-wm-check >/dev/null 2>&1 &
 sleep 4
 # Demo vault with invented files so the tray has something to show.
 mkdir -p /it/files /it/storage
-"$bin" --home /it/home init --name laptop >/dev/null
+init="$("$bin" --home /it/home init --name laptop --json)"
+rw="$(echo "$init" | python3 -c 'import json,re,sys; k=json.load(sys.stdin)["kit"].split("RECOVERY WORDS")[1]; print(" ".join(re.findall(r"\d+\.\s+([a-z]+)", k)))')"
 "$bin" --home /it/home storage add-local box /it/storage >/dev/null
-"$bin" --home /it/home folder add Documents /it/files >/dev/null
+VARSTO_RECOVERY_WORDS="$rw" "$bin" --home /it/home folder add Documents /it/files >/dev/null
 printf 'notes\n' > /it/files/notes.md
 "$bin" --home /it/home sync >/dev/null
 nohup "$bin" --home /it/home tray > /it/tray.log 2>&1 &
