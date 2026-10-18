@@ -51,8 +51,48 @@ impl Core3 {
     }
 }
 
+/// `Engine::key_for3` over the parts of an engine it needs (so that the
+/// ledger store can be borrowed apart from them).
+pub(crate) fn key_for3_in(
+    epochs: &membership::VaultEpochs,
+    members: &members3::Members3,
+    key_id: &str,
+) -> Option<SecretKey> {
+    match KeyId::parse(key_id)? {
+        KeyId::Ledger(e) => Some(crate::membership3::derive3(
+            epochs.keys.get(&e)?,
+            "ledger",
+            &[],
+        )),
+        KeyId::ShareLedger { folder, epoch } => members.granted.get(&folder)?.share_ledger(epoch),
+        // Replicas' batches: part B (f3-switch).
+        _ => None,
+    }
+}
+
+/// `Engine::scope3` over the membership alone.
+pub(crate) fn scope3_in(
+    m: &members3::Members3,
+    device: &Id16,
+    key_id: &str,
+) -> Option<EventScope> {
+    match EventScope::of_key_id(key_id)? {
+        EventScope::Full => m.devices.get(device).map(|_| EventScope::Full),
+        EventScope::Member(f) => {
+            m.members.get(&f, device)?;
+            match m.role(device, &f) {
+                Some(crate::membership3::Role::Viewer) => Some(EventScope::Viewer(f)),
+                Some(_) => Some(EventScope::Member(f)),
+                None => None,
+            }
+        }
+        // Replicas: part B (f3-switch).
+        _ => None,
+    }
+}
+
 /// The format-3 form of a format-2 event, where format 3 has one.
-fn convert(ev: &Event) -> Option<Event3> {
+pub(crate) fn convert(ev: &Event) -> Option<Event3> {
     let b = |id: &crate::ids::Id| members3::bin(id).ok();
     Some(match ev {
         Event::DeviceEnrolled { name } => {
@@ -114,18 +154,7 @@ impl Engine {
 
     /// The key that opens a batch or checkpoint with `key_id`, if held.
     pub(crate) fn key_for3(&self, key_id: &str) -> Option<SecretKey> {
-        match KeyId::parse(key_id)? {
-            KeyId::Ledger(e) => Some(crate::membership3::derive3(
-                self.epochs.keys.get(&e)?,
-                "ledger",
-                &[],
-            )),
-            KeyId::ShareLedger { folder, epoch } => {
-                self.f3.members.granted.get(&folder)?.share_ledger(epoch)
-            }
-            // Replicas' batches: part B (f3-switch).
-            _ => None,
-        }
+        key_for3_in(&self.epochs, &self.f3.members, key_id)
     }
 
     /// Whether batch `seq` of `device` counts: a removed device's only up
@@ -142,21 +171,8 @@ impl Engine {
     /// devices of the registry under the vault ledger key, member devices
     /// of shared folders under their folder's key, with the role the folder
     /// records give them.
-    fn scope3(&self, device: &Id16, key_id: &str) -> Option<EventScope> {
-        let m = &self.f3.members;
-        match EventScope::of_key_id(key_id)? {
-            EventScope::Full => m.devices.get(device).map(|_| EventScope::Full),
-            EventScope::Member(f) => {
-                m.members.get(&f, device)?;
-                match m.role(device, &f) {
-                    Some(crate::membership3::Role::Viewer) => Some(EventScope::Viewer(f)),
-                    Some(_) => Some(EventScope::Member(f)),
-                    None => None,
-                }
-            }
-            // Replicas: part B (f3-switch).
-            _ => None,
-        }
+    pub(crate) fn scope3(&self, device: &Id16, key_id: &str) -> Option<EventScope> {
+        scope3_in(&self.f3.members, device, key_id)
     }
 
     /// What decides which batches count, as text: the keys held, the
@@ -308,6 +324,11 @@ impl Engine {
             return Ok(None);
         }
         let mut events: Vec<Event3> = self.pending.iter().filter_map(convert).collect();
+        if !events.is_empty() || !self.f3.pending.is_empty() {
+            // A lost or damaged local ledger, a fork or a fence: nothing
+            // is signed until a rebuild ran (the events stay pending).
+            self.ensure_ledger_writable()?;
+        }
         events.append(&mut self.f3.pending);
         self.pending.clear();
         self.clear_deferred();
@@ -407,6 +428,7 @@ impl Engine {
             }
         }
         let mut forks = BTreeSet::new();
+        let (mut malformed, mut refused) = (0u64, 0u64);
         let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
         for (spec, backend) in self.metadata_storages(false)? {
             if spec.is_carrier() {
@@ -461,7 +483,12 @@ impl Engine {
                         continue;
                     };
                     let Ok(rec) = crate::record::SignedRecord::decode(&bytes) else {
+                        // One storage holding a damaged or planted object
+                        // does not stop the pull: another may hold the batch.
                         log::warn!(storage = backend.name(); "ledger: {name} is not a record");
+                        if *dev != me {
+                            malformed += 1;
+                        }
                         continue;
                     };
                     if *dev == me && seq > head.seq {
@@ -482,10 +509,12 @@ impl Engine {
                             forks.insert(DeviceId::from_bytes(dev));
                         }
                         Ok(Ingest::Refused) => {
+                            refused += 1;
                             log::warn!(storage = backend.name(), seq = seq; "ledger batch refused");
                         }
                         Ok(_) => {}
                         Err(e) => {
+                            malformed += 1;
                             log::warn!(storage = backend.name(), seq = seq, error:% = e; "ledger batch skipped");
                         }
                     }
@@ -494,6 +523,7 @@ impl Engine {
         }
         let view = self.view3()?;
         self.observe_clock(view.max_lamport)?;
+        self.watch_freshness3(&view, malformed, refused);
         Ok(forks.into_iter().collect())
     }
 

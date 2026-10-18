@@ -75,10 +75,12 @@ fn two_devices() -> (Lab, Engine, Engine) {
     a.add_folder("docs", &root.join("a-docs")).unwrap();
     fs::write(root.join("a-docs/one.txt"), b"first file").unwrap();
     fs::write(root.join("a-docs/two.bin"), pseudo_random(60_000, 2)).unwrap();
+    // Two pushes: two packs.
+    a.sync(None).unwrap();
     fs::create_dir_all(root.join("a-docs/sub")).unwrap();
     fs::write(root.join("a-docs/sub/three.bin"), pseudo_random(90_000, 3)).unwrap();
     a.sync(None).unwrap();
-    let mut b = Engine::join(&root.join("b"), "phone", PASS, &key, storage.clone()).unwrap();
+    let mut b = common::join_approved(&root.join("b"), "phone", PASS, &key, storage.clone(), &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &root.join("b-docs"), false)
         .unwrap();
@@ -144,23 +146,28 @@ fn heads_of(e: &Engine, device: &str) -> BTreeSet<u64> {
         .collect()
 }
 
+/// Every pack copy the ledger view claims: `<pack>@<storage>`.
 fn claims(e: &Engine) -> BTreeSet<String> {
-    e.view()
-        .unwrap()
-        .chunks
-        .iter()
-        .flat_map(|((f, c), r)| {
-            r.storages
-                .keys()
-                .map(move |s| format!("{}/{}@{s}", f.short(), c.short()))
+    let view = e.ledger_view3().unwrap();
+    view.packs
+        .keys()
+        .flat_map(|id| {
+            view.copies(id)
+                .into_iter()
+                .filter(|c| !c.claimed_by.is_empty())
+                .map(move |c| format!("{}@{}", &hex::encode(id)[..12], c.storage))
         })
         .collect()
+}
+
+/// A batch file of `device` in a ledger directory (storage or local).
+fn batch_file(dir: &Path, device: &str, seq: u64) -> PathBuf {
+    dir.join(device).join(format!("{seq:016}-0000.rec"))
 }
 
 /// S1: a storage that lost the ledger objects is filled again by the next
 /// push of every device, and a device joining afterwards sees everything.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn s1_storage_that_lost_its_ledger_is_filled_again() {
     let (lab, mut a, mut b) = two_devices();
     let before = claims(&a);
@@ -178,6 +185,7 @@ fn s1_storage_that_lost_its_ledger_is_filled_again() {
         assert_eq!(n, own_head(e), "every batch is back on the storage");
         assert!(e.ledger_health().is_ok());
     }
+    // A device joining with the vault words alone sees every claim.
     let mut c = Engine::join(
         &lab.root.join("c"),
         "tablet",
@@ -197,13 +205,12 @@ fn s1_storage_that_lost_its_ledger_is_filled_again() {
 /// back, and the next batch continues the numbering: the other device
 /// accepts it without seeing a fork.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn s2_deleted_local_ledger_is_restored_and_numbering_continues() {
     let (lab, a, b) = two_devices();
     let home = lab.a_home();
     let a_id = a.device_id().to_string();
     let head = own_head(&a);
-    let view = a.view().unwrap();
+    let view = a.ledger_view3().unwrap().canonical();
     drop((a, b));
     fs::remove_dir_all(home.join("ledger")).unwrap();
 
@@ -223,29 +230,27 @@ fn s2_deleted_local_ledger_is_restored_and_numbering_continues() {
     let err = format!("{:#}", a.sync(None).unwrap_err());
     assert!(err.contains("varsto ledger rebuild"), "{err}");
 
+    // The rebuild continues after the old head: the folder created while
+    // the ledger was missing is recorded in the one batch it signs.
     let r = a.ledger_rebuild(&LedgerRebuildOptions::default()).unwrap();
     assert!(r.own_found_on_storages);
-    assert_eq!(r.own_head_after, head);
+    assert_eq!(r.own_head_after, head + 1, "{r:?}");
     assert!(r.batches_pulled > 0, "B's batches came back too: {r:?}");
     assert!(!r.reenrolled);
     assert!(r.health.is_ok(), "{:?}", r.health);
-    let after = a.view().unwrap();
-    assert_eq!(after.chunks, view.chunks);
+    let after = a.ledger_view3().unwrap().canonical();
+    assert_eq!(after.packs, view.packs);
     assert_eq!(after.devices, view.devices);
+    assert_eq!(after.folders.len(), 2, "the new folder is recorded");
 
-    // The folder created while the ledger was missing is recorded with the
-    // next batch, which continues after the old head.
+    // The next batch continues after that.
     fs::write(lab.a_docs().join("four.txt"), b"fourth").unwrap();
     a.sync(None).unwrap();
-    assert_eq!(own_head(&a), head + 1);
-    assert!(
-        a.view().unwrap().folders.len() >= 2,
-        "the new folder is recorded"
-    );
+    assert_eq!(own_head(&a), head + 2);
     let mut b = open(&lab.b_home());
     b.sync(None).unwrap();
     assert!(b.status().unwrap().forked_devices.is_empty());
-    assert!(heads_of(&b, &a_id).contains(&(head + 1)));
+    assert!(heads_of(&b, &a_id).contains(&(head + 2)));
     assert_eq!(
         fs::read(lab.root.join("b-docs/four.txt")).unwrap(),
         b"fourth"
@@ -257,7 +262,6 @@ fn s2_deleted_local_ledger_is_restored_and_numbering_continues() {
 /// checkpoint and only the last batches; the rebuild takes the checkpoint
 /// back, so the view still has the claims of the pruned batches.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn s2_restores_own_checkpoint_after_pruning() {
     let (lab, mut a, mut b) = two_devices();
     a.set_ledger_policy(3, 1);
@@ -278,7 +282,7 @@ fn s2_restores_own_checkpoint_after_pruning() {
         "old batches were pruned: {on_box:?}"
     );
     let head = own_head(&a);
-    let view = a.view().unwrap();
+    let view = a.ledger_view3().unwrap().canonical();
     let home = lab.a_home();
     drop(a);
     fs::remove_dir_all(home.join("ledger")).unwrap();
@@ -287,7 +291,7 @@ fn s2_restores_own_checkpoint_after_pruning() {
     let r = a.ledger_rebuild(&LedgerRebuildOptions::default()).unwrap();
     assert_eq!(r.adopted_checkpoint, Some(cp));
     assert_eq!(own_head(&a), head);
-    assert_eq!(a.view().unwrap().chunks, view.chunks);
+    assert_eq!(a.ledger_view3().unwrap().canonical().packs, view.packs);
     fs::write(lab.a_docs().join("after.txt"), b"after").unwrap();
     a.sync(None).unwrap();
     assert_eq!(own_head(&a), head + 1);
@@ -301,7 +305,6 @@ fn s2_restores_own_checkpoint_after_pruning() {
 /// Unreadable `pushed.json` and `pending.json` are set aside and noted.
 /// A missing newest own batch is fetched again.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn s2_damaged_local_files_are_set_aside_and_rebuilt() {
     let (lab, a, b) = two_devices();
     let home = lab.a_home();
@@ -336,12 +339,7 @@ fn s2_damaged_local_files_are_set_aside_and_rebuilt() {
     // The newest own batch file goes missing.
     let head = own_head(&a);
     drop(a);
-    fs::remove_file(
-        home.join("ledger")
-            .join(&a_id)
-            .join(format!("{head:016}.json")),
-    )
-    .unwrap();
+    fs::remove_file(batch_file(&home.join("ledger"), &a_id, head)).unwrap();
     let mut a = open(&home);
     assert_eq!(a.ledger_health().state, "rebuild_needed");
     a.ledger_rebuild(&LedgerRebuildOptions::default()).unwrap();
@@ -355,7 +353,6 @@ fn s2_damaged_local_files_are_set_aside_and_rebuilt() {
 /// its own later batches from the storage (they are signed with its key
 /// and continue its history), and it goes on after them.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn s3_restored_device_adopts_its_later_history() {
     let (lab, mut a, mut b) = two_devices();
     let home = lab.a_home();
@@ -386,7 +383,7 @@ fn s3_restored_device_adopts_its_later_history() {
     let r = a.ledger_rebuild(&LedgerRebuildOptions::default()).unwrap();
     assert!(r.adopted_batches >= 2, "{r:?}");
     assert!(r.discarded_unpublished.is_empty());
-    assert_eq!(own_head(&a), head);
+    assert_eq!(own_head(&a), head, "{r:?}");
     assert!(r.health.is_ok());
     fs::write(lab.a_docs().join("six.txt"), b"sixth").unwrap();
     a.sync(None).unwrap();
@@ -424,7 +421,6 @@ fn set_storages(home: &Path, name: &str, path: &Path, extra: &[(&str, &Path)]) {
 /// the same number. The rebuild refuses, says to pair the device again,
 /// and the device stays fenced across restarts.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn s3_two_copies_of_one_identity_are_refused() {
     let (lab, mut a, b) = two_devices();
     let home = lab.a_home();
@@ -463,14 +459,13 @@ fn s3_two_copies_of_one_identity_are_refused() {
 }
 
 /// S4: the ledger is gone from the storage and from both devices. The
-/// first device restores what it can (nothing), enrols again and says the
-/// claims must be rebuilt from the storage; that rebuild maps every stored
-/// object to its folder and block through the newest manifests, verifies
-/// them and signs the claims. A device joining afterwards pulls identical
-/// files and fsck with verification is clean; the second device restores
-/// itself and syncs without a fork.
+/// first device restores what it can (no batch), enrols again and, as no
+/// ledger is left anywhere while its folder names blocks, rebuilds the
+/// claims: every pack its block maps name is read and hashed, then
+/// claimed, and its map and manifest records are announced again. A device
+/// joining afterwards pulls identical files and fsck with verification is
+/// clean; the second device restores itself and syncs without a fork.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn s4_ledger_lost_everywhere_is_rebuilt_from_storage() {
     let (lab, a, b) = two_devices();
     let before = claims(&a);
@@ -482,29 +477,21 @@ fn s4_ledger_lost_everywhere_is_rebuilt_from_storage() {
 
     let mut a = open(&lab.a_home());
     assert_eq!(a.ledger_health().state, "rebuild_needed");
-    let r = a.ledger_rebuild(&LedgerRebuildOptions::default()).unwrap();
-    assert!(!r.own_found_on_storages);
-    assert!(r.reenrolled);
-    assert!(r.no_ledger_anywhere);
-    assert!(r.from_storage.is_none());
-    assert_eq!(r.health.state, "no_ledger");
-    assert_eq!(
-        r.health.suggestion.as_deref(),
-        Some("varsto ledger rebuild --from-storage")
-    );
     let r = a
         .ledger_rebuild(&LedgerRebuildOptions {
             from_storage: true,
             ..Default::default()
         })
         .unwrap();
+    assert!(!r.own_found_on_storages);
+    assert!(r.reenrolled);
     let s = r.from_storage.expect("claims rebuilt");
     assert!(s.claims_written > 0, "{s:?}");
-    assert_eq!(s.objects_missing, 0);
     assert_eq!(s.objects_corrupt, 0);
     assert_eq!(s.objects_unverified, 0, "a small vault is verified in full");
-    assert!(s.blocks_on_device > 0);
+    assert!(s.objects_verified > 0);
     assert!(s.manifests_announced > 0);
+    assert!(!r.no_ledger_anywhere);
     assert!(r.health.is_ok(), "{:?}", r.health);
     assert!(claims(&a).is_superset(&before));
     let st = a.status().unwrap();
@@ -519,17 +506,16 @@ fn s4_ledger_lost_everywhere_is_rebuilt_from_storage() {
         .from_storage
         .unwrap();
     assert_eq!(again.claims_written, 0);
-    assert!(again.claims_known > 0);
 
     // A new device pulls byte-identical files; fsck with verification is clean.
-    let mut c = Engine::join(
+    let mut c = common::join_approved(
         &lab.root.join("c"),
         "tablet",
         PASS,
         &lab.key,
         lab.storage.clone(),
-    )
-    .unwrap();
+        &mut a,
+    );
     c.chunker = ChunkerParams::SMALL;
     c.attach_folder("docs", &lab.root.join("c-docs"), false)
         .unwrap();
@@ -559,7 +545,6 @@ fn s4_ledger_lost_everywhere_is_rebuilt_from_storage() {
 /// no ledger is left anywhere, rebuilds the claims as well; a damaged
 /// object is not claimed but queued for repair.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn s4_service_rebuilds_by_itself_and_skips_damaged_objects() {
     let (lab, a, b) = two_devices();
     let objects: Vec<String> = common::object_names(&lab.storage_dir())
@@ -594,21 +579,19 @@ fn s4_service_rebuilds_by_itself_and_skips_damaged_objects() {
 
 /// S5: a damaged cached view is rebuilt from the batches.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn s5_damaged_view_cache_is_rebuilt() {
     let (lab, a, b) = two_devices();
     let home = lab.a_home();
-    let before = a.view().unwrap();
+    let before = a.ledger_view3().unwrap().canonical();
     drop((a, b));
-    fs::write(home.join("ledger/view.enc"), b"garbage").unwrap();
+    fs::write(home.join("ledger/view.rec"), b"garbage").unwrap();
     let a = open(&home);
-    assert_eq!(a.view().unwrap(), before);
+    assert_eq!(a.ledger_view3().unwrap().canonical(), before);
     assert!(a.ledger_health().is_ok());
 }
 
 /// `ledger status`: heads per device and where their batches are held.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn ledger_status_lists_heads_and_holdings() {
     let (_lab, mut a, b) = two_devices();
     let st = a.ledger_status(true).unwrap();

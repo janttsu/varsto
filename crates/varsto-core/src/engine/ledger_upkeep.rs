@@ -22,51 +22,6 @@
 //! (`docs/spec/alpha-0-format.md` section 22).
 
 use super::*;
-use crate::ledger::{LedgerObject, SignedCheckpoint};
-
-/// Listing start for the objects of `device` after batch `seq` (0: all).
-/// Checkpoint names sort after every batch name, so they are always listed.
-fn start_after(device: &DeviceId, seq: u64) -> String {
-    if seq == 0 {
-        String::new()
-    } else {
-        SignedBatch::storage_key(device, seq)
-    }
-}
-
-/// The batches and checkpoints of `device` on a storage after batch `seq`.
-fn remote_objects(
-    backend: &dyn Storage,
-    device: &DeviceId,
-    seq: u64,
-) -> Result<BTreeSet<LedgerObject>> {
-    let prefix = format!("ledger/{device}/");
-    Ok(backend
-        .list_after(&prefix, &start_after(device, seq))?
-        .iter()
-        .filter_map(|k| k.strip_prefix(&prefix).and_then(LedgerObject::parse))
-        .collect())
-}
-
-fn batches_of(objects: &BTreeSet<LedgerObject>) -> BTreeSet<u64> {
-    objects
-        .iter()
-        .filter_map(|o| match o {
-            LedgerObject::Batch(s) => Some(*s),
-            LedgerObject::Checkpoint(_) => None,
-        })
-        .collect()
-}
-
-fn checkpoints_of(objects: &BTreeSet<LedgerObject>) -> BTreeSet<u64> {
-    objects
-        .iter()
-        .filter_map(|o| match o {
-            LedgerObject::Checkpoint(s) => Some(*s),
-            LedgerObject::Batch(_) => None,
-        })
-        .collect()
-}
 
 /// When a device writes a checkpoint of its own batches and how many
 /// batches it keeps on the storages before its newest checkpoint.
@@ -155,49 +110,6 @@ impl Engine {
         Ok((out, committed?))
     }
 
-    /// Fetch, check and keep checkpoint `seq` of another device. One that
-    /// does not verify or open is skipped (the batches still count), and so
-    /// is one that is not a trusted full device's: replicas and members
-    /// write none, and a checkpoint speaks for its signer only anyway
-    /// (`LedgerView::restricted_to`). One far beyond the batches held is
-    /// kept only beside the signed batch it ends at.
-    fn pull_checkpoint(
-        &mut self,
-        backend: &dyn Storage,
-        dev: &DeviceId,
-        seq: u64,
-        pk: &crypto::VerifyingKey,
-    ) -> Result<Ingest> {
-        let Some(blob) = backend.get(&SignedCheckpoint::storage_key(dev, seq))? else {
-            return Ok(Ingest::Known);
-        };
-        let Ok(cp) = serde_json::from_slice::<SignedCheckpoint>(&blob) else {
-            return Ok(Ingest::Known);
-        };
-        if &cp.device != dev || cp.seq != seq || cp.verify(pk).is_err() {
-            return Ok(Ingest::Known);
-        }
-        if self.event_scope(dev, &cp.key_id) != Some(ledger::EventScope::Full) {
-            return Ok(Ingest::Known);
-        }
-        let head = self.ledger.head(dev);
-        let floor = head.seq.max(head.base.as_ref().map(|b| b.seq).unwrap_or(0));
-        let anchor = if seq > floor.saturating_add(ledger::MAX_AHEAD) {
-            backend
-                .get(&SignedBatch::storage_key(dev, seq))?
-                .and_then(|b| serde_json::from_slice::<SignedBatch>(&b).ok())
-                .filter(|b| b.verify(pk).is_ok())
-        } else {
-            None
-        };
-        match self.key_for_id(&cp.key_id) {
-            Some(key) if cp.open(&key).is_ok() => {
-                self.ledger.ingest_checkpoint_anchored(cp, anchor.as_ref())
-            }
-            _ => Ok(Ingest::Known),
-        }
-    }
-
     /// The newest batch of every other device held here, for the `seen`
     /// field of this device's next batch.
     pub(super) fn seen_heads(&self) -> BTreeMap<DeviceId, u64> {
@@ -213,33 +125,6 @@ impl Engine {
             .collect()
     }
 
-    /// The devices whose acknowledgement a checkpoint needs before the
-    /// batches it covers may go: full devices of the vault that are trusted
-    /// and not revoked. Members of shared folders and replicas do not read
-    /// the vault ledger.
-    pub(super) fn ledger_readers(&self) -> Vec<DeviceId> {
-        self.devices
-            .devices
-            .keys()
-            .filter(|d| *d != &self.vault.device_id && self.trusted(d))
-            .cloned()
-            .collect()
-    }
-
-    /// Whether every reader other than `device` itself has said it holds
-    /// `device`'s batches up to `seq`.
-    fn all_acked(&self, view: &LedgerView, device: &DeviceId, seq: u64) -> bool {
-        self.ledger_readers()
-            .iter()
-            .filter(|r| *r != device)
-            .all(|r| {
-                view.acks
-                    .get(r)
-                    .and_then(|a| a.get(device))
-                    .is_some_and(|s| *s >= seq)
-            })
-    }
-
     /// Keep the ledger small, after a sync: acknowledge other devices'
     /// checkpoints, write a checkpoint of this device's own batches when
     /// enough have accumulated, and once every reader has acknowledged a
@@ -248,110 +133,6 @@ impl Engine {
     /// as they are.
     pub fn ledger_upkeep(&mut self) -> Result<()> {
         crate::logged_op_plain!("ledger upkeep", "", { self.ledger_upkeep3() })
-    }
-
-    /// Format 2 (f3-switch: part B deletes it).
-    fn ledger_upkeep_inner2(&mut self) -> Result<()> {
-        if self.vault.member
-            || self.forked_self
-            || self.removal.is_some()
-            || self.ledger_alarm.needs_rebuild()
-        {
-            return Ok(());
-        }
-        let me = self.vault.device_id.clone();
-        let view = self.view()?;
-
-        // 1. Acknowledge checkpoints of others in a batch of our own.
-        let acked = view.acks.get(&me).cloned().unwrap_or_default();
-        let ack_due = self.ledger.devices().iter().any(|d| {
-            d != &me
-                && self
-                    .ledger
-                    .head(d)
-                    .base
-                    .is_some_and(|b| acked.get(d).copied().unwrap_or(0) < b.seq)
-        });
-        if ack_due {
-            if self.pending.is_empty() {
-                let lamport = self.tick()?;
-                let (key_id, key) = self.ledger_key_now();
-                self.ledger.append_own_seen(
-                    &me,
-                    Vec::new(),
-                    self.seen_heads(),
-                    lamport,
-                    &key,
-                    &key_id,
-                    &self.keys.signer,
-                )?;
-                self.push_own_batches()?;
-            } else {
-                self.commit_batch()?;
-            }
-        }
-
-        // 2. A checkpoint of our own batches.
-        let head = self.ledger.head(&me);
-        let base = head.base.as_ref().map(|b| b.seq).unwrap_or(0);
-        let last_size = match head.base.as_ref() {
-            Some(_) => self
-                .ledger
-                .checkpoint(&me)?
-                .map(|c| c.body_hex.len() as u64 / 2)
-                .unwrap_or(0),
-            None => 0,
-        };
-        let every = self
-            .ledger_policy
-            .checkpoint_every
-            .max(last_size / TYPICAL_BATCH_BYTES);
-        if head.seq >= base + every {
-            let (key_id, key) = self.ledger_key_now();
-            let own = self
-                .ledger
-                .contribution(&me, head.seq, |id| self.key_for_id(id))?;
-            self.ledger
-                .seal_checkpoint(&me, head.seq, own, &key, &key_id, &self.keys.signer)?;
-            self.push_own_batches()?;
-        }
-
-        // 3. Drop what checkpoints cover once every reader has seen past them.
-        let view = self.view()?;
-        let keep = self.ledger_policy.keep_before;
-        if let Some(b) = self.ledger.head(&me).base {
-            if self.all_acked(&view, &me, b.seq) {
-                let upto = b.seq.saturating_sub(keep);
-                for (spec, backend) in self.metadata_storages(false)? {
-                    if self.ledger.pruned(spec.name()) >= upto
-                        || !backend.exists(&SignedCheckpoint::storage_key(&me, b.seq))?
-                    {
-                        continue;
-                    }
-                    for seq in self.ledger.pruned(spec.name()) + 1..=upto {
-                        backend.delete(&SignedBatch::storage_key(&me, seq))?;
-                    }
-                    for old in checkpoints_of(&remote_objects(backend.as_ref(), &me, upto)?) {
-                        if old < b.seq {
-                            backend.delete(&SignedCheckpoint::storage_key(&me, old))?;
-                        }
-                    }
-                    self.ledger.set_pruned(spec.name(), upto)?;
-                }
-                self.ledger.drop_through(&me, upto)?;
-            }
-        }
-        for d in self.ledger.devices() {
-            if d == me {
-                continue;
-            }
-            if let Some(b) = self.ledger.head(&d).base {
-                if self.batch_accepted(&d, b.seq) && self.all_acked(&view, &d, b.seq) {
-                    self.ledger.drop_through(&d, b.seq)?;
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Write a checkpoint after `checkpoint_every` own batches and keep
@@ -380,41 +161,38 @@ impl Engine {
         let (key_id, key) = match key_id {
             Some(id) => (
                 id.to_string(),
-                self.key_for_id(id)
+                self.key_for3(id)
                     .ok_or_else(|| anyhow!("no key for {id} on this device"))?,
             ),
-            None if self.vault.member => {
-                let rec = self
-                    .keyring
-                    .folders
-                    .values()
-                    .next()
-                    .cloned()
-                    .ok_or_else(|| anyhow!("no shared folder"))?;
-                self.share_ledger_key_now(&rec)?
-            }
-            None => self.ledger_key_now(),
+            None => self.ledger_key3()?,
+        };
+        let scope = match crate::record::KeyId::parse(&key_id) {
+            Some(crate::record::KeyId::ShareLedger { folder, .. }) => folder,
+            _ => crate::ledger3::NO_FOLDER,
         };
         let lamport = match lamport {
             Some(l) => l,
             None => self.tick()?,
         };
-        let seen = if self.vault.member {
-            BTreeMap::new()
-        } else {
-            self.seen_heads()
-        };
-        let signed = self.ledger.append_own_seen(
-            &self.vault.device_id.clone(),
-            events,
+        let me = self.me3();
+        let seen = self.f3.ledger.vault_seen(&me);
+        let raw = events
+            .iter()
+            .filter_map(super::ledger3_ops::convert)
+            .map(|e| e.to_raw())
+            .collect();
+        let rec = self.f3.ledger.append_own(
+            &me,
+            raw,
             seen,
             lamport,
             &key,
             &key_id,
+            scope,
             &self.keys.signer,
         )?;
-        self.push_own_batches()?;
-        Ok(signed.seq)
+        self.push_own_batches3()?;
+        Ok(rec.seq)
     }
 
     /// Pull the ledger, once per `one_batch` action.
@@ -602,334 +380,82 @@ impl Engine {
         self.pull_ledger3()
     }
 
-    /// Push every own batch (and the newest own checkpoint) that a storage
-    /// does not have yet; detect forks. Format 2 (f3-switch: part B
-    /// deletes it).
-    pub(super) fn push_own_batches2(&mut self) -> Result<()> {
-        let me = self.vault.device_id.clone();
-        let head = self.ledger.head(&me);
-        let checkpoint = self.ledger.checkpoint(&me)?;
-        for (spec, backend) in self.metadata_storages(true)? {
-            // List from the newest batch this storage is known to hold, so
-            // that batch is seen again: a storage that lost it (or another
-            // storage under a known name) is filled from the start.
-            let mut done = self.ledger.pushed(spec.name()).min(head.seq);
-            let mut objects = remote_objects(backend.as_ref(), &me, done.saturating_sub(1))?;
-            let mut present = batches_of(&objects);
-            if done > 0 && !present.contains(&done) && done > head.dropped {
-                done = 0;
-                objects = remote_objects(backend.as_ref(), &me, 0)?;
-                present = batches_of(&objects);
-            }
-            // Only objects this device's key signed are its history; junk
-            // under its name is noted and never taken for a fork.
-            for newest in present.iter().rev().take_while(|n| **n > head.seq) {
-                if self.own_object_genuine(
-                    spec.name(),
-                    backend.as_ref(),
-                    &LedgerObject::Batch(*newest),
-                )? {
-                    bail!("ledger fork: storage {} holds batch {} of this device, newer than its own last batch {} (restored from an old copy?)", backend.name(), newest, head.seq);
-                }
-            }
-            for newest in checkpoints_of(&objects)
-                .iter()
-                .rev()
-                .take_while(|n| **n > head.seq)
-            {
-                if self.own_object_genuine(
-                    spec.name(),
-                    backend.as_ref(),
-                    &LedgerObject::Checkpoint(*newest),
-                )? {
-                    bail!("ledger fork: storage {} holds checkpoint {} of this device, newer than its own last batch {} (restored from an old copy?)", backend.name(), newest, head.seq);
-                }
-            }
-            if let Some(cp) = checkpoint.as_ref() {
-                if !checkpoints_of(&objects).contains(&cp.seq) {
-                    backend.put_if_absent(
-                        &SignedCheckpoint::storage_key(&me, cp.seq),
-                        &serde_json::to_vec(cp)?,
-                    )?;
-                }
-            }
-            for seq in done.max(head.dropped).max(1)..=head.seq {
-                let key = SignedBatch::storage_key(&me, seq);
-                if present.contains(&seq) {
-                    if seq == head.seq {
-                        if let (Some(remote), Some(batch)) =
-                            (backend.get(&key)?, self.ledger.get(&me, seq)?)
-                        {
-                            let remote = serde_json::from_slice::<SignedBatch>(&remote)
-                                .ok()
-                                .filter(|r| r.device == me && r.seq == seq);
-                            match remote {
-                                Some(r) if r.hash == batch.hash => {}
-                                Some(r) if r.verify(&self.keys.signer.public()).is_ok() => {
-                                    bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
-                                }
-                                _ => {
-                                    // Junk occupies the name: noted; the
-                                    // other storages hold the batch.
-                                    self.own_object_genuine(
-                                        spec.name(),
-                                        backend.as_ref(),
-                                        &LedgerObject::Batch(seq),
-                                    )?;
-                                }
-                            }
-                        }
-                    }
-                    continue;
-                }
-                let Some(batch) = self.ledger.get(&me, seq)? else {
-                    continue;
-                };
-                let written = backend.put_if_absent(&key, &serde_json::to_vec(&batch)?)?;
-                if !written {
-                    let same = backend
-                        .get(&key)?
-                        .and_then(|b| serde_json::from_slice::<SignedBatch>(&b).ok())
-                        .is_some_and(|r| r.hash == batch.hash);
-                    if !same
-                        && self.own_object_genuine(
-                            spec.name(),
-                            backend.as_ref(),
-                            &LedgerObject::Batch(seq),
-                        )?
-                    {
-                        bail!(
-                            "ledger fork: batch {} of this device appeared on {} concurrently",
-                            seq,
-                            backend.name()
-                        );
-                    }
-                }
-            }
-            self.ledger.set_pushed(spec.name(), head.seq)?;
-        }
-        self.ledger_alarm.watch.save(&self.home);
-        Ok(())
-    }
-
-    /// Pull everyone's new batches from every hot storage: for each device
-    /// with a known key, only the batches after the local head, and its
-    /// newest checkpoint when that is newer than the one held here. Format
-    /// 2 (f3-switch: part B deletes it).
-    pub(super) fn pull_ledger2(&mut self) -> Result<Vec<DeviceId>> {
-        self.pull_registry()?;
-        self.sync_membership()?;
-        let dir = self.key_directory()?;
-        let me = self.vault.device_id.clone();
-        let mut devices: Vec<DeviceId> = dir.keys().cloned().collect();
-        devices.sort();
-        // What peers say they hold (section 74); the pull below asks the
-        // storages for it.
-        self.exchange_heads();
-        let mut forks = BTreeSet::new();
-        let (mut malformed, mut refused) = (0u64, 0u64);
-        for (spec, backend) in self.metadata_storages(false)? {
-            for dev in &devices {
-                let head = self.ledger.head(dev);
-                if !self.batch_accepted(dev, head.seq + 1) {
-                    // Revoked, and everything up to the cut-off is here.
-                    continue;
-                }
-                // Our own identity is listed after our head too: anything
-                // there was written by another copy of this device. A forked
-                // device is read in full, as it always was.
-                let after = if head.forked { 0 } else { head.seq };
-                let objects = remote_objects(backend.as_ref(), dev, after)?;
-                if !objects.is_empty() {
-                    log::debug!(device:% = dev, storage = backend.name(), after = after, objects = objects.len(); "ledger: new objects of a device");
-                }
-                let pk = &dir[dev];
-                if dev == &me {
-                    // Only a checkpoint this device's key signed fences it:
-                    // anything else under its name is junk.
-                    let own_head = self.ledger.head(&me).seq;
-                    for n in checkpoints_of(&objects).into_iter().rev() {
-                        if n <= own_head {
-                            break;
-                        }
-                        let o = LedgerObject::Checkpoint(n);
-                        if self.own_object_genuine(spec.name(), backend.as_ref(), &o)? {
-                            forks.insert(me.clone());
-                            self.mark_forked(&me)?;
-                            break;
-                        }
-                    }
-                } else if let Some(n) = checkpoints_of(&objects)
-                    .into_iter()
-                    .rfind(|n| self.batch_accepted(dev, *n))
-                {
-                    if !self.vault.member && head.base.as_ref().is_none_or(|b| b.seq < n) {
-                        if let Ingest::Fork = self.pull_checkpoint(backend.as_ref(), dev, n, pk)? {
-                            forks.insert(dev.clone());
-                        }
-                    }
-                }
-                for seq in batches_of(&objects) {
-                    if !self.batch_accepted(dev, seq) {
-                        // Signed by a revoked device after its cut-off.
-                        continue;
-                    }
-                    let head = self.ledger.head(dev);
-                    if head.base.as_ref().is_some_and(|b| seq <= b.seq) && !head.forked {
-                        // A checkpoint held here covers it.
-                        continue;
-                    }
-                    if (self.ledger.get(dev, seq)?.is_some() || self.ledger.has_pending(dev, seq))
-                        && !head.forked
-                    {
-                        continue;
-                    }
-                    if dev == &me
-                        && self
-                            .ledger_alarm
-                            .watch
-                            .junk
-                            .get(spec.name())
-                            .is_some_and(|j| j.contains(&SignedBatch::storage_key(dev, seq)))
-                    {
-                        // Known junk under this device's name.
-                        continue;
-                    }
-                    let Some(blob) = backend.get(&SignedBatch::storage_key(dev, seq))? else {
-                        continue;
-                    };
-                    // One storage holding a damaged or planted object does
-                    // not stop the pull: another storage may hold the batch.
-                    let parsed = serde_json::from_slice::<SignedBatch>(&blob)
-                        .ok()
-                        .filter(|b| &b.device == dev && b.seq == seq);
-                    let Some(signed) = parsed else {
-                        if dev == &me {
-                            self.own_object_genuine(
-                                spec.name(),
-                                backend.as_ref(),
-                                &LedgerObject::Batch(seq),
-                            )?;
-                        } else {
-                            malformed += 1;
-                        }
-                        continue;
-                    };
-                    // A batch under a key this device lacks is kept unread.
-                    let key = self.key_for_id(&signed.key_id);
-                    if dev == &me && seq > self.ledger.head(&me).seq {
-                        if signed.verify(pk).is_err() {
-                            // Not signed by this device: junk, it fences nothing.
-                            self.own_object_genuine(
-                                spec.name(),
-                                backend.as_ref(),
-                                &LedgerObject::Batch(seq),
-                            )?;
-                            continue;
-                        }
-                        // Another copy of this device identity published ahead of us.
-                        forks.insert(me.clone());
-                        let _ = self.ledger.ingest_with(signed, pk, key.as_ref());
-                        self.mark_forked(&me)?;
-                        continue;
-                    }
-                    let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
-                    match self.ledger.ingest_limited(signed, pk, key.as_ref(), limit) {
-                        Ok(Ingest::Fork) => {
-                            forks.insert(dev.clone());
-                        }
-                        Ok(Ingest::Refused) => {
-                            refused += 1;
-                            log::warn!(device:% = dev, seq = seq, storage = backend.name(); "ledger batch refused");
-                        }
-                        Ok(Ingest::New | Ingest::Known | Ingest::Pending) => {}
-                        Err(e) => {
-                            malformed += 1;
-                            log::warn!(device:% = dev, seq = seq, storage = backend.name(), error:% = e; "ledger batch skipped");
-                        }
-                    }
-                }
-            }
-        }
-        let view = self.view()?;
-        self.observe_clock(view.max_lamport)?;
-        self.watch_freshness(&view, &dir, malformed, refused);
-        Ok(forks.into_iter().collect())
-    }
-
     /// After a pull: which devices' batches this device still lacks while
     /// another full device says (`seen`, in its signed batches) that it
-    /// holds them, or while batches wait here for a predecessor. The pull
-    /// has just asked every storage for them; a gap that stays for
-    /// `WITHHOLD_PULLS` pulls in a row is reported as a storage that may be
-    /// withholding batches (`LedgerHealth::warnings`).
-    fn watch_freshness(
-        &mut self,
-        view: &LedgerView,
-        dir: &KeyDirectory,
-        malformed: u64,
-        refused: u64,
-    ) {
-        let me = self.vault.device_id.clone();
+    /// holds them, a peer proved it (`p2p::v3::heads`), or batches wait here
+    /// for a predecessor. The pull has just asked every storage for them; a
+    /// gap that stays for `WITHHOLD_PULLS` pulls in a row is reported as a
+    /// storage that may be withholding batches (`LedgerHealth::warnings`).
+    pub(super) fn watch_freshness3(&mut self, view: &crate::ledger3::LedgerView, malformed: u64, refused: u64) {
+        let me = self.me3();
+        let known: BTreeSet<crate::record::Id16> =
+            self.f3.members.devices.devices.keys().copied().collect();
+        let cutoff = |d: &crate::record::Id16, seq: u64| match self.f3.members.revocations.get(d) {
+            Some(r) => seq.min(r.cutoff_seq),
+            None => seq,
+        };
         // device -> (held, seen, source)
-        let mut lacking: BTreeMap<DeviceId, (u64, u64, &'static str)> = BTreeMap::new();
+        let mut lacking: BTreeMap<crate::record::Id16, (u64, u64, &'static str)> =
+            BTreeMap::new();
         for (reader, acks) in &view.acks {
-            if reader == &me {
+            if *reader == me || !known.contains(reader) {
                 continue;
             }
             for (dev, seen) in acks {
-                if dev == &me || !dir.contains_key(dev) {
+                if *dev == me || !known.contains(dev) {
                     continue;
                 }
-                // Never beyond a removed device's cut-off.
-                let seen = match self.devices.revoked.get(dev) {
-                    Some(r) => (*seen).min(r.cutoff_seq),
-                    None => *seen,
-                };
-                let held = self.ledger.head(dev).seq;
+                let seen = cutoff(dev, *seen);
+                let held = self.f3.ledger.head(dev).seq;
                 if seen > held {
-                    let e = lacking.entry(dev.clone()).or_insert((held, 0, "acks"));
+                    let e = lacking.entry(*dev).or_insert((held, 0, "acks"));
                     e.1 = e.1.max(seen);
                 }
             }
         }
-        // What a peer says it holds (head statements, section 74).
-        for (dev, reach) in self.peer_reach(dir) {
-            let held = self.ledger.head(&dev).seq;
+        // What peers proved (signed batch envelopes, design section 8).
+        let proved = crate::p2p::v3::heads::Watch::load(&self.home);
+        for dev in known.iter().filter(|d| **d != me) {
+            let Some(p) = proved.get(dev) else {
+                continue;
+            };
+            let reach = cutoff(dev, p.seq);
+            let held = self.f3.ledger.head(dev).seq;
             if reach > held {
-                let e = lacking.entry(dev).or_insert((held, 0, "peer"));
+                let e = lacking.entry(*dev).or_insert((held, 0, "peer"));
                 if reach > e.1 {
                     e.1 = reach;
                     e.2 = "peer";
                 }
             }
         }
-        for dev in dir.keys().filter(|d| **d != me) {
-            if let Some(&waiting) = self.ledger.pending_seqs(dev).last() {
-                let held = self.ledger.head(dev).seq;
-                let e = lacking.entry(dev.clone()).or_insert((held, 0, "pending"));
+        for dev in known.iter().filter(|d| **d != me) {
+            if let Some(&waiting) = self.f3.ledger.pending_seqs(dev).last() {
+                let held = self.f3.ledger.head(dev).seq;
+                let e = lacking.entry(*dev).or_insert((held, 0, "pending"));
                 e.1 = e.1.max(waiting);
             }
         }
+        let names: BTreeMap<crate::record::Id16, String> = view.devices.clone();
         let watch = &mut self.ledger_alarm.watch;
         let before = std::mem::take(&mut watch.behind);
         for (dev, (held, seen, source)) in lacking {
+            let did = DeviceId::from_bytes(&dev);
             let pulls = before
-                .get(&dev)
+                .get(&did)
                 .map(|b| if b.held == held { b.pulls + 1 } else { 1 })
                 .unwrap_or(1);
             if pulls == ledger_recovery::WITHHOLD_PULLS {
-                log::warn!(device:% = dev, held = held, seen = seen; "a storage may be withholding ledger batches");
+                log::warn!(device:% = did, held = held, seen = seen; "a storage may be withholding ledger batches");
             }
-            let name = view
-                .devices
+            let name = names
                 .get(&dev)
                 .cloned()
-                .unwrap_or_else(|| dev.short().to_string());
+                .unwrap_or_else(|| did.short().to_string());
             watch.behind.insert(
-                dev.clone(),
+                did.clone(),
                 ledger_recovery::LedgerBehind {
-                    device: dev.to_string(),
+                    device: did.to_string(),
                     name,
                     held,
                     seen,

@@ -29,8 +29,7 @@ use crate::fsmeta;
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
 use crate::ignore_rules::{self, Matcher as IgnoreMatcher};
 use crate::ledger::{
-    self, Event, Ingest, KeyDirectory, LedgerStore, LedgerView, SignedBatch, KEY_LEDGER,
-    KEY_REPLICA,
+    self, Event, Ingest, KeyDirectory, LedgerStore, LedgerView, KEY_LEDGER, KEY_REPLICA,
 };
 use crate::manifest::{self, ChunkRef, FileState, Manifest, Merge};
 use crate::policy::{Policy, PolicyReport};
@@ -8273,20 +8272,30 @@ impl Engine {
             .collect())
     }
 
+    /// Every batch held here that opens under a key this device holds
+    /// (`varsto ledger`, `/api/ledger`).
     pub fn ledger_entries(&self) -> Result<Vec<LedgerEntry>> {
+        let vault = members3::bin(&self.vault.vault_id)?;
         let mut out = Vec::new();
-        for s in self.ledger.all()? {
-            let Some(key) = self.key_for_id(&s.key_id) else {
+        for rec in self.f3.ledger.all()? {
+            let Some(key) = self.key_for3(&rec.key_id) else {
                 continue;
             };
-            let Ok(b) = s.open(&key) else { continue };
+            let Some(pk) = self.f3.members.devices.get(&rec.device).and_then(|r| r.signing_key())
+            else {
+                continue;
+            };
+            let Ok(Some(b)) = crate::ledger3::store::check_batch(&rec, &vault, &pk, Some(&key))
+            else {
+                continue;
+            };
             out.push(LedgerEntry {
-                device: s.device.to_string(),
-                seq: s.seq,
+                device: DeviceId::from_bytes(&rec.device).to_string(),
+                seq: rec.seq,
                 lamport: b.lamport,
                 created_utc: b.created_utc,
                 events: b.events.len(),
-                hash: s.hash.clone(),
+                hash: hex::encode(rec.body_hash),
             });
         }
         Ok(out)
