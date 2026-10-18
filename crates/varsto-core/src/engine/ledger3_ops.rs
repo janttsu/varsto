@@ -532,7 +532,16 @@ impl Engine {
         // A storage that shows less than a writer confirmed and a peer
         // proved, two pulls in a row: the rollback warning.
         match self.p2p_judge_rollback(pull_utc, None) {
-            Ok(w) => self.ledger_alarm.watch.rollback = w.into_iter().map(|w| w.text).collect(),
+            Ok(w) => {
+                let mut devices: Vec<String> = w
+                    .iter()
+                    .map(|w| self.device_name(&DeviceId::from_bytes(&w.device)))
+                    .collect();
+                devices.sort();
+                devices.dedup();
+                self.ledger_alarm.watch.rollback_devices = devices;
+                self.ledger_alarm.watch.rollback = w.into_iter().map(|w| w.text).collect();
+            }
             Err(e) => log::debug!("rollback check failed: {e:#}"),
         }
         self.watch_freshness3(&view, malformed, refused);

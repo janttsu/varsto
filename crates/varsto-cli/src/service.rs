@@ -575,6 +575,18 @@ impl ServiceState {
                 "ledger.health",
                 json!({"state": h.state, "text": h.describe(), "warnings": h.warnings}),
             );
+            // A storage that may be withholding or rolling back batches:
+            // notified once when the warning appears.
+            let before: &[String] = self
+                .ledger_health
+                .as_ref()
+                .map(|o| o.warnings.as_slice())
+                .unwrap_or(&[]);
+            for w in h.warnings.iter().filter(|w| !before.contains(w)) {
+                if w.contains("withholding") {
+                    notify("Varsto ledger", w);
+                }
+            }
         }
         self.ledger_health = Some(h);
     }

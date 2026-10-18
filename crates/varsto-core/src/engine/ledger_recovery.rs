@@ -114,6 +114,9 @@ pub(super) struct Watch {
     /// shows less of a device's ledger than a peer proved).
     #[serde(default)]
     pub(super) rollback: Vec<String>,
+    /// The writing devices those warnings name (for the Help page).
+    #[serde(default)]
+    pub(super) rollback_devices: Vec<String>,
 }
 
 /// Kept apart from what peers proved (`p2p::v3::heads::WATCH_FILE`).
@@ -626,6 +629,12 @@ impl Engine {
             );
         }
         Ok(())
+    }
+
+    /// The devices whose ledger a storage may be withholding or rolling
+    /// back (the rollback warning of the last pull).
+    pub(super) fn ledger_rollback_devices(&self) -> Vec<String> {
+        self.ledger_alarm.watch.rollback_devices.clone()
     }
 
     /// This device's own ledger prefix on the storages.
