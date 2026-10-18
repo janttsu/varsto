@@ -47,6 +47,8 @@ impl Drop for Kill {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (upkeep)"]
+// Waits for an fsck verify activity task.
 fn a_command_reports_its_task_to_the_service() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

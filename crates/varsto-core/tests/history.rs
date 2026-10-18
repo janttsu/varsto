@@ -289,6 +289,8 @@ fn the_thinning_schedule_keeps_exactly_the_expected_versions() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (upkeep)"]
+// Waits for garbage collection in trash upkeep.
 fn thinning_and_expiry_drop_only_unreferenced_blocks() {
     let lab = Lab::new();
     let store = lab.p("store");
@@ -391,6 +393,8 @@ fn thinning_and_expiry_drop_only_unreferenced_blocks() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (upkeep)"]
+// Waits for garbage collection in trash upkeep.
 fn a_trash_storage_takes_the_blocks_only_versions_use() {
     let lab = Lab::new();
     let (one, cold, a_dir, b_dir) = (

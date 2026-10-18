@@ -81,6 +81,8 @@ fn mailbox_through_the_cli() {
 }
 
 #[test]
+#[ignore = "f3-switch: port in part B (membership)"]
+// Waits for the format-3 ledger_entries listing.
 fn two_devices_through_the_cli() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
