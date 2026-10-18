@@ -1809,7 +1809,10 @@
   "Decline": "Hylkää",
   "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.": "Palautussanat ovat holviavain 24 sanana ja tallennusmuodossa 3 myös palautussanat toisena 24 sanan joukkona. Turvallisuuden vuoksi ne tulostetaan tämän tietokoneen komentoriviltä, joka kysyy salasanaasi: aja jokin alla olevista komennoista ja tulosta tai kopioi sanat käsin. Valitsimella --shares tulostuu myös kolme osaa, joista mitkä tahansa kaksi palauttavat avaimen.",
   "Recovery words (optional)": "Palautussanat (valinnainen)",
-  "the 24 words of your recovery kit: they make the folder's recovery copy now. Leave empty to write it later": "palautuspaketin 24 sanaa: niillä tehdään kansion palautuskopio heti. Jätä tyhjäksi, jos haluat kirjoittaa sen myöhemmin"
+  "the 24 words of your recovery kit: they make the folder's recovery copy now. Leave empty to write it later": "palautuspaketin 24 sanaa: niillä tehdään kansion palautuskopio heti. Jätä tyhjäksi, jos haluat kirjoittaa sen myöhemmin",
+  "Your vault key and recovery words": "Holvin avain ja palautussanat",
+  "Write both word sets down and keep them offline: they are the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. The recovery words also make each new folder's recovery copy. They are shown once.": "Kirjoita molemmat sanasarjat muistiin ja säilytä ne offline-tilassa: ne ovat ainoa tapa palauttaa tiedot tai liittyä ilman toista laitetta; laitteita voi lisätä myös parituskoodilla. Palautussanoista tehdään myös jokaisen uuden kansion palautuskopio. Ne näytetään vain kerran.",
+  "I have written them down": "Olen kirjoittanut ne muistiin"
  },
  "patterns": [
   [
