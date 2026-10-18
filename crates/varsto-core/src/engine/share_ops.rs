@@ -176,7 +176,10 @@ impl Engine {
             .with_enrolled3(|m| {
                 let d = m.add_member(&id, &name, &req.k6, &k8, role.role3())?;
                 let me = m.devices.get(&m.me).cloned().expect("enrolled");
-                Ok((d, crate::membership3::fingerprint(&me.sign_pub, &me.kem_pub)))
+                Ok((
+                    d,
+                    crate::membership3::fingerprint(&me.sign_pub, &me.kem_pub),
+                ))
             })?
             .ok_or_else(|| anyhow!("this device has no storage to share through"))?;
         // The folder's earlier claims and records, where the member reads them.
@@ -438,7 +441,9 @@ impl Engine {
         let offers = Self::share_offers(home, &storage, secret.clone())?;
         let picked: Vec<&ShareOffer> = offers
             .iter()
-            .filter(|o| owner_words.is_none_or(|w| share::fingerprint_matches(&o.owner_fingerprint, w)))
+            .filter(|o| {
+                owner_words.is_none_or(|w| share::fingerprint_matches(&o.owner_fingerprint, w))
+            })
             .collect();
         let offer = match (picked.as_slice(), owner_words) {
             ([one], _) => (*one).clone(),

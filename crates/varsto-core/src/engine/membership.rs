@@ -728,7 +728,10 @@ impl Engine {
         let targets: BTreeSet<DeviceId> = targets.iter().cloned().collect();
         let mut list = Vec::new();
         for t in &targets {
-            list.push((members3::bin(t)?, self.f3.ledger.head(&members3::bin(t)?).seq));
+            list.push((
+                members3::bin(t)?,
+                self.f3.ledger.head(&members3::bin(t)?).seq,
+            ));
         }
         let names: Vec<String> = targets.iter().map(|t| self.device_name(t)).collect();
         let k1 = self.f3.recovery.clone();
@@ -774,11 +777,7 @@ impl Engine {
                 .iter()
                 .map(|(f, _)| folder_name(f))
                 .collect(),
-            folders_not_rekeyed: report
-                .folders_not_rotated
-                .iter()
-                .map(folder_name)
-                .collect(),
+            folders_not_rekeyed: report.folders_not_rotated.iter().map(folder_name).collect(),
         })
     }
 

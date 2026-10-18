@@ -283,7 +283,10 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
             .join(rec.folder_id.as_str())
             .join(a.device_id().as_str()),
     );
-    assert_eq!(manifest.key_id, format!("meta:{}@1", rec.folder_id.as_str()));
+    assert_eq!(
+        manifest.key_id,
+        format!("meta:{}@1", rec.folder_id.as_str())
+    );
     assert!(manifest.open_part(&Only(fk0.meta.clone())).is_err());
     // A's newest batch is under the new vault key; the old one opens nothing.
     let old_k3 = SecretKey::from_hex(&old_key).unwrap();
@@ -435,7 +438,11 @@ fn junk_under_a_devices_ledger_name_does_not_fence_it() {
     let (mut a, mut b, _c, _) = three_devices(&lab);
     let own = lab.store().join("ledger").join(a.device_id().as_str());
     fs::write(own.join("9999999999999999-0000.rec"), b"junk").unwrap();
-    fs::write(own.join("checkpoint-9999999999999998-0000.rec"), b"not a checkpoint").unwrap();
+    fs::write(
+        own.join("checkpoint-9999999999999998-0000.rec"),
+        b"not a checkpoint",
+    )
+    .unwrap();
     // A copy of a real batch of another device, under A's name.
     let theirs = fs::read_dir(lab.store().join("ledger").join(b.device_id().as_str()))
         .unwrap()

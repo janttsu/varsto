@@ -90,7 +90,10 @@ fn invite(lab: &Lab, owner: &mut Engine, who: &str) -> Engine {
         )
         .unwrap(),
     );
-    assert!(!home.join(ShareRequest::FILE).exists(), "the request is used up");
+    assert!(
+        !home.join(ShareRequest::FILE).exists(),
+        "the request is used up"
+    );
     m.attach_folder("project", &lab.dir(who), false).unwrap();
     m.sync(None).unwrap();
     m
@@ -166,8 +169,10 @@ fn request_fingerprint_matches_on_both_sides() {
     let offers = Engine::share_offers(&home, &lab.storage, None).unwrap();
     assert_eq!(offers.len(), 1);
     assert_eq!(offers[0].owner_fingerprint, added.owner_fingerprint);
-    let mut m = small(Engine::accept_share(&home, "robin", PASS, None, lab.storage.clone()).unwrap());
-    m.attach_folder("project", &lab.dir("robin"), false).unwrap();
+    let mut m =
+        small(Engine::accept_share(&home, "robin", PASS, None, lab.storage.clone()).unwrap());
+    m.attach_folder("project", &lab.dir("robin"), false)
+        .unwrap();
     m.sync(None).unwrap();
     assert!(read(&lab.dir("robin"), "plan.txt").is_some());
 }
@@ -400,7 +405,8 @@ fn a_member_removed_before_it_accepted_gets_nothing_new() {
     assert!(read(&lab.dir("a"), "eve.txt").is_none());
 
     // The member that was kept got the new key in a new grant.
-    let mut f = small(Engine::accept_share(&fhome, "fay", PASS, None, lab.storage.clone()).unwrap());
+    let mut f =
+        small(Engine::accept_share(&fhome, "fay", PASS, None, lab.storage.clone()).unwrap());
     f.attach_folder("project", &lab.dir("fay"), false).unwrap();
     f.sync(None).unwrap();
     assert!(read(&lab.dir("fay"), "after.txt").is_some());
@@ -441,7 +447,11 @@ fn a_folder_re_keyed_by_a_device_removal_can_be_shared() {
         .unwrap();
     lost.sync(None).unwrap();
     a.revoke_device("lost", false).unwrap();
-    fs::write(lab.dir("a").join("rekeyed.txt"), b"under the new folder key").unwrap();
+    fs::write(
+        lab.dir("a").join("rekeyed.txt"),
+        b"under the new folder key",
+    )
+    .unwrap();
     a.sync(None).unwrap();
     let mut b = invite(&lab, &mut a, "bea");
     assert_eq!(

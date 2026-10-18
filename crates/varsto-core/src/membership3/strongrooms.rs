@@ -12,7 +12,9 @@
 //! The newest record of a folder (by `updated_utc`, then stamp) counts.
 
 use super::{store, Stamp};
-use crate::record::{Id16, Kind, Record, RecordBody, RecordKeys, RecordMeta, RecordTrust, RecordsRefused, StreamRef};
+use crate::record::{
+    Id16, Kind, Record, RecordBody, RecordKeys, RecordMeta, RecordTrust, RecordsRefused, StreamRef,
+};
 use crate::storage::Storage;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

@@ -267,10 +267,22 @@ impl Engine {
                 k11: crate::membership3::grants::k11_of(&f, k13),
             };
             if let Some(k) = keys.k10(0) {
-                extra.push((KeyId::Meta { folder: f, epoch: 0 }, k));
+                extra.push((
+                    KeyId::Meta {
+                        folder: f,
+                        epoch: 0,
+                    },
+                    k,
+                ));
             }
             if let Some(k) = keys.share_ledger(0) {
-                extra.push((KeyId::ShareLedger { folder: f, epoch: 0 }, k));
+                extra.push((
+                    KeyId::ShareLedger {
+                        folder: f,
+                        epoch: 0,
+                    },
+                    k,
+                ));
             }
         }
         KeyRing {

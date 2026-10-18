@@ -157,7 +157,10 @@ fn a_share_with_qr_links_and_the_service_endpoints() {
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains('█') && text.contains("Pairing code"), "{text}");
+    assert!(
+        text.contains('█') && text.contains("Pairing code"),
+        "{text}"
+    );
 
     // The service: QR images, parsing scanned parts, a camera frame, a link
     // from the system.

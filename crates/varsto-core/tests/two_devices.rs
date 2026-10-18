@@ -882,7 +882,8 @@ fn strongroom_folder_needs_the_security_key_on_every_device() {
     assert!(
         a.share_add(
             "taxes",
-            &varsto_core::vault::ShareRequest::code_for(&lab.b_home.with_file_name("x-home")).unwrap(),
+            &varsto_core::vault::ShareRequest::code_for(&lab.b_home.with_file_name("x-home"))
+                .unwrap(),
             None,
             varsto_core::share::ShareRole::Editor
         )

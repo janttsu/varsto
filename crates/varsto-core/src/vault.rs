@@ -138,7 +138,11 @@ impl ShareRequest {
 
     /// The text form of a request code: `vsr1.<K6 hex>.<K8 hex>[.<name>]`.
     pub fn code_of(k6: &[u8], k8: &[u8], name: &str) -> String {
-        let mut code = format!("{SHARE_REQUEST_PREFIX}{}.{}", hex::encode(k6), hex::encode(k8));
+        let mut code = format!(
+            "{SHARE_REQUEST_PREFIX}{}.{}",
+            hex::encode(k6),
+            hex::encode(k8)
+        );
         if !name.is_empty() {
             code.push('.');
             code.push_str(name);
@@ -167,13 +171,14 @@ impl ShareRequest {
             .ok_or_else(|| anyhow!("not a share request code (expected the vsr1. prefix)"))?;
         let mut it = rest.splitn(3, '.');
         let k6_hex = it.next().unwrap_or_default();
-        let k8_hex = it
-            .next()
-            .ok_or_else(|| anyhow!("this share request code is from an older version of Varsto: ask for a new one"))?;
+        let k8_hex = it.next().ok_or_else(|| {
+            anyhow!("this share request code is from an older version of Varsto: ask for a new one")
+        })?;
         let name = it.next().unwrap_or_default().trim().to_string();
         let k6 = hex::decode(k6_hex).map_err(|_| anyhow!("the request code is damaged"))?;
-        let vk = VerifyingKey::from_bytes(&k6)
-            .map_err(|_| anyhow!("this share request code is from an older version of Varsto: ask for a new one"))?;
+        let vk = VerifyingKey::from_bytes(&k6).map_err(|_| {
+            anyhow!("this share request code is from an older version of Varsto: ask for a new one")
+        })?;
         let key = crate::kem::EncapsKey::from_bytes(
             &hex::decode(k8_hex).map_err(|_| anyhow!("the request code is damaged"))?,
         )?;
@@ -1381,7 +1386,9 @@ mod tests {
         assert!(ShareRequest::parse(&format!("vsr1.{key}.Ville")).is_ok());
         // A code of format 2 (the KEM key alone) is refused with a reason.
         let old = hex::encode(crate::kem::DecapsKey::generate().public().to_bytes());
-        let e = ShareRequest::parse(&format!("vsr1.{old}.Ville")).err().unwrap();
+        let e = ShareRequest::parse(&format!("vsr1.{old}.Ville"))
+            .err()
+            .unwrap();
         assert!(format!("{e:#}").contains("older version"), "{e:#}");
         for bad in ["x\u{1b}[2Ay", "a\u{202e}b", "a\u{200b}b", "tab\there"] {
             let e = ShareRequest::parse(&format!("vsr1.{key}.{bad}"))

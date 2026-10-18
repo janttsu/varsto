@@ -398,8 +398,14 @@ fn a_recovered_device_owns_the_folders_once_the_lost_ones_are_removed() {
     let (a, key) = first_device(&lab);
     let words = a.recovery_kit_text().unwrap();
     drop(a);
-    let mut c = Engine::join(&lab.p("c-home"), "new laptop", PASS, &key, lab.storage.clone())
-        .unwrap();
+    let mut c = Engine::join(
+        &lab.p("c-home"),
+        "new laptop",
+        PASS,
+        &key,
+        lab.storage.clone(),
+    )
+    .unwrap();
     c.chunker = ChunkerParams::SMALL;
     c.recover_folders(&recovery_key_of(&words)).unwrap();
     // While the lost device is still in the vault, C only reads.

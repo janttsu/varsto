@@ -1081,7 +1081,9 @@ fn a_member_of_another_vault_writes_by_the_member_rows() {
         .expect("a grant to a member carries the directory");
     assert_eq!(dir.get(&m).and_then(|e| e.role()), Some(Role::Editor));
     assert_eq!(dir.get(&w).and_then(|e| e.role()), Some(Role::Viewer));
-    assert!(dir.get(&ma.me).is_some_and(|e| e.full && e.role() == Some(Role::Owner)));
+    assert!(dir
+        .get(&ma.me)
+        .is_some_and(|e| e.full && e.role() == Some(Role::Owner)));
     assert!(dir.entries.iter().all(|e| e.id_matches()));
     assert!(env.open_part(&MemberKem(&guest, m)).is_err());
 }

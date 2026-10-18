@@ -174,16 +174,15 @@ impl Engine {
             // platform its policy refuses) writes nothing that counts.
             _ if self.org_untrusted3(device) => None,
             EventScope::Full => m.devices.get(device).map(|_| EventScope::Full),
-            EventScope::Member(f) if m.devices.get(device).is_some() => {
-                Some(EventScope::Owner(f))
-            }
+            EventScope::Member(f) if m.devices.get(device).is_some() => Some(EventScope::Owner(f)),
             EventScope::Member(f) => {
                 m.members.get(&f, device)?;
                 let st = m.registry.get(&f)?;
-                let wrote = st
-                    .history
-                    .get(device)
-                    .is_some_and(|h| h.iter().any(|(_, r)| matches!(r, Some(r) if *r != crate::membership3::Role::Viewer)));
+                let wrote = st.history.get(device).is_some_and(|h| {
+                    h.iter().any(
+                        |(_, r)| matches!(r, Some(r) if *r != crate::membership3::Role::Viewer),
+                    )
+                });
                 if wrote {
                     Some(EventScope::Member(f))
                 } else {
@@ -453,10 +452,7 @@ impl Engine {
     /// (not in its roster, or on a platform its policy refuses). Removed
     /// devices are judged by their cut-off instead.
     pub(crate) fn org_untrusted3(&self, device: &Id16) -> bool {
-        if self.org.is_none()
-            || *device == self.me3()
-            || self.f3.members.revoked.contains(device)
-        {
+        if self.org.is_none() || *device == self.me3() || self.f3.members.revoked.contains(device) {
             return false;
         }
         self.f3.members.devices.get(device).is_some()
@@ -465,12 +461,10 @@ impl Engine {
 
     /// The share-ledger key id and key of `folder`'s newest epoch held.
     fn share_ledger_key3(&self, folder: &Id16) -> Result<(String, SecretKey)> {
-        let k = self
-            .f3
-            .members
-            .granted
-            .get(folder)
-            .ok_or_else(|| anyhow!("this device holds no key of folder {}", hex::encode(folder)))?;
+        let k =
+            self.f3.members.granted.get(folder).ok_or_else(|| {
+                anyhow!("this device holds no key of folder {}", hex::encode(folder))
+            })?;
         let (e, _) = k
             .newest()
             .ok_or_else(|| anyhow!("no folder epoch is held here"))?;

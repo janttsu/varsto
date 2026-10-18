@@ -2703,7 +2703,11 @@ impl Engine {
     /// packs (dropped in one batch first) and its records (manifests, maps,
     /// trash, access, notes, thumbnails, snapshots, Strongroom key wraps).
     /// Returns (pack objects deleted, records deleted).
-    pub(super) fn purge_folder3(&mut self, id: &crate::record::Id16, name: &str) -> Result<(u64, u64)> {
+    pub(super) fn purge_folder3(
+        &mut self,
+        id: &crate::record::Id16,
+        name: &str,
+    ) -> Result<(u64, u64)> {
         let view = self.view3()?;
         let packs: Vec<[u8; 32]> = view
             .packs
@@ -2724,12 +2728,14 @@ impl Engine {
             for p in &packs {
                 let key = crate::packs::pack_key(&hex::encode(p));
                 if backend.exists(&key).unwrap_or(false) {
-                    self.f3.pending.push(crate::ledger3::events::Event::PackDropped(
-                        crate::ledger3::events::PackOn {
-                            storage: spec.name().to_string(),
-                            pack: *p,
-                        },
-                    ));
+                    self.f3
+                        .pending
+                        .push(crate::ledger3::events::Event::PackDropped(
+                            crate::ledger3::events::PackOn {
+                                storage: spec.name().to_string(),
+                                pack: *p,
+                            },
+                        ));
                     gone.push((spec.name().to_string(), key));
                 }
             }

@@ -276,11 +276,7 @@ impl MemberView {
                 accepted[i] = true;
                 changed = true;
                 v.owners.insert(c.issuer);
-                if v
-                    .directory
-                    .as_ref()
-                    .is_none_or(|old| d.stamp > old.stamp)
-                {
+                if v.directory.as_ref().is_none_or(|old| d.stamp > old.stamp) {
                     v.directory = Some(d.clone());
                 }
                 for o in &d.entries {
@@ -411,11 +407,17 @@ impl MemberView {
             if e != ep.current() + 1 {
                 continue;
             }
-            let Some(k9) = self.granted.get(&folder).and_then(|k| k.epochs.get(&e)).cloned() else {
+            let Some(k9) = self
+                .granted
+                .get(&folder)
+                .and_then(|k| k.epochs.get(&e))
+                .cloned()
+            else {
                 continue;
             };
             let mut ring = KeyRing::vault_only(me, &empty);
-            ring.extra.push((KeyId::Meta { folder, epoch: e }, k10_of(&folder, &k9)));
+            ring.extra
+                .push((KeyId::Meta { folder, epoch: e }, k10_of(&folder, &k9)));
             let mut found = None;
             for n in &owners {
                 if let Some(r) = store::accept_numbered::<FolderEpochRecord>(
@@ -445,9 +447,6 @@ impl MemberView {
     }
 
     fn is_owner(&self, device: &Id16) -> bool {
-        self.registry
-            .get(&self.folder)
-            .and_then(|s| s.role(device))
-            == Some(Role::Owner)
+        self.registry.get(&self.folder).and_then(|s| s.role(device)) == Some(Role::Owner)
     }
 }

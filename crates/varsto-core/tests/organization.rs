@@ -464,7 +464,11 @@ fn junk_epoch_objects_are_skipped() {
     b.sync(None).unwrap();
     assert_eq!(b.key_epoch(), 3);
     assert!(matches!(c.sync(None), Err(e) if removed(&e).is_some()));
-    fs::write(epochs.join("0000000000000004-0000.rec"), b"junk above the current epoch").unwrap();
+    fs::write(
+        epochs.join("0000000000000004-0000.rec"),
+        b"junk above the current epoch",
+    )
+    .unwrap();
     let current = a.export_vault_key().unwrap();
     let d = Engine::join(&lab.home("d"), "d", PASS, &current, lab.storage.clone()).unwrap();
     assert_eq!(d.key_epoch(), 3);

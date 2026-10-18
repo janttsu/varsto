@@ -23,7 +23,6 @@ use super::*;
 use crate::membership3::strongrooms::StrongroomRecord;
 use crate::strongroom::{self, Conversion, EnrolledKey, SecurityKey, StrongroomInfo};
 
-
 /// What a conversion did.
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct ConvertReport {
@@ -61,7 +60,6 @@ pub struct StrongroomKeySummary {
     pub name: String,
     pub added_utc: i64,
 }
-
 
 fn mtime_ns(md: &fs::Metadata) -> i64 {
     md.modified()
@@ -359,7 +357,12 @@ impl Engine {
             folder_id: new_id.to_string(),
             ..Default::default()
         };
-        let live: Vec<FileState> = state.files.values().filter(|f| !f.deleted).cloned().collect();
+        let live: Vec<FileState> = state
+            .files
+            .values()
+            .filter(|f| !f.deleted)
+            .cloned()
+            .collect();
         let task = crate::activity::start(
             crate::activity::STRONGROOM_CONVERT,
             &rec.name,
