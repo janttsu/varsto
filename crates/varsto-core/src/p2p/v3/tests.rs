@@ -467,6 +467,34 @@ fn tls_admits_only_certificates_named_by_an_accepted_peer_record() {
 }
 
 #[test]
+fn an_unknown_certificate_asks_for_the_records_to_be_read_again() {
+    let (a, b, c) = (Dev::new(1), Dev::new(2), Dev::new(3));
+    let r = responder_for(&a, &[&b]);
+    let srv = tls_server(&a, r.clone());
+    let t = Duration::from_secs(3);
+    assert!(!r.take_unknown());
+    // A device of the directory knocks: nothing to read again.
+    Client::new(b.device(), b.tls.clone())
+        .tcp_get(srv.addr, &a.tls.sha256, &a.device(), "/p2p/info", t)
+        .unwrap();
+    assert!(!r.take_unknown());
+    // C published its record after A's last read: its knock is noted once.
+    let got = Client::new(c.device(), c.tls.clone()).tcp_get(
+        srv.addr,
+        &a.tls.sha256,
+        &a.device(),
+        "/p2p/info",
+        t,
+    );
+    assert!(!matches!(got, Ok((200, _))));
+    assert!(r.take_unknown());
+    assert!(!r.take_unknown());
+    // The asking side rests only briefly after such a refusal.
+    let e = format!("{:#}", got.err().unwrap());
+    assert!(crate::p2p::refused_us(&e), "{e}");
+}
+
+#[test]
 fn a_connection_that_never_finishes_its_handshake_is_closed_at_the_deadline() {
     use std::io::{Read, Write};
     let (a, b) = (Dev::new(1), Dev::new(2));

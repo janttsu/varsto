@@ -111,6 +111,9 @@ pub struct Responder {
     nonces: token::NonceWindow,
     batches: RwLock<Option<Arc<dyn BatchSource>>>,
     heard: Mutex<Vec<Heard>>,
+    /// A handshake presented a certificate the directory does not name
+    /// (a device whose record arrived after the last read, or a stranger).
+    unknown: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for Responder {
@@ -134,6 +137,7 @@ impl Responder {
             nonces: token::NonceWindow::default(),
             batches: RwLock::new(None),
             heard: Mutex::new(Vec::new()),
+            unknown: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -158,7 +162,28 @@ impl Responder {
     /// Whether the handshake admits a client certificate: named by the
     /// directory, and not this device's own.
     pub fn admits(&self, cert: &[u8; 32]) -> bool {
-        cert != &self.own_cert && self.directory().device_for_cert(cert).is_some()
+        if cert == &self.own_cert {
+            return false;
+        }
+        let known = self.directory().device_for_cert(cert).is_some();
+        if !known {
+            self.note_unknown();
+        }
+        known
+    }
+
+    /// A handshake was refused for a certificate the directory does not
+    /// name: the service reads the peer records again soon (rate-limited),
+    /// so a device that just published its record is admitted.
+    pub fn note_unknown(&self) {
+        self.unknown
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether an unknown certificate was refused since the last call.
+    pub fn take_unknown(&self) -> bool {
+        self.unknown
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// A token from this device for `path` at `responder`, on the

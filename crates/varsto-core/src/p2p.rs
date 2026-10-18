@@ -980,6 +980,30 @@ impl ObjectStats {
 }
 
 const ROUTE_TTL: Duration = Duration::from_secs(60);
+/// A peer that refused our certificate (its directory did not name us
+/// yet: we published our record after its last read, and our knock makes
+/// it read the records again) rests this long only.
+const REFUSED_REST: Duration = Duration::from_secs(3);
+
+/// An error of a peer that answered but refused this device's certificate
+/// in the TLS handshake (TCP or QUIC).
+fn refused_us(e: &str) -> bool {
+    [
+        "AccessDenied",
+        "ApplicationVerificationFailure",
+        "CertificateUnknown",
+        "BadCertificate",
+    ]
+    .iter()
+    .any(|m| e.contains(m))
+}
+
+/// When to note a failure so that it rests `rest` instead of `ROUTE_TTL`.
+fn failed_at(rest: Duration) -> Instant {
+    let now = Instant::now();
+    now.checked_sub(ROUTE_TTL.saturating_sub(rest))
+        .unwrap_or(now)
+}
 
 impl Peers {
     /// The peers of the directory (accepted peer records of trusted full
@@ -1121,10 +1145,11 @@ impl Peers {
             }
         ));
         let ok = result.is_ok();
-        self.state
-            .lock()
-            .unwrap()
-            .insert(addr, (ok, Instant::now()));
+        let when = match &result {
+            Err(e) if refused_us(&format!("{e:#}")) => failed_at(REFUSED_REST),
+            _ => Instant::now(),
+        };
+        self.state.lock().unwrap().insert(addr, (ok, when));
         result
     }
 
@@ -1344,7 +1369,15 @@ impl Peers {
                 tried.join("; ")
             }
         ));
-        self.remember(&p.device, None, 0);
+        if !tried.is_empty() && tried.iter().all(|t| refused_us(t)) {
+            // It answered and refused us: it reads our record soon.
+            self.routes
+                .lock()
+                .unwrap()
+                .insert(p.device.clone(), (None, 0, failed_at(REFUSED_REST)));
+        } else {
+            self.remember(&p.device, None, 0);
+        }
         None
     }
 
