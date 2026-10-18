@@ -278,8 +278,14 @@ impl<'a> Membership<'a> {
             members: None,
         };
         let ring = KeyRing::vault_only(self.me, &self.vault_keys);
-        self.registry =
-            FolderRegistry::read(self.storages, self.vault, &ring, &trust, &mut self.refused)?;
+        self.registry = FolderRegistry::read_with(
+            self.storages,
+            self.vault,
+            &ring,
+            &trust,
+            &mut self.refused,
+            &self.revoked,
+        )?;
         // Member devices the owners listed in the folder records.
         let mut members = super::members::MemberRegistry::default();
         for st in self.registry.folders.values() {
@@ -1686,6 +1692,8 @@ impl<'a> Membership<'a> {
         }
         self.vault_keys.keys.insert(new, k3);
         self.refresh()?;
+        // Folders this device recovered whose last owner just left.
+        self.claim_recovered_folders()?;
         // A folder epoch for every folder the device took part in.
         let mut report = RemovalReport {
             vault_epoch: new,
@@ -1869,7 +1877,56 @@ impl<'a> Membership<'a> {
             self.recovered.add(k);
         }
         self.refresh()?;
+        self.claim_recovered_folders()?;
         Ok(out)
+    }
+
+    /// Keys this device took from escrow in an earlier session (the engine
+    /// keeps them in its keyring): held like granted ones.
+    pub fn add_recovered(&mut self, keys: FolderKeys) {
+        self.recovered.add(keys.clone());
+        self.granted.add(keys);
+    }
+
+    /// A device that recovered folder keys from escrow becomes an owner of
+    /// every such folder whose owners were all removed from the vault: it
+    /// is the only holder left. Its folder record names itself owner, and
+    /// readers take that entry because no owner remains
+    /// (`FolderState::build_with`). Returns the folders claimed.
+    pub fn claim_recovered_folders(&mut self) -> Result<Vec<Id16>> {
+        let mut claimed = Vec::new();
+        let ids: Vec<Id16> = self.recovered.folders.keys().copied().collect();
+        for f in ids {
+            let Some(st) = self.registry.get(&f) else {
+                continue;
+            };
+            if st.is_removed()
+                || st.role(&self.me) == Some(Role::Owner)
+                || !st.owners().iter().all(|o| self.revoked.contains(o))
+            {
+                continue;
+            }
+            let stamp = Stamp {
+                lamport: self.lamport + 1,
+                device: self.me,
+            };
+            self.write_folder_record(
+                &f,
+                None,
+                None,
+                vec![Participant {
+                    device: self.me,
+                    role: Role::Owner,
+                    stamp,
+                }],
+                Vec::new(),
+            )?;
+            claimed.push(f);
+        }
+        if !claimed.is_empty() {
+            self.refresh()?;
+        }
+        Ok(claimed)
     }
 
     /// Folder epochs this device holds the key of with no escrow on the

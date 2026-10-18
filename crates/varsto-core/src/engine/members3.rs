@@ -333,6 +333,7 @@ impl Engine {
         let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
         let lamport = self.clock.lamport;
         let kept = self.vault_kept3();
+        let recovered = self.keyring_keys3()?;
         let (out, snapshot, keys, stamped) = {
             let Some(kem) = self.epochs.kem.as_ref() else {
                 bail!("this device has no KEM key (K8); it cannot take part in format-3 folders");
@@ -346,6 +347,11 @@ impl Engine {
                 kept,
             )?;
             m.observe_lamport(lamport);
+            for k in recovered {
+                if m.granted.get(&k.folder).is_none() {
+                    m.add_recovered(k);
+                }
+            }
             // A removed device, or one that waits for the user's choice
             // between two vault epochs, writes nothing.
             let out = if !guard {
@@ -526,14 +532,15 @@ impl Engine {
     /// Keep what a `Membership` read: the registries, newer vault keys,
     /// the folders of the vault in the local keyring (with the keys granted
     /// to this device), the device list.
-    fn adopt_members3(&mut self, mut snapshot: Members3, keys: VaultKeys) -> Result<()> {
-        // Keys this device took from escrow (`recover_folders3`) are kept
-        // in the local keyring only: they count as held.
+    /// The folder keys the local keyring holds (from grants, or taken from
+    /// escrow by `recover_folders`, which only the keyring keeps).
+    fn keyring_keys3(&self) -> Result<Vec<crate::membership3::FolderKeys>> {
+        let mut out = Vec::new();
         for rec in self.keyring.folders.values() {
             let Ok(id) = bin(&rec.folder_id) else {
                 continue;
             };
-            if snapshot.granted.get(&id).is_some() || rec.k11_hex.is_empty() {
+            if rec.k11_hex.is_empty() || rec.is_removed() {
                 continue;
             }
             let mut epochs = BTreeMap::new();
@@ -546,11 +553,22 @@ impl Engine {
             if epochs.is_empty() {
                 continue;
             }
-            snapshot.granted.add(crate::membership3::FolderKeys {
+            out.push(crate::membership3::FolderKeys {
                 folder: id,
                 epochs,
                 k11: SecretKey::from_hex(&rec.k11_hex)?,
             });
+        }
+        Ok(out)
+    }
+
+    fn adopt_members3(&mut self, mut snapshot: Members3, keys: VaultKeys) -> Result<()> {
+        // Keys this device took from escrow (`recover_folders3`) are kept
+        // in the local keyring only: they count as held.
+        for k in self.keyring_keys3()? {
+            if snapshot.granted.get(&k.folder).is_none() {
+                snapshot.granted.add(k);
+            }
         }
         let mut epochs_changed = false;
         for (e, k) in keys.keys {

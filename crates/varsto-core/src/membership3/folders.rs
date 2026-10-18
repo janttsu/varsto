@@ -181,6 +181,18 @@ impl FolderState {
     /// Replay every record of one folder. `None` without a valid creation
     /// record (nothing of the folder counts then).
     pub fn build(records: &[Record<FolderRecord>]) -> Option<FolderState> {
+        Self::build_with(records, &std::collections::BTreeSet::new())
+    }
+
+    /// `build`, knowing which devices were removed from the vault: a
+    /// device that makes itself an owner counts when every owner of the
+    /// folder at that stamp was removed (it recovered the folder's keys
+    /// from escrow and is the only holder left; `alpha-0-format.md`
+    /// section 77.6, "As built").
+    pub fn build_with(
+        records: &[Record<FolderRecord>],
+        revoked: &std::collections::BTreeSet<Id16>,
+    ) -> Option<FolderState> {
         let genesis = records
             .iter()
             .filter(|r| r.body.creation.is_some())
@@ -222,7 +234,10 @@ impl FolderState {
         all.sort();
         let mut name_stamp = Stamp::default();
         for (stamp, writer, entry) in all {
-            if st.role(&writer) != Some(Role::Owner) {
+            let recovered = matches!(&entry, Entry::Set(d, Some(Role::Owner)) if *d == writer)
+                && !revoked.contains(&writer)
+                && st.owners().iter().all(|o| revoked.contains(o));
+            if st.role(&writer) != Some(Role::Owner) && !recovered {
                 st.entries_refused += 1;
                 continue;
             }
@@ -325,6 +340,18 @@ impl FolderRegistry {
         trust: &dyn RecordTrust,
         counter: &mut RecordsRefused,
     ) -> Result<FolderRegistry> {
+        Self::read_with(storages, vault, keys, trust, counter, &Default::default())
+    }
+
+    /// `read`, knowing the devices removed from the vault (`build_with`).
+    pub fn read_with(
+        storages: &[&dyn Storage],
+        vault: Id16,
+        keys: &dyn RecordKeys,
+        trust: &dyn RecordTrust,
+        counter: &mut RecordsRefused,
+        revoked: &std::collections::BTreeSet<Id16>,
+    ) -> Result<FolderRegistry> {
         let recs: Vec<Record<FolderRecord>> = store::read_all(
             storages,
             vault,
@@ -340,7 +367,7 @@ impl FolderRegistry {
         }
         let mut out = FolderRegistry::default();
         for (id, recs) in by_folder {
-            if let Some(st) = FolderState::build(&recs) {
+            if let Some(st) = FolderState::build_with(&recs, revoked) {
                 out.folders.insert(id, st);
             }
         }

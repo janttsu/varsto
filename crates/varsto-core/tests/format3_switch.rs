@@ -389,6 +389,56 @@ fn the_vault_words_alone_restore_no_folder_and_the_recovery_words_restore_every_
     assert_eq!(tree(&lab.p("a-docs")), tree(&lab.p("c-docs")));
 }
 
+/// A device that recovered the folders through the escrow becomes their
+/// owner once the lost devices are removed: it is the only holder left,
+/// and it can then share the folder with a new device of its own.
+#[test]
+fn a_recovered_device_owns_the_folders_once_the_lost_ones_are_removed() {
+    let lab = Lab::new();
+    let (a, key) = first_device(&lab);
+    let words = a.recovery_kit_text().unwrap();
+    drop(a);
+    let mut c = Engine::join(&lab.p("c-home"), "new laptop", PASS, &key, lab.storage.clone())
+        .unwrap();
+    c.chunker = ChunkerParams::SMALL;
+    c.recover_folders(&recovery_key_of(&words)).unwrap();
+    // While the lost device is still in the vault, C only reads.
+    assert_eq!(
+        c.f3_members("docs").unwrap().your_role.as_deref(),
+        None,
+        "not a participant yet"
+    );
+    let r = c.revoke_device("laptop", false).unwrap();
+    assert_eq!(r.key_epoch, 1);
+    assert_eq!(r.folders_rekeyed, vec!["docs".to_string()]);
+    assert_eq!(
+        c.f3_members("docs").unwrap().your_role.as_deref(),
+        Some("owner")
+    );
+    // As owner it approves another device of its own, which reads and writes.
+    let new_key = c.export_vault_key().unwrap();
+    let mut d = common::join_approved(
+        &lab.p("d-home"),
+        "desk",
+        PASS,
+        &new_key,
+        lab.storage.clone(),
+        &mut c,
+    );
+    d.chunker = ChunkerParams::SMALL;
+    d.attach_folder("docs", &lab.p("d-docs"), false).unwrap();
+    d.sync(None).unwrap();
+    assert_eq!(tree(&lab.p("a-docs")), tree(&lab.p("d-docs")));
+    fs::write(lab.p("d-docs").join("after.txt"), b"after the recovery").unwrap();
+    d.sync(None).unwrap();
+    c.attach_folder("docs", &lab.p("c-docs"), false).unwrap();
+    c.sync(None).unwrap();
+    assert_eq!(
+        fs::read(lab.p("c-docs").join("after.txt")).unwrap(),
+        b"after the recovery"
+    );
+}
+
 /// The recovery key from the kit text: the 24 words after its heading.
 fn recovery_key_of(kit: &str) -> varsto_core::membership3::RecoveryKey {
     let lines: Vec<&str> = kit.lines().collect();
