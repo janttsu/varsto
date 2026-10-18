@@ -324,6 +324,7 @@ fn grants_and_folder_records_from_non_owners_are_refused() {
                 device: mc.me,
             },
         }],
+        members: Vec::new(),
     };
     Writer {
         vault: VAULT,
@@ -755,6 +756,7 @@ fn body_parsers_survive_random_bytes() {
                 device: [6; 16],
                 stamp,
             }],
+            members: Vec::new(),
         },
     );
     fuzz_one(
@@ -890,4 +892,171 @@ fn folder_record_replay_converges_in_any_order() {
     // ma2's denial came after ma's approval (larger stamp): denied wins.
     assert!(want.is_denied(&mb.me));
     assert_eq!(want.role(&mc.me), Some(Role::Editor));
+}
+
+/// The member's own K8 opens a grant sealed to it.
+struct MemberKem<'a>(&'a Dev, Id16);
+
+impl crate::record::RecordKeys for MemberKem<'_> {
+    fn symmetric(&self, _: &KeyId) -> Option<SecretKey> {
+        None
+    }
+    fn kem_decapsulate(&self, recipient: &Id16, ct: &[u8]) -> Option<Result<SecretKey>> {
+        (*recipient == self.1).then(|| self.0.kem.decapsulate(ct))
+    }
+}
+
+/// Section 9's member rows (work package 12): another person's devices
+/// that an owner added to a folder from their request codes are trusted
+/// for that folder only, an editor for manifests, maps and trash records
+/// and its folder-scoped batches, a viewer for its batches alone. Every
+/// owner device learns their keys from the folder record; the grant opens
+/// with the member's own K8.
+#[test]
+fn a_member_of_another_vault_writes_by_the_member_rows() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, a2) = (Dev::new(), Dev::new());
+    let (friend, guest, stranger) = (Dev::new(), Dev::new(), Dev::new());
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut ma2 = device(&st, &a2, &keys, "desktop");
+    ma.refresh().unwrap();
+    let f = ma.create_folder("Shared", BTreeMap::new(), None).unwrap();
+    let g = ma.create_folder("Private", BTreeMap::new(), None).unwrap();
+    ma.approve(&f, &ma2.me.clone(), Role::Owner).unwrap();
+    let m = ma
+        .add_member(
+            &f,
+            "friend's phone",
+            &friend.sign.public().to_bytes(),
+            &friend.kem.public().to_bytes(),
+            Role::Editor,
+        )
+        .unwrap();
+    let w = ma
+        .add_member(
+            &f,
+            "guest tablet",
+            &guest.sign.public().to_bytes(),
+            &guest.kem.public().to_bytes(),
+            Role::Viewer,
+        )
+        .unwrap();
+    // A member is never an owner, and a device of the vault is approved.
+    assert!(ma
+        .add_member(
+            &f,
+            "x",
+            &stranger.sign.public().to_bytes(),
+            &stranger.kem.public().to_bytes(),
+            Role::Owner
+        )
+        .is_err());
+    assert!(ma
+        .add_member(
+            &f,
+            "x",
+            &a2.sign.public().to_bytes(),
+            &a2.kem.public().to_bytes(),
+            Role::Editor
+        )
+        .is_err());
+    let s_id = device_id(&stranger.sign.public());
+    ma2.refresh().unwrap();
+    let trust = ma2.record_trust();
+    use crate::record::WriterClass;
+    assert_eq!(trust.class(&m, &f, 0), WriterClass::MemberEditor);
+    assert_eq!(trust.class(&w, &f, 0), WriterClass::MemberViewer);
+    assert_eq!(trust.class(&m, &g, 0), WriterClass::Untrusted);
+    assert_eq!(trust.class(&s_id, &f, 0), WriterClass::Untrusted);
+    assert_eq!(trust.class(&ma2.me, &f, 0), WriterClass::FullOwner);
+    let ledger = KeyId::ShareLedger {
+        folder: f,
+        epoch: 0,
+    };
+    for kind in [Kind::Manifest, Kind::BlockMap, Kind::Trash] {
+        assert!(trust.signer_key(&m, kind, &f).is_some());
+        assert!(trust.may_write(&m, kind, &f, &meta(f, 0)), "{kind}");
+        assert!(!trust.may_write(&w, kind, &f, &meta(f, 0)), "{kind}");
+        assert!(trust.signer_key(&m, kind, &g).is_none());
+        assert!(!trust.may_write(&m, kind, &g, &meta(g, 0)));
+        assert!(trust.signer_key(&s_id, kind, &f).is_none());
+    }
+    assert!(trust.may_write(&m, Kind::Batch, &f, &ledger));
+    assert!(trust.may_write(&w, Kind::Batch, &f, &ledger));
+    assert!(!trust.may_write(&m, Kind::Batch, &[0; 16], &KeyId::Ledger(0)));
+    for kind in [Kind::Notes, Kind::Access, Kind::Snapshot] {
+        assert!(!trust.may_write(&m, kind, &f, &meta(f, 0)), "{kind}");
+    }
+    for kind in [Kind::Policy, Kind::Settings, Kind::Peer, Kind::Device] {
+        assert!(
+            !trust.may_write(&m, kind, &[0; 16], &KeyId::Registry(0)),
+            "{kind}"
+        );
+        assert!(trust.signer_key(&m, kind, &[0; 16]).is_none());
+    }
+    // What the editor writes in the folder is accepted by an owner device;
+    // the viewer's manifest is refused by the acceptance rule.
+    let seal = |dev: &Dev, id: Id16, kind: Kind| {
+        let signer = DeviceSigner {
+            device: id,
+            key: &dev.sign,
+        };
+        let ring = ma.record_keys();
+        RecordWriter {
+            vault: VAULT,
+            signer: &signer,
+            keys: &ring,
+        }
+        .seal(
+            &StreamRef::new(kind, f, id),
+            1,
+            1,
+            &meta(f, 0),
+            &Note {
+                text: "plan.txt".into(),
+            },
+        )
+        .unwrap()
+        .parts
+    };
+    let open = |parts: &[(String, Vec<u8>)]| {
+        let keys = ma2.record_keys();
+        let trust = ma2.record_trust();
+        Acceptor {
+            vault: VAULT,
+            keys: &keys,
+            trust: &trust,
+        }
+        .open::<Note>(parts)
+        .map(|r| r.body.text)
+        .map_err(|r| r.reason)
+    };
+    assert_eq!(open(&seal(&friend, m, Kind::Manifest)).unwrap(), "plan.txt");
+    assert_eq!(
+        open(&seal(&guest, w, Kind::Manifest)),
+        Err(Refusal::Junk(Junk::NotAllowed))
+    );
+    assert_eq!(
+        open(&seal(&stranger, s_id, Kind::Manifest)),
+        Err(Refusal::Junk(Junk::UnknownSigner))
+    );
+    // The grant to the editor opens with its own K8 only.
+    let names = s
+        .list(&format!("vault/grants/{}/", hex::encode(f)))
+        .unwrap();
+    let to_m: Vec<&String> = names
+        .iter()
+        .filter(|n| n.contains(&hex::encode(m)))
+        .collect();
+    assert_eq!(to_m.len(), 1);
+    let env = crate::record::SignedRecord::decode(&s.get(to_m[0]).unwrap().unwrap()).unwrap();
+    let body = env.open_part(&MemberKem(&friend, m)).unwrap();
+    let grant: grants::GrantRecord = decode_body(&body).unwrap();
+    assert_eq!(
+        (grant.folder, grant.recipient, grant.role),
+        (f, m, Role::Editor)
+    );
+    assert!(env.open_part(&MemberKem(&guest, m)).is_err());
 }

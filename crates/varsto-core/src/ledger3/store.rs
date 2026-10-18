@@ -21,9 +21,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::checkpoint::{Checkpoint, LedgerObject, CHECKPOINT_PREFIX};
-use super::envelope::{kind, Header, SignedRecord};
+use super::envelope::{self, kind, Header, LedgerRecord, SignedRecord};
 use super::events::{split_events, Batch, RawEvent, MAX_BATCH_PLAIN};
-use super::scope::EventScope;
+use super::scope::{EventScope, FolderRoles, NoRoles};
 use super::view::LedgerView;
 use super::{DeviceBin, FolderBin, Hash32, Ingest, MAX_AHEAD, MAX_BATCH_BODY};
 use crate::crypto::{self, SecretKey, SigningKey, VerifyingKey};
@@ -92,8 +92,22 @@ fn read_or_set_aside<T: serde::de::DeserializeOwned + Default>(
 }
 
 /// Check a batch record against what a batch of this vault must be, and
-/// its signature; returns the body when `key` opens it.
+/// its signature, through the acceptance rule of every record
+/// (`record::Acceptor`, steps 1 to 4) under its canonical storage name;
+/// returns the body when `key` opens it.
 pub fn check_batch(
+    rec: &SignedRecord,
+    vault: &[u8; 16],
+    pubkey: &VerifyingKey,
+    key: Option<&SecretKey>,
+) -> Result<Option<Batch>> {
+    check_batch_named(&envelope::storage_name(rec), rec, vault, pubkey, key)
+}
+
+/// `check_batch` for a record read under `name` (a storage listing): the
+/// name must be the one the envelope gives.
+pub fn check_batch_named(
+    name: &str,
     rec: &SignedRecord,
     vault: &[u8; 16],
     pubkey: &VerifyingKey,
@@ -102,22 +116,15 @@ pub fn check_batch(
     if rec.kind != kind::BATCH || &rec.vault != vault || rec.part != 0 || rec.parts != 1 {
         bail!("not a batch record of this vault");
     }
-    if rec.body.len() > super::envelope::padded_body_len(MAX_BATCH_BODY) {
+    if rec.body.len() > envelope::padded_body_len(MAX_BATCH_BODY) {
         bail!("batch body of {} bytes is over the limit", rec.body.len());
     }
-    rec.verify(pubkey)
-        .with_context(|| format!("batch {}/{}", hexd(&rec.device), rec.seq))?;
-    let Some(key) = key else {
+    let (_, plain) =
+        envelope::accept_part(name, &rec.encode(), vault, pubkey, key, MAX_BATCH_PLAIN)
+            .with_context(|| format!("batch {}/{}", hexd(&rec.device), rec.seq))?;
+    let Some(plain) = plain else {
         return Ok(None);
     };
-    let packed = rec.open_raw(key)?;
-    if packed.len() > MAX_BATCH_BODY {
-        bail!(
-            "batch body of {} compressed bytes is over the limit",
-            packed.len()
-        );
-    }
-    let plain = zstd::bulk::decompress(&packed, MAX_BATCH_PLAIN).context("batch body")?;
     let batch = Batch::from_postcard(&plain)?;
     if batch.device != rec.device || batch.seq != rec.seq {
         bail!("batch body does not match its envelope");
@@ -233,7 +240,7 @@ impl LedgerStore {
         if let Some(p) = path.parent() {
             std::fs::create_dir_all(p)?;
         }
-        util::write_atomic(path, &rec.encode()?)
+        util::write_atomic(path, &rec.encode())
     }
 
     fn read_record(path: &Path) -> Result<Option<SignedRecord>> {
@@ -513,7 +520,20 @@ impl LedgerStore {
         pubkey: &VerifyingKey,
         key: Option<&SecretKey>,
     ) -> Result<Ingest> {
-        self.ingest_inner(rec, pubkey, key, u64::MAX, false)
+        self.ingest_inner(None, rec, pubkey, key, u64::MAX, false)
+    }
+
+    /// `ingest` for a batch read under `name` from a storage or a peer:
+    /// the name must be the one its envelope gives.
+    pub fn ingest_named(
+        &mut self,
+        name: &str,
+        rec: SignedRecord,
+        pubkey: &VerifyingKey,
+        key: Option<&SecretKey>,
+        lamport_limit: u64,
+    ) -> Result<Ingest> {
+        self.ingest_inner(Some(name), rec, pubkey, key, lamport_limit, false)
     }
 
     /// Like `ingest`; a batch with a Lamport time above `lamport_limit` is
@@ -525,7 +545,7 @@ impl LedgerStore {
         key: Option<&SecretKey>,
         lamport_limit: u64,
     ) -> Result<Ingest> {
-        self.ingest_inner(rec, pubkey, key, lamport_limit, false)
+        self.ingest_inner(None, rec, pubkey, key, lamport_limit, false)
     }
 
     /// A device taking its own batches back after it lost its local
@@ -536,18 +556,22 @@ impl LedgerStore {
         pubkey: &VerifyingKey,
         key: Option<&SecretKey>,
     ) -> Result<Ingest> {
-        self.ingest_inner(rec, pubkey, key, u64::MAX, true)
+        self.ingest_inner(None, rec, pubkey, key, u64::MAX, true)
     }
 
     fn ingest_inner(
         &mut self,
+        name: Option<&str>,
         rec: SignedRecord,
         pubkey: &VerifyingKey,
         key: Option<&SecretKey>,
         lamport_limit: u64,
         over_gap: bool,
     ) -> Result<Ingest> {
-        let batch = check_batch(&rec, &self.vault, pubkey, key)?;
+        let batch = match name {
+            Some(n) => check_batch_named(n, &rec, &self.vault, pubkey, key)?,
+            None => check_batch(&rec, &self.vault, pubkey, key)?,
+        };
         if batch.as_ref().is_some_and(|b| b.lamport > lamport_limit) {
             return Ok(Ingest::Refused);
         }
@@ -595,7 +619,7 @@ impl LedgerStore {
         }
         if rec.seq > head_seq + 1 && !over_gap {
             let waiting = PendingBatch {
-                record: rec.encode()?,
+                record: rec.encode(),
                 opened: batch.is_some(),
                 prev: batch.map(|b| b.prev),
             };
@@ -987,6 +1011,18 @@ impl LedgerStore {
         keep: impl Fn(&DeviceBin, u64) -> bool,
         scope: impl Fn(&DeviceBin, &str) -> Option<EventScope>,
     ) -> Result<LedgerView> {
+        self.view_with_roles(key_for, keep, scope, &NoRoles)
+    }
+
+    /// `view_scoped` with the folder roles of full devices
+    /// (`scope::FolderRoles`).
+    pub fn view_with_roles(
+        &self,
+        key_for: impl Fn(&str) -> Option<SecretKey>,
+        keep: impl Fn(&DeviceBin, u64) -> bool,
+        scope: impl Fn(&DeviceBin, &str) -> Option<EventScope>,
+        roles: &dyn FolderRoles,
+    ) -> Result<LedgerView> {
         let mut view = LedgerView::default();
         for device in self.devices() {
             let head = self.head(&device);
@@ -996,7 +1032,7 @@ impl LedgerStore {
             }
             for seq in (base.max(head.dropped) + 1)..=head.seq {
                 if let Some(rec) = self.get(&device, seq)? {
-                    apply_record(&mut view, &rec, &key_for, &keep, &scope);
+                    apply_record(&mut view, &rec, &key_for, &keep, &scope, roles);
                 }
             }
         }
@@ -1012,6 +1048,20 @@ impl LedgerStore {
         key_for: impl Fn(&str) -> Option<SecretKey>,
         keep: impl Fn(&DeviceBin, u64) -> bool,
         scope: impl Fn(&DeviceBin, &str) -> Option<EventScope>,
+    ) -> Result<u64> {
+        self.update_view_with_roles(cache, key_for, keep, scope, &NoRoles)
+    }
+
+    /// `update_view_scoped` with the folder roles of full devices. The
+    /// caller puts what the roles depend on into the cache's `context`, so
+    /// a change of roles replays from the start.
+    pub fn update_view_with_roles(
+        &self,
+        cache: &mut ViewCache,
+        key_for: impl Fn(&str) -> Option<SecretKey>,
+        keep: impl Fn(&DeviceBin, u64) -> bool,
+        scope: impl Fn(&DeviceBin, &str) -> Option<EventScope>,
+        roles: &dyn FolderRoles,
     ) -> Result<u64> {
         let mut applied = 0;
         let devices = self.devices();
@@ -1046,7 +1096,7 @@ impl LedgerStore {
                     .collect();
                 for seq in filled {
                     if let Some(rec) = self.get(&device, seq)? {
-                        apply_record(&mut cache.raw, &rec, &key_for, &keep, &scope);
+                        apply_record(&mut cache.raw, &rec, &key_for, &keep, &scope, roles);
                         applied += 1;
                     }
                     gaps.remove(&seq);
@@ -1064,7 +1114,7 @@ impl LedgerStore {
             for seq in from + 1..=head.seq {
                 match self.get(&device, seq)? {
                     Some(rec) => {
-                        apply_record(&mut cache.raw, &rec, &key_for, &keep, &scope);
+                        apply_record(&mut cache.raw, &rec, &key_for, &keep, &scope, roles);
                         applied += 1;
                     }
                     None => {
@@ -1130,6 +1180,7 @@ fn apply_record(
     key_for: &impl Fn(&str) -> Option<SecretKey>,
     keep: &impl Fn(&DeviceBin, u64) -> bool,
     scope: &impl Fn(&DeviceBin, &str) -> Option<EventScope>,
+    roles: &dyn FolderRoles,
 ) {
     if !keep(&rec.device, rec.seq) {
         return;
@@ -1150,7 +1201,7 @@ fn apply_record(
         return;
     };
     if batch.device == rec.device && batch.seq == rec.seq {
-        view.apply_scoped(&batch, &scope);
+        view.apply_scoped_with(&batch, &scope, roles);
     }
 }
 

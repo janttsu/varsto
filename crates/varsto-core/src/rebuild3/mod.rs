@@ -372,7 +372,7 @@ pub fn rebuild(
         if opts.push {
             for s in input.storages.iter().filter(|s| s.meta && !s.cold) {
                 for rec in &sealed {
-                    let bytes = rec.encode()?;
+                    let bytes = rec.encode();
                     let key = batch_key(&me, rec.seq);
                     if !s.storage.put_if_absent(&key, &bytes)? {
                         let same = s.storage.get(&key)?.is_some_and(|b| {

@@ -24,7 +24,7 @@ use smallvec::SmallVec;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::events::{Announcement, Batch, Event, PackOn, PackStored};
-use super::scope::{Allow, EventScope};
+use super::scope::{folder_written, Allow, EventScope, FolderRoles, NoRoles};
 use super::{DeviceBin, FolderBin, Hash32, ObjectBin, PackId, NO_FOLDER};
 
 /// Which event set a value last, by the full device id: Lamport time,
@@ -496,6 +496,18 @@ impl LedgerView {
     /// Apply a batch whose signer has `scope`: events outside it are left
     /// out and counted; members' conditional events wait for `finish`.
     pub fn apply_scoped(&mut self, batch: &Batch, scope: &EventScope) {
+        self.apply_scoped_with(batch, scope, &NoRoles)
+    }
+
+    /// `apply_scoped` with the folder roles of full devices: a full
+    /// device's folder events (`scope::folder_written`) count only while
+    /// it writes in that folder at the batch's Lamport time.
+    pub fn apply_scoped_with(
+        &mut self,
+        batch: &Batch,
+        scope: &EventScope,
+        roles: &dyn FolderRoles,
+    ) {
         self.batches += 1;
         self.max_lamport = self.max_lamport.max(batch.lamport);
         let acks = match scope {
@@ -526,7 +538,12 @@ impl LedgerView {
                 pos,
                 dev,
             };
+            let role_ok = *scope != EventScope::Full
+                || folder_written(&ev).is_none_or(|f| {
+                    roles.writes_at(&batch.device, &f, batch.lamport) != Some(false)
+                });
             let applied = match scope.allows(&ev) {
+                _ if !role_ok => false,
                 Allow::No => false,
                 Allow::Yes => self.apply_event(batch, at, utc, ev),
                 _ => match scope.folder() {

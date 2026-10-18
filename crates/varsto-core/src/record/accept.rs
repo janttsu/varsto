@@ -9,7 +9,7 @@
 //! step 6 through `RecordBody::check`. A removed device's cut-off is the
 //! engine's: its `announcement` simply stops answering past it.
 
-use super::envelope::{decode_body, record_hash, RecordKeys, SignedRecord, MAX_PART_READ};
+use super::envelope::{decode_body_limited, record_hash, RecordKeys, SignedRecord, MAX_PART_READ};
 use super::kinds::{KeyId, Kind, RecordName, StreamRef};
 use super::Id16;
 use crate::crypto::VerifyingKey;
@@ -56,6 +56,8 @@ pub enum Junk {
     /// The body does not decode, or fails its kind's checks.
     BadBody(String),
 }
+
+impl std::error::Error for Junk {}
 
 impl fmt::Display for Junk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -221,6 +223,11 @@ pub trait RecordBody: Serialize + DeserializeOwned {
     fn check(&self, _meta: &RecordMeta) -> Result<(), String> {
         Ok(())
     }
+    /// The most bytes the body of this kind decompresses to (a batch, for
+    /// example, far less than a manifest base).
+    fn max_decoded() -> u64 {
+        super::envelope::MAX_DECODED_BODY
+    }
 }
 
 /// What a batch of the writer announced for one record.
@@ -260,6 +267,19 @@ pub struct Record<T> {
     pub body: T,
 }
 
+/// A record that passed steps (1) to (3): its envelopes in part order,
+/// with the names they were read under.
+#[derive(Clone, Debug)]
+pub struct Checked {
+    pub kind: Kind,
+    pub key_id: KeyId,
+    pub epoch: Option<u32>,
+    pub recipient: Option<Id16>,
+    pub size: u64,
+    pub names: Vec<String>,
+    pub envelopes: Vec<SignedRecord>,
+}
+
 /// The result of acceptance.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome<T> {
@@ -293,9 +313,11 @@ fn refused(
 }
 
 impl Acceptor<'_> {
-    /// Steps (1) to (4) over the parts of one record (storage name and
-    /// bytes, in any order).
-    pub fn open<T: RecordBody>(&self, parts: &[(String, Vec<u8>)]) -> Result<Record<T>, Refused> {
+    /// Steps (1) to (3) over the parts of one record (storage name and
+    /// bytes, in any order): the name, the envelope, the signature and the
+    /// writer, without opening the body. Used alone where no key is held
+    /// (a batch kept for later, a proof) and by `open`.
+    pub fn check_parts(&self, parts: &[(String, Vec<u8>)]) -> Result<Checked, Refused> {
         if parts.is_empty() {
             return Err(refused(
                 "",
@@ -378,13 +400,32 @@ impl Acceptor<'_> {
         if !self.trust.may_write(&e0.device, kind, &e0.scope, &key_id) {
             return Err(junk0(Junk::NotAllowed));
         }
+        let size = parts.iter().map(|(_, b)| b.len() as u64).sum();
+        let (epoch, recipient) = (n0.epoch, n0.recipient);
+        Ok(Checked {
+            kind,
+            key_id,
+            epoch,
+            recipient,
+            size,
+            names: envs.iter().map(|(n, _, _)| n.clone()).collect(),
+            envelopes: envs.into_iter().map(|(_, _, e)| e).collect(),
+        })
+    }
+
+    /// Steps (1) to (4) over the parts of one record (storage name and
+    /// bytes, in any order).
+    pub fn open<T: RecordBody>(&self, parts: &[(String, Vec<u8>)]) -> Result<Record<T>, Refused> {
+        let c = self.check_parts(parts)?;
+        let (name0, e0) = (&c.names[0], &c.envelopes[0]);
+        let junk0 = |j| refused(name0, Some(e0), None, Refusal::Junk(j));
         // (4)
         let mut compressed = Vec::new();
-        for (_, _, e) in &envs {
+        for e in &c.envelopes {
             compressed.extend_from_slice(&e.open_part(self.keys).map_err(junk0)?);
         }
-        let body: T = decode_body(&compressed).map_err(junk0)?;
-        if kind == Kind::Device {
+        let body: T = decode_body_limited(&compressed, T::max_decoded()).map_err(junk0)?;
+        if c.kind == Kind::Device {
             let raw = body
                 .embedded_signing_key()
                 .ok_or(junk0(Junk::BadBody("no signing key".into())))?;
@@ -392,23 +433,23 @@ impl Acceptor<'_> {
                 return Err(junk0(Junk::BadSignature));
             }
             let pk = VerifyingKey::from_bytes(&raw).map_err(|_| junk0(Junk::BadSignature))?;
-            for (_, _, e) in &envs {
+            for e in &c.envelopes {
                 e.verify(&pk).map_err(junk0)?;
             }
         }
         Ok(Record {
             meta: RecordMeta {
-                kind,
+                kind: c.kind,
                 vault: e0.vault,
                 scope: e0.scope,
                 device: e0.device,
                 seq: e0.seq,
                 parts: e0.parts,
-                key_id,
-                body_hash: record_hash(envs.iter().map(|(_, _, e)| &e.body_hash)),
-                epoch: n0.epoch,
-                recipient: n0.recipient,
-                size: parts.iter().map(|(_, b)| b.len() as u64).sum(),
+                key_id: c.key_id.clone(),
+                body_hash: record_hash(c.envelopes.iter().map(|e| &e.body_hash)),
+                epoch: c.epoch,
+                recipient: c.recipient,
+                size: c.size,
             },
             body,
         })

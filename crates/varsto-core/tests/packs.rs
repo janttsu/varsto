@@ -203,3 +203,92 @@ fn pack_sizes_are_size_classes_not_the_size_of_the_push() {
     }
     // The files come back through a second device.
 }
+
+/// Every pack under a storage directory: (id, bytes).
+fn pack_set(root: &Path) -> BTreeSet<(String, Vec<u8>)> {
+    common::pack_files(root)
+        .into_iter()
+        .map(|(path, id)| (id, fs::read(path).unwrap()))
+        .collect()
+}
+
+#[test]
+fn a_target_set_gets_one_pack_under_one_id_on_every_storage() {
+    let t = tempfile::tempdir().unwrap();
+    let (h1, h2, cold, docs) = (
+        t.path().join("h1"),
+        t.path().join("h2"),
+        t.path().join("cold"),
+        t.path().join("docs"),
+    );
+    let mounts = t.path().join("mounts");
+    fs::create_dir_all(&mounts).unwrap();
+    let (mut a, key) = Engine::init(&t.path().join("a"), "laptop", PASS).unwrap();
+    a.add_storage(dir("hot-one", &h1)).unwrap();
+    a.add_storage(dir("hot-two", &h2)).unwrap();
+    a.add_storage(StorageSpec::LocalDir {
+        name: "deep".into(),
+        path: cold.clone(),
+        cold: true,
+        carrier: false,
+        place: String::new(),
+        min_free: None,
+    })
+    .unwrap();
+    // A disk pool with no disk attached: it would share the hot storages'
+    // packs, takes nothing now and must not stop them.
+    a.add_storage(StorageSpec::Pool {
+        name: "shelf".into(),
+        place: "shelf".into(),
+        reserve_percent: 5,
+        min_reserve_bytes: 0,
+        disks: vec![],
+        scan_roots: vec![mounts],
+        copies: 1,
+        verify_after_days: varsto_core::pool::DEFAULT_VERIFY_AFTER_DAYS,
+    })
+    .unwrap();
+    a.add_folder("docs", &docs).unwrap();
+    fs::write(docs.join("big.bin"), random(3 * MIB as usize, 41)).unwrap();
+    for i in 0..20u64 {
+        fs::write(docs.join(format!("small{i}.txt")), random(5000, 50 + i)).unwrap();
+    }
+    let push = a.push("docs").unwrap();
+    assert_eq!(push.storages_unavailable, vec!["shelf".to_string()]);
+    let (one, two, deep) = (pack_set(&h1), pack_set(&h2), pack_set(&cold));
+    assert!(!one.is_empty() && !deep.is_empty());
+    // The same packs, byte for byte, under the same ids on both hot storages.
+    assert_eq!(one, two);
+    for (id, bytes) in one.iter().chain(&deep) {
+        let len = bytes.len() as u64;
+        assert!(is_size_class(len) || len == 256 * MIB, "{len} bytes");
+        assert_eq!(hex::encode(varsto_core::crypto::hash(bytes)), *id);
+    }
+    // The cold storage's packs are built apart (another class limit).
+    let hot_ids: BTreeSet<&String> = one.iter().map(|(id, _)| id).collect();
+    assert!(deep.iter().all(|(id, _)| !hot_ids.contains(id)));
+    // Another device reads every file through either hot storage alone.
+    for (i, only) in [&h1, &h2].into_iter().enumerate() {
+        let out = t.path().join(format!("out{i}"));
+        let mut b = Engine::join(
+            &t.path().join(format!("b{i}")),
+            "phone",
+            PASS,
+            &key,
+            dir(if i == 0 { "hot-one" } else { "hot-two" }, only),
+        )
+        .unwrap();
+        b.attach_folder("docs", &out, false).unwrap();
+        b.sync(None).unwrap();
+        assert_eq!(
+            fs::read(out.join("big.bin")).unwrap(),
+            random(3 * MIB as usize, 41)
+        );
+        for f in 0..20u64 {
+            assert_eq!(
+                fs::read(out.join(format!("small{f}.txt"))).unwrap(),
+                random(5000, 50 + f)
+            );
+        }
+    }
+}

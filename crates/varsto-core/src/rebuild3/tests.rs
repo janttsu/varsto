@@ -306,7 +306,7 @@ fn a_cloned_identity_with_two_histories_is_refused() {
     assert_eq!(other.seq, 3);
     std::fs::write(
         w.kit.dir.path().join("h2").join(batch_key(&me, 3)),
-        other.encode().unwrap(),
+        other.encode(),
     )
     .unwrap();
 

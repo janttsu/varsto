@@ -168,7 +168,7 @@ impl Kit {
                 .unwrap()
         };
         for s in &self.st {
-            s.put_if_absent(&batch_key(&id, rec.seq), &rec.encode().unwrap())
+            s.put_if_absent(&batch_key(&id, rec.seq), &rec.encode())
                 .unwrap();
         }
         // The other devices' local stores take it in.

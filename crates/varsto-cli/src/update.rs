@@ -956,21 +956,81 @@ pub struct Installed {
     pub signed_at: i64,
     /// The version the build reported when installed.
     pub version: String,
+    /// SHA-256 of the binary that was installed. The record speaks for the
+    /// running copy only when its hash is this one, so a binary put in
+    /// place by hand never shows (or is judged by) a stale build id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binary_sha256: Option<String>,
+    /// For an install another program finishes after this one exits (the
+    /// Windows setup program): the hash of the binary it replaces. The
+    /// first copy that runs with another hash takes the record over.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces_sha256: Option<String>,
 }
 
-/// The daily build this copy was installed from, if it was.
+/// SHA-256 of the running binary, hashed once per process.
+pub fn running_binary_hash() -> Option<&'static str> {
+    static HASH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| sha256_file(&p).ok())
+    })
+    .as_deref()
+}
+
+/// The daily build this copy was installed from, if it was: the record is
+/// valid and was written for the binary that runs now.
 pub fn installed_daily(home: &Path) -> Option<Installed> {
-    let i: Installed = serde_json::from_slice(&fs::read(home.join(CHANNEL_FILE)).ok()?).ok()?;
-    (i.channel == "daily" && valid_build_id(&i.build)).then_some(i)
+    installed_daily_as(home, running_binary_hash())
 }
 
+/// `installed_daily` for a running binary whose SHA-256 is `running`.
+fn installed_daily_as(home: &Path, running: Option<&str>) -> Option<Installed> {
+    let mut i: Installed = serde_json::from_slice(&fs::read(home.join(CHANNEL_FILE)).ok()?).ok()?;
+    if i.channel != "daily" || !valid_build_id(&i.build) {
+        return None;
+    }
+    let running = running?;
+    match (&i.binary_sha256, &i.replaces_sha256) {
+        (Some(h), _) if h.eq_ignore_ascii_case(running) => Some(i),
+        // The setup program has replaced the binary since: this is the build.
+        (None, Some(old)) if !old.eq_ignore_ascii_case(running) => {
+            i.binary_sha256 = Some(running.to_string());
+            i.replaces_sha256 = None;
+            if let Ok(bytes) = serde_json::to_vec_pretty(&i) {
+                let _ = varsto_core::util::write_atomic(&home.join(CHANNEL_FILE), &bytes);
+            }
+            Some(i)
+        }
+        _ => None,
+    }
+}
+
+/// Remember the daily build just installed over the running binary; its
+/// hash is taken from the file now in place.
 fn record_daily(home: &Path, build: &str, signed_at: i64) -> Result<()> {
+    let installed = std::env::current_exe()
+        .ok()
+        .and_then(|p| sha256_file(&p).ok());
+    record_daily_with(home, build, signed_at, installed, None)
+}
+
+fn record_daily_with(
+    home: &Path,
+    build: &str,
+    signed_at: i64,
+    binary_sha256: Option<String>,
+    replaces_sha256: Option<String>,
+) -> Result<()> {
     varsto_core::util::private_dir(home)?;
     let i = Installed {
         channel: "daily".into(),
         build: build.into(),
         signed_at,
         version: env!("CARGO_PKG_VERSION").into(),
+        binary_sha256,
+        replaces_sha256,
     };
     varsto_core::util::write_atomic(&home.join(CHANNEL_FILE), &serde_json::to_vec_pretty(&i)?)
 }
@@ -1242,7 +1302,18 @@ pub fn apply_daily(check: &DailyCheck, policy: &Policy) -> Result<String> {
     let v = download_daily_verified(&Curl, &daily_base(), check, &dir, policy)?;
     let message = install_file(&v, &dir, &from, &format!("daily {}", check.latest_build))?;
     if let Some(home) = policy.home {
-        record_daily(home, &check.latest_build, check.signed_at)?;
+        if installer {
+            // The setup program replaces the binary after this process exits.
+            record_daily_with(
+                home,
+                &check.latest_build,
+                check.signed_at,
+                None,
+                running_binary_hash().map(str::to_string),
+            )?;
+        } else {
+            record_daily(home, &check.latest_build, check.signed_at)?;
+        }
     }
     Ok(message)
 }
@@ -2367,6 +2438,55 @@ mod tests {
         assert!(!valid_build_id("20261016"));
         assert!(!valid_build_id("2026101-316c579"));
         assert!(!valid_build_id("20261016-XYZ1234"));
+    }
+
+    #[test]
+    fn the_daily_record_speaks_only_for_the_binary_it_was_written_for() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        let a = "a".repeat(64);
+        let b = "b".repeat(64);
+        record_daily_with(h, BUILD, 900_000, Some(a.clone()), None).unwrap();
+        assert_eq!(installed_daily_as(h, Some(&a)).unwrap().build, BUILD);
+        // A binary put in place by hand: no daily id, and no comparison.
+        assert_eq!(installed_daily_as(h, Some(&b)), None);
+        assert_eq!(installed_daily_as(h, None), None);
+        // A record without a hash (an older version wrote it) speaks for nobody.
+        let old = format!(
+            "{{\"channel\":\"daily\",\"build\":\"{BUILD}\",\"signed_at\":1,\"version\":\"1\"}}"
+        );
+        fs::write(h.join(CHANNEL_FILE), old).unwrap();
+        assert_eq!(installed_daily_as(h, Some(&a)), None);
+        // The setup program's install: the old binary is not the build, the
+        // first other one is, and the record names it from then on.
+        record_daily_with(h, BUILD, 900_000, None, Some(a.clone())).unwrap();
+        assert_eq!(installed_daily_as(h, Some(&a)), None);
+        assert_eq!(installed_daily_as(h, Some(&b)).unwrap().build, BUILD);
+        assert_eq!(installed_daily_as(h, Some(&a)), None);
+        assert_eq!(installed_daily_as(h, Some(&b)).unwrap().build, BUILD);
+    }
+
+    #[test]
+    fn a_hand_installed_daily_build_can_update() {
+        let (sk, pk) = test_key(9);
+        let home = tempfile::tempdir().unwrap();
+        // The record is of another binary than the one running (this test).
+        record_daily_with(
+            home.path(),
+            "20261016-316c579",
+            900_000,
+            Some("c".repeat(64)),
+            None,
+        )
+        .unwrap();
+        assert_eq!(channel_note(home.path()), None);
+        let list = |build: &str, ts: i64| daily_files(&sk, b"b", &daily_comment(ts, build));
+        let check = |f: &Fake| check_daily_with(f, DBASE, &pk, &dpol(home.path()));
+        // The record's build id is no "up to date": this copy is not known to be it.
+        let c = check(&list("20261016-316c579", 995_000)).unwrap();
+        assert!(c.newer && c.current_build.is_none());
+        // And an older day than the record's is no refusal.
+        assert!(check(&list("20261015-1111111", 996_000)).unwrap().newer);
     }
 
     #[test]

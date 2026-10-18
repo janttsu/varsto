@@ -87,6 +87,62 @@ impl Checkpoint {
     }
 }
 
+impl crate::record::RecordBody for Checkpoint {
+    fn check(&self, meta: &crate::record::RecordMeta) -> std::result::Result<(), String> {
+        if self.device != meta.device || self.seq != meta.seq {
+            return Err("checkpoint body does not match its envelope".into());
+        }
+        Ok(())
+    }
+    fn max_decoded() -> u64 {
+        MAX_CHECKPOINT_PLAIN as u64
+    }
+}
+
+impl Checkpoint {
+    /// The acceptance rule of every record (`record::Acceptor`) over the
+    /// parts of a checkpoint as read (storage name, bytes): names, the
+    /// envelope, `pubkey`'s signature, the body under `key` and its check.
+    pub fn accept(
+        parts: &[(String, Vec<u8>)],
+        vault: &[u8; 16],
+        pubkey: &crate::crypto::VerifyingKey,
+        key: &SecretKey,
+    ) -> Result<(Vec<SignedRecord>, Checkpoint)> {
+        use crate::record::{Acceptor, Outcome};
+        let Some((_, first)) = parts.first() else {
+            bail!("a checkpoint without parts");
+        };
+        let device = SignedRecord::decode(first)
+            .map_err(|j| anyhow::anyhow!("checkpoint: {j}"))?
+            .device;
+        let trust = envelope::OneSigner {
+            device,
+            key: pubkey,
+        };
+        let keys = envelope::OneKey(key);
+        let acceptor = Acceptor {
+            vault: *vault,
+            keys: &keys,
+            trust: &trust,
+        };
+        let rec = match acceptor.accept::<Checkpoint>(parts) {
+            Outcome::Accepted(r) => r,
+            Outcome::Refused(r) => bail!("{r}"),
+            Outcome::Waiting(_) => bail!("a checkpoint is never announced"),
+        };
+        if rec.meta.kind != crate::record::Kind::Checkpoint || rec.meta.scope != NO_FOLDER {
+            bail!("not a checkpoint record");
+        }
+        let mut envs: Vec<SignedRecord> = parts
+            .iter()
+            .filter_map(|(_, b)| SignedRecord::decode(b).ok())
+            .collect();
+        envs.sort_by_key(|e| e.part);
+        Ok((envs, rec.body))
+    }
+}
+
 /// What a name inside `ledger/<device>/` stands for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LedgerObject {

@@ -91,23 +91,24 @@ pub(super) fn pull_ledger(
                 let held = store.head(&device);
                 let held_to = held.seq.max(held.base.as_ref().map_or(0, |b| b.seq));
                 if *seq > held_to {
-                    let mut parts = Vec::new();
+                    let mut read = Vec::new();
                     for n in names {
                         if let Some(b) = s.storage.get_bounded(n, crate::record::MAX_PART_READ)? {
-                            if let Ok(r) = SignedRecord::decode(&b) {
-                                parts.push(r);
-                            }
+                            read.push((n.clone(), b));
                         }
                     }
-                    let usable = parts.len() == names.len()
-                        && parts.iter().all(|p| p.verify(&pubkey).is_ok())
-                        && parts.first().is_some_and(|p| {
-                            own || (input.scope_of)(&device, &p.key_id) == Some(EventScope::Full)
+                    let key_id = read
+                        .first()
+                        .and_then(|(_, b)| SignedRecord::decode(b).ok())
+                        .map(|r| r.key_id);
+                    let usable = read.len() == names.len()
+                        && key_id.as_ref().is_some_and(|k| {
+                            own || (input.scope_of)(&device, k) == Some(EventScope::Full)
                         });
                     if usable {
-                        if let Some(key) = (input.key_for)(&parts[0].key_id) {
-                            match Checkpoint::open(&parts, &key) {
-                                Ok(cp) if cp.device == device => {
+                        if let Some(key) = key_id.as_deref().and_then(|k| (input.key_for)(k)) {
+                            match Checkpoint::accept(&read, store.vault(), &pubkey, &key) {
+                                Ok((parts, cp)) if cp.device == device => {
                                     let anchor = s
                                         .storage
                                         .get_bounded(

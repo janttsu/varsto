@@ -8,7 +8,9 @@ use super::epochs::{
     VaultEpochRecord,
 };
 use super::escrow::{EscrowRecord, MissingEscrow, RecoveryKey};
-use super::folders::{folder_id, Denied, FolderRecord, FolderRegistry, FolderState, Participant};
+use super::folders::{
+    folder_id, Denied, FolderRecord, FolderRegistry, FolderState, MemberKeys, Participant,
+};
 use super::grants::{self, k10_of, k11_of, FolderKeys, GrantRecord, GrantedKeys, VaultGrantRecord};
 use super::keys::{KeyRing, VaultKeys};
 use super::requests::{fingerprint, PendingRequest, RequestRecord};
@@ -63,6 +65,9 @@ pub struct Membership<'a> {
     recovered: GrantedKeys,
     /// The issuer the user kept for a folder epoch number with two records.
     pub kept: BTreeMap<(Id16, u32), Id16>,
+    /// Member devices of shared folders (other people's devices) this
+    /// device knows, with their keys (section 9's member rows).
+    pub members: super::members::MemberRegistry,
     pub refused: RecordsRefused,
     lamport: u64,
 }
@@ -92,6 +97,7 @@ impl<'a> Membership<'a> {
             granted: GrantedKeys::default(),
             recovered: GrantedKeys::default(),
             kept: BTreeMap::new(),
+            members: Default::default(),
             refused: RecordsRefused::default(),
             lamport: 0,
         };
@@ -136,6 +142,7 @@ impl<'a> Membership<'a> {
             folders: Some(&self.granted),
             recovery: None,
             extra: Vec::new(),
+            members: Some(&self.members),
         }
     }
 
@@ -144,6 +151,7 @@ impl<'a> Membership<'a> {
             devices: &self.devices,
             revoked: &self.revoked,
             folders: Some(&self.registry),
+            members: Some(&self.members),
         }
     }
 
@@ -179,10 +187,25 @@ impl<'a> Membership<'a> {
             devices,
             revoked: &self.revoked,
             folders: None,
+            members: None,
         };
         let ring = KeyRing::vault_only(self.me, &self.vault_keys);
         self.registry =
             FolderRegistry::read(self.storages, self.vault, &ring, &trust, &mut self.refused)?;
+        // Member devices the owners listed in the folder records.
+        let mut members = super::members::MemberRegistry::default();
+        for st in self.registry.folders.values() {
+            for m in st.members.values() {
+                members.insert(super::members::MemberDevice {
+                    device: m.device,
+                    folder: st.id,
+                    name: m.name.clone(),
+                    k6: m.k6.clone(),
+                    k8: m.k8.clone(),
+                });
+            }
+        }
+        self.members = members;
         self.read_folder_keys()?;
         let mut lamport = self.lamport;
         for st in self.registry.folders.values() {
@@ -213,6 +236,7 @@ impl<'a> Membership<'a> {
                 devices: &self.devices,
                 revoked: &self.revoked,
                 folders: None,
+                members: None,
             };
             grants::read_vault_grants(
                 self.storages,
@@ -309,6 +333,7 @@ impl<'a> Membership<'a> {
                 devices: &self.devices,
                 revoked: &empty,
                 folders: None,
+                members: None,
             };
             store::read_all(
                 self.storages,
@@ -350,6 +375,7 @@ impl<'a> Membership<'a> {
                 devices: &self.devices,
                 revoked: &self.revoked,
                 folders: None,
+                members: None,
             };
             grants::read_folder_grants(
                 self.storages,
@@ -570,6 +596,7 @@ impl<'a> Membership<'a> {
             devices: &self.devices,
             revoked: &self.revoked,
             folders: None,
+            members: None,
         };
         store::accept_numbered::<FolderEpochRecord>(self.vault, &ring, &trust, n, counter)
             .map(|r| r.body)
@@ -638,6 +665,18 @@ impl<'a> Membership<'a> {
         participants: Vec<Participant>,
         denied: Vec<Denied>,
     ) -> Result<()> {
+        self.write_folder_record_with(folder, creation, name, participants, denied, Vec::new())
+    }
+
+    fn write_folder_record_with(
+        &mut self,
+        folder: &Id16,
+        creation: Option<[u8; 16]>,
+        name: Option<(String, BTreeMap<String, String>)>,
+        participants: Vec<Participant>,
+        denied: Vec<Denied>,
+        members: Vec<MemberKeys>,
+    ) -> Result<()> {
         let stamp = self.next_stamp();
         let (name, settings) = match name {
             Some(n) => n,
@@ -657,6 +696,7 @@ impl<'a> Membership<'a> {
             creation,
             participants,
             denied,
+            members,
         };
         let key = self.newest_registry();
         self.writer().write(
@@ -727,7 +767,9 @@ impl<'a> Membership<'a> {
             k11: keys.k11.0,
             older,
         };
-        if self.devices.kem_key(&recipient).is_none() {
+        if self.devices.kem_key(&recipient).is_none()
+            && !self.members.members.values().any(|m| m.device == recipient)
+        {
             bail!(
                 "device {} has no KEM key in its device record",
                 hex::encode(recipient)
@@ -840,6 +882,66 @@ impl<'a> Membership<'a> {
             });
         }
         Ok(out)
+    }
+
+    /// Share `folder` with another person's device (section 6: its `vsr1`
+    /// request code gave its name, K6 and K8 public keys): a folder record
+    /// that lists the member's keys and its role, then a grant of the
+    /// current epoch (and every older one) sealed to its K8. Every device
+    /// of this vault learns the member's keys from the folder record and
+    /// takes what it writes by section 9's member rows; the member reads
+    /// its grant from the storage it was given. A member is an editor or a
+    /// viewer, never an owner.
+    pub fn add_member(
+        &mut self,
+        folder: &Id16,
+        name: &str,
+        k6_public: &[u8],
+        k8_public: &[u8],
+        role: Role,
+    ) -> Result<Id16> {
+        let epoch = self.folder_epochs(folder).current();
+        if !self.registry.is_owner(&self.me, folder, epoch) {
+            bail!("this device is not an owner of the folder");
+        }
+        if role == Role::Owner {
+            bail!("a device of another vault can be an editor or a viewer, not an owner");
+        }
+        if name.len() > super::MAX_NAME {
+            bail!("device name longer than {} bytes", super::MAX_NAME);
+        }
+        let sign_pub = VerifyingKey::from_bytes(k6_public)?;
+        crate::kem::EncapsKey::from_bytes(k8_public)?;
+        let device = super::devices::device_id(&sign_pub);
+        if self.devices.get(&device).is_some() {
+            bail!("that device belongs to this vault: approve its request instead");
+        }
+        let stamp = Stamp {
+            lamport: self.lamport + 1,
+            device: self.me,
+        };
+        self.write_folder_record_with(
+            folder,
+            None,
+            None,
+            vec![Participant {
+                device,
+                role,
+                stamp,
+            }],
+            Vec::new(),
+            vec![MemberKeys {
+                device,
+                name: name.to_string(),
+                k6: k6_public.to_vec(),
+                k8: k8_public.to_vec(),
+                stamp,
+            }],
+        )?;
+        self.refresh()?;
+        self.issue_grant(folder, epoch, &device, role)?;
+        self.refresh()?;
+        Ok(device)
     }
 
     /// Approve `device` for `folder` with `role`: a folder record that

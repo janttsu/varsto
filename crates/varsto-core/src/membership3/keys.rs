@@ -80,6 +80,8 @@ pub struct KeyRing<'a> {
     pub recovery: Option<SecretKey>,
     /// Keys a writer uses before they are held (a new folder epoch's K10).
     pub extra: Vec<(KeyId, SecretKey)>,
+    /// K8 public keys of member devices (other people's) of shared folders.
+    pub members: Option<&'a super::members::MemberRegistry>,
 }
 
 impl<'a> KeyRing<'a> {
@@ -92,6 +94,7 @@ impl<'a> KeyRing<'a> {
             folders: None,
             recovery: None,
             extra: Vec::new(),
+            members: None,
         }
     }
 }
@@ -111,7 +114,14 @@ impl RecordKeys for KeyRing<'_> {
         }
     }
     fn kem_public(&self, recipient: &Id16) -> Option<EncapsKey> {
-        self.devices?.kem_key(recipient)
+        if let Some(k) = self.devices.and_then(|d| d.kem_key(recipient)) {
+            return Some(k);
+        }
+        let m = self.members?;
+        m.members
+            .values()
+            .find(|m| m.device == *recipient)
+            .and_then(|m| EncapsKey::from_bytes(&m.k8).ok())
     }
     fn kem_decapsulate(&self, recipient: &Id16, ct: &[u8]) -> Option<Result<SecretKey>> {
         if *recipient != self.me {

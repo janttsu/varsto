@@ -315,14 +315,23 @@ impl SignedRecord {
 
 /// Decompress the joined parts of a record and decode its body struct.
 pub fn decode_body<T: for<'de> Deserialize<'de>>(compressed: &[u8]) -> Result<T, Junk> {
+    decode_body_limited(compressed, MAX_DECODED_BODY)
+}
+
+/// `decode_body` with a smaller limit on the decompressed size.
+pub fn decode_body_limited<T: for<'de> Deserialize<'de>>(
+    compressed: &[u8],
+    limit: u64,
+) -> Result<T, Junk> {
+    let limit = limit.min(MAX_DECODED_BODY);
     let mut dec = zstd::stream::read::Decoder::new(compressed)
         .map_err(|e| Junk::BadBody(format!("zstd: {e}")))?;
     let mut plain = Vec::new();
     (&mut dec)
-        .take(MAX_DECODED_BODY + 1)
+        .take(limit + 1)
         .read_to_end(&mut plain)
         .map_err(|e| Junk::BadBody(format!("zstd: {e}")))?;
-    if plain.len() as u64 > MAX_DECODED_BODY {
+    if plain.len() as u64 > limit {
         return Err(Junk::BadBody("body larger than a record may be".into()));
     }
     let (body, tail): (T, &[u8]) =
