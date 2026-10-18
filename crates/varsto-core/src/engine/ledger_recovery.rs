@@ -910,13 +910,30 @@ impl Engine {
                 None => crate::fsck3::PackVerdict::Corrupt("no size class".into()),
             }
         };
+        // What `scope3` and `key_for3` read of the engine besides the
+        // membership, taken before the ledger store is borrowed.
+        let member_device = self.vault.member;
+        let untrusted: BTreeSet<Id16> = self
+            .f3
+            .members
+            .devices
+            .devices
+            .keys()
+            .copied()
+            .filter(|d| self.org_untrusted3(d))
+            .collect();
         let result = {
             let Engine {
                 f3, epochs, keys, ..
             } = &mut *self;
             let members = &f3.members;
-            let key_for = |id: &str| super::ledger3_ops::key_for3_in(epochs, members, id);
-            let scope_of = |d: &Id16, id: &str| super::ledger3_ops::scope3_in(members, d, id);
+            let key_for =
+                |id: &str| super::ledger3_ops::key_for3_in(epochs, members, member_device, id);
+            let scope_of = |d: &Id16, id: &str| {
+                (!untrusted.contains(d))
+                    .then(|| super::ledger3_ops::scope3_in(members, d, id))
+                    .flatten()
+            };
             let pubkey_of = |d: &Id16| -> Option<crypto::VerifyingKey> {
                 members
                     .devices

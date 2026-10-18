@@ -33,6 +33,10 @@ pub enum EventScope {
     /// packs (section 9). Its batches carry the member key id; the engine
     /// gives this scope from the folder record's role.
     Viewer(FolderBin),
+    /// A full device of the vault writing for a folder shared with other
+    /// people, in a folder-scoped batch the members can read: claims and
+    /// announcements of that folder, verifications and drops of packs.
+    Owner(FolderBin),
 }
 
 /// The key id of a full device's batches under vault epoch `e`.
@@ -103,7 +107,7 @@ impl EventScope {
     /// The folder of a member's or viewer's scope.
     pub fn folder(&self) -> Option<&FolderBin> {
         match self {
-            EventScope::Member(f) | EventScope::Viewer(f) => Some(f),
+            EventScope::Member(f) | EventScope::Viewer(f) | EventScope::Owner(f) => Some(f),
             _ => None,
         }
     }
@@ -133,7 +137,7 @@ impl EventScope {
     /// not count.
     pub fn record_scope(&self) -> FolderBin {
         match self {
-            EventScope::Member(f) | EventScope::Viewer(f) => *f,
+            EventScope::Member(f) | EventScope::Viewer(f) | EventScope::Owner(f) => *f,
             _ => NO_FOLDER,
         }
     }
@@ -166,6 +170,10 @@ impl EventScope {
             (EventScope::Member(_), _) => Allow::No,
             (EventScope::Viewer(_), Event::PackVerified(_)) => Allow::IfPackOfFolder,
             (EventScope::Viewer(_), _) => Allow::No,
+            (EventScope::Owner(f), Event::PackStored(p)) => yes(p.folder == *f),
+            (EventScope::Owner(f), Event::RecordPublished(a)) => yes(a.scope == *f),
+            (EventScope::Owner(_), Event::PackVerified(_) | Event::PackDropped(_)) => Allow::Yes,
+            (EventScope::Owner(_), _) => Allow::No,
         }
     }
 }

@@ -34,9 +34,16 @@ pub(crate) struct Core3 {
     pub recovery: Option<crate::membership3::RecoveryKey>,
     /// Events of the next batch.
     pub pending: Vec<Event3>,
+    /// Folder records (manifests, maps, trash) refused in this process,
+    /// by kind.
+    pub records_refused: std::sync::Mutex<crate::record::RecordsRefused>,
 }
 
 pub(crate) type MapTable3 = crate::blockmap::MapTable;
+
+/// Shared folders this device announced its earlier work of in their
+/// folder-scoped batches.
+const ANNOUNCED_FILE: &str = "shared3.json";
 
 impl Core3 {
     pub fn open(home: &Path, vault: &VaultId) -> Result<Core3> {
@@ -47,18 +54,24 @@ impl Core3 {
             tables: Default::default(),
             recovery: None,
             pending: Vec::new(),
+            records_refused: Default::default(),
         })
     }
 }
 
 /// `Engine::key_for3` over the parts of an engine it needs (so that the
-/// ledger store can be borrowed apart from them).
+/// ledger store can be borrowed apart from them). `member`: this device is
+/// a member device of another vault.
 pub(crate) fn key_for3_in(
     epochs: &membership::VaultEpochs,
     members: &members3::Members3,
+    member: bool,
     key_id: &str,
 ) -> Option<SecretKey> {
     match KeyId::parse(key_id)? {
+        // A member device of another vault holds no vault key: the
+        // owners' vault batches stay closed to it (stored, not applied).
+        KeyId::Ledger(_) if member => None,
         KeyId::Ledger(e) => Some(crate::membership3::derive3(
             epochs.keys.get(&e)?,
             "ledger",
@@ -70,20 +83,39 @@ pub(crate) fn key_for3_in(
     }
 }
 
-/// `Engine::scope3` over the membership alone.
+/// `Engine::scope3` over the membership alone (the organization's check
+/// of `org_untrusted3` is the caller's).
 pub(crate) fn scope3_in(m: &members3::Members3, device: &Id16, key_id: &str) -> Option<EventScope> {
     match EventScope::of_key_id(key_id)? {
         EventScope::Full => m.devices.get(device).map(|_| EventScope::Full),
+        EventScope::Member(f) if m.devices.get(device).is_some() => Some(EventScope::Owner(f)),
         EventScope::Member(f) => {
             m.members.get(&f, device)?;
-            match m.role(device, &f) {
-                Some(crate::membership3::Role::Viewer) => Some(EventScope::Viewer(f)),
-                Some(_) => Some(EventScope::Member(f)),
-                None => None,
+            let st = m.registry.get(&f)?;
+            let wrote = st.history.get(device).is_some_and(|h| {
+                h.iter()
+                    .any(|(_, r)| matches!(r, Some(r) if *r != crate::membership3::Role::Viewer))
+            });
+            if wrote {
+                Some(EventScope::Member(f))
+            } else {
+                Some(EventScope::Viewer(f))
             }
         }
         // Replicas: part B (f3-switch).
         _ => None,
+    }
+}
+
+impl Engine {
+    /// Folder records of other writers refused by the acceptance rule in
+    /// this process (a viewer's manifests, junk under a writer's name).
+    pub fn records_refused3(&self) -> u64 {
+        self.f3
+            .records_refused
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .total()
     }
 }
 
@@ -150,7 +182,7 @@ impl Engine {
 
     /// The key that opens a batch or checkpoint with `key_id`, if held.
     pub(crate) fn key_for3(&self, key_id: &str) -> Option<SecretKey> {
-        key_for3_in(&self.epochs, &self.f3.members, key_id)
+        key_for3_in(&self.epochs, &self.f3.members, self.vault.member, key_id)
     }
 
     /// Whether batch `seq` of `device` counts: a removed device's only up
@@ -158,16 +190,23 @@ impl Engine {
     fn keep3(&self, device: &Id16, seq: u64) -> bool {
         self.f3
             .members
-            .revocations
+            .cutoffs
             .get(device)
-            .is_none_or(|r| seq <= r.cutoff_seq)
+            .is_none_or(|c| seq <= *c)
     }
 
     /// The role a batch of `device` under `key_id` is read with: full
-    /// devices of the registry under the vault ledger key, member devices
-    /// of shared folders under their folder's key, with the role the folder
-    /// records give them.
+    /// devices of the registry under the vault ledger key, and under a
+    /// folder's key for a folder shared with other people (`Owner`);
+    /// member devices of shared folders under their folder's key. When a
+    /// folder event counts is the folder roles' (by Lamport time): what a
+    /// member wrote while it was an editor stays.
     pub(crate) fn scope3(&self, device: &Id16, key_id: &str) -> Option<EventScope> {
+        // In an organization, a device the roster does not list (or a
+        // platform its policy refuses) writes nothing that counts.
+        if self.org_untrusted3(device) {
+            return None;
+        }
         scope3_in(&self.f3.members, device, key_id)
     }
 
@@ -187,12 +226,13 @@ impl Engine {
                 parts.push(crypto::hash(&k9.0).to_vec());
             }
         }
-        for (d, r) in &m.revocations {
+        for (d, c) in &m.cutoffs {
             parts.push(d.to_vec());
-            parts.push(r.cutoff_seq.to_le_bytes().to_vec());
+            parts.push(c.to_le_bytes().to_vec());
         }
         for d in m.devices.devices.keys() {
             parts.push(d.to_vec());
+            parts.push(vec![self.org_untrusted3(d) as u8]);
         }
         for (f, d) in m.members.members.keys() {
             parts.push(f.to_vec());
@@ -328,40 +368,231 @@ impl Engine {
         events.append(&mut self.f3.pending);
         self.pending.clear();
         self.clear_deferred();
-        if events.is_empty() {
-            return Ok(None);
-        }
-        if self.vault.member {
-            // Folder-scoped batches of members: part B (f3-switch).
-            bail!("a member device writes folder-scoped batches, which this build does not seal yet (f3-switch: part B)");
-        }
-        if self.forked_self {
+        if self.forked_self && !events.is_empty() {
             bail!("this device's ledger is forked; it must be re-enrolled as a new device");
         }
+        // Folders shared with other people: the folder's events go into a
+        // folder-scoped batch under its share-ledger key, which the members
+        // read (they hold no vault key); the first time this device sees a
+        // folder shared, it announces there again what it published of it
+        // before (its packs and its records), so a member that joins later
+        // finds them. A member device writes folder-scoped batches only.
+        let mut groups: BTreeMap<Id16, Vec<Event3>> = BTreeMap::new();
+        let view = if self.vault.member || !self.shared_folders3().is_empty() {
+            self.view3().ok()
+        } else {
+            None
+        };
+        for ev in events {
+            let f = self.batch_folder3(&ev, view.as_ref());
+            groups.entry(f).or_default().push(ev);
+        }
+        let announced = self.reannounce3(&mut groups, view.as_ref())?;
+        if groups.values().all(|g| g.is_empty()) {
+            return Ok(None);
+        }
         let me = self.me3();
-        let (key_id, key) = self.ledger_key3()?;
         let seen = self.f3.ledger.vault_seen(&me);
-        let raw: Vec<_> = events.iter().map(Event3::to_raw).collect();
-        let n = raw.len();
+        let n: usize = groups.values().map(|g| g.len()).sum();
         let mut last = None;
-        // One batch per action, more only past the size limits.
-        for group in ledger3::events::split_events(raw) {
-            let lamport = self.tick()?;
-            let rec = self.f3.ledger.append_own(
-                &me,
-                group,
-                seen.clone(),
-                lamport,
-                &key,
-                &key_id,
-                ledger3::NO_FOLDER,
-                &self.keys.signer,
-            )?;
-            last = Some(rec.seq);
+        for (folder, evs) in groups {
+            if evs.is_empty() {
+                continue;
+            }
+            let (key_id, key) = if folder == ledger3::NO_FOLDER {
+                if self.vault.member {
+                    bail!("a member device writes only for its shared folder");
+                }
+                self.ledger_key3()?
+            } else {
+                self.share_ledger_key3(&folder)?
+            };
+            let raw: Vec<_> = evs.iter().map(Event3::to_raw).collect();
+            // One batch per action (and folder), more only past the size limits.
+            for group in ledger3::events::split_events(raw) {
+                let lamport = self.tick()?;
+                let rec = self.f3.ledger.append_own(
+                    &me,
+                    group,
+                    seen.clone(),
+                    lamport,
+                    &key,
+                    &key_id,
+                    folder,
+                    &self.keys.signer,
+                )?;
+                last = Some(rec.seq);
+            }
         }
         log::debug!(events = n, seq = last.unwrap_or(0); "ledger batch sealed");
+        if !announced.is_empty() {
+            let mut done = self.announced3();
+            done.extend(announced.iter().map(hex::encode));
+            util::write_json(&self.home.join("state").join(ANNOUNCED_FILE), &done)?;
+        }
         self.push_own_batches3()?;
         Ok(last)
+    }
+
+    /// Tests: what a modified client could sign, one batch of exactly
+    /// `events` (a member device: its folder-scoped batch; otherwise under
+    /// the vault ledger key) at Lamport time `lamport`, pushed to every
+    /// storage. Other devices must take from it only what this device's
+    /// role allows.
+    #[doc(hidden)]
+    pub fn seal_batch3_unchecked(&mut self, events: Vec<Event3>, lamport: u64) -> Result<u64> {
+        let me = self.me3();
+        let (key_id, key, scope) = match &self.f3.members.member {
+            Some(m) => {
+                let f = m.folder;
+                let (id, k) = self.share_ledger_key3(&f)?;
+                (id, k, f)
+            }
+            None => {
+                let (id, k) = self.ledger_key3()?;
+                (id, k, ledger3::NO_FOLDER)
+            }
+        };
+        let seen = self.f3.ledger.vault_seen(&me);
+        let raw = events.iter().map(Event3::to_raw).collect();
+        let rec = self.f3.ledger.append_own(
+            &me,
+            raw,
+            seen,
+            lamport,
+            &key,
+            &key_id,
+            scope,
+            &self.keys.signer,
+        )?;
+        self.push_own_batches3()?;
+        Ok(rec.seq)
+    }
+
+    /// A full device of the registry that the organization does not trust
+    /// (not in its roster, or on a platform its policy refuses). Removed
+    /// devices are judged by their cut-off instead.
+    pub(crate) fn org_untrusted3(&self, device: &Id16) -> bool {
+        if self.org.is_none() || *device == self.me3() || self.f3.members.revoked.contains(device) {
+            return false;
+        }
+        self.f3.members.devices.get(device).is_some()
+            && !self.trusted(&DeviceId::from_bytes(device))
+    }
+
+    /// The share-ledger key id and key of `folder`'s newest epoch held.
+    fn share_ledger_key3(&self, folder: &Id16) -> Result<(String, SecretKey)> {
+        let k =
+            self.f3.members.granted.get(folder).ok_or_else(|| {
+                anyhow!("this device holds no key of folder {}", hex::encode(folder))
+            })?;
+        let (e, _) = k
+            .newest()
+            .ok_or_else(|| anyhow!("no folder epoch is held here"))?;
+        let key = k
+            .share_ledger(e)
+            .ok_or_else(|| anyhow!("no folder epoch is held here"))?;
+        Ok((ledger3::scope::share_ledger_key_id(folder, e), key))
+    }
+
+    /// Folders shared with other people whose keys this device holds.
+    fn shared_folders3(&self) -> Vec<Id16> {
+        let m = &self.f3.members;
+        m.granted
+            .folders
+            .keys()
+            .filter(|f| m.shared(f))
+            .copied()
+            .collect()
+    }
+
+    /// The folder whose folder-scoped batch an event goes into, or
+    /// `NO_FOLDER` for the vault batch.
+    fn batch_folder3(&self, ev: &Event3, view: Option<&View3>) -> Id16 {
+        if let Some(m) = &self.f3.members.member {
+            return m.folder;
+        }
+        let f = match ev {
+            Event3::PackVerified(p) | Event3::PackDropped(p) => {
+                view.and_then(|v| v.pack_folder(&p.pack))
+            }
+            other => ledger3::scope::folder_written(other),
+        };
+        match f {
+            Some(f) if self.f3.members.shared(&f) && self.f3.members.granted.get(&f).is_some() => f,
+            _ => ledger3::NO_FOLDER,
+        }
+    }
+
+    /// Folders this device announced its earlier work of in their
+    /// folder-scoped batches (`state/shared3.json`).
+    fn announced3(&self) -> BTreeSet<String> {
+        util::read_json_or_default(&self.home.join("state").join(ANNOUNCED_FILE))
+            .unwrap_or_default()
+    }
+
+    /// Add, for every shared folder not announced yet, this device's claims
+    /// of the packs it wrote and its announcements of the folder's records
+    /// to the folder's group. Returns the folders announced now.
+    fn reannounce3(
+        &self,
+        groups: &mut BTreeMap<Id16, Vec<Event3>>,
+        view: Option<&View3>,
+    ) -> Result<Vec<Id16>> {
+        if self.vault.member {
+            return Ok(Vec::new());
+        }
+        let Some(view) = view else {
+            return Ok(Vec::new());
+        };
+        let done = self.announced3();
+        let me = self.me3();
+        let mut out = Vec::new();
+        for f in self.shared_folders3() {
+            if done.contains(&hex::encode(f)) {
+                continue;
+            }
+            let g = groups.entry(f).or_default();
+            for (id, rec) in &view.packs {
+                if view.pack_folder(id) != Some(f) || view.pack_writer(id) != Some(me) {
+                    continue;
+                }
+                for c in view.copies(id) {
+                    if c.claimed_by.contains(&me) {
+                        g.push(Event3::PackStored(crate::ledger3::events::PackStored {
+                            storage: c.storage.clone(),
+                            pack: *id,
+                            class: rec.class,
+                            folder: f,
+                            map_seq: rec.map_seq,
+                        }));
+                    }
+                }
+            }
+            for kind in [
+                crate::record::Kind::Manifest,
+                crate::record::Kind::BlockMap,
+                crate::record::Kind::Trash,
+            ] {
+                if let Some(s) = view.stream(kind.code(), &f, &me) {
+                    for (seq, a) in &s.records {
+                        g.push(Event3::RecordPublished(
+                            crate::ledger3::events::Announcement {
+                                kind: kind.code(),
+                                scope: f,
+                                seq: *seq,
+                                base: a.base,
+                                parts: a.parts,
+                                body_hash: a.body_hash,
+                                size: a.size,
+                            },
+                        ));
+                    }
+                }
+            }
+            out.push(f);
+        }
+        Ok(out)
     }
 
     /// Push every own batch a hot metadata storage does not have yet. A
@@ -720,7 +951,11 @@ impl Engine {
         let view = self.view3()?;
         let readers = self.ledger_readers3();
         let keep = self.ledger_policy.keep_before;
-        if let Some(b) = self.f3.ledger.head(&me).base {
+        // A device that writes for a folder shared with other people keeps
+        // its batches on the storages: members read the folder-scoped ones
+        // (they cannot read the checkpoints that would stand in for them).
+        let keep_all = !self.shared_folders3().is_empty();
+        if let Some(b) = self.f3.ledger.head(&me).base.filter(|_| !keep_all) {
             if view.vault_acked_by_all(readers.iter(), &me, b.seq) {
                 let upto = b.seq.saturating_sub(keep);
                 let prefix = format!("ledger/{}/", hex::encode(me));

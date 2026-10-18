@@ -904,11 +904,15 @@ pub struct RequestInfo {
 /// The six words of a request: over the key, the device id, the platform
 /// (`vor2`) and the name.
 fn request_fingerprint(key: &EncapsKey, device: &DeviceId, platform: &str, name: &str) -> String {
-    if platform.is_empty() {
-        crate::share::fingerprint(key, &format!("{device} {name}"))
+    let text = if platform.is_empty() {
+        format!("{device} {name}")
     } else {
-        crate::share::fingerprint(key, &format!("{device} {platform} {name}"))
-    }
+        format!("{device} {platform} {name}")
+    };
+    crate::share::fingerprint_words(
+        "varsto share-request fingerprint v1",
+        &[key.to_bytes().as_slice(), text.trim().as_bytes()],
+    )
 }
 
 impl OrgRequest {

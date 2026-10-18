@@ -135,7 +135,9 @@ impl EventScope {
         } else if key_id == KEY_REPLICA {
             Some(EventScope::Replica)
         } else {
-            crate::share::parse_ledger_key_id(key_id).map(|(f, _)| EventScope::Member(f))
+            // Format-2 member batches (`share:<folder>`) are gone: members
+            // write format-3 folder-scoped batches (`ledger3`).
+            None
         }
     }
 

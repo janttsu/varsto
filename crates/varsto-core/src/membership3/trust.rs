@@ -41,10 +41,23 @@ impl Trust<'_> {
                 kind,
                 Kind::Folder | Kind::ShareEpoch | Kind::Grant | Kind::Escrow
             )
+            || Self::announced(kind)
     }
 
+    /// Kinds a batch announces: a removed device's records of them count
+    /// up to its cut-off (their announcements in its batches after it do
+    /// not count).
+    fn announced(kind: Kind) -> bool {
+        matches!(
+            kind,
+            Kind::Manifest | Kind::BlockMap | Kind::Trash | Kind::Snapshot
+        )
+    }
+
+    /// The role a record of `device` is judged with (`writer_role`).
     fn role(&self, device: &Id16, folder: &Id16, epoch: u32) -> Option<Role> {
-        self.folders.and_then(|f| f.role(device, folder, epoch))
+        self.folders
+            .and_then(|f| f.writer_role(device, folder, epoch))
     }
 
     /// The section 9 row of `device` in `folder` at `epoch`.
@@ -144,7 +157,8 @@ impl RecordTrust for Trust<'_> {
                 let KeyId::Meta { epoch, .. } = key_id else {
                     return false;
                 };
-                !revoked && section9_allows(self.class(device, scope, *epoch), kind)
+                (!revoked || Self::announced(kind))
+                    && section9_allows(self.class(device, scope, *epoch), kind)
             }
             Kind::Batch => match key_id {
                 KeyId::ShareLedger { folder, epoch } => {

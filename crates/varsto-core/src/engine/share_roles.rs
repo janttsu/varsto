@@ -1,32 +1,24 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Read-only members of shared folders (`docs/spec/alpha-0-format.md`,
-//! section "Read-only members of shared folders").
+//! Read-only participants of folders (`docs/spec/format-3-design.md`
+//! section 6, "Roles"; `alpha-0-format.md` section 77.6).
 //!
 //! A folder key lets whoever holds it read *and* encrypt, so a viewer cannot
 //! be stopped from writing objects to the storage. What makes it read-only
-//! is that nobody takes what it writes: the owner's devices and the editors
-//! do not merge its manifests, do not count its ledger batches and ignore
-//! its records (analyses, last-accessed times) for the folder. Its own
-//! client refuses writes as well: files arrive without write permission,
-//! a local change is moved aside into `kept-aside/` and the shared version
-//! comes back, and writes through the interface are refused.
+//! is that nobody takes what it writes: every reader refuses its manifests,
+//! block maps and trash records by the acceptance rule, and its ledger
+//! batches claim nothing of the folder. Its own client refuses writes as
+//! well: files arrive without write permission, a local change is moved
+//! aside into `kept-aside/` and the shared version comes back, and writes
+//! through the interface are refused.
 //!
-//! Who may write is said by a **role record** signed by one of the owner's
-//! devices (`share::ShareRoles`): every member device with its role. It is
-//! a snapshot; the valid record with the highest sequence number wins.
-//! Once a folder has one, a member it does not list is a viewer. A new
-//! member is listed by an owner device under the role of the token it came
-//! through, once that device sees its *join proof* (`share::JoinProof`, a
-//! value derived from a secret that only the sealed token carries), so a
-//! viewer cannot claim an editor's invitation. Without any role record
-//! everyone writes, as before roles existed.
-//!
-//! A viewer that was an editor keeps what it wrote then: the record names
-//! the Lamport clock and ledger batch up to which its changes stay valid.
+//! Who may write is said by the folder records an owner writes (on a member
+//! device of another vault: by the directory its grants carry). A viewer
+//! that was an editor keeps what it wrote then: its announcements count by
+//! the Lamport time of their batch against its role history.
 
-use super::share_ops::{FolderShareState, ShareBook};
 use super::*;
-use crate::share::{self, JoinProof, RoleEntry, ShareRole, ShareRoles, SignedShareRoles};
+use crate::membership3::Role;
+use crate::share::ShareRole;
 
 /// What `share_set_role` did.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,7 +27,7 @@ pub struct ShareRoleReport {
     pub member: String,
     pub member_id: String,
     pub role: String,
-    /// Sequence number of the role record written.
+    /// The Lamport time of the folder record entry written.
     pub seq: u64,
 }
 
@@ -57,99 +49,40 @@ pub(super) fn set_read_only(path: &Path, read_only: bool) {
 }
 
 impl Engine {
-    /// The newest verified role record of a folder, if it has one.
-    pub fn share_roles(&self, folder: &FolderId) -> Option<ShareRoles> {
-        self.share_book().folders.get(folder)?.roles.clone()
+    /// The current role of `dev` in a folder (`None`: not a participant).
+    pub(super) fn folder_role3(&self, folder: &FolderId, dev: &DeviceId) -> Option<Role> {
+        let (f, d) = (members3::bin(folder).ok()?, members3::bin(dev).ok()?);
+        self.f3.members.role(&d, &f)
     }
 
-    /// A member's role as `st` says (the owner's devices are not asked here).
-    pub(super) fn role_in(st: &FolderShareState, dev: &DeviceId) -> ShareRole {
-        match &st.roles {
-            None => ShareRole::Editor,
-            Some(r) => r
-                .roles
-                .get(dev)
-                .map(|e| e.role)
-                .unwrap_or(ShareRole::Viewer),
-        }
-    }
-
-    /// Whether `dev` is one of the folder owner's devices as this device
-    /// knows them.
-    fn share_owner_device(&self, st: &FolderShareState, dev: &DeviceId) -> bool {
-        if self.vault.member {
-            st.owners.contains(dev)
-        } else {
-            dev == &self.vault.device_id || self.devices.devices.contains_key(dev)
-        }
-    }
-
-    /// Whether a role record signed by `issuer` counts: one of the owner's
-    /// devices that is not revoked; on the owner's own devices a trusted one
-    /// that the organization (if any) lets share.
-    fn share_role_issuer_ok(&self, st: &FolderShareState, issuer: &DeviceId) -> bool {
-        if self.is_revoked(issuer) || !self.share_owner_device(st, issuer) {
-            return false;
-        }
-        if self.vault.member {
-            return true;
-        }
-        if issuer == &self.vault.device_id {
-            return true;
-        }
-        self.trusted(issuer)
-            && self.org.as_ref().is_none_or(|o| {
-                o.manifest().is_none() || o.is_admin(issuer) || o.policy().members_may_share
-            })
-    }
-
-    /// The role of another device in a shared folder: whether this device
-    /// takes what it writes there.
+    /// The role of another device in a folder: whether this device takes
+    /// what it writes there now.
     pub fn share_role_of(&self, folder: &FolderId, dev: &DeviceId) -> ShareRole {
-        let book = self.share_book();
-        let Some(st) = book.folders.get(folder) else {
-            return ShareRole::Editor;
-        };
-        if self.share_owner_device(st, dev) {
-            return ShareRole::Editor;
+        match self.folder_role3(folder, dev) {
+            Some(Role::Viewer) | None => ShareRole::Viewer,
+            Some(_) => ShareRole::Editor,
         }
-        Self::role_in(st, dev)
     }
 
-    /// This device's own role in a folder: the owner's devices write; a
-    /// member is what the newest role record says, or else what its token
-    /// said (a viewer when the folder has roles and lists neither).
+    /// This device's own role in a folder.
     pub fn share_own_role(&self, folder: &FolderId) -> ShareRole {
-        if !self.vault.member {
-            return ShareRole::Editor;
+        if let Some(m) = &self.f3.members.member {
+            if members3::bin(folder).ok() == Some(m.folder) {
+                return match self.folder_role3(folder, &self.vault.device_id) {
+                    Some(Role::Viewer) | None => ShareRole::Viewer,
+                    Some(_) => ShareRole::Editor,
+                };
+            }
         }
-        let book = self.share_book();
-        let st = book.folders.get(folder);
-        if let Some(e) = st
-            .and_then(|s| s.roles.as_ref())
-            .and_then(|r| r.roles.get(&self.vault.device_id))
-        {
-            return e.role;
-        }
-        let token = self
-            .keyring
-            .folders
-            .get(folder)
-            .and_then(|r| r.share_join.as_ref())
-            .map(|j| j.role);
-        match (token, st.and_then(|s| s.roles.as_ref())) {
-            (Some(r), _) => r,
-            (None, Some(_)) => ShareRole::Viewer,
-            (None, None) => ShareRole::Editor,
+        match self.folder_role3(folder, &self.vault.device_id) {
+            Some(Role::Viewer) => ShareRole::Viewer,
+            _ => ShareRole::Editor,
         }
     }
 
     /// Whether this device keeps a folder read-only (it is a viewer there).
     pub fn share_read_only(&self, rec: &FolderRecord) -> bool {
-        self.vault.member
-            && rec.shared
-            && !self.role_guard_off
-            && !self.share_own_role(&rec.folder_id).is_editor()
+        !self.role_guard_off && !self.share_own_role(&rec.folder_id).is_editor()
     }
 
     /// Refuse a write to a folder this device may only read.
@@ -170,350 +103,51 @@ impl Engine {
         self.role_guard_off = true;
     }
 
-    /// Whether this device takes a manifest or record of `dev` for a shared
-    /// folder: it must belong to the folder and must not be a viewer.
+    /// Whether this device takes a manifest or record of `dev` for a
+    /// folder now: it is this device, or an owner or editor of it.
     pub(super) fn share_writer_ok(&self, rec: &FolderRecord, dev: &DeviceId) -> bool {
-        if !self.share_manifest_source_ok(rec, dev) {
-            return false;
-        }
-        !rec.shared
-            || dev == &self.vault.device_id
-            || self.share_role_of(&rec.folder_id, dev).is_editor()
+        dev == &self.vault.device_id
+            || matches!(
+                self.folder_role3(&rec.folder_id, dev),
+                Some(Role::Owner | Role::Editor)
+            )
     }
 
-    /// Viewers of a folder with the Lamport clock up to which their changes
-    /// (made while they were editors) stay valid. Empty without roles.
+    /// Viewers of a folder that were editors, with the Lamport time from
+    /// which their changes no longer count (`0`: never an editor).
     pub(super) fn share_viewer_clocks(&self, rec: &FolderRecord) -> BTreeMap<DeviceId, u64> {
         let mut out = BTreeMap::new();
-        if !rec.shared {
-            return out;
-        }
-        let book = self.share_book();
-        let Some(st) = book.folders.get(&rec.folder_id) else {
+        let Ok(f) = members3::bin(&rec.folder_id) else {
             return out;
         };
-        let Some(roles) = &st.roles else {
+        let Some(st) = self.f3.members.registry.get(&f) else {
             return out;
         };
-        for d in st.members.iter().chain(roles.roles.keys()) {
-            if d == &self.vault.device_id || self.share_owner_device(st, d) {
+        for (d, h) in &st.history {
+            if st.role(d) != Some(Role::Viewer) {
                 continue;
             }
-            match roles.roles.get(d) {
-                Some(e) if e.role.is_editor() => {}
-                Some(e) => {
-                    out.insert(d.clone(), e.editor_until_clock);
-                }
-                None => {
-                    out.insert(d.clone(), 0);
-                }
-            }
+            // The stamp of the change that made it a viewer for good.
+            let since = h
+                .iter()
+                .rev()
+                .take_while(|(_, r)| *r == Some(Role::Viewer))
+                .last()
+                .map(|(s, _)| s.lamport)
+                .unwrap_or(0);
+            let wrote = h
+                .iter()
+                .any(|(_, r)| matches!(r, Some(Role::Owner | Role::Editor)));
+            out.insert(DeviceId::from_bytes(d), if wrote { since } else { 0 });
         }
         out
     }
 
-    // ----- reading role records -------------------------------------------------
-
-    /// Adopt the newest valid role record of every shared folder. A record
-    /// counts when one of the owner's devices signed it and it opens with a
-    /// folder key this device holds; it never replaces a newer one.
-    pub(super) fn pull_share_roles(
-        &mut self,
-        storages: &OpenStorages,
-        book: &mut ShareBook,
-    ) -> Result<bool> {
-        let shared: Vec<FolderRecord> = self
-            .keyring
-            .folders
-            .values()
-            .filter(|f| f.shared && !f.is_removed())
-            .cloned()
-            .collect();
-        let mut changed = false;
-        for f in &shared {
-            let st = book.folders.entry(f.folder_id.clone()).or_default().clone();
-            let current = st.roles.as_ref().map(|r| r.rank());
-            let floor = st.roles.as_ref().map(|r| r.seq).unwrap_or(0);
-            let prefix = format!("{}{}/", share::ROLE_PREFIX, f.folder_id);
-            let mut names: BTreeMap<(u64, DeviceId), usize> = BTreeMap::new();
-            for (i, (_, backend)) in storages.iter().enumerate() {
-                for key in backend.list(&prefix)? {
-                    if let Some((seq, issuer)) = key
-                        .strip_prefix(&prefix)
-                        .and_then(SignedShareRoles::parse_name)
-                    {
-                        if seq >= floor {
-                            names.entry((seq, issuer)).or_insert(i);
-                        }
-                    }
-                }
-            }
-            let mut best: Option<ShareRoles> = None;
-            for ((seq, issuer), i) in names.into_iter().rev() {
-                if best.as_ref().is_some_and(|b| b.seq > seq) {
-                    break;
-                }
-                if !self.share_role_issuer_ok(&st, &issuer) {
-                    continue;
-                }
-                let Some(pk) = self.share_issuer_key(&issuer) else {
-                    continue;
-                };
-                let Some(blob) = storages[i].1.get(&SignedShareRoles::storage_key(
-                    &f.folder_id,
-                    seq,
-                    &issuer,
-                ))?
-                else {
-                    continue;
-                };
-                let Ok(signed) = serde_json::from_slice::<SignedShareRoles>(&blob) else {
-                    continue;
-                };
-                if signed.folder != f.folder_id || signed.seq != seq || signed.issuer != issuer {
-                    continue;
-                }
-                let Some(k) = self.share_epoch_key(f, signed.epoch) else {
-                    continue;
-                };
-                let Ok(r) = signed.open(&self.vault.vault_id, &pk, &k) else {
-                    continue;
-                };
-                if current.as_ref().is_some_and(|c| r.rank() <= *c) {
-                    continue;
-                }
-                if best.as_ref().is_none_or(|b| r.rank() > b.rank()) {
-                    best = Some(r);
-                }
-            }
-            if let Some(r) = best {
-                book.folders.entry(f.folder_id.clone()).or_default().roles = Some(r);
-                changed = true;
-            }
-        }
-        Ok(changed)
-    }
-
-    /// Owner devices: list members that joined since the newest role record
-    /// under the role of their invitation, once their join proof verifies
-    /// against the secret the invitation recorded.
-    pub(super) fn pin_share_roles(
-        &mut self,
-        storages: &OpenStorages,
-        book: &mut ShareBook,
-    ) -> Result<bool> {
-        if self.vault.member || self.org_allows(|p| p.members_may_share, "").is_err() {
-            return Ok(false);
-        }
-        let folders: Vec<FolderId> = book
-            .folders
-            .iter()
-            .filter(|(_, st)| st.roles.is_some())
-            .map(|(f, _)| f.clone())
-            .collect();
-        let mut changed = false;
-        for folder in folders {
-            let Some(rec) = self.keyring.folders.get(&folder).cloned() else {
-                continue;
-            };
-            if !rec.shared || rec.is_removed() {
-                continue;
-            }
-            let st = book.folders[&folder].clone();
-            let roles = st.roles.clone().expect("filtered above");
-            let unpinned: Vec<DeviceId> = st
-                .members
-                .iter()
-                .filter(|d| {
-                    !roles.roles.contains_key(*d)
-                        && !st.removed.contains_key(*d)
-                        && !st.owners.contains(*d)
-                        && !self.is_revoked(d)
-                })
-                .cloned()
-                .collect();
-            if unpinned.is_empty() {
-                continue;
-            }
-            let invites = self.invites(&folder)?;
-            let mut pins: BTreeMap<DeviceId, RoleEntry> = BTreeMap::new();
-            for d in unpinned {
-                let key = JoinProof::storage_key(&folder, &d);
-                let mut proof = None;
-                for (_, b) in storages {
-                    if let Some(blob) = b.get(&key)? {
-                        proof = serde_json::from_slice::<JoinProof>(&blob).ok();
-                        if proof.is_some() {
-                            break;
-                        }
-                    }
-                }
-                let Some(p) = proof.filter(|p| p.folder == folder && p.device == d) else {
-                    continue;
-                };
-                let Some(inv) = invites.get(&p.invite) else {
-                    continue;
-                };
-                if st.revoked_invites.contains(&p.invite) {
-                    continue;
-                }
-                let Ok(secret) = SecretKey::from_hex(&inv.join_secret_hex) else {
-                    continue;
-                };
-                if !p.verify(&secret) {
-                    continue;
-                }
-                pins.insert(
-                    d.clone(),
-                    RoleEntry {
-                        role: inv.role,
-                        name: self.member_name(&d),
-                        since_utc: util::now_utc(),
-                        editor_until_clock: 0,
-                        editor_until_seq: 0,
-                    },
-                );
-            }
-            if pins.is_empty() {
-                continue;
-            }
-            let mut next = roles.roles.clone();
-            next.extend(pins);
-            self.publish_share_roles(book, &rec, next)?;
-            changed = true;
-        }
-        Ok(changed)
-    }
-
-    /// Keep `devices.share_viewers` (viewer device -> last ledger batch of
-    /// it that counts) in step with the role records. Returns whether it
-    /// changed; the ledger view is then rebuilt (its context includes it).
-    pub(super) fn refresh_share_viewers(&mut self, book: &ShareBook) -> Result<bool> {
-        let mut viewers: BTreeMap<DeviceId, u64> = BTreeMap::new();
-        for st in book.folders.values() {
-            let Some(roles) = &st.roles else {
-                continue;
-            };
-            for d in st.members.iter().chain(roles.roles.keys()) {
-                if d == &self.vault.device_id || self.share_owner_device(st, d) {
-                    continue;
-                }
-                let cutoff = match roles.roles.get(d) {
-                    Some(e) if e.role.is_editor() => continue,
-                    Some(e) => e.editor_until_seq,
-                    None => 0,
-                };
-                let c = viewers.entry(d.clone()).or_insert(cutoff);
-                *c = (*c).min(cutoff);
-            }
-        }
-        if viewers == self.devices.share_viewers {
-            return Ok(false);
-        }
-        self.devices.share_viewers = viewers;
-        self.save_devices()?;
-        Ok(true)
-    }
-
-    // ----- writing role records -------------------------------------------------
-
-    /// Publish the next role record of `rec` with `roles`, signed by this
-    /// device and sealed under the folder's newest share key.
-    pub(super) fn publish_share_roles(
-        &mut self,
-        book: &mut ShareBook,
-        rec: &FolderRecord,
-        roles: BTreeMap<DeviceId, RoleEntry>,
-    ) -> Result<ShareRoles> {
-        let epoch = Self::newest_share_epoch(rec);
-        let key = self
-            .share_epoch_key(rec, epoch)
-            .ok_or_else(|| anyhow!("no key for share epoch {epoch} of {}", rec.name))?;
-        let st = book.folders.entry(rec.folder_id.clone()).or_default();
-        // Above every record seen on the storages too, verified or not, so a
-        // name taken by another owner device is not reused.
-        let mut seq = st.roles.as_ref().map(|r| r.seq).unwrap_or(0) + 1;
-        let prefix = format!("{}{}/", share::ROLE_PREFIX, rec.folder_id);
-        let storages = self.metadata_storages(true)?;
-        if storages.is_empty() {
-            bail!("no storage to publish the roles to: add one first");
-        }
-        for (_, b) in &storages {
-            for key in b.list(&prefix)? {
-                if let Some((s, issuer)) = key
-                    .strip_prefix(&prefix)
-                    .and_then(SignedShareRoles::parse_name)
-                {
-                    if issuer == self.vault.device_id && s >= seq {
-                        seq = s + 1;
-                    }
-                }
-            }
-        }
-        let r = ShareRoles {
-            folder: rec.folder_id.clone(),
-            seq,
-            issuer: self.vault.device_id.clone(),
-            issued_utc: util::now_utc(),
-            share_epoch: epoch,
-            roles,
-        };
-        let signed =
-            SignedShareRoles::seal(&r, &self.vault.vault_id, epoch, &key, &self.keys.signer)?;
-        let bytes = serde_json::to_vec(&signed)?;
-        let path = SignedShareRoles::storage_key(&rec.folder_id, seq, &self.vault.device_id);
-        for (_, b) in &storages {
-            b.put_if_absent(&path, &bytes)?;
-        }
-        st.roles = Some(r.clone());
-        self.save_share_book(book)?;
-        self.refresh_share_viewers(book)?;
-        Ok(r)
-    }
-
-    /// The first role record of a folder: every member there is now stays an
-    /// editor (from here on, a member the record does not list is a viewer).
-    pub(super) fn start_share_roles(&mut self, folder: &FolderId) -> Result<()> {
-        let rec = self
-            .keyring
-            .folders
-            .get(folder)
-            .cloned()
-            .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
-        let mut book = self.share_book();
-        if book.folders.get(folder).is_some_and(|s| s.roles.is_some()) {
-            return Ok(());
-        }
-        let st = book.folders.get(folder).cloned().unwrap_or_default();
-        let now = util::now_utc();
-        let roles: BTreeMap<DeviceId, RoleEntry> = st
-            .members
-            .iter()
-            .filter(|d| {
-                !st.removed.contains_key(*d) && !st.owners.contains(*d) && !self.is_revoked(d)
-            })
-            .map(|d| {
-                (
-                    d.clone(),
-                    RoleEntry {
-                        role: ShareRole::Editor,
-                        name: self.member_name(d),
-                        since_utc: now,
-                        editor_until_clock: 0,
-                        editor_until_seq: 0,
-                    },
-                )
-            })
-            .collect();
-        self.publish_share_roles(&mut book, &rec, roles)?;
-        Ok(())
-    }
-
-    /// Owner: make a member of a shared folder a viewer or an editor. A
-    /// member cannot change its own role: only a record signed by one of
-    /// the owner's devices counts. Taking writing away keeps what the member
-    /// wrote until now (its changes this device has seen, its ledger
-    /// batches held here); what it writes from now on is not accepted.
+    /// Owner: make a participant of a folder a viewer or an editor (a
+    /// folder record entry and a grant that carries the role; the member
+    /// devices of the folder get the change in their grants). Taking
+    /// writing away keeps what it wrote until now; what it writes from now
+    /// on is not accepted.
     pub fn share_set_role(
         &mut self,
         folder: &str,
@@ -530,12 +164,7 @@ impl Engine {
             .find(folder)
             .cloned()
             .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
-        if !rec.shared {
-            bail!("{} is not shared", rec.name);
-        }
-        // Up to date first: the newest roles, members and ledger heads.
-        self.pull_ledger_once()?;
-        self.pull_share_state()?;
+        let id = members3::bin(&rec.folder_id)?;
         let list = self.share_members(folder)?;
         let who = member.trim();
         let hits: Vec<&ShareMember> = list
@@ -549,111 +178,38 @@ impl Engine {
                 rec.name,
                 rec.name
             ),
-            [one] => *one,
+            [one] => (*one).clone(),
             _ => bail!(
                 "several members of {} match {who}: use the device id",
                 rec.name
             ),
         };
-        match (m.kind.as_str(), m.status.as_str()) {
-            ("owner-device", _) => bail!(
-                "{} is one of your own devices; the owner's devices always write",
+        if m.kind == "owner-device" {
+            bail!(
+                "{} is one of your own devices; change its role with `varsto folder role`",
                 m.name
-            ),
-            ("invite", _) => bail!(
-                "{} is a token not accepted yet; its role is set when the token is made (revoke it and make a new one)",
-                m.name
-            ),
-            (_, "removed") => bail!("{} was removed from {}", m.name, rec.name),
-            _ => {}
+            );
         }
-        let dev = DeviceId::from_hex(&m.id)?;
-        let mut book = self.share_book();
-        let st = book
-            .folders
-            .get(&rec.folder_id)
-            .cloned()
-            .unwrap_or_default();
-        let now = util::now_utc();
-        let mut roles = match &st.roles {
-            Some(r) => r.roles.clone(),
-            None => {
-                // The first record: everyone there now stays an editor.
-                st.members
-                    .iter()
-                    .filter(|d| {
-                        !st.removed.contains_key(*d)
-                            && !st.owners.contains(*d)
-                            && !self.is_revoked(d)
-                    })
-                    .map(|d| {
-                        (
-                            d.clone(),
-                            RoleEntry {
-                                role: ShareRole::Editor,
-                                name: self.member_name(d),
-                                since_utc: now,
-                                editor_until_clock: 0,
-                                editor_until_seq: 0,
-                            },
-                        )
-                    })
-                    .collect()
-            }
-        };
-        let before = roles.get(&dev).cloned();
-        let was_editor = match (&st.roles, &before) {
-            (None, _) => true,
-            (Some(_), Some(e)) => e.role.is_editor(),
-            (Some(_), None) => false,
-        };
-        let entry = match role {
-            ShareRole::Editor => RoleEntry {
-                role,
-                name: m.name.clone(),
-                since_utc: now,
-                editor_until_clock: 0,
-                editor_until_seq: 0,
-            },
-            ShareRole::Viewer if was_editor => {
-                // What it wrote while it could stays valid.
-                let state = self.load_state(&rec.folder_id)?;
-                let clock = state
-                    .files
-                    .values()
-                    .filter(|f| f.modified_by == dev)
-                    .map(|f| f.modified_clock)
-                    .max()
-                    .unwrap_or(0);
-                RoleEntry {
-                    role,
-                    name: m.name.clone(),
-                    since_utc: now,
-                    editor_until_clock: clock,
-                    editor_until_seq: self.ledger.head(&dev).seq,
+        if m.status == "removed" {
+            bail!("{} was removed from {}", m.name, rec.name);
+        }
+        let dev = members3::bin(&DeviceId::from_hex(&m.id)?)?;
+        let stamp = self
+            .with_enrolled3(|ms| {
+                let epoch = ms.folder_epochs(&id).current();
+                if !ms.registry.is_owner(&ms.me, &id, epoch) {
+                    bail!("this device is not an owner of {}", rec.name);
                 }
-            }
-            ShareRole::Viewer => before.clone().unwrap_or(RoleEntry {
-                role,
-                name: m.name.clone(),
-                since_utc: now,
-                editor_until_clock: 0,
-                editor_until_seq: 0,
-            }),
-        };
-        let unchanged = st.roles.is_some() && before.as_ref().is_some_and(|b| b.role == role);
-        let seq = if unchanged {
-            st.roles.as_ref().map(|r| r.seq).unwrap_or(0)
-        } else {
-            roles.insert(dev.clone(), RoleEntry { role, ..entry });
-            self.publish_share_roles(&mut book, &rec, roles)?.seq
-        };
+                ms.approve(&id, &dev, role.role3())?;
+                Ok(ms.lamport())
+            })?
+            .ok_or_else(|| anyhow!("this device has no storage to write to"))?;
         Ok(ShareRoleReport {
             folder: rec.name.clone(),
             member: m.name.clone(),
             member_id: m.id.clone(),
             role: role.as_str().into(),
-            seq,
+            seq: stamp,
         })
     }
 

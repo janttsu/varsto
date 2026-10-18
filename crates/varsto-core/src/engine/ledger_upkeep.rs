@@ -164,6 +164,9 @@ impl Engine {
                 self.key_for3(id)
                     .ok_or_else(|| anyhow!("no key for {id} on this device"))?,
             ),
+            None if self.vault.member => {
+                bail!("a member device writes format-3 folder-scoped batches only")
+            }
             None => self.ledger_key3()?,
         };
         let scope = match crate::record::KeyId::parse(&key_id) {
@@ -294,7 +297,6 @@ impl Engine {
                 .filter(|e| **e > 0)
                 .map(|e| format!("{}{e}", ledger::KEY_LEDGER_EPOCH_PREFIX)),
         );
-        ids.extend(self.share_ledger_key_ids());
         let mut parts: Vec<Vec<u8>> = Vec::new();
         for id in ids {
             if let Some(k) = self.key_for_id(&id) {
