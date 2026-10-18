@@ -1286,7 +1286,6 @@ impl Engine {
             }
         }
         drop(to_box);
-        self.flush_pack_deletions();
         if let Some(p) = to_pool {
             // Keep the registry in `config.json` as the pool learned it.
             let disks = p.disks();

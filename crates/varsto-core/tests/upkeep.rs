@@ -73,8 +73,63 @@ fn chunks_of(e: &Engine) -> u64 {
     e.status().unwrap().folders[0].chunks
 }
 
+fn verified_elsewhere(e: &Engine) -> u64 {
+    e.status().unwrap().folders[0].chunks_verified_elsewhere
+}
+
+/// Storage format 3: automatic verification reads whole packs that other
+/// devices wrote and records `pack_verified`; a device that joined with the
+/// vault words alone (no folder key) verifies too, under its own name for
+/// the storage.
 #[test]
-#[ignore = "f3-switch: port in part B (upkeep)"]
+fn another_device_verifies_packs_automatically() {
+    let lab = lab();
+    let (mut a, key) = writer(&lab);
+    // A second push: a second pack.
+    fs::write(lab.root.join("a-docs/more.bin"), pseudo_random(90_000, 8)).unwrap();
+    a.push("docs").unwrap();
+    let packs = common::pack_files(&lab.root.join("storage")).len() as u64;
+    assert_eq!(packs, 2);
+    let chunks = chunks_of(&a);
+    // The writer's own run has nothing to do: its own copies do not count.
+    let r = a.auto_verify().unwrap();
+    assert_eq!((r.due, r.blocks_verified), (0, 0));
+    assert_eq!(verified_elsewhere(&a), 0);
+
+    let renamed = dir_storage("primary", &lab.root.join("storage"), false);
+    let mut b = Engine::join(&lab.root.join("b-home"), "nas", PASS, &key, renamed).unwrap();
+    let now = varsto_core::util::now_utc();
+    assert!(b.auto_verify_due(now), "a first run is due at once");
+    // A budget of one pack per run: one is verified, the other waits.
+    b.set_verify_schedule(VerifySchedule {
+        max_blocks: 1,
+        ..Default::default()
+    })
+    .unwrap();
+    let r = b.auto_verify().unwrap();
+    assert_eq!(
+        (r.due, r.blocks_verified, r.left_for_next_run),
+        (packs, 1, 1)
+    );
+    assert!(r.bytes_downloaded >= 256 << 10, "a whole pack: {r:?}");
+    a.sync(None).unwrap();
+    let some = verified_elsewhere(&a);
+    assert!(some > 0 && some < chunks, "{some} of {chunks}");
+
+    b.set_verify_schedule(VerifySchedule::default()).unwrap();
+    let r = b.auto_verify().unwrap();
+    assert_eq!((r.blocks_verified, r.left_for_next_run), (1, 0), "{r:?}");
+    assert!(r.corrupt.is_empty() && r.missing.is_empty());
+    assert_eq!(b.verify_status().total_verified, packs);
+    a.sync(None).unwrap();
+    assert_eq!(verified_elsewhere(&a), chunks);
+    // Nothing is due again until the copies are 30 days old.
+    assert_eq!(b.auto_verify().unwrap().due, 0);
+    assert_eq!(b.auto_verify_at(now + 31 * DAY).unwrap().due, packs);
+}
+
+#[test]
+#[ignore = "f3-switch: port in part B (policies): the policy check counts blocks from the format-2 view; automatic verification itself is `another_device_verifies_packs_automatically`"]
 fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
     let lab = lab();
     let (mut a, key) = writer(&lab);
@@ -165,14 +220,15 @@ fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (upkeep)"]
 fn automatic_verification_skips_cold_storage_and_reports_corruption() {
     let lab = lab();
     let (mut a, key) = writer(&lab);
     let cold = dir_storage("archive", &lab.root.join("archive"), true);
     a.add_storage(cold.clone()).unwrap();
-    a.push("docs").unwrap(); // cold storages are written, never read
-    let chunks = chunks_of(&a);
+    // Cold storages are written, never read; a second push, a second pack.
+    fs::write(lab.root.join("a-docs/more.bin"), pseudo_random(90_000, 8)).unwrap();
+    a.push("docs").unwrap();
+    let packs = common::pack_files(&lab.root.join("storage")).len() as u64;
     let mut b = Engine::join(
         &lab.root.join("b-home"),
         "nas",
@@ -188,9 +244,10 @@ fn automatic_verification_skips_cold_storage_and_reports_corruption() {
     common::corrupt_object(&hot, &victim);
     let r = b.auto_verify().unwrap();
     assert_eq!(r.storages_skipped, vec!["archive".to_string()]);
-    assert_eq!(r.due, chunks, "only the hot copies are candidates");
+    assert_eq!(r.due, packs, "only the hot copies are candidates");
     assert_eq!(r.corrupt.len(), 1, "{r:?}");
-    assert_eq!(r.blocks_verified, chunks - 1);
+    assert_eq!(r.blocks_verified, packs - 1);
+    assert_eq!(r.queued_for_repair, 1);
     // Automatic verification can be turned off; a run on request still works.
     b.set_verify_schedule(VerifySchedule {
         enabled: false,
@@ -208,7 +265,7 @@ fn automatic_verification_skips_cold_storage_and_reports_corruption() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (upkeep)"]
+#[ignore = "f3-switch: port in part B (placement): storage estimates and placement advice count the format-2 view (engine/placement.rs)"]
 fn storage_prices_feed_the_estimates() {
     let lab = lab();
     let (mut a, _) = writer(&lab);
@@ -259,7 +316,7 @@ fn storage_prices_feed_the_estimates() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (upkeep)"]
+#[ignore = "f3-switch: port in part B (placement): storage estimates and placement advice count the format-2 view (engine/placement.rs)"]
 fn applying_a_placement_suggestion_frees_idle_files_safely() {
     let lab = lab();
     let (mut a, _) = writer(&lab);
@@ -322,7 +379,7 @@ fn applying_a_placement_suggestion_frees_idle_files_safely() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (upkeep)"]
+#[ignore = "f3-switch: port in part B (placement): storage estimates and placement advice count the format-2 view (engine/placement.rs)"]
 fn a_file_only_on_cold_storage_is_never_freed() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

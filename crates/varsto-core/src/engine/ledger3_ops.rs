@@ -59,6 +59,54 @@ impl Core3 {
     }
 }
 
+/// `Engine::key_for3` over the parts of an engine it needs (so that the
+/// ledger store can be borrowed apart from them). `member`: this device is
+/// a member device of another vault.
+pub(crate) fn key_for3_in(
+    epochs: &membership::VaultEpochs,
+    members: &members3::Members3,
+    member: bool,
+    key_id: &str,
+) -> Option<SecretKey> {
+    match KeyId::parse(key_id)? {
+        // A member device of another vault holds no vault key: the
+        // owners' vault batches stay closed to it (stored, not applied).
+        KeyId::Ledger(_) if member => None,
+        KeyId::Ledger(e) => Some(crate::membership3::derive3(
+            epochs.keys.get(&e)?,
+            "ledger",
+            &[],
+        )),
+        KeyId::ShareLedger { folder, epoch } => members.granted.get(&folder)?.share_ledger(epoch),
+        // Replicas' batches: part B (f3-switch).
+        _ => None,
+    }
+}
+
+/// `Engine::scope3` over the membership alone (the organization's check
+/// of `org_untrusted3` is the caller's).
+pub(crate) fn scope3_in(m: &members3::Members3, device: &Id16, key_id: &str) -> Option<EventScope> {
+    match EventScope::of_key_id(key_id)? {
+        EventScope::Full => m.devices.get(device).map(|_| EventScope::Full),
+        EventScope::Member(f) if m.devices.get(device).is_some() => Some(EventScope::Owner(f)),
+        EventScope::Member(f) => {
+            m.members.get(&f, device)?;
+            let st = m.registry.get(&f)?;
+            let wrote = st.history.get(device).is_some_and(|h| {
+                h.iter()
+                    .any(|(_, r)| matches!(r, Some(r) if *r != crate::membership3::Role::Viewer))
+            });
+            if wrote {
+                Some(EventScope::Member(f))
+            } else {
+                Some(EventScope::Viewer(f))
+            }
+        }
+        // Replicas: part B (f3-switch).
+        _ => None,
+    }
+}
+
 impl Engine {
     /// Folder records of other writers refused by the acceptance rule in
     /// this process (a viewer's manifests, junk under a writer's name).
@@ -72,7 +120,7 @@ impl Engine {
 }
 
 /// The format-3 form of a format-2 event, where format 3 has one.
-fn convert(ev: &Event) -> Option<Event3> {
+pub(crate) fn convert(ev: &Event) -> Option<Event3> {
     let b = |id: &crate::ids::Id| members3::bin(id).ok();
     Some(match ev {
         Event::DeviceEnrolled { name } => {
@@ -134,21 +182,7 @@ impl Engine {
 
     /// The key that opens a batch or checkpoint with `key_id`, if held.
     pub(crate) fn key_for3(&self, key_id: &str) -> Option<SecretKey> {
-        match KeyId::parse(key_id)? {
-            // A member device of another vault holds no vault key: the
-            // owners' vault batches stay closed to it (stored, not applied).
-            KeyId::Ledger(_) if self.vault.member => None,
-            KeyId::Ledger(e) => Some(crate::membership3::derive3(
-                self.epochs.keys.get(&e)?,
-                "ledger",
-                &[],
-            )),
-            KeyId::ShareLedger { folder, epoch } => {
-                self.f3.members.granted.get(&folder)?.share_ledger(epoch)
-            }
-            // Replicas' batches: part B (f3-switch).
-            _ => None,
-        }
+        key_for3_in(&self.epochs, &self.f3.members, self.vault.member, key_id)
     }
 
     /// Whether batch `seq` of `device` counts: a removed device's only up
@@ -167,31 +201,13 @@ impl Engine {
     /// member devices of shared folders under their folder's key. When a
     /// folder event counts is the folder roles' (by Lamport time): what a
     /// member wrote while it was an editor stays.
-    fn scope3(&self, device: &Id16, key_id: &str) -> Option<EventScope> {
-        let m = &self.f3.members;
-        match EventScope::of_key_id(key_id)? {
-            // In an organization, a device the roster does not list (or a
-            // platform its policy refuses) writes nothing that counts.
-            _ if self.org_untrusted3(device) => None,
-            EventScope::Full => m.devices.get(device).map(|_| EventScope::Full),
-            EventScope::Member(f) if m.devices.get(device).is_some() => Some(EventScope::Owner(f)),
-            EventScope::Member(f) => {
-                m.members.get(&f, device)?;
-                let st = m.registry.get(&f)?;
-                let wrote = st.history.get(device).is_some_and(|h| {
-                    h.iter().any(
-                        |(_, r)| matches!(r, Some(r) if *r != crate::membership3::Role::Viewer),
-                    )
-                });
-                if wrote {
-                    Some(EventScope::Member(f))
-                } else {
-                    Some(EventScope::Viewer(f))
-                }
-            }
-            // Replicas: part B (f3-switch).
-            _ => None,
+    pub(crate) fn scope3(&self, device: &Id16, key_id: &str) -> Option<EventScope> {
+        // In an organization, a device the roster does not list (or a
+        // platform its policy refuses) writes nothing that counts.
+        if self.org_untrusted3(device) {
+            return None;
         }
+        scope3_in(&self.f3.members, device, key_id)
     }
 
     /// What decides which batches count, as text: the keys held, the
@@ -344,6 +360,11 @@ impl Engine {
             return Ok(None);
         }
         let mut events: Vec<Event3> = self.pending.iter().filter_map(convert).collect();
+        if !events.is_empty() || !self.f3.pending.is_empty() {
+            // A lost or damaged local ledger, a fork or a fence: nothing
+            // is signed until a rebuild ran (the events stay pending).
+            self.ensure_ledger_writable()?;
+        }
         events.append(&mut self.f3.pending);
         self.pending.clear();
         self.clear_deferred();
@@ -621,6 +642,12 @@ impl Engine {
     /// hot metadata storage. Returns the devices found forked.
     pub(crate) fn pull_ledger3(&mut self) -> Result<Vec<DeviceId>> {
         self.refresh_members3()?;
+        // Head exchange first (design section 8): what peers prove, and the
+        // batches every storage withholds, fetched from the peers.
+        let pull_utc = util::now_utc();
+        if let Err(e) = self.p2p_catch_up() {
+            log::debug!("head exchange with peers failed: {e:#}");
+        }
         let me = self.me3();
         let mut keys: BTreeMap<Id16, crypto::VerifyingKey> = BTreeMap::new();
         for (d, (rec, _)) in &self.f3.members.devices.devices {
@@ -634,11 +661,17 @@ impl Engine {
             }
         }
         let mut forks = BTreeSet::new();
+        let (mut malformed, mut refused) = (0u64, 0u64);
         let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
+        // What each storage's listing showed, for the rollback judge. The
+        // listing starts after the head held here, so a storage that lists
+        // nothing newer counts as showing that head.
+        let mut views: Vec<crate::p2p::v3::heads::StorageView> = Vec::new();
         for (spec, backend) in self.metadata_storages(false)? {
             if spec.is_carrier() {
                 continue;
             }
+            let mut shown: BTreeMap<Id16, u64> = BTreeMap::new();
             for (dev, pk) in &keys {
                 let head = self.f3.ledger.head(dev);
                 if !self.keep3(dev, head.seq + 1) {
@@ -651,6 +684,17 @@ impl Engine {
                     ledger3::checkpoint::batch_key(dev, head.seq)
                 };
                 let names = backend.list_after(&prefix, &after)?;
+                let top = names
+                    .iter()
+                    .filter_map(|n| n.strip_prefix(&prefix))
+                    .filter_map(ledger3::LedgerObject::parse)
+                    .filter_map(|o| match o {
+                        ledger3::LedgerObject::Batch(s) => Some(s),
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0);
+                shown.insert(*dev, top.max(head.seq));
                 // The newest checkpoint first: it stands in for batches a
                 // pruning device deleted (other devices' only; one of this
                 // device's own is its own).
@@ -688,7 +732,12 @@ impl Engine {
                         continue;
                     };
                     let Ok(rec) = crate::record::SignedRecord::decode(&bytes) else {
+                        // One storage holding a damaged or planted object
+                        // does not stop the pull: another may hold the batch.
                         log::warn!(storage = backend.name(); "ledger: {name} is not a record");
+                        if *dev != me {
+                            malformed += 1;
+                        }
                         continue;
                     };
                     if *dev == me && seq > head.seq {
@@ -709,18 +758,47 @@ impl Engine {
                             forks.insert(DeviceId::from_bytes(dev));
                         }
                         Ok(Ingest::Refused) => {
+                            refused += 1;
                             log::warn!(storage = backend.name(), seq = seq; "ledger batch refused");
                         }
                         Ok(_) => {}
                         Err(e) => {
+                            malformed += 1;
                             log::warn!(storage = backend.name(), seq = seq, error:% = e; "ledger batch skipped");
                         }
                     }
                 }
             }
+            if let Some(storage) = super::verify::storage_identity(backend.as_ref())
+                .ok()
+                .and_then(|id| crate::record::kinds::parse_id16(&id))
+            {
+                views.push(crate::p2p::v3::heads::StorageView {
+                    storage,
+                    name: spec.name().to_string(),
+                    reachable: true,
+                    shown,
+                });
+            }
         }
         let view = self.view3()?;
         self.observe_clock(view.max_lamport)?;
+        // A storage that shows less than a writer confirmed and a peer
+        // proved, two pulls in a row: the rollback warning.
+        match self.p2p_judge_rollback(pull_utc, Some(views)) {
+            Ok(w) => {
+                let mut devices: Vec<String> = w
+                    .iter()
+                    .map(|w| self.device_name(&DeviceId::from_bytes(&w.device)))
+                    .collect();
+                devices.sort();
+                devices.dedup();
+                self.ledger_alarm.watch.rollback_devices = devices;
+                self.ledger_alarm.watch.rollback = w.into_iter().map(|w| w.text).collect();
+            }
+            Err(e) => log::debug!("rollback check failed: {e:#}"),
+        }
+        self.watch_freshness3(&view, malformed, refused);
         Ok(forks.into_iter().collect())
     }
 
@@ -812,7 +890,9 @@ impl Engine {
         }
         let me = self.me3();
         let view = self.view3()?;
-        // 1. Acknowledge other devices' checkpoints in a batch of our own.
+        // 1. Acknowledge other devices' checkpoints, and other writers'
+        // dead marks (they settle only once every writer did), in a batch
+        // of our own.
         let ack_due = self.f3.ledger.devices().iter().any(|d| {
             *d != me
                 && self
@@ -821,7 +901,7 @@ impl Engine {
                     .head(d)
                     .base
                     .is_some_and(|b| view.acked(&me, d, None) < b.seq)
-        });
+        }) || self.acks_due3(&view);
         if ack_due && self.cycle.is_none() {
             let (key_id, key) = self.ledger_key3()?;
             let lamport = self.tick()?;

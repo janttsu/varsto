@@ -223,7 +223,7 @@ fn the_local_trash_copy_is_used_first_and_cleared_with_the_entry() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (trash GC)"]
+#[ignore = "f3-switch: port in part B (data moves): moving a folder's packs to another storage"]
 fn trashed_blocks_survive_moves_and_storage_removal() {
     let lab = Lab::new();
     let (one, two, docs) = (lab.p("one"), lab.p("two"), lab.p("docs"));
@@ -283,7 +283,6 @@ fn trashed_blocks_survive_moves_and_storage_removal() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (trash GC)"]
 fn expired_entries_drop_only_blocks_nothing_else_uses() {
     let lab = Lab::new();
     let (one, docs) = (lab.p("one"), lab.p("docs"));
@@ -321,26 +320,32 @@ fn expired_entries_drop_only_blocks_nothing_else_uses() {
     a.trash_set(Some(0), Some("docs"), None).unwrap();
     let up = a.trash_upkeep_at(now + 29 * DAY).unwrap();
     assert_eq!(up.expired, 0);
+    // The packs that hold the expired blocks.
+    let gone_packs: BTreeSet<String> = gone
+        .iter()
+        .filter_map(|o| common::pack_path(&one, o))
+        .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    assert!(!gone_packs.is_empty());
     let up = a.trash_upkeep_at(now + 31 * DAY).unwrap();
     assert_eq!(up.expired, 2);
-    assert!(up.blocks_dropped >= gone.len() as u64);
+    assert!(up.blocks_dropped >= gone.len() as u64, "{up:?}");
     let left = objects(&one);
     assert!(left.is_disjoint(&gone), "expired blocks are deleted");
     assert!(twin.is_subset(&left), "blocks a current file uses stay");
     assert!(kept.is_subset(&left));
-    // The drops are in the ledger: no device counts those copies any more.
-    let view = a.view().unwrap();
-    assert!(view
-        .chunks
-        .values()
-        .filter(|r| gone.contains(r.object.as_str()))
-        .all(|r| r.storages.is_empty()));
+    // The drops are in the ledger: no device counts those packs any more.
+    let view = a.ledger_view3().unwrap();
+    for p in &gone_packs {
+        let mut id = [0u8; 32];
+        hex::decode_to_slice(p, &mut id).unwrap();
+        assert!(view.holders(&id).is_empty(), "pack {p} still held");
+    }
     let f = a.fsck(false).unwrap();
     assert_eq!(f.claims_without_object, 0);
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (trash GC)"]
 fn purging_deletes_for_good() {
     let lab = Lab::new();
     let store = dir("box", &lab.p("store"), false);
@@ -361,22 +366,33 @@ fn purging_deletes_for_good() {
     fs::remove_file(a_dir.join("two.bin")).unwrap();
     a.sync(None).unwrap();
 
-    // B deletes one entry for good, then empties the trash.
+    // B deletes one entry for good, then empties the trash. B marks the
+    // blocks dead in its block map; they go once A, the folder's other
+    // writer, has acknowledged the marks (storage format 3).
     let r = b.trash_purge(Some("docs"), &s("one.bin"), false).unwrap();
     assert_eq!(r.entries, 1);
-    assert!(r.blocks_dropped > 0);
+    assert_eq!(r.blocks_dropped, 0, "{r:?}");
     assert_eq!(paths(&a.trash_list(None).unwrap()), s("two.bin"));
     let r = b.trash_purge(None, &[], true).unwrap();
     assert_eq!(r.entries, 1);
     assert!(a.trash_list(None).unwrap().is_empty());
     assert!(b.trash_list(None).unwrap().is_empty());
+    let up = b.trash_upkeep().unwrap();
+    assert_eq!(up.blocks_dropped, 0, "{up:?}");
+    assert!(
+        up.notes.iter().any(|n| n.contains("laptop")),
+        "collection waits for the laptop: {up:?}"
+    );
+    // A syncs: it acknowledges B's marks, and B's next upkeep collects.
+    a.sync(None).unwrap();
+    let up = b.trash_upkeep().unwrap();
+    assert!(up.blocks_dropped > 0, "{up:?}");
     // Only the blocks of the kept file are left.
     assert_eq!(objects(&lab.p("store")), kept);
     assert!(b.trash_purge(Some("docs"), &s("nothing"), false).is_err());
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (trash GC)"]
 fn a_trash_storage_takes_the_trashed_blocks() {
     let lab = Lab::new();
     let (one, cold, a_dir, b_dir) = (
@@ -450,10 +466,27 @@ fn a_trash_storage_takes_the_trashed_blocks() {
     assert!(!back.is_empty());
 
     // Deleting for good does not delete from cold storage before its
-    // minimum duration; the upkeep does it afterwards.
-    let r = a.trash_purge(Some("docs"), &s("older.bin"), false).unwrap();
-    assert_eq!(r.entries, 1);
-    assert!(r.blocks_waiting > 0);
+    // minimum duration; the upkeep does it afterwards. (A cold pack goes
+    // whole once none of its blocks is used, so both files go here.)
+    a.sync(None).unwrap();
+    fs::remove_file(a_dir.join("old.bin")).unwrap();
+    a.sync(None).unwrap();
+    let r = a
+        .trash_purge(
+            Some("docs"),
+            &["old.bin".to_string(), "older.bin".to_string()],
+            false,
+        )
+        .unwrap();
+    assert_eq!(r.entries, 2);
+    // The phone's manifest still names old.bin until it has pulled the
+    // deletion and published its own view; then the laptop marks the rest,
+    // and the phone acknowledges the marks.
+    b.sync(None).unwrap();
+    a.trash_upkeep().unwrap();
+    b.sync(None).unwrap();
+    let up = a.trash_upkeep().unwrap();
+    assert!(up.blocks_waiting > 0, "{up:?}");
     let before = objects(&cold).len();
     let now = varsto_core::util::now_utc();
     let up = a.trash_upkeep_at(now + 91 * DAY).unwrap();

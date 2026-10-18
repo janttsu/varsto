@@ -353,7 +353,6 @@ impl Engine {
         damage: &mut Vec<Damage>,
     ) -> Result<()> {
         let schedule = self.config.scrub.clone();
-        let me = self.vault.device_id.clone();
         let mut readable: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
         let mut remote: BTreeSet<String> = BTreeSet::new();
         let mut pools: Vec<StorageSpec> = Vec::new();
@@ -396,169 +395,95 @@ impl Engine {
                 Err(e) => report.skipped.push(format!("{name} (cannot open: {e:#})")),
             }
         }
-        let view = self.view()?;
-        // The objects the ledger places on each storage read here, whoever
-        // wrote them: key -> (size, folder, chunk, object).
-        type Expected = BTreeMap<String, (u64, FolderId, ChunkId, ObjectName)>;
-        let mut expected: BTreeMap<String, Expected> = BTreeMap::new();
+        let view = self.view3()?;
+        // The packs the view holds on each storage read here, whoever wrote
+        // them, under this device's name for the storage (`scrub3`): the
+        // unit is the pack, read whole and hashed against its id.
+        let me3 = self.me3();
+        let mut items: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
         if !readable.is_empty() {
             let names = self.storage_resolver(&readable);
-            for ((folder, chunk), rec) in view.chunks.iter() {
-                if !self.keyring.folders.contains_key(folder) {
-                    continue; // converted into a Strongroom: its old objects are gone
-                }
-                for (name, loc) in &rec.storages {
-                    if loc.claimed_by.is_empty() {
+            for (id, rec) in &view.packs {
+                let Some(size) = crate::ledger3::events::class_bytes(rec.class) else {
+                    continue;
+                };
+                for c in view.copies(id) {
+                    if c.claimed_by.is_empty() {
                         continue;
                     }
-                    let local = if loc.claimed_by.contains(&me) && readable.contains_key(name) {
-                        Some(name.clone())
+                    let local = if c.claimed_by.contains(&me3) && readable.contains_key(&c.storage)
+                    {
+                        Some(c.storage.clone())
                     } else {
-                        names.resolve(name, &loc.claimed_by)
+                        let claimers: BTreeSet<DeviceId> = c
+                            .claimed_by
+                            .iter()
+                            .map(|d| DeviceId::from_bytes(d))
+                            .collect();
+                        names.resolve(&c.storage, &claimers)
                     };
                     let Some(local) = local.filter(|l| readable.contains_key(l)) else {
                         continue;
                     };
-                    expected
+                    items
                         .entry(local)
                         .or_default()
-                        .entry(chunk_storage_key(&rec.object))
-                        .or_insert((rec.size, folder.clone(), chunk.clone(), rec.object.clone()));
+                        .insert(hex::encode(id), size);
                 }
             }
         }
-        let damaged = |storage: &str,
-                       folder: &FolderId,
-                       chunk: &ChunkId,
-                       object: &ObjectName,
-                       kind: DamageKind| {
-            Damage {
-                folder: folder.clone(),
-                chunk: chunk.clone(),
-                object: object.clone(),
-                storage: storage.to_string(),
-                kind,
-                found_by: "scrub".to_string(),
-                found_utc: now,
-                retry_utc: 0,
-                reason: None,
-            }
-        };
-        // The pass that began longest ago first.
-        let mut order: Vec<String> = readable.keys().cloned().collect();
-        order.sort_by_key(|n| {
-            st.sweeps
-                .get(&format!("storage:{n}"))
-                .map(|s| s.pass_started_utc)
-                .unwrap_or(0)
-        });
-        for name in order {
-            let budget = if remote.contains(&name) {
-                &mut *remote_budget
-            } else {
-                &mut *local_budget
-            };
-            let objects = expected.remove(&name).unwrap_or_default();
-            let items: Vec<(String, u64)> = objects.iter().map(|(k, v)| (k.clone(), v.0)).collect();
-            let metas: Vec<&(u64, FolderId, ChunkId, ObjectName)> = objects.values().collect();
-            let target = format!("storage:{name}");
-            let sweep = st.sweeps.entry(target.clone()).or_default();
-            sweep.label = format!("storage {name}");
-            let plan = scrub::plan(&items, sweep, now, &schedule, pace, budget);
-            let task = crate::activity::start(
-                crate::activity::SCRUB,
-                &name,
-                plan.picks.iter().map(|&i| items[i].1).sum(),
-                crate::activity::Unit::Bytes,
-            );
-            task.set_phase("storage");
-            let mut tr = TargetReport {
-                target,
-                label: sweep.label.clone(),
-                behind: plan.behind,
-                ..Default::default()
-            };
-            let mut done = plan.finishes_pass;
-            let mut last: Option<&str> = None;
-            let backend = readable[&name].as_ref();
-            let jobs = picks_to_jobs(&plan.picks, &items);
-            // Read ahead (in parallel where the medium allows); the results
-            // come back here in key order, as a plain loop would see them.
-            parverify::run_ordered(
-                &jobs,
-                &[lanes[&name]],
-                |&i| {
-                    crate::storage::guarded(&items[i].0, || {
-                        backend.get_bounded(&items[i].0, crate::storage::MAX_BLOCK_OBJECT)
-                    })
-                },
-                |_, got| got.map(|ct| ct.map(|ct| (ct.len() as u64, crypto::hash(&ct)))),
-                |_, &i, got| {
-                    let key = &items[i].0;
-                    let (_, folder, chunk, object) = metas[i];
-                    match got {
-                        Ok(None) => {
-                            report.missing.push(format!("{name}:{}", object.short()));
-                            damage.push(damaged(&name, folder, chunk, object, DamageKind::Missing));
-                        }
-                        Ok(Some((len, hash))) => {
-                            tr.bytes += len;
-                            if ObjectName::from_bytes(&hash) != *object {
-                                report.corrupt.push(format!("{name}:{}", object.short()));
-                                damage.push(damaged(
-                                    &name,
-                                    folder,
-                                    chunk,
-                                    object,
-                                    DamageKind::Corrupt,
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            // Unreachable now: the pass goes on from here next time.
-                            report.skipped.push(format!("{name} (read failed: {e:#})"));
-                            done = false;
-                            return false;
-                        }
-                    }
-                    tr.checked += 1;
-                    task.advance(items[i].1);
-                    last = Some(key);
-                    true
-                },
-            );
-            sweep.advance(now, last, tr.checked, done);
-            tr.pass_done = done;
-            tr.left_in_pass = plan.remaining - tr.checked;
-            report.objects_checked += tr.checked;
-            report.object_bytes += tr.bytes;
-            report.targets.push(tr);
-        }
+        let targets: Vec<crate::scrub3::PackTarget> = readable
+            .iter()
+            .map(|(name, backend)| crate::scrub3::PackTarget {
+                target: format!("storage:{name}"),
+                label: format!("storage {name}"),
+                name: name.clone(),
+                lane: lanes[name],
+                remote: remote.contains(name),
+                items: items.remove(name).unwrap_or_default().into_iter().collect(),
+                read: Box::new(move |id: &str| {
+                    backend.get_bounded(&crate::packs::pack_key(id), crate::storage::MAX_PACK)
+                }),
+            })
+            .collect();
+        let task =
+            crate::activity::start(crate::activity::SCRUB, "", 0, crate::activity::Unit::Bytes);
+        task.set_phase("storage");
+        let out = crate::scrub3::scrub_packs(
+            &targets,
+            st,
+            &schedule,
+            pace,
+            local_budget,
+            remote_budget,
+            now,
+            &mut |m| {
+                let mut pack = [0u8; 32];
+                if hex::decode_to_slice(&m.pack, &mut pack).is_err() {
+                    return false;
+                }
+                let kind = match m.kind {
+                    crate::scrub3::MismatchKind::Missing => DamageKind::Missing,
+                    _ => DamageKind::Corrupt,
+                };
+                damage.push(super::repair::pack_damage(
+                    &view, &pack, &m.name, kind, "scrub", now,
+                ));
+                true
+            },
+        );
+        drop(targets);
+        task.advance(out.report.object_bytes);
+        report.objects_checked += out.report.objects_checked;
+        report.object_bytes += out.report.object_bytes;
+        report.missing.extend(out.report.missing);
+        report.corrupt.extend(out.report.corrupt);
+        report.skipped.extend(out.report.skipped);
+        report.targets.extend(out.report.targets);
         // Pools: each attached disk is a target of its own; a disk that is
         // away waits, and one not seen within the period is reported.
         // A disk holds packs (`crate::packs`): a pack is checked against its
-        // id, and a lost pack is every block in it.
-        let mut by_object: HashMap<ObjectName, Vec<(FolderId, ChunkId, ObjectName)>> =
-            HashMap::new();
-        if !pools.is_empty() {
-            for ((f, c), r) in &view.chunks {
-                let block = (f.clone(), c.clone(), r.object.clone());
-                by_object
-                    .entry(r.object.clone())
-                    .or_default()
-                    .push(block.clone());
-                for loc in r.storages.values() {
-                    if let Some(p) = loc.pack.as_ref() {
-                        if let Ok(id) = ObjectName::from_hex(&p.pack) {
-                            let e = by_object.entry(id).or_default();
-                            if !e.contains(&block) {
-                                e.push(block.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // id, and a bad pack no other disk holds goes to the repair queue.
         for spec in pools {
             let pool = match self.open_pool(&spec) {
                 Ok(p) => p,
@@ -674,10 +599,18 @@ impl Engine {
                         if left {
                             return true;
                         }
-                        if let Ok(o) = ObjectName::from_hex(name) {
-                            for (f, c, block) in by_object.get(&o).into_iter().flatten() {
-                                damage.push(damaged(&pool_name, f, c, block, DamageKind::Missing));
-                            }
+                        let mut pack = [0u8; 32];
+                        if hex::decode_to_slice(name, &mut pack).is_ok()
+                            && view.pack(&pack).is_some()
+                        {
+                            damage.push(super::repair::pack_damage(
+                                &view,
+                                &pack,
+                                &pool_name,
+                                DamageKind::Missing,
+                                "scrub",
+                                now,
+                            ));
                         }
                         true
                     },

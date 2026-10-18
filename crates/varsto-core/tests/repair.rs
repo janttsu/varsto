@@ -161,7 +161,6 @@ fn missing_copy_is_rewritten_from_another_storage() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (repair: the damaged pack stays listed until GC marks it dead)"]
 fn corrupt_copy_is_rewritten_from_the_local_file() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[dir("box", &lab.p("box"), false)]);
@@ -183,14 +182,13 @@ fn corrupt_copy_is_rewritten_from_the_local_file() {
     assert_eq!(kinds, BTreeSet::from([DamageKind::Corrupt]));
     assert!(r.repaired.iter().all(|c| c.source == "local file"), "{r:?}");
     assert!(intact(&all[1]) && intact(&all[2]));
-    // Both good copies went into one new pack.
-    assert_eq!(common::pack_files(&lab.p("box")).len(), 2);
+    // The pack's members went into one new pack, the damaged one went.
+    assert_eq!(common::pack_files(&lab.p("box")).len(), 1);
     assert!(!a.repair_due(varsto_core::util::now_utc()));
     assert!(a.fsck(true).unwrap().objects_corrupt.is_empty());
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (repair: auto verification over block maps)"]
 fn verification_queues_damage_and_another_device_repairs_it() {
     let lab = Lab::new();
     let (mut a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
@@ -221,7 +219,6 @@ fn verification_queues_damage_and_another_device_repairs_it() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (repair: peer source for whole packs)"]
 fn missing_copy_is_rewritten_from_a_peer() {
     let lab = Lab::new();
     let (mut a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
@@ -240,9 +237,9 @@ fn missing_copy_is_rewritten_from_a_peer() {
     let all = objects(&lab.p("box"));
     let n = lose(&all[0]);
 
-    // Without a peer nothing can repair them.
+    // Without a peer nothing can repair them (one lost pack).
     let r = b.repair(&RepairOptions::manual()).unwrap();
-    assert_eq!(r.unrepairable.len(), n, "{r:?}");
+    assert_eq!(r.unrepairable.len(), 1, "{r:?}");
 
     // The laptop serves its blocks over TLS on TCP.
     let serving = common::p2p::Serving::start(&mut a);
@@ -259,7 +256,6 @@ fn missing_copy_is_rewritten_from_a_peer() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (repair: cold-storage reasons per pack)"]
 fn cold_storage_is_read_only_when_asked() {
     let lab = Lab::new();
     let (mut a, _) = device(
@@ -278,17 +274,17 @@ fn cold_storage_is_read_only_when_asked() {
     a.count_storage_calls(calls.clone());
     let r = a.repair(&RepairOptions::manual()).unwrap();
     assert!(r.repaired.is_empty(), "{r:?}");
-    assert_eq!(r.unrepairable.len(), n);
+    // Storage format 3 repairs and reports whole packs: one lost pack.
+    assert_eq!(r.unrepairable.len(), 1, "{r:?}");
     assert!(
         r.unrepairable
             .iter()
             .all(|u| u.reason.contains("cold storage deep")),
         "{r:?}"
     );
-    // One read per block: the damaged copy itself, nothing from the cold
-    // storage.
+    // Nothing read block by block (the hot pack is checked whole).
     let c = calls.snapshot();
-    assert_eq!(c.chunk_gets, n as u64, "{c:?}");
+    assert_eq!(c.chunk_gets, 0, "{c:?}");
     assert!(!present(&all[0]));
 
     let r = a

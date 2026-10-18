@@ -280,13 +280,16 @@ enum Cmd {
         #[arg(required = true)]
         paths: Vec<String>,
     },
-    /// Compare the ledger with the storages; --verify downloads and hashes every chunk.
+    /// Compare the ledger with the storages: every claimed pack present at its size class, every
+    /// block of a current file in a pack, every announced record on the storages; --verify reads
+    /// every pack whole and hashes it against its id.
     Fsck {
         #[arg(long)]
         verify: bool,
-        /// Repair what was found right away (see `varsto repair`).
-        #[arg(long)]
-        repair: bool,
+        /// Repair what was found right away: copy missing packs whole from another storage and
+        /// rebuild damaged ones (see `varsto repair`).
+        #[arg(long, alias = "repair")]
+        fix: bool,
     },
     /// Rewrite missing or corrupt copies on this device's storages from another copy.
     Repair {
@@ -4603,14 +4606,33 @@ fn run(cli: &Cli) -> Result<()> {
                 max_blocks: *max_blocks,
             },
         )?,
-        Cmd::Fsck { verify, repair } => {
+        Cmd::Fsck { verify, fix } => {
             let mut engine = open_engine(&home)?;
             let r = engine.fsck(*verify)?;
             print(cli, &r, |r| {
-                format!("referenced {} | with storage copy {} | verified elsewhere {} | claimed only {} | missing {:?} | claims without object {} | unreferenced objects {} | verified now {} | corrupt {:?} | forked {:?} | cold skipped {:?}{}", r.chunks_referenced, r.chunks_with_storage_copy, r.chunks_verified_elsewhere, r.chunks_claimed_only, r.chunks_missing, r.claims_without_object, r.objects_unreferenced, r.objects_verified_now, r.objects_corrupt, r.forked_devices, r.storages_skipped_cold, if r.disks_offline.is_empty() { String::new() } else { format!(" | offline: {} objects on {}", r.objects_offline, r.disks_offline.join("; ")) }) + &if r.ledger_health.is_ok() { String::new() } else { format!("\nledger: {}", r.ledger_health.describe()) }
+                let summary = match &r.format3 {
+                    Some(f) => f.describe(),
+                    None => format!(
+                        "referenced {} | with storage copy {} | missing {:?} | corrupt {:?}",
+                        r.chunks_referenced,
+                        r.chunks_with_storage_copy,
+                        r.chunks_missing,
+                        r.objects_corrupt
+                    ),
+                };
+                summary
+                    + &format!(
+                        " | repairs queued {} | cold skipped {:?}",
+                        r.repairs_queued, r.storages_skipped_cold
+                    )
+                    + &if r.ledger_health.is_ok() {
+                        String::new()
+                    } else {
+                        format!("\nledger: {}", r.ledger_health.describe())
+                    }
             })?;
             let mut repaired_all = false;
-            if *repair && r.repairs_queued > 0 {
+            if *fix && r.repairs_queued > 0 {
                 let mut opts = varsto_core::engine::RepairOptions::manual();
                 opts.scan = false;
                 let rep = engine.repair(&opts)?;

@@ -137,6 +137,9 @@ pub struct RebuildReport {
     pub claims_from_listing: u64,
     pub verified: u64,
     pub unnamed_corrupt: Vec<String>,
+    /// Packs this device's maps name whose bytes failed the verification
+    /// (`verify_named`): not claimed (`storage:pack`).
+    pub named_corrupt: Vec<String>,
     pub announced: u64,
     pub folders_added: u64,
     pub enrolled: bool,
@@ -168,7 +171,7 @@ impl RebuildReport {
         for s in &self.skipped {
             out.push_str(&format!("\n  skipped: {s}"));
         }
-        for s in &self.unnamed_corrupt {
+        for s in self.unnamed_corrupt.iter().chain(&self.named_corrupt) {
             out.push_str(&format!("\n  not claimed, corrupt: {s}"));
         }
         out

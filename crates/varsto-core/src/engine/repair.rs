@@ -74,6 +74,33 @@ impl Damage {
     }
 }
 
+/// A damaged copy of a whole pack (storage format 3 repairs packs): its
+/// object and chunk are the pack id, its folder the one the view gives the
+/// pack (zeros when none).
+pub(super) fn pack_damage(
+    view: &crate::ledger3::LedgerView,
+    pack: &[u8; 32],
+    storage: &str,
+    kind: DamageKind,
+    found_by: &str,
+    now: i64,
+) -> Damage {
+    Damage {
+        folder: view
+            .pack_folder(pack)
+            .map(|f| FolderId::from_bytes(&f))
+            .unwrap_or_else(|| FolderId::from_bytes(&[0; 16])),
+        chunk: ChunkId::from_bytes(pack),
+        object: ObjectName::from_bytes(pack),
+        storage: storage.to_string(),
+        kind,
+        found_by: found_by.to_string(),
+        found_utc: now,
+        retry_utc: 0,
+        reason: None,
+    }
+}
+
 /// How one repair run behaves.
 #[derive(Clone, Debug)]
 pub struct RepairOptions {
@@ -229,12 +256,6 @@ impl RepairStatus {
     }
 }
 
-/// Where the plaintext of an object may be on this device.
-struct PlainSource {
-    epoch: u32,
-    files: Vec<PathBuf>,
-}
-
 impl Engine {
     fn repair_path(&self) -> PathBuf {
         self.home.join(REPAIR_FILE)
@@ -247,6 +268,11 @@ impl Engine {
             .iter()
             .map(|d| d.object.as_str().to_ascii_lowercase())
             .collect()
+    }
+
+    /// The damaged copies waiting in the repair queue.
+    pub(super) fn load_repair_queue(&self) -> Vec<Damage> {
+        self.load_repair_state().queue
     }
 
     fn load_repair_state(&self) -> RepairState {
@@ -346,439 +372,16 @@ impl Engine {
         }
     }
 
+    pub(super) fn folder_label3(&self, folder: &FolderId) -> String {
+        self.folder_label(folder)
+    }
+
     fn folder_label(&self, folder: &FolderId) -> String {
         self.keyring
             .folders
             .get(folder)
             .map(|r| r.name.clone())
             .unwrap_or_else(|| folder.short().to_string())
-    }
-
-    /// The run itself; returns the report and the queue to keep.
-    fn run_repair(&mut self, opts: &RepairOptions) -> Result<(RepairReport, Vec<Damage>)> {
-        let now = util::now_utc();
-        let mut report = RepairReport {
-            started_utc: now,
-            dry_run: opts.dry_run,
-            ..Default::default()
-        };
-        let mut queue = self.load_repair_state().queue;
-        if opts.scan {
-            let (_, found) = self.fsck_scan(false)?;
-            merge_damage(&mut queue, found);
-        } else {
-            self.pull_ledger_once()?;
-        }
-        let view = self.view()?;
-
-        // Objects of current files in folders attached here, and where
-        // their plaintext is on this device.
-        let mut attached: BTreeSet<FolderId> = BTreeSet::new();
-        let mut current: HashMap<ObjectName, PlainSource> = HashMap::new();
-        let mut keys: BTreeMap<FolderId, FolderKeys> = BTreeMap::new();
-        for (rec, mount) in self.folders() {
-            let Some(mount) = mount else { continue };
-            if !self.state_path(&rec.folder_id).exists() {
-                continue;
-            }
-            attached.insert(rec.folder_id.clone());
-            let state = self.load_state(&rec.folder_id)?;
-            let plain = !self.mount_is_encrypted(&rec.folder_id) && !state.block_cache;
-            for f in state.files.values().filter(|f| !f.deleted) {
-                let on_disk = plain
-                    && state
-                        .local_index
-                        .get(&f.path)
-                        .is_some_and(|l| l.content_hash == f.content_hash);
-                for c in &f.chunks {
-                    let e = current.entry(c.object.clone()).or_insert(PlainSource {
-                        epoch: c.epoch,
-                        files: Vec::new(),
-                    });
-                    if on_disk {
-                        e.files.push(self.disk_of(&mount, &state, &f.path));
-                    }
-                }
-            }
-            if let Ok(r) = self.with_key(&rec) {
-                if let Ok(k) = self.folder_keys(&r) {
-                    keys.insert(rec.folder_id.clone(), k);
-                }
-            }
-        }
-
-        // Fewest other copies first, then oldest.
-        let copies = |d: &Damage| {
-            view.locate(&d.folder, &d.chunk)
-                .filter(|r| r.object == d.object)
-                .map(|r| r.storages.keys().filter(|s| **s != d.storage).count())
-                .unwrap_or(0)
-        };
-        queue.sort_by(|a, b| {
-            copies(a)
-                .cmp(&copies(b))
-                .then(a.found_utc.cmp(&b.found_utc))
-                .then(a.key().cmp(&b.key()))
-        });
-
-        let specs: BTreeMap<String, StorageSpec> = self
-            .config
-            .storages
-            .iter()
-            .map(|s| (s.name().to_string(), s.clone()))
-            .collect();
-        let mut opened: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
-        let mut unreachable: BTreeSet<String> = BTreeSet::new();
-        let mut keep: Vec<Damage> = Vec::new();
-        let mut waiting: BTreeMap<String, (Vec<PendingRepair>, usize)> = BTreeMap::new();
-        let (mut blocks, mut bytes) = (0u64, 0u64);
-        let task = crate::activity::start(
-            crate::activity::REPAIR,
-            "",
-            queue.len() as u64,
-            crate::activity::Unit::Items,
-        );
-        for mut d in queue {
-            task.advance(1);
-            if !opts.retry_all && d.retry_utc > now {
-                report.left_for_next_run += 1;
-                keep.push(d);
-                continue;
-            }
-            report.found += 1;
-            let Some(spec) = specs.get(&d.storage) else {
-                report.not_needed += 1; // the storage is gone
-                continue;
-            };
-            if spec.is_carrier() || spec.is_cold() {
-                report.not_needed += 1; // never written by repair
-                continue;
-            }
-            if attached.contains(&d.folder) && !current.contains_key(&d.object) {
-                report.not_needed += 1; // no current file uses it any more
-                continue;
-            }
-            // A copy moved away on purpose (`chunk_dropped`), or a storage
-            // the folder's placement does not take, is not written back.
-            let record = view
-                .locate(&d.folder, &d.chunk)
-                .filter(|r| r.object == d.object);
-            let placed = self
-                .keyring
-                .folders
-                .get(&d.folder)
-                .is_none_or(|rec| self.write_targets(rec).wants(&d.storage, None));
-            if record.is_some_and(|r| r.dropped_from(&d.storage)) || !placed {
-                report.not_needed += 1;
-                continue;
-            }
-            if blocks > 0 && (blocks >= opts.max_blocks || bytes >= opts.max_bytes) {
-                report.left_for_next_run += 1;
-                keep.push(d);
-                continue;
-            }
-            if unreachable.contains(&d.storage) {
-                d.retry_utc = now + RETRY_UNREACHABLE_SECS;
-                report.left_for_next_run += 1;
-                keep.push(d);
-                continue;
-            }
-            if !opened.contains_key(&d.storage) {
-                match self.open_spec(spec) {
-                    Ok(b) => {
-                        opened.insert(d.storage.clone(), b);
-                    }
-                    Err(e) => {
-                        report.unreachable.push(format!("{} ({e:#})", d.storage));
-                        unreachable.insert(d.storage.clone());
-                        d.retry_utc = now + RETRY_UNREACHABLE_SECS;
-                        report.left_for_next_run += 1;
-                        keep.push(d);
-                        continue;
-                    }
-                }
-            }
-            let key = chunk_storage_key(&d.object);
-            // 1. The copy as it is now.
-            let corrupt = match crate::storage::guarded(&key, || {
-                opened[&d.storage].get_bounded(&key, crate::storage::MAX_BLOCK_OBJECT)
-            }) {
-                Ok(Some(ct)) if ObjectName::from_bytes(&crypto::hash(&ct)) == d.object => {
-                    report.already_intact += 1;
-                    if !opts.dry_run {
-                        self.pending.push(Event::ChunkVerified {
-                            folder: d.folder.clone(),
-                            chunk: d.chunk.clone(),
-                            object: d.object.clone(),
-                            storage: d.storage.clone(),
-                        });
-                    }
-                    continue;
-                }
-                Ok(Some(_)) => true,
-                Ok(None) => false,
-                Err(e) => {
-                    let why = match pool::pool_error(&e) {
-                        Some(PoolError::NeedsDisk { .. }) => {
-                            format!("{} (the disk that holds it is away)", d.storage)
-                        }
-                        _ => format!("{} ({e:#})", d.storage),
-                    };
-                    report.unreachable.push(why);
-                    unreachable.insert(d.storage.clone());
-                    d.retry_utc = now + RETRY_UNREACHABLE_SECS;
-                    report.left_for_next_run += 1;
-                    keep.push(d);
-                    continue;
-                }
-            };
-            d.kind = if corrupt {
-                DamageKind::Corrupt
-            } else {
-                DamageKind::Missing
-            };
-            // 2. A good copy from somewhere else.
-            let plain = current.get(&d.object);
-            let found = self.repair_source(&d, &specs, &mut opened, plain, &keys, opts)?;
-            let (source, ct) = match found {
-                Ok(x) => x,
-                Err(reason) => {
-                    report
-                        .unrepairable
-                        .push(self.unrepairable(&d, reason.clone()));
-                    d.reason = Some(reason);
-                    d.retry_utc = now + RETRY_UNREPAIRABLE_SECS;
-                    keep.push(d);
-                    continue;
-                }
-            };
-            blocks += 1;
-            bytes += ct.len() as u64;
-            let done = RepairedCopy {
-                folder: self.folder_label(&d.folder),
-                storage: d.storage.clone(),
-                object: d.object.short().to_string(),
-                kind: d.kind,
-                source,
-                bytes: ct.len() as u64,
-            };
-            if opts.dry_run {
-                report.repaired.push(done);
-                continue;
-            }
-            // 3. Written with the other repairs of the storage as packs
-            //    (`crate::packs`), then read back and recorded.
-            let w = waiting.entry(d.storage.clone()).or_default();
-            w.1 += ct.len();
-            let storage = d.storage.clone();
-            w.0.push(PendingRepair {
-                damage: d,
-                done,
-                ct,
-                corrupt,
-            });
-            if w.1 >= crate::packs::HOT_TARGET {
-                let (list, _) = waiting.remove(&storage).unwrap_or_default();
-                let mut out = RepairBook {
-                    report: &mut report,
-                    keep: &mut keep,
-                    unreachable: &mut unreachable,
-                    now,
-                };
-                self.write_repairs(opened[&storage].as_ref(), list, &mut out);
-            }
-        }
-        for (storage, (list, _)) in std::mem::take(&mut waiting) {
-            let mut out = RepairBook {
-                report: &mut report,
-                keep: &mut keep,
-                unreachable: &mut unreachable,
-                now,
-            };
-            self.write_repairs(opened[&storage].as_ref(), list, &mut out);
-        }
-        report.finished_utc = util::now_utc();
-        Ok((report, keep))
-    }
-
-    /// Write the repaired copies of one storage together, read each back
-    /// and record it (or keep the damage for the next run).
-    fn write_repairs(
-        &mut self,
-        target: &dyn Storage,
-        list: Vec<PendingRepair>,
-        out: &mut RepairBook<'_>,
-    ) {
-        if list.is_empty() {
-            return;
-        }
-        let written = (|| -> Result<()> {
-            for p in list.iter().filter(|p| p.corrupt) {
-                target.delete(&chunk_storage_key(&p.damage.object))?;
-            }
-            let members: Vec<(String, &[u8])> = list
-                .iter()
-                .map(|p| (p.damage.object.as_str().to_string(), p.ct.as_slice()))
-                .collect();
-            target.put_pack(&members)?;
-            Ok(())
-        })();
-        if let Err(e) = written {
-            let storage = &list[0].damage.storage;
-            let why = match pool::pool_error(&e) {
-                Some(PoolError::NoDiskAttached { .. }) => format!("{storage} (no disk attached)"),
-                Some(PoolError::NoRoom { .. }) => {
-                    format!("{storage} (no room on the attached disks)")
-                }
-                _ => format!("{storage} ({e:#})"),
-            };
-            out.report.unreachable.push(why);
-            out.unreachable.insert(storage.clone());
-            for p in list {
-                let mut d = p.damage;
-                d.retry_utc = out.now + RETRY_UNREACHABLE_SECS;
-                out.report.left_for_next_run += 1;
-                out.keep.push(d);
-            }
-            return;
-        }
-        for p in list {
-            let mut d = p.damage;
-            let key = chunk_storage_key(&d.object);
-            let back = crate::storage::guarded(&key, || target.get(&key));
-            if matches!(&back, Ok(Some(b)) if ObjectName::from_bytes(&crypto::hash(b)) == d.object)
-            {
-                out.report.bytes_written += p.ct.len() as u64;
-                out.report.repaired.push(p.done);
-                self.pending.push(Event::ChunkStored {
-                    folder: d.folder.clone(),
-                    chunk: d.chunk.clone(),
-                    object: d.object.clone(),
-                    storage: d.storage.clone(),
-                    size: p.ct.len() as u64,
-                    pack: None,
-                });
-                continue;
-            }
-            let reason = format!(
-                "{} did not return the object intact after it was written again",
-                d.storage
-            );
-            out.report
-                .unrepairable
-                .push(self.unrepairable(&d, reason.clone()));
-            d.reason = Some(reason);
-            d.retry_utc = out.now + RETRY_UNREPAIRABLE_SECS;
-            out.keep.push(d);
-        }
-    }
-
-    /// The intact ciphertext of `d.object` from somewhere other than the
-    /// damaged copy, and where it came from; or why there is none.
-    #[allow(clippy::type_complexity)]
-    fn repair_source(
-        &self,
-        d: &Damage,
-        specs: &BTreeMap<String, StorageSpec>,
-        opened: &mut BTreeMap<String, Box<dyn Storage>>,
-        plain: Option<&PlainSource>,
-        keys: &BTreeMap<FolderId, FolderKeys>,
-        opts: &RepairOptions,
-    ) -> Result<std::result::Result<(String, Vec<u8>), String>> {
-        let intact = |ct: &[u8]| ObjectName::from_bytes(&crypto::hash(ct)) == d.object;
-        let key = chunk_storage_key(&d.object);
-        if let Some(ct) = self.cached_object(&d.object) {
-            return Ok(Ok(("block cache".to_string(), ct)));
-        }
-        let mut away: Vec<String> = Vec::new();
-        let mut get_from =
-            |name: &str, opened: &mut BTreeMap<String, Box<dyn Storage>>| -> Option<Vec<u8>> {
-                if !opened.contains_key(name) {
-                    let b = self.open_spec(&specs[name]).ok()?;
-                    opened.insert(name.to_string(), b);
-                }
-                match crate::storage::guarded(&key, || {
-                    opened[name].get_bounded(&key, crate::storage::MAX_BLOCK_OBJECT)
-                }) {
-                    Ok(Some(ct)) if intact(&ct) => Some(ct),
-                    Ok(_) => None,
-                    Err(e) => {
-                        if matches!(pool::pool_error(&e), Some(PoolError::NeedsDisk { .. })) {
-                            away.push(name.to_string());
-                        }
-                        None
-                    }
-                }
-            };
-        for (name, spec) in specs {
-            if name == &d.storage || spec.is_cold() {
-                continue;
-            }
-            if let Some(ct) = get_from(name, opened) {
-                return Ok(Ok((format!("storage {name}"), ct)));
-            }
-        }
-        if let (Some(p), Some(fk)) = (plain, keys.get(&d.folder)) {
-            for path in &p.files {
-                if let Ok(ct) = self.chunk_ciphertext_from_file(fk, path, &d.chunk, p.epoch) {
-                    if intact(&ct) {
-                        return Ok(Ok(("local file".to_string(), ct)));
-                    }
-                }
-            }
-        }
-        if let Some((dev, ct)) = self.peers.as_ref().and_then(|p| p.get(&d.object)) {
-            if intact(&ct) {
-                return Ok(Ok((format!("peer {}", dev.short()), ct)));
-            }
-        }
-        let cold: Vec<&String> = specs
-            .iter()
-            .filter(|(n, s)| s.is_cold() && *n != &d.storage)
-            .map(|(n, _)| n)
-            .collect();
-        if opts.from_cold {
-            for name in &cold {
-                if let Some(ct) = get_from(name, opened) {
-                    return Ok(Ok((format!("cold storage {name}"), ct)));
-                }
-            }
-        }
-        let view = self.view()?;
-        let claimed_cold: Vec<&String> = view
-            .locate(&d.folder, &d.chunk)
-            .filter(|r| r.object == d.object)
-            .map(|r| {
-                cold.iter()
-                    .filter(|c| r.storages.contains_key(c.as_str()))
-                    .copied()
-                    .collect()
-            })
-            .unwrap_or_default();
-        let locked = self
-            .keyring
-            .folders
-            .get(&d.folder)
-            .is_some_and(|r| r.is_strongroom() && !self.is_unlocked(&d.folder));
-        Ok(Err(if !away.is_empty() {
-            format!(
-                "the other copy is on a disk of {} that is not attached",
-                away.join(", ")
-            )
-        } else if !claimed_cold.is_empty() && !opts.from_cold {
-            format!(
-                "a copy is on cold storage {}; run `varsto repair --from-cold` to read it (retrieval fees may apply)",
-                claimed_cold
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        } else if locked {
-            "no other copy can be read, and the Strongroom is locked (unlock it so its files can be re-encrypted)".to_string()
-        } else {
-            "no intact copy anywhere this device can read: not on another storage, not in this device's files or block cache, and no peer had it".to_string()
-        }))
     }
 }
 
@@ -794,20 +397,4 @@ pub(super) fn merge_damage(queue: &mut Vec<Damage>, found: Vec<Damage>) {
             None => queue.push(f),
         }
     }
-}
-
-/// A repaired copy waiting to be written with others of its storage.
-struct PendingRepair {
-    damage: Damage,
-    done: RepairedCopy,
-    ct: Vec<u8>,
-    corrupt: bool,
-}
-
-/// Where `write_repairs` records what happened.
-struct RepairBook<'a> {
-    report: &'a mut RepairReport,
-    keep: &'a mut Vec<Damage>,
-    unreachable: &'a mut BTreeSet<String>,
-    now: i64,
 }

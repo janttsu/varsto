@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Format 2 stores every block in a pack: a storage sees pack sizes only,
-//! never a block of its own, and the same file pushed to two folders is
-//! cut and packed differently. Packs that are mostly dead are rewritten,
-//! and another device still finds every block.
+//! Every block is stored in a pack: a storage sees pack sizes only, never a
+//! block of its own, and the same file pushed to two folders is cut and
+//! packed differently. Packs that are mostly dead are rewritten by garbage
+//! collection (storage format 3: dead marks in the block maps), and another
+//! device still finds every block.
 
 mod common;
 
@@ -54,7 +55,6 @@ fn files(root: &Path) -> BTreeSet<String> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (pack rewrite and GC)"]
 fn the_same_file_in_two_folders_gives_other_packs_and_no_block_objects() {
     let t = tempfile::tempdir().unwrap();
     let (store, f1, f2) = (t.path().join("s"), t.path().join("f1"), t.path().join("f2"));
@@ -74,10 +74,16 @@ fn the_same_file_in_two_folders_gives_other_packs_and_no_block_objects() {
         .collect();
     let second = a.add_folder("second", &f2).unwrap();
     a.sync(None).unwrap();
-    // No block is an object of its own: only packs, records and indexes.
+    // No block is an object of its own: only packs and records (the block
+    // maps say where each block is; no pack index, no tombstone list).
     let all = files(&store);
     assert!(all.iter().all(|f| !f.starts_with("chunks/")), "{all:?}");
-    assert!(all.iter().any(|f| f.starts_with("packs/index/")), "{all:?}");
+    assert!(all.iter().any(|f| f.starts_with("maps/")), "{all:?}");
+    assert!(
+        all.iter()
+            .all(|f| !f.starts_with("packs/index/") && !f.starts_with("packs/tombstones/")),
+        "{all:?}"
+    );
     // Each folder's push wrote its own packs, laid out differently.
     let packs = common::pack_files(&store);
     let new: Vec<String> = packs
@@ -98,18 +104,22 @@ fn the_same_file_in_two_folders_gives_other_packs_and_no_block_objects() {
     let two = layout(&mut new.iter());
     assert!(one.len() >= 3 && two.len() >= 3, "{one:?} {two:?}");
     assert_ne!(one, two);
-    // Every block of both folders is in a pack the ledger places.
-    let view = a.view().unwrap();
-    for ((folder, _), rec) in &view.chunks {
-        if *folder == first || *folder == second {
-            let loc = rec.storages.get("box").expect("a copy on the storage");
-            assert!(loc.pack.is_some(), "no pack place for {}", rec.object);
-        }
+    // Every pack is claimed on the storage, for one of the two folders.
+    let view = a.ledger_view3().unwrap();
+    let ids: BTreeSet<String> = [first, second]
+        .iter()
+        .map(|f| f.as_str().to_string())
+        .collect();
+    for (_, id) in &packs {
+        let mut bin = [0u8; 32];
+        hex::decode_to_slice(id, &mut bin).unwrap();
+        assert_eq!(view.holders(&bin), vec!["box"], "pack {id}");
+        let folder = hex::encode(view.pack_folder(&bin).expect("a folder"));
+        assert!(ids.contains(&folder), "pack {id} of {folder}");
     }
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (pack rewrite and GC)"]
 fn a_mostly_dead_pack_is_rewritten_and_every_device_still_reads() {
     let t = tempfile::tempdir().unwrap();
     let (store, a_dir, b_dir) = (
@@ -132,19 +142,19 @@ fn a_mostly_dead_pack_is_rewritten_and_every_device_still_reads() {
     let before = common::pack_files(&store);
     assert_eq!(before.len(), 1, "one push, one pack: {before:?}");
     let before_len = fs::metadata(&before[0].0).unwrap().len();
-    // Five of six files go for good: their blocks die in the pack.
+    // Five of six files go for good: their blocks are marked dead in A's
+    // block map, and A, the folder's only writer, collects at once: the
+    // pack is more than half dead, so its live block moves to a new pack.
     for i in 1..6u64 {
         fs::remove_file(a_dir.join(format!("f{i}.bin"))).unwrap();
     }
     a.sync(None).unwrap();
     let purged = a.trash_purge(None, &[], true).unwrap();
     assert!(purged.blocks_dropped >= 5, "{purged:?}");
-    // The dead blocks are listed in an encrypted tombstone list.
+    // No tombstone list: the marks are in the map records.
     assert!(files(&store)
         .iter()
-        .any(|f| f.starts_with("packs/tombstones/")));
-    let r = a.pack_upkeep().unwrap();
-    assert_eq!(r.blocks_moved, 1, "{r:?}");
+        .all(|f| !f.starts_with("packs/tombstones/")));
     let after = common::pack_files(&store);
     assert_eq!(after.len(), 1);
     assert_ne!(after[0].1, before[0].1, "the old pack went");
@@ -152,7 +162,14 @@ fn a_mostly_dead_pack_is_rewritten_and_every_device_still_reads() {
     assert_eq!(before_len, 4 << 20);
     assert_eq!(fs::metadata(&after[0].0).unwrap().len(), 256 << 10);
     // A device that joins now reads the moved block from the new pack.
-    let mut b = Engine::join(&t.path().join("b"), "phone", PASS, &key, dir("box", &store)).unwrap();
+    let mut b = common::join_approved(
+        &t.path().join("b"),
+        "phone",
+        PASS,
+        &key,
+        dir("box", &store),
+        &mut a,
+    );
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.sync(None).unwrap();
     assert_eq!(
@@ -160,7 +177,8 @@ fn a_mostly_dead_pack_is_rewritten_and_every_device_still_reads() {
         random(200_000, 100)
     );
     // Nothing more to rewrite.
-    assert_eq!(a.pack_upkeep().unwrap().blocks_moved, 0);
+    let r = a.pack_upkeep().unwrap();
+    assert_eq!((r.blocks_moved, r.packs_dropped), (0, 0), "{r:?}");
 }
 
 const MIB: u64 = 1 << 20;
@@ -215,7 +233,7 @@ fn pack_set(root: &Path) -> BTreeSet<(String, Vec<u8>)> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (pack rewrite and GC)"]
+#[ignore = "f3-switch: port in part B (remote storages): a storage added after the first gets no copy of the membership records, so a device cannot join through it alone"]
 fn a_target_set_gets_one_pack_under_one_id_on_every_storage() {
     let t = tempfile::tempdir().unwrap();
     let (h1, h2, cold, docs) = (
@@ -273,14 +291,14 @@ fn a_target_set_gets_one_pack_under_one_id_on_every_storage() {
     // Another device reads every file through either hot storage alone.
     for (i, only) in [&h1, &h2].into_iter().enumerate() {
         let out = t.path().join(format!("out{i}"));
-        let mut b = Engine::join(
+        let mut b = common::join_approved(
             &t.path().join(format!("b{i}")),
             "phone",
             PASS,
             &key,
             dir(if i == 0 { "hot-one" } else { "hot-two" }, only),
-        )
-        .unwrap();
+            &mut a,
+        );
         b.attach_folder("docs", &out, false).unwrap();
         b.sync(None).unwrap();
         assert_eq!(

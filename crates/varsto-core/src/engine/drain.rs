@@ -1273,7 +1273,6 @@ impl Engine {
                 }
             }
         }
-        self.flush_pack_deletions();
         Ok(())
     }
 
