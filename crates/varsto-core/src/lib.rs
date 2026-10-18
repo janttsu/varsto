@@ -33,6 +33,8 @@ pub mod freespace;
 #[cfg(feature = "format3")]
 pub mod fsck3;
 pub mod fsmeta;
+#[cfg(feature = "format3")]
+pub mod gc3;
 pub mod help;
 pub mod ids;
 pub mod ignore_rules;
