@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Device details for the device list: system, version and when each device
-//! last synced. Every device publishes its own small record, sealed under the
-//! registry key like the device records, at
-//! `vault/devinfo/<device>/<utc>.enc`; the newest per device wins and a
-//! device deletes its older ones. Nothing here is needed for syncing.
+//! last synced. Format 3 (`docs/spec/format-3-design.md` section 5, "Kinds
+//! and rules of the switch"): they are a field of the device's own `device`
+//! record (`membership3::DeviceDetails`), signed by the K6 the record
+//! carries, so no holder of the vault key speaks for another device; a
+//! device writes its next record when they change, and at least every six
+//! hours while it syncs. Nothing here is needed for syncing.
 
 use super::*;
 
-const PREFIX: &str = "vault/devinfo/";
 /// Republish at least this often, so "last seen" stays meaningful.
 const REFRESH_SECS: i64 = 6 * 3600;
 
@@ -29,47 +30,46 @@ pub struct DeviceDetails {
     /// what an organization's platform policy is checked against.
     #[serde(default)]
     pub platform: String,
-    /// The device's own signature over the rest (section 56): a holder of
-    /// the vault key cannot speak for another device.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub sig_alg: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub sig_hex: String,
 }
 
 impl DeviceDetails {
-    fn message(&self, vault: &VaultId) -> Result<Vec<u8>> {
-        let unsigned = DeviceDetails {
-            sig_alg: String::new(),
-            sig_hex: String::new(),
-            ..self.clone()
-        };
-        Ok(crypto::aad(
-            "device-details-signature",
-            &[vault.as_str().as_bytes(), &serde_json::to_vec(&unsigned)?],
-        ))
+    /// The details a device record carries, for the device list.
+    pub(super) fn of_record(
+        device: &DeviceId,
+        d: &crate::membership3::devices::DeviceDetails,
+    ) -> Self {
+        DeviceDetails {
+            device: device.to_string(),
+            os: d.os.clone(),
+            os_version: d.os_version.clone(),
+            model: d.model.clone(),
+            arch: d.arch.clone(),
+            app_version: d.app_version.clone(),
+            updated_utc: d.updated_utc,
+            last_sync_utc: d.last_sync_utc,
+            platform: d.platform.clone(),
+        }
     }
-    fn sign(&mut self, vault: &VaultId, signer: &crypto::SigningKey) -> Result<()> {
-        self.sig_alg = signer.alg().to_string();
-        self.sig_hex = String::new();
-        self.sig_hex = hex::encode(signer.sign(&self.message(vault)?));
-        Ok(())
-    }
-    /// Whether the device whose key is `pk` signed these details.
-    pub fn verify(&self, vault: &VaultId, pk: &crypto::VerifyingKey) -> bool {
-        let Ok(sig) = hex::decode(&self.sig_hex) else {
-            return false;
-        };
-        self.message(vault)
-            .is_ok_and(|m| pk.verify(&self.sig_alg, &m, &sig).is_ok())
-    }
-}
 
-fn aad(vault: &VaultId, device: &str) -> Vec<u8> {
-    crypto::aad(
-        "device-details",
-        &[vault.as_str().as_bytes(), device.as_bytes()],
-    )
+    fn to_record(&self) -> crate::membership3::devices::DeviceDetails {
+        let cut = |s: &str| {
+            let mut s = s.to_string();
+            while s.len() > crate::membership3::devices::MAX_DETAIL {
+                s.pop();
+            }
+            s
+        };
+        crate::membership3::devices::DeviceDetails {
+            os: cut(&self.os),
+            os_version: cut(&self.os_version),
+            model: cut(&self.model),
+            arch: cut(&self.arch),
+            app_version: cut(&self.app_version),
+            platform: cut(&self.platform),
+            updated_utc: self.updated_utc,
+            last_sync_utc: self.last_sync_utc,
+        }
+    }
 }
 
 fn command_line(cmd: &str, args: &[&str]) -> Option<String> {
@@ -129,12 +129,13 @@ fn this_system() -> (String, String, String) {
 }
 
 impl Engine {
-    /// Publish this device's details when they changed or got old.
+    /// Publish this device's details in its device record when they
+    /// changed, or when the last record is older than six hours.
     pub fn publish_device_details(&mut self, last_sync_utc: Option<i64>) -> Result<()> {
         if self.vault.member {
             return Ok(());
         }
-        let me = self.vault.device_id.to_string();
+        let me = self.vault.device_id.clone();
         let (mut os, os_version, model) = this_system();
         let platform = self.this_platform();
         if crate::org::platform_id(&os) != platform {
@@ -142,7 +143,7 @@ impl Engine {
         }
         let now = util::now_utc();
         let mut details = DeviceDetails {
-            device: me.clone(),
+            device: me.to_string(),
             os,
             os_version,
             model,
@@ -151,58 +152,49 @@ impl Engine {
             updated_utc: now,
             last_sync_utc,
             platform,
-            sig_alg: String::new(),
-            sig_hex: String::new(),
         };
         let path = self.home.join("devinfo.json");
         if let Ok(prev) = util::read_json_or_default::<DeviceDetails>(&path) {
             let same = DeviceDetails {
                 updated_utc: prev.updated_utc,
                 last_sync_utc: prev.last_sync_utc,
-                sig_alg: prev.sig_alg.clone(),
-                sig_hex: prev.sig_hex.clone(),
                 ..details.clone()
-            } == prev
-                && !prev.sig_hex.is_empty();
-            if same && now - prev.updated_utc < REFRESH_SECS {
+            } == prev;
+            let published = self
+                .f3
+                .members
+                .devices
+                .get(&self.me3())
+                .and_then(|r| r.details.as_ref())
+                .is_some_and(|d| d.updated_utc == prev.updated_utc);
+            if same && published && now - prev.updated_utc < REFRESH_SECS {
                 return Ok(());
             }
         }
         details.updated_utc = now;
-        details.sign(&self.vault.vault_id, &self.keys.signer)?;
-        let blob = crypto::encrypt(
-            &self.registry_key_now(),
-            &aad(&self.vault.vault_id, &me),
-            &serde_json::to_vec(&details)?,
-        )?;
-        let key = format!("{PREFIX}{me}/{now:020}.enc");
-        for (_, backend) in self.metadata_storages(false)? {
-            backend.put_if_absent(&key, &blob)?;
-            for old in backend.list(&format!("{PREFIX}{me}/"))? {
-                if old != key {
-                    let _ = backend.delete(&old);
-                }
-            }
+        let name = self.vault.device_name.clone();
+        let rec = details.to_record();
+        if self
+            .with_members3(|m| m.enrol_with(&name, Some(rec)))?
+            .is_none()
+        {
+            return Ok(());
         }
-        details.updated_utc = now;
         util::write_json(&path, &details)?;
-        self.devices
-            .details
-            .insert(self.vault.device_id.clone(), details);
+        self.devices.details.insert(me, details);
         self.save_devices()
     }
 
-    /// Publish this device's details when they changed or got old, keeping
-    /// the last sync time the service recorded.
     pub fn refresh_device_details(&mut self) -> Result<()> {
         let prev: DeviceDetails =
             util::read_json_or_default(&self.home.join("devinfo.json")).unwrap_or_default();
         self.publish_device_details(prev.last_sync_utc)
     }
 
-    /// Tests: what a holder of the vault key could do, publish details in
-    /// the name of another device (signed by this one). Readers must ignore
-    /// them.
+    /// Tests: what a holder of the vault key could try, a device record
+    /// with details for another device, signed with this device's K6. Its
+    /// id is not the BLAKE3 of the key it carries, so every reader refuses
+    /// it.
     #[doc(hidden)]
     pub fn forge_device_details_for_tests(
         &mut self,
@@ -210,92 +202,54 @@ impl Engine {
         platform: &str,
     ) -> Result<()> {
         let now = util::now_utc() + 1;
-        let mut d = DeviceDetails {
+        let target = members3::bin(device)?;
+        let details = DeviceDetails {
             device: device.to_string(),
             os: crate::org::platform_name(platform),
             app_version: self.this_app_version(),
             updated_utc: now,
             platform: crate::org::platform_id(platform),
             ..Default::default()
+        }
+        .to_record();
+        let kem = self
+            .epochs
+            .kem
+            .as_ref()
+            .map(|k| k.public().to_bytes())
+            .unwrap_or_default();
+        let rec = crate::membership3::DeviceRecord {
+            device: target,
+            name: self.device_name(device),
+            sign_pub: self.keys.signer.public().to_bytes(),
+            kem_pub: kem,
+            stamp: crate::membership3::Stamp {
+                lamport: self.clock.lamport + 1_000,
+                device: target,
+            },
+            details: Some(details),
         };
-        d.sign(&self.vault.vault_id, &self.keys.signer)?;
-        let blob = crypto::encrypt(
-            &self.registry_key_now(),
-            &aad(&self.vault.vault_id, device.as_str()),
-            &serde_json::to_vec(&d)?,
-        )?;
-        let key = format!("{PREFIX}{device}/{now:020}.enc");
+        let vault = members3::bin(&self.vault.vault_id)?;
+        let keys = self.vault_keys3();
+        let ring = self.keys3(&keys);
+        let key_id = crate::record::KeyId::Registry(keys.newest_epoch());
+        let signer = crate::record::DeviceSigner {
+            device: target,
+            key: &self.keys.signer,
+        };
+        let writer = crate::record::RecordWriter {
+            vault,
+            signer: &signer,
+            keys: &ring,
+        };
+        let stream = crate::membership3::DeviceRecord::stream(target);
+        let sealed = writer.seal(&stream, 1_000_000, 1_000_000, &key_id, &rec)?;
         for (_, backend) in self.metadata_storages(true)? {
-            backend.put_if_absent(&key, &blob)?;
+            for (name, bytes) in &sealed.parts {
+                backend.put_if_absent(name, bytes)?;
+            }
         }
         Ok(())
-    }
-
-    /// Read the other devices' newest details (part of the registry pull).
-    pub(super) fn pull_device_details(&mut self) -> Result<bool> {
-        let keys: Vec<SecretKey> = self.registry_keys().into_iter().map(|(_, k)| k).collect();
-        let mut changed = false;
-        for (_, backend) in self.metadata_storages(false)? {
-            let mut by_device: BTreeMap<String, Vec<String>> = BTreeMap::new();
-            for key in backend.list(PREFIX)? {
-                if let Some((dev, _)) = key.strip_prefix(PREFIX).and_then(|r| r.split_once('/')) {
-                    by_device
-                        .entry(dev.to_string())
-                        .or_default()
-                        .push(key.clone());
-                }
-            }
-            for (dev, mut names) in by_device {
-                let Ok(id) = DeviceId::from_hex(&dev) else {
-                    continue;
-                };
-                if id == self.vault.device_id {
-                    continue;
-                }
-                // Only details the device itself signed count (an
-                // organization's platform policy is checked against them):
-                // newest first, past records anyone else planted there.
-                let Some(pk) = self
-                    .device_key(&id)
-                    .or_else(|| self.devices.members.get(&id).and_then(|r| r.pubkey().ok()))
-                else {
-                    continue;
-                };
-                names.sort();
-                for key in names.iter().rev().take(16) {
-                    let stamp: i64 = key
-                        .rsplit('/')
-                        .next()
-                        .and_then(|n| n.strip_suffix(".enc"))
-                        .and_then(|n| n.parse().ok())
-                        .unwrap_or(0);
-                    if self
-                        .devices
-                        .details
-                        .get(&id)
-                        .is_some_and(|d| d.updated_utc >= stamp)
-                    {
-                        break;
-                    }
-                    let Some(blob) = backend.get(key)? else {
-                        continue;
-                    };
-                    let opened = keys.iter().find_map(|k| {
-                        crypto::decrypt(k, &aad(&self.vault.vault_id, &dev), &blob)
-                            .ok()
-                            .and_then(|p| serde_json::from_slice::<DeviceDetails>(&p).ok())
-                    });
-                    if let Some(d) =
-                        opened.filter(|d| d.device == dev && d.verify(&self.vault.vault_id, &pk))
-                    {
-                        self.devices.details.insert(id, d);
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-        }
-        Ok(changed)
     }
 
     /// Details of a device, if it has published any.

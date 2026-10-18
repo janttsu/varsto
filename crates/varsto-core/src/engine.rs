@@ -39,7 +39,7 @@ use crate::replica::{self, ReplicaToken, REPLICA_PREFIX};
 use crate::storage::{Storage, StorageSpec};
 use crate::thumbs;
 use crate::util;
-use crate::vault::{self, SecretStore, ShareToken, SHARE_PREFIX};
+use crate::vault::{self, SecretStore};
 use crate::vault::{
     Config, DeviceRecord, FolderKeys, FolderMount, FolderRecord, Keyring, Keys, LocalVault,
     VaultMeta,
@@ -144,8 +144,7 @@ pub use ledger_recovery::{
 pub use mailbox::MailboxOptions;
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
-    removal_notice, DeviceInfo, DeviceRemoved, EpochForks, EpochRecord, Grant, KemRecord, Removal,
-    Revocation, RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+    removal_notice, DeviceInfo, DeviceRemoved, EpochForks, Removal, RevokeReport, Revoked,
 };
 #[cfg(feature = "format3")]
 pub use membership3_ops::{
@@ -1496,154 +1495,18 @@ impl Engine {
         Ok(engine)
     }
 
-    /// Become a member of one shared folder of another user's vault (F-047).
-    /// This device gets the folder key only: it can read and write that folder
-    /// through the shared storage, nothing else of the vault.
-    pub fn accept_share(
-        home: &Path,
-        device_name: &str,
-        passphrase: &str,
-        token: &ShareToken,
-        storage: StorageSpec,
-    ) -> Result<Engine> {
-        Self::accept_share_with_secret(home, device_name, passphrase, token, storage, None)
-    }
-
-    /// Like `accept_share`, through a storage that needs a secret (an S3
-    /// bucket both users can reach); the secret goes into this device's
-    /// encrypted secret store.
-    pub fn accept_share_with_secret(
-        home: &Path,
-        device_name: &str,
-        passphrase: &str,
-        token: &ShareToken,
-        storage: StorageSpec,
-        secret: Option<String>,
-    ) -> Result<Engine> {
-        crate::logged_op_plain!("accept share with secret", device_name, {
-            Self::accept_share_with_secret_inner(
-                home,
-                device_name,
-                passphrase,
-                token,
-                storage,
-                secret,
-            )
-        })
-    }
-
-    fn accept_share_with_secret_inner(
-        home: &Path,
-        device_name: &str,
-        passphrase: &str,
-        token: &ShareToken,
-        storage: StorageSpec,
-        secret: Option<String>,
-    ) -> Result<Engine> {
-        crypto::check_passphrase(passphrase)?;
-        crate::names::check_display_name(device_name)?;
-        ensure_no_vault(home)?;
-        let backend = storage.open_with(&|_| secret.clone())?;
-        let meta: VaultMeta = serde_json::from_slice(
-            &backend
-                .get(VaultMeta::STORAGE_KEY)?
-                .ok_or_else(|| anyhow!("storage {} holds no vault", storage.name()))?,
-        )?;
-        if meta.vault_id != token.vault_id {
-            bail!(
-                "the storage holds vault {} but the token is for {}",
-                meta.vault_id,
-                token.vault_id
-            );
-        }
-        util::private_home(home)?;
-        // The "master" of a member is a local random root used only for the
-        // local keyring; it never leaves the device and opens nothing shared.
-        let keys = Keys {
-            master: SecretKey::random(),
-            signer: crypto::SigningKey::generate(),
-        };
-        let device_id = ledger::device_id_for(&keys.signer.public());
-        let vault = LocalVault {
-            format_version: crate::FORMAT_VERSION,
-            vault_id: meta.vault_id.clone(),
-            device_id: device_id.clone(),
-            device_name: device_name.to_string(),
-            created_utc: meta.created_utc,
-            member: true,
-        };
-        let epochs = membership::VaultEpochs::genesis(&keys.master);
-        let mut engine = Self::write_new(home, vault, keys, passphrase, epochs)?;
-        let rec = FolderRecord {
-            folder_id: token.folder_id.clone(),
-            name: token.name.clone(),
-            key_hex: token.key_hex.clone(),
-            k11_hex: String::new(),
-            created_by: device_id,
-            created_utc: util::now_utc(),
-            shared: true,
-            policy: None,
-            policy_updated_utc: 0,
-            placement: None,
-            placement_updated_utc: 0,
-            strongroom: None,
-            removed_utc: 0,
-            epoch_keys: token.epoch_keys.clone(),
-            backup: None,
-            share_join: (!token.join_secret_hex.is_empty()).then(|| crate::vault::ShareJoin {
-                invite: token.invite.clone(),
-                secret_hex: token.join_secret_hex.clone(),
-                role: token.role,
-            }),
-        };
-        engine.keyring.folders.insert(rec.folder_id.clone(), rec);
-        // The request key stays as this member's KEM key: grants of later
-        // share epochs are sealed to it.
-        engine.adopt_member_kem()?;
-        engine.remember_share_owners(&token.folder_id, &token.owners)?;
-        engine.keyring.save(
-            home,
-            &engine.keys,
-            &engine.vault.vault_id,
-            &engine.vault.device_id,
-        )?;
-        engine.add_storage_internal(storage, secret)?;
-        engine.pending.push(Event::DeviceEnrolled {
-            name: engine.vault.device_name.clone(),
-        });
-        engine.commit_batch()?;
-        engine.pull_registry()?;
-        Ok(engine)
-    }
-
-    /// Owner: share a folder with another user. The token carries the folder
-    /// key (and the keys of later epochs); seal it to the recipient's request
-    /// code with `ShareToken::seal` (see `share_ops::share_create_for`).
-    pub fn share_create(&mut self, folder: &str) -> Result<ShareToken> {
-        crate::logged_op_plain!("share create", folder, { self.share_create_inner(folder) })
-    }
-
-    fn share_create_inner(&mut self, folder: &str) -> Result<ShareToken> {
-        self.share_prepare(folder)
-    }
-
     pub fn is_member(&self) -> bool {
         self.vault.member
     }
 
-    /// Which key opens a ledger batch with this key id, on this device.
+    /// Which key opens a format-2 ledger batch with this key id, on this
+    /// device (the format-2 ledger of other areas still asks; f3-switch:
+    /// part B). Format-2 member batches are gone.
     fn key_for_id(&self, id: &str) -> Option<SecretKey> {
         match id {
             KEY_REPLICA if !self.vault.member => Some(replica::replica_key(self.root_key())),
             id if !self.vault.member && id.starts_with(KEY_LEDGER) => self.ledger_key_for(id),
-            other => {
-                let (fid, epoch) = crate::share::parse_ledger_key_id(other)?;
-                let rec = self.keyring.folders.get(&fid)?;
-                Some(vault::share_ledger_key(
-                    &self.share_epoch_key(rec, epoch)?,
-                    &rec.folder_id,
-                ))
-            }
+            _ => None,
         }
     }
 
@@ -2207,8 +2070,14 @@ impl Engine {
         } else {
             backend.put_if_absent(VaultMeta::STORAGE_KEY, &serde_json::to_vec_pretty(&meta)?)?;
         }
+        let carrier = spec.is_carrier();
         self.config.storages.push(spec);
         self.config.save(&self.home)?;
+        // The membership records read so far go to the new storage too: a
+        // device that reaches the vault only through it finds them there.
+        if !carrier {
+            self.copy_records3(backend.as_ref())?;
+        }
         // This device's record and the batches signed before the first
         // storage existed (its enrolment) go out now.
         self.publish_registry()?;
@@ -2578,7 +2447,6 @@ impl Engine {
             removed_utc: 0,
             epoch_keys: BTreeMap::new(),
             backup: None,
-            share_join: None,
         };
         let id = rec.folder_id.clone();
         folder_safety::write_marker(path, &rec)?;
@@ -2798,56 +2666,66 @@ impl Engine {
 
     /// Publish the removal of a folder or backup, delete its data when
     /// `purge`, and forget it here.
+    /// Format 3: an owner's folder record with the `removed` stamp (every
+    /// device stops syncing the folder when it reads it); with `purge` the
+    /// folder's packs are dropped in one batch and deleted, then its
+    /// records.
     fn remove_record(&mut self, rec: &FolderRecord, purge: bool) -> Result<u64> {
-        let removal = vault::FolderRemoval {
-            folder_id: rec.folder_id.clone(),
-            device: self.vault.device_id.clone(),
-            removed_utc: util::now_utc(),
-        };
-        let blob = removal.seal(&self.vault.vault_id, &self.folder_record_key_now())?;
-        for (_, backend) in self.metadata_storages(true)? {
-            backend.put_if_absent(&removal.storage_key(), &blob)?;
-        }
+        let id = members3::bin(&rec.folder_id)?;
+        let removed_utc = util::now_utc();
+        self.with_enrolled3(|m| m.remove_folder(&id))?
+            .ok_or_else(|| anyhow!("this device has no storage to publish the removal to"))?;
         let mut deleted = 0u64;
         if purge {
-            let view = self.view()?;
-            let objects: Vec<String> = view
-                .chunks
-                .iter()
-                .filter(|((f, _), _)| f == &rec.folder_id)
-                .map(|(_, c)| chunk_storage_key(&c.object))
+            let view = self.view3()?;
+            let packs: Vec<[u8; 32]> = view
+                .packs
+                .keys()
+                .filter(|p| view.pack_folder(p) == Some(id))
+                .copied()
                 .collect();
             let storages = self.open_storages(true)?;
             let task = activity::start(
                 activity::FOLDER_PURGE,
                 &rec.name,
-                (objects.len() * storages.len()) as u64,
+                (packs.len() * storages.len()) as u64,
                 activity::Unit::Items,
             );
-            for (_, backend) in storages {
-                for key in &objects {
-                    if backend.exists(key).unwrap_or(false) {
-                        backend.delete(key)?;
-                        deleted += 1;
+            // The drops are recorded and pushed before anything is deleted.
+            let mut gone = Vec::new();
+            for (spec, backend) in &storages {
+                for p in &packs {
+                    let key = crate::packs::pack_key(&hex::encode(p));
+                    if backend.exists(&key).unwrap_or(false) {
+                        self.f3.pending.push(crate::ledger3::events::Event::PackDropped(
+                            crate::ledger3::events::PackOn {
+                                storage: spec.name().to_string(),
+                                pack: *p,
+                            },
+                        ));
+                        gone.push((spec.name().to_string(), key));
                     }
-                    task.advance(1);
                 }
-                for prefix in [
-                    format!("manifests/{}/", rec.folder_id),
-                    format!("thumbs/{}/", rec.folder_id),
-                    format!("vault/access/{}/", rec.folder_id),
-                    notes::folder_prefix(&rec.folder_id),
-                    trash::record_prefix(&rec.folder_id),
-                    crate::snapshot::Snapshot::backup_prefix(&rec.folder_id),
-                ] {
-                    for key in backend.list(&prefix)? {
+            }
+            self.commit3()?;
+            for (name, key) in gone {
+                if let Some((_, backend)) = storages.iter().find(|(s, _)| s.name() == name) {
+                    backend.delete(&key)?;
+                    deleted += 1;
+                }
+                task.advance(1);
+            }
+            let hex_id = hex::encode(id);
+            for (_, backend) in storages {
+                for prefix in ["manifests", "maps", "trash", "access", "notes", "thumbs", "snapshots"] {
+                    for key in backend.list(&format!("{prefix}/{hex_id}/"))? {
                         backend.delete(&key)?;
                         deleted += 1;
                     }
                 }
             }
         }
-        self.forget_folder(&rec.folder_id, removal.removed_utc)?;
+        self.forget_folder(&rec.folder_id, removed_utc)?;
         if purge {
             self.forget_trash(&rec.folder_id);
         }
@@ -3203,39 +3081,6 @@ impl Engine {
         self.refresh_members3()
     }
 
-    /// The format-2 device and folder records (f3-switch: part B deletes it).
-    fn publish_registry2(&mut self) -> Result<()> {
-        let rec = self.own_record();
-        let reg_key = self.registry_key_now();
-        let fr_key = self.folder_record_key_now();
-        for (_, backend) in self.metadata_storages(true)? {
-            if !self.vault.member {
-                backend.put_if_absent(
-                    &DeviceRecord::storage_key(&rec.device_id),
-                    &rec.seal(&self.vault.vault_id, &reg_key)?,
-                )?;
-                for f in self
-                    .keyring
-                    .folders
-                    .values()
-                    .filter(|f| f.created_by == self.vault.device_id && !self.vault.member)
-                {
-                    backend.put_if_absent(
-                        &FolderRecord::storage_key(&f.created_by, &f.folder_id),
-                        &f.seal(&self.vault.vault_id, &fr_key)?,
-                    )?;
-                }
-            }
-            // Shared folders: every participant (owner devices and members)
-            // publishes its record under the folder-derived registry key.
-            self.publish_share_records(backend.as_ref(), &rec)?;
-        }
-        // The key-exchange key a revocation seals the next vault key to.
-        self.kem_record_stale();
-        self.ensure_kem_record()?;
-        Ok(())
-    }
-
     /// Look for the device records other devices published since (a device
     /// that just joined), without a sync: one listing per storage. True when
     /// the vault's device list changed. The service asks every few seconds
@@ -3409,47 +3254,14 @@ impl Engine {
                 }
             }
         }
-        // Folders removed from the vault: stop syncing them here (files stay).
-        if !self.vault.member {
-            for (_, backend) in self.metadata_storages(false)? {
-                for key in backend.list(vault::FolderRemoval::PREFIX)? {
-                    let Some(fid) = key
-                        .strip_prefix(vault::FolderRemoval::PREFIX)
-                        .and_then(|r| r.split('/').next())
-                        .and_then(|f| FolderId::from_hex(f).ok())
-                    else {
-                        continue;
-                    };
-                    if !self
-                        .keyring
-                        .folders
-                        .get(&fid)
-                        .is_some_and(|f| !f.is_removed())
-                    {
-                        continue;
-                    }
-                    if let Some(blob) = backend.get(&key)? {
-                        if let Some(rec) = fr_keys.iter().find_map(|k| {
-                            vault::FolderRemoval::open(&blob, &self.vault.vault_id, &fid, k).ok()
-                        }) {
-                            self.forget_folder(&fid, rec.removed_utc)?;
-                            changed_folders = true;
-                        }
-                    }
-                }
-            }
-        }
-        // Member records, epochs and grants of shared folders.
-        let (devs, folders) = self.pull_share_state()?;
-        changed_devices |= devs;
-        changed_folders |= folders;
+        // Folder removals, shared folders and device details are format-3
+        // records now (`members3`).
         // Placement records: newest per folder wins, as for policies.
         changed_folders |= self.pull_placement_records()?;
         // Quotas and drains of the storages (`quotas`): newest per storage wins.
         self.pull_storage_settings()?;
         // Strongroom conversions and key lists (S-012).
         self.pull_strongroom_records()?;
-        changed_devices |= self.pull_device_details().unwrap_or(false);
         changed_folders |= self.dedupe_folder_names();
         if changed_devices {
             self.save_devices()?;
@@ -3528,54 +3340,10 @@ impl Engine {
             log::debug!(seq = signed.seq, ms = t.ms(); "ledger batches pushed");
             return Ok(Some(signed.seq));
         }
-        // A member has no vault ledger key: seal one batch per shared folder
-        // under that folder's share key, so the owner and other members can read it.
-        let mut by_folder: BTreeMap<FolderId, Vec<Event>> = BTreeMap::new();
-        let all: Vec<FolderId> = self.keyring.folders.keys().cloned().collect();
-        for ev in events {
-            let folder = match &ev {
-                Event::ChunkStored { folder, .. }
-                | Event::ChunkVerified { folder, .. }
-                | Event::ChunkOnDevice { folder, .. }
-                | Event::ManifestPublished { folder, .. }
-                | Event::ChunkDropped { folder, .. }
-                | Event::FolderAdded { folder } => Some(folder.clone()),
-                Event::SnapshotTaken { backup, .. }
-                | Event::SnapshotExpired { backup, .. }
-                | Event::BackupStopped { backup } => Some(backup.clone()),
-                Event::DeviceEnrolled { .. } | Event::StorageRetired { .. } | Event::Unknown => {
-                    None
-                }
-            };
-            match folder {
-                Some(f) => by_folder.entry(f).or_default().push(ev),
-                None => {
-                    for f in &all {
-                        by_folder.entry(f.clone()).or_default().push(ev.clone());
-                    }
-                }
-            }
-        }
-        let mut last = None;
-        for (fid, evs) in by_folder {
-            let Some(rec) = self.keyring.folders.get(&fid) else {
-                continue;
-            };
-            let (key_id, key) = self.share_ledger_key_now(rec)?;
-            let signed = self.ledger.append_own_with(
-                &self.vault.device_id,
-                evs,
-                lamport,
-                &key,
-                &key_id,
-                &self.keys.signer,
-            )?;
-            log::debug!(seq = signed.seq, folder:% = fid, lamport = lamport; "ledger batch sealed for a shared folder");
-            last = Some(signed.seq);
-        }
-        self.clear_deferred();
-        self.push_own_batches()?;
-        Ok(last)
+        // Format-2 member batches are gone: a member device seals
+        // folder-scoped batches of format 3 (`commit3`).
+        let _ = (events, lamport, n_events);
+        bail!("a member device writes format-3 folder-scoped batches only")
     }
 
     fn mark_forked(&mut self, _device: &DeviceId) -> Result<()> {
@@ -4958,7 +4726,7 @@ impl Engine {
         }
         let fk = self.folder_keys(&rec)?;
         let storages = self.open_storages(false)?;
-        if self.vault.member || rec.share_join.is_some() {
+        if self.vault.member {
             self.learn_folder_pack_indexes(&rec, &storages);
         }
         // Counted by the files' downloads (`progress`); the total is not known.
@@ -5168,10 +4936,6 @@ impl Engine {
         let mut hist = self.open_history(&rec.folder_id);
         let _ = self.history_backfill(&mut hist, &rec, &state, storages);
         for (dev, (seq, idx)) in newest {
-            if !self.share_manifest_source_ok(&rec, &dev) {
-                // A device that is not a participant of the shared folder.
-                continue;
-            }
             if self.devices.devices.contains_key(&dev)
                 && !self.is_revoked(&dev)
                 && !self.trusted(&dev)
@@ -5187,7 +4951,7 @@ impl Engine {
                 // manifest stays unread (`last_seen` does not move), so a
                 // later role as editor takes its newest one.
                 if seq > state.last_seen.get(&dev).copied().unwrap_or(0) {
-                    report.writes_refused.push(self.member_name(&dev));
+                    report.writes_refused.push(self.device_name(&dev));
                 }
                 continue;
             }
@@ -6538,7 +6302,6 @@ impl Engine {
             removed_utc: 0,
             epoch_keys: BTreeMap::new(),
             backup: None,
-            share_join: None,
         };
         folder_safety::write_marker(path, &rec)?;
         self.keyring.folders.insert(folder_id.clone(), rec);
@@ -8306,18 +8069,27 @@ impl Engine {
 
     pub fn ledger_entries(&self) -> Result<Vec<LedgerEntry>> {
         let mut out = Vec::new();
-        for s in self.ledger.all()? {
-            let Some(key) = self.key_for_id(&s.key_id) else {
+        for s in self.f3.ledger.all()? {
+            let Some(key) = self.key_for3(&s.key_id) else {
                 continue;
             };
-            let Ok(b) = s.open(&key) else { continue };
+            let Ok(plain) = crate::ledger3::envelope::open_parts(
+                std::slice::from_ref(&s),
+                &key,
+                crate::ledger3::events::MAX_BATCH_PLAIN,
+            ) else {
+                continue;
+            };
+            let Ok(b) = crate::ledger3::events::Batch::from_postcard(&plain) else {
+                continue;
+            };
             out.push(LedgerEntry {
-                device: s.device.to_string(),
+                device: hex::encode(s.device),
                 seq: s.seq,
                 lamport: b.lamport,
                 created_utc: b.created_utc,
                 events: b.events.len(),
-                hash: s.hash.clone(),
+                hash: hex::encode(s.body_hash),
             });
         }
         Ok(out)

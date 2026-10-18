@@ -69,6 +69,16 @@ pub struct Membership<'a> {
     /// device knows, with their keys (section 9's member rows).
     pub members: super::members::MemberRegistry,
     pub refused: RecordsRefused,
+    /// The issuer the user kept for a vault epoch number with two records
+    /// (`varsto device resolve-epoch`): only grants whose chain passes that
+    /// record are adopted.
+    pub vault_kept: BTreeMap<u32, Id16>,
+    /// A revocation of this device by a device of the vault (this device
+    /// cannot open the epoch record that backs it: it gets no key of it).
+    pub own_revocation: Option<RevocationRecord>,
+    /// Vault epoch numbers that hold a record signed by a device of the
+    /// vault.
+    vault_signed: BTreeSet<u32>,
     lamport: u64,
 }
 
@@ -81,6 +91,19 @@ impl<'a> Membership<'a> {
         sign: &'a SigningKey,
         kem: &'a DecapsKey,
         vault_keys: VaultKeys,
+    ) -> Result<Membership<'a>> {
+        Self::open_with(vault, storages, sign, kem, vault_keys, BTreeMap::new())
+    }
+
+    /// `open` with the vault epoch records the user kept where two devices
+    /// wrote one number.
+    pub fn open_with(
+        vault: Id16,
+        storages: &'a [&'a dyn Storage],
+        sign: &'a SigningKey,
+        kem: &'a DecapsKey,
+        vault_keys: VaultKeys,
+        vault_kept: BTreeMap<u32, Id16>,
     ) -> Result<Membership<'a>> {
         let mut m = Membership {
             vault,
@@ -99,6 +122,9 @@ impl<'a> Membership<'a> {
             kept: BTreeMap::new(),
             members: Default::default(),
             refused: RecordsRefused::default(),
+            vault_kept,
+            own_revocation: None,
+            vault_signed: BTreeSet::new(),
             lamport: 0,
         };
         m.refresh()?;
@@ -228,6 +254,7 @@ impl<'a> Membership<'a> {
     pub fn refresh(&mut self) -> Result<()> {
         self.refused = RecordsRefused::default();
         self.read_devices()?;
+        self.find_vault_forks()?;
         if self.adopt_vault_grants()? {
             self.read_devices()?;
         }
@@ -302,8 +329,13 @@ impl<'a> Membership<'a> {
         let mut changed = false;
         let mut sorted: Vec<&Record<VaultGrantRecord>> = grants.iter().collect();
         sorted.sort_by_key(|g| g.body.epoch);
+        // Nothing at or above a number two devices wrote, until the user
+        // keeps one of them.
+        let stop = self.unresolved_vault_forks().first().copied();
         for g in sorted {
-            if g.body.epoch <= self.vault_keys.newest_epoch() {
+            if g.body.epoch <= self.vault_keys.newest_epoch()
+                || stop.is_some_and(|s| g.body.epoch >= s)
+            {
                 continue;
             }
             let Ok((keys, opened)) = epochs::walk_vault_chain(
@@ -322,7 +354,20 @@ impl<'a> Membership<'a> {
             let keeps_me = opened
                 .first()
                 .is_some_and(|o| o.record.members.contains(&self.me));
-            if agrees && keeps_me {
+            // A record may skip numbers only over junk (objects no device of
+            // the vault signed): one that skips a signed record (a removed
+            // device's modified client writing past epochs it was not
+            // given) is not followed.
+            let as_kept = opened.iter().all(|o| {
+                self.vault_kept
+                    .get(&o.record.epoch)
+                    .is_none_or(|k| *k == o.record.issuer)
+                    && !self
+                        .vault_signed
+                        .range(o.record.previous_epoch + 1..o.record.epoch)
+                        .any(|_| true)
+            });
+            if agrees && keeps_me && as_kept {
                 for (e, k) in keys.keys {
                     self.vault_keys.keys.entry(e).or_insert(k);
                 }
@@ -367,15 +412,6 @@ impl<'a> Membership<'a> {
             "vault/epochs/",
             &|d| devices.signing_key(d),
         )?;
-        self.vault_forks.clear();
-        for (seq, list) in found {
-            if list.len() > 1 {
-                if let Ok(e) = u32::try_from(seq) {
-                    self.vault_forks
-                        .insert(e, list.iter().map(|n| n.device).collect());
-                }
-            }
-        }
         let revs: Vec<Record<RevocationRecord>> = {
             let ring = KeyRing::vault_only(self.me, &self.vault_keys);
             let empty = BTreeSet::new();
@@ -397,10 +433,29 @@ impl<'a> Membership<'a> {
         };
         let mut revs: Vec<RevocationRecord> = revs.into_iter().map(|r| r.body).collect();
         revs.sort_by_key(|r| (r.new_epoch, r.issuer));
+        self.own_revocation = None;
         for r in revs {
             let backed = backing.get(&r.new_epoch).is_some_and(|(issuer, revoked)| {
                 *issuer == r.issuer && revoked.contains(&r.device)
             });
+            if r.device == self.me {
+                // This device gets no key of the epoch that removed it, so
+                // it cannot open the record that backs its revocation: a
+                // signed record of the issuer under a number above the keys
+                // held here stands in for it.
+                let above = r.new_epoch > top
+                    && found
+                        .get(&u64::from(r.new_epoch))
+                        .is_some_and(|l| l.iter().any(|n| n.device == r.issuer));
+                if r.issuer != self.me
+                    && !self.revoked.contains(&r.issuer)
+                    && (backed || above)
+                    && self.own_revocation.is_none()
+                {
+                    self.own_revocation = Some(r.clone());
+                }
+                continue;
+            }
             if !backed || self.revoked.contains(&r.issuer) {
                 continue;
             }
@@ -408,6 +463,43 @@ impl<'a> Membership<'a> {
             self.revocations.entry(r.device).or_insert(r);
         }
         Ok(())
+    }
+
+    /// Vault epoch numbers held by two signed records (by different
+    /// issuers, or two different records of one), found before any key is
+    /// adopted.
+    fn find_vault_forks(&mut self) -> Result<()> {
+        let devices = &self.devices;
+        let found = store::numbered(
+            self.storages,
+            self.vault,
+            Kind::Epoch,
+            "vault/epochs/",
+            &|d| devices.signing_key(d),
+        )?;
+        self.vault_forks.clear();
+        self.vault_signed = found
+            .keys()
+            .filter_map(|s| u32::try_from(*s).ok())
+            .collect();
+        for (seq, list) in found {
+            if list.len() > 1 {
+                if let Ok(e) = u32::try_from(seq) {
+                    self.vault_forks
+                        .insert(e, list.iter().map(|n| n.device).collect());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Vault epoch numbers with two records and no choice made.
+    pub fn unresolved_vault_forks(&self) -> Vec<u32> {
+        self.vault_forks
+            .keys()
+            .filter(|e| !self.vault_kept.contains_key(e))
+            .copied()
+            .collect()
     }
 
     /// Whether `d` may grant (and start epochs) in `folder` at `epoch`.
@@ -818,6 +910,13 @@ impl<'a> Membership<'a> {
             .get(&epoch)
             .ok_or_else(|| anyhow!("folder epoch {epoch} is not held here"))?;
         let older = keys.epochs.range(..epoch).map(|(e, k)| (*e, k.0)).collect();
+        // A member device of another vault cannot read the registry: its
+        // grant carries the folder's participants with their keys.
+        let directory = if self.devices.get(&recipient).is_none() {
+            self.directory(&keys.folder)
+        } else {
+            None
+        };
         let body = GrantRecord {
             folder: keys.folder,
             epoch,
@@ -827,6 +926,7 @@ impl<'a> Membership<'a> {
             k9: k9.0,
             k11: keys.k11.0,
             older,
+            directory,
         };
         if self.devices.kem_key(&recipient).is_none()
             && !self.members.members.values().any(|m| m.device == recipient)
@@ -843,6 +943,99 @@ impl<'a> Membership<'a> {
             &KeyId::Kem(recipient),
             &body,
         )?;
+        Ok(())
+    }
+
+    /// The participants of `folder` as a member device learns them (its
+    /// grants carry this, section 77.6 "As built"): every device the folder
+    /// records name, with its keys, its role history and, once removed from
+    /// the vault or the folder, its ledger cut-off.
+    pub fn directory(&self, folder: &Id16) -> Option<super::grants::Directory> {
+        use super::grants::{Directory, DirectoryEntry, MAX_HISTORY};
+        let st = self.registry.get(folder)?;
+        let ep = self.folder_epochs(folder);
+        let mut cutoffs: BTreeMap<Id16, u64> = BTreeMap::new();
+        for r in ep.applied.values() {
+            for x in &r.removed {
+                cutoffs.insert(x.device, x.cutoff);
+            }
+        }
+        for (d, r) in &self.revocations {
+            cutoffs.insert(*d, r.cutoff_seq);
+        }
+        let mut entries = Vec::new();
+        for (device, hist) in &st.history {
+            let (name, k6, k8, full) = if let Some(rec) = self.devices.get(device) {
+                (
+                    rec.name.clone(),
+                    rec.sign_pub.clone(),
+                    rec.kem_pub.clone(),
+                    true,
+                )
+            } else if let Some(m) = st.members.get(device) {
+                (m.name.clone(), m.k6.clone(), m.k8.clone(), false)
+            } else {
+                continue;
+            };
+            let mut history = hist.clone();
+            if self.revoked.contains(device) {
+                history.push((
+                    Stamp {
+                        lamport: self.lamport + 1,
+                        device: self.me,
+                    },
+                    None,
+                ));
+            }
+            if history.len() > MAX_HISTORY {
+                history.drain(..history.len() - MAX_HISTORY);
+            }
+            entries.push(DirectoryEntry {
+                device: *device,
+                name,
+                k6,
+                k8,
+                full,
+                history,
+                cutoff: cutoffs.get(device).copied(),
+            });
+        }
+        Some(Directory {
+            stamp: Stamp {
+                lamport: self.lamport + 1,
+                device: self.me,
+            },
+            name: st.name.clone(),
+            creator: st.creator,
+            entries,
+        })
+    }
+
+    /// Write the member devices of `folder` new grants of its current
+    /// epoch (with the directory as it is now), after its participants or
+    /// their roles changed. Nothing for a folder without members, or when
+    /// this device is not an owner holding the current key.
+    pub fn refresh_member_grants(&mut self, folder: &Id16) -> Result<()> {
+        let epoch = self.folder_epochs(folder).current();
+        if !self.registry.is_owner(&self.me, folder, epoch) {
+            return Ok(());
+        }
+        let Some(keys) = self.granted.get(folder).cloned().filter(|k| k.holds(epoch)) else {
+            return Ok(());
+        };
+        let Some(st) = self.registry.get(folder).cloned() else {
+            return Ok(());
+        };
+        let ep = self.folder_epochs(folder);
+        for p in st.participants() {
+            if self.devices.get(&p.device).is_some()
+                || !st.members.contains_key(&p.device)
+                || ep.removed_at(&p.device, epoch)
+            {
+                continue;
+            }
+            self.write_grant(&keys, epoch, p.device, p.role)?;
+        }
         Ok(())
     }
 
@@ -1002,6 +1195,9 @@ impl<'a> Membership<'a> {
         self.refresh()?;
         self.issue_grant(folder, epoch, &device, role)?;
         self.refresh()?;
+        // The other members learn the new one (and its keys).
+        self.refresh_member_grants(folder)?;
+        self.refresh()?;
         Ok(device)
     }
 
@@ -1029,6 +1225,10 @@ impl<'a> Membership<'a> {
             Vec::new(),
         )?;
         self.issue_grant(folder, epoch, device, role)?;
+        self.refresh()?;
+        // Member devices of the folder learn the change (a new own device,
+        // or a member's new role).
+        self.refresh_member_grants(folder)?;
         self.refresh()
     }
 
@@ -1087,6 +1287,10 @@ impl<'a> Membership<'a> {
             self.issue_grant(f, epoch, &device, role)?;
         }
         self.refresh()?;
+        for f in folders {
+            self.refresh_member_grants(f)?;
+        }
+        self.refresh()?;
         Ok(device)
     }
 
@@ -1110,6 +1314,8 @@ impl<'a> Membership<'a> {
                 stamp,
             }],
         )?;
+        self.refresh()?;
+        self.refresh_member_grants(folder)?;
         self.refresh()
     }
 
@@ -1199,10 +1405,15 @@ impl<'a> Membership<'a> {
         }
         keys.epochs.insert(e, k9);
         let (mut granted_to, mut pending) = (Vec::new(), Vec::new());
+        let mut members = Vec::new();
         for p in &stay {
             if self.devices.kem_key(&p.device).is_some() {
                 self.write_grant(&keys, e, p.device, p.role)?;
                 granted_to.push(p.device);
+            } else if st.members.contains_key(&p.device) {
+                // Member devices next, once the new epoch is read here:
+                // their directory names who was removed.
+                members.push(p.device);
             } else {
                 pending.push(p.device);
             }
@@ -1215,6 +1426,11 @@ impl<'a> Membership<'a> {
             None => false,
         };
         self.refresh()?;
+        if !members.is_empty() {
+            self.refresh_member_grants(folder)?;
+            granted_to.extend(members);
+            self.refresh()?;
+        }
         Ok(EpochStart {
             folder: *folder,
             epoch: e,
@@ -1236,17 +1452,40 @@ impl<'a> Membership<'a> {
         wipe: bool,
         k1: Option<&RecoveryKey>,
     ) -> Result<RemovalReport> {
-        if *target == self.me {
-            bail!("a device cannot remove itself");
+        self.remove_devices(&[(*target, cutoff_seq)], wipe, k1, false)
+    }
+
+    /// `remove_device` for several devices in one vault epoch (a person's
+    /// devices in an organization). `unchecked` is what a modified client
+    /// could do (tests): no check for newer epochs, the number after the
+    /// highest one listed, chained to the newest key held here. Readers
+    /// refuse such a record when it skips numbers.
+    pub fn remove_devices(
+        &mut self,
+        targets: &[(Id16, u64)],
+        wipe: bool,
+        k1: Option<&RecoveryKey>,
+        unchecked: bool,
+    ) -> Result<RemovalReport> {
+        if targets.is_empty() {
+            bail!("no device to remove");
         }
-        if self.devices.get(target).is_none() || self.revoked.contains(target) {
+        let gone: BTreeSet<Id16> = targets.iter().map(|(d, _)| *d).collect();
+        for target in &gone {
+            if *target == self.me {
+                bail!("a device cannot remove itself");
+            }
+            if self.devices.get(target).is_none() || self.revoked.contains(target) {
+                bail!(
+                    "{} is not a current device of the vault",
+                    hex::encode(target)
+                );
+            }
+        }
+        if let Some(e) = self.unresolved_vault_forks().first() {
             bail!(
-                "{} is not a current device of the vault",
-                hex::encode(target)
+                "two devices wrote key epoch {e} at once; keep one first (`varsto device resolve-epoch {e} --keep <device>`)"
             );
-        }
-        if let Some(e) = self.vault_forks.keys().next() {
-            bail!("two devices wrote vault epoch {e} at once; keep one first");
         }
         let (old, old_k3) = match self.vault_keys.newest() {
             Some((e, k)) => (e, k.clone()),
@@ -1260,17 +1499,24 @@ impl<'a> Membership<'a> {
             "vault/epochs/",
             &|d| devices.signing_key(d),
         )?;
-        if found.keys().any(|s| *s > u64::from(old)) {
+        let listed = epochs::highest_number(self.storages)?;
+        if !unchecked && found.keys().any(|s| *s > u64::from(old)) {
             bail!("another device changed the vault keys and this device has not received them yet; sync, then try again");
         }
         let members: Vec<Id16> = self
             .devices
             .devices
             .keys()
-            .filter(|d| *d != target && !self.revoked.contains(*d))
+            .filter(|d| !gone.contains(*d) && !self.revoked.contains(*d))
             .copied()
             .collect();
-        let new = old + 1;
+        if members.is_empty() {
+            bail!("cannot remove the last full device of the vault");
+        }
+        // Junk under the next number (anyone with the storage's credentials
+        // can write it) is skipped, not waited for: readers take only a
+        // signed record of a device of the vault there.
+        let new = listed.max(old) + 1;
         let k3 = SecretKey::random();
         let record = VaultEpochRecord {
             epoch: new,
@@ -1278,7 +1524,7 @@ impl<'a> Membership<'a> {
             previous_epoch: old,
             previous_k3: old_k3.0,
             members: members.clone(),
-            revoked: vec![*target],
+            revoked: gone.iter().copied().collect(),
         };
         {
             let mut ring = self.ring();
@@ -1292,21 +1538,23 @@ impl<'a> Membership<'a> {
                 &record,
             )?;
         }
-        let rev = RevocationRecord {
-            device: *target,
-            name: self.devices.name(target),
-            issuer: self.me,
-            cutoff_seq,
-            wipe,
-            new_epoch: new,
-        };
-        self.writer().write(
-            &self.ring(),
-            &RevocationRecord::stream(*target, self.me),
-            None,
-            &KeyId::Registry(0),
-            &rev,
-        )?;
+        for (target, cutoff_seq) in targets {
+            let rev = RevocationRecord {
+                device: *target,
+                name: self.devices.name(target),
+                issuer: self.me,
+                cutoff_seq: *cutoff_seq,
+                wipe,
+                new_epoch: new,
+            };
+            self.writer().write(
+                &self.ring(),
+                &RevocationRecord::stream(*target, self.me),
+                None,
+                &KeyId::Registry(0),
+                &rev,
+            )?;
+        }
         let mut sent = Vec::new();
         for m in &members {
             if self.devices.kem_key(m).is_none() {
@@ -1336,14 +1584,25 @@ impl<'a> Membership<'a> {
             folder_epochs: Vec::new(),
             folders_not_rotated: Vec::new(),
         };
-        let held: Vec<Id16> = self
+        let held: Vec<(Id16, Vec<Removed>)> = self
             .registry
             .folders
             .iter()
-            .filter(|(_, st)| st.role(target).is_some())
-            .map(|(f, _)| *f)
+            .filter(|(_, st)| !st.is_removed())
+            .map(|(f, st)| {
+                let removed: Vec<Removed> = targets
+                    .iter()
+                    .filter(|(d, _)| st.role(d).is_some())
+                    .map(|(d, c)| Removed {
+                        device: *d,
+                        cutoff: *c,
+                    })
+                    .collect();
+                (*f, removed)
+            })
+            .filter(|(_, r)| !r.is_empty())
             .collect();
-        for folder in held {
+        for (folder, removed) in held {
             let current = self.folder_epochs(&folder).current();
             if !self.registry.is_owner(&self.me, &folder, current)
                 || !self.granted.holds(&folder, current)
@@ -1351,14 +1610,7 @@ impl<'a> Membership<'a> {
                 report.folders_not_rotated.push(folder);
                 continue;
             }
-            let start = self.start_folder_epoch(
-                &folder,
-                &[Removed {
-                    device: *target,
-                    cutoff: cutoff_seq,
-                }],
-                k1,
-            )?;
+            let start = self.start_folder_epoch(&folder, &removed, k1)?;
             report.folder_epochs.push((folder, start.epoch));
         }
         Ok(report)

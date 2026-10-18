@@ -355,13 +355,40 @@ impl FolderRegistry {
     /// in the folder records, unless an accepted folder epoch record at or
     /// below `epoch` removed it (and no later one up to `epoch` kept it).
     pub fn role(&self, device: &Id16, folder: &Id16, epoch: u32) -> Option<Role> {
-        let r = self.folders.get(folder)?.role(device)?;
-        if let Some(ep) = self.epochs.get(folder) {
-            if ep.removed_at(device, epoch) {
-                return None;
-            }
+        let st = self.folders.get(folder)?;
+        let ep = self.epochs.get(folder);
+        if ep.is_some_and(|ep| ep.removed_at(device, epoch)) {
+            return None;
         }
-        Some(r)
+        if let Some(r) = st.role(device) {
+            return Some(r);
+        }
+        // Removed by a later folder epoch (its `denied` entry came with
+        // that epoch): at `epoch` it still took part, with the role it had.
+        let later = ep.is_some_and(|ep| {
+            ep.applied
+                .range(epoch.saturating_add(1)..)
+                .any(|(_, r)| r.removed.iter().any(|x| x.device == *device))
+        });
+        if later {
+            return st.history.get(device)?.iter().rev().find_map(|(_, r)| *r);
+        }
+        None
+    }
+
+    /// The role a device's records of `folder` under `epoch` are judged
+    /// with: the highest role it held while it took part (so what an
+    /// editor wrote before it became a viewer stays). When it wrote is
+    /// decided by the ledger: its announcements count only while it was
+    /// an owner or editor (`ledger3::scope::FolderRoles`).
+    pub fn writer_role(&self, device: &Id16, folder: &Id16, epoch: u32) -> Option<Role> {
+        let now = self.role(device, folder, epoch)?;
+        let best = self
+            .folders
+            .get(folder)
+            .and_then(|st| st.history.get(device))
+            .and_then(|h| h.iter().filter_map(|(_, r)| *r).min());
+        Some(best.map_or(now, |b| b.min(now)))
     }
 
     pub fn is_owner(&self, device: &Id16, folder: &Id16, epoch: u32) -> bool {

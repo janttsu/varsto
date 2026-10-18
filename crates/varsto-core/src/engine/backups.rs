@@ -274,7 +274,6 @@ impl Engine {
                 retention_days: opts.retention_days,
                 created_utc: now,
             }),
-            share_join: None,
         };
         let id = rec.folder_id.clone();
         self.keyring.folders.insert(id.clone(), rec);

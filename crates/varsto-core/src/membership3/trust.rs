@@ -43,8 +43,9 @@ impl Trust<'_> {
             )
     }
 
+    /// The role a record of `device` is judged with (`writer_role`).
     fn role(&self, device: &Id16, folder: &Id16, epoch: u32) -> Option<Role> {
-        self.folders.and_then(|f| f.role(device, folder, epoch))
+        self.folders.and_then(|f| f.writer_role(device, folder, epoch))
     }
 
     /// The section 9 row of `device` in `folder` at `epoch`.
