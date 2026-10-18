@@ -474,6 +474,7 @@
           <p id="addfolder-hint" class="muted small hidden">This creates a new, empty folder. To sync a folder that is already on your other devices, attach it instead (tap it in the folder list).</p>
           <label>Name <input name="name" placeholder="Documents" required autocomplete="off"></label>
           <label class="desktop-only">Directory <input name="path" placeholder="/Users/me/Documents" autocomplete="off"><span class="hint muted">where this folder lives on this device</span></label>
+          <label>Recovery words (optional) <input name="recovery_words" type="password" autocomplete="off" spellcheck="false"><span class="hint muted">the 24 words of your recovery kit: they make the folder's recovery copy now. Leave empty to write it later</span></label>
           <div class="mode-cards mobile-only" role="radiogroup" aria-label="On this phone">
             <label class="mode-card"><input type="radio" name="mode" value="encrypted" checked><span class="mode-body"><span class="mode-title">Encrypted on this phone</span><span class="mode-sub">Files are kept only as encrypted blocks inside Varsto and open in the app. Nothing readable is left on the phone.</span></span></label>
             <label class="mode-card"><input type="radio" name="mode" value="plain"><span class="mode-body"><span class="mode-title">Plain files on this phone</span><span class="mode-sub">Ordinary files under Internal storage/Varsto, visible in My Files and the gallery. Needs all files access.</span></span></label>

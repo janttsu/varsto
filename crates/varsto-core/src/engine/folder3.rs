@@ -343,14 +343,12 @@ impl Engine {
         let (vault, me, vault_keys) = self.record_writer_parts();
         let view = self.view3()?;
         let mut writer = ManifestWriter::new(*folder, me);
-        if let Some(n) = self.manifest_base_after {
-            writer.rule = crate::manifest3::BaseRule {
-                min_deltas: n,
-                size_divisor: u64::MAX,
-                max_deltas: n,
-            };
-        }
+
         if let Some(own) = manifests.views.get(&me) {
+            // Nothing changed since the last record: no storage is asked.
+            if own.files == current {
+                return Ok(None);
+            }
             writer.seq = own.seq;
             writer.base_seq = own.base;
             writer.hash = own.hash;

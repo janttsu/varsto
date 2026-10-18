@@ -3589,7 +3589,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       // The key is shown once: in a dialog now, and on the overview until the user confirms.
       $("vaultkey-text").textContent = "Vault key (shown once, write it down and keep it offline): " + r.vault_key;
       $("vaultkey").classList.remove("hidden");
-      return dialog({ title: "Your vault key", text: "Write it down and keep it offline: it is the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. It is shown once.", code: r.vault_key, ok: "Continue", cancel: false }).then(function () { return refreshState(); });
+      return dialog({ title: "Your vault key and recovery words", text: "Write both word sets down and keep them offline: they are the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. The recovery words also make each new folder's recovery copy. They are shown once.", code: r.kit || r.vault_key, ok: "I have written them down", cancel: false }).then(function () { return refreshState(); });
     }).catch(function (e) { alertBox(e.message); });
   };
   $("vaultkey-done").onclick = function () { $("vaultkey").classList.add("hidden"); $("vaultkey-text").textContent = ""; };

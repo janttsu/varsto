@@ -641,7 +641,7 @@ impl Engine {
     fn history_status_at(&mut self, now: i64) -> Result<HistoryStatus> {
         self.trash_refresh(true)?;
         let settings = self.trash_settings();
-        let view = self.view()?;
+        let view = self.view3()?;
         let mut st = HistoryStatus {
             days: settings.history_days,
             schedule: schedule_words(),
@@ -686,10 +686,8 @@ impl Engine {
                         continue;
                     }
                     fh.extra_bytes += c.size;
-                    if let Some(r) = view.locate(&rec.folder_id, &c.chunk) {
-                        for n in r.storages.keys() {
-                            *fh.by_storage.entry(n.clone()).or_default() += c.size;
-                        }
+                    for n in self.block_copies3(&view, &rec.folder_id, &c.object) {
+                        *fh.by_storage.entry(n).or_default() += c.size;
                     }
                 }
             }

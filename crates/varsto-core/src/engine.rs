@@ -90,6 +90,7 @@ mod pack_upkeep;
 mod placement;
 mod protection;
 mod quotas;
+mod records3_io;
 mod repair;
 mod restic_mirror;
 mod scrub;
@@ -98,6 +99,7 @@ mod share_roles;
 mod staged_moves;
 mod storage_directory;
 mod strongroom_ops;
+mod thumbs3;
 mod trash;
 mod trash3_io;
 mod verify;
@@ -764,9 +766,6 @@ pub struct Engine {
     ledger_policy: ledger_upkeep::LedgerPolicy,
     /// When manifests are listed in full and whether old ones are pruned.
     manifest_policy: manifest_upkeep::ManifestPolicy,
-    /// Tests: a manifest base after this many deltas, instead of the
-    /// design's rule (`set_manifest_base_after`).
-    manifest_base_after: Option<u64>,
     /// The token of the restic hold this engine works under (its own run's
     /// completeness check), which the hold does not stop (`restic_mirror`).
     hold_exempt: Option<String>,
@@ -1477,7 +1476,6 @@ impl Engine {
             cycle: None,
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
-            manifest_base_after: None,
             hold_exempt: None,
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),
@@ -1713,7 +1711,6 @@ impl Engine {
             cycle: None,
             ledger_policy: Default::default(),
             manifest_policy: Default::default(),
-            manifest_base_after: None,
             hold_exempt: None,
             download_log: None,
             meta_caps: crate::fsmeta::Caps::here(),
@@ -4536,279 +4533,6 @@ impl Engine {
         crate::blockmap::written_packs(&per_storage, &|o| info.get(o).copied())
     }
 
-    /// Encrypted thumbnails for image and video files that have none yet (F-046).
-    ///
-    /// Bounded: at most `limit` pictures and `budget` of time per call (a
-    /// low-priority background pass; the rest follows on the next sync). With
-    /// no storage to put them on nothing is made and nothing is marked done.
-    fn make_thumbnails(
-        &mut self,
-        rec: &FolderRecord,
-        root: &Path,
-        state: &mut FolderState,
-        limit: usize,
-        budget: std::time::Duration,
-    ) -> Result<u64> {
-        if state.thumbs_rev < 2 {
-            let videos: Vec<String> = state
-                .files
-                .values()
-                .filter(|f| thumbs::is_video(&f.path))
-                .map(|f| f.content_hash.clone())
-                .collect();
-            for h in videos {
-                state.thumbs_done.remove(&h);
-            }
-            state.thumbs_rev = 2;
-        }
-        let storages: Vec<(StorageSpec, Box<dyn Storage>)> = self
-            .metadata_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
-        if storages.is_empty() {
-            return Ok(0);
-        }
-        self.replicate_thumbnails(rec, state, &storages);
-        let videos_here = thumbs::video_tool_available();
-        let candidates: Vec<(String, String)> = state
-            .files
-            .values()
-            .filter(|f| {
-                !f.deleted
-                    && !f.is_symlink()
-                    && (thumbs::is_image(&f.path) || thumbs::is_video(&f.path))
-                    && !state.thumbs_done.contains(&f.content_hash)
-            })
-            .map(|f| (f.path.clone(), f.content_hash.clone()))
-            .collect();
-        if candidates.is_empty() {
-            return Ok(0);
-        }
-        let fk = self.folder_keys(rec)?;
-        let meta = fk.meta.clone();
-        let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
-        let mut made = 0u64;
-        let started = std::time::Instant::now();
-        let mut attempts = 0usize;
-        for (path, hash) in candidates {
-            if attempts >= limit || started.elapsed() >= budget {
-                break;
-            }
-            // Without a tool for videos (a phone, a computer without ffmpeg)
-            // they wait: the app around the service may hand in a frame
-            // (`store_thumbnail`), or ffmpeg is installed later.
-            if thumbs::is_video(&path) && !encrypted_here && !videos_here {
-                continue;
-            }
-            let key = thumbs::storage_key(&rec.folder_id, &hash);
-            if storages
-                .iter()
-                .any(|(_, b)| b.exists(&key).unwrap_or(false))
-            {
-                state.thumbs_done.insert(hash);
-                continue;
-            }
-            let made_here = if encrypted_here {
-                // Pictures are decoded in memory from their cached blocks;
-                // videos would need a plain file, so none is made here.
-                if thumbs::is_video(&path) {
-                    state.thumbs_done.insert(hash);
-                    continue;
-                }
-                if !state.local_index.contains_key(&path) {
-                    continue;
-                }
-                // Blocks evicted from the cache: try again when they are back,
-                // do not give the picture up for good.
-                let cached = state.files.get(&path).is_some_and(|f| {
-                    f.chunks
-                        .iter()
-                        .all(|c| self.cached_object(&c.object).is_some())
-                });
-                if !cached {
-                    continue;
-                }
-                self.thumbnail_from_cache(&fk, state, &path)
-            } else {
-                let disk = self.disk_of(root, state, &path);
-                if !disk.exists() {
-                    continue;
-                }
-                thumbs::make_with(&disk, &path, &self.config.thumbnails)
-            };
-            attempts += 1;
-            let Some(bytes) = made_here else {
-                state.thumbs_done.insert(hash); // cannot make one; do not retry every time
-                continue;
-            };
-            let blob = thumbs::seal(&bytes, &self.vault.vault_id, &rec.folder_id, &hash, &meta)?;
-            for (_, backend) in &storages {
-                backend.put_if_absent(&key, &blob)?;
-            }
-            state.thumbs_done.insert(hash);
-            made += 1;
-        }
-        Ok(made)
-    }
-
-    /// Copy the thumbnails other storages hold to a storage that was added
-    /// later: the encrypted blob is the same everywhere. A device that only
-    /// reaches the new storage (a phone with a bucket) sees no previews
-    /// otherwise. Best effort: a storage that cannot be reached now is tried
-    /// again at the next sync.
-    fn replicate_thumbnails(
-        &self,
-        rec: &FolderRecord,
-        state: &mut FolderState,
-        storages: &[(StorageSpec, Box<dyn Storage>)],
-    ) {
-        if storages.len() < 2 {
-            for (spec, _) in storages {
-                state.thumbs_replicated.insert(spec.name().to_string());
-            }
-            return;
-        }
-        let hashes: BTreeSet<String> = state
-            .files
-            .values()
-            .filter(|f| {
-                !f.deleted
-                    && !f.content_hash.is_empty()
-                    && (thumbs::is_image(&f.path) || thumbs::is_video(&f.path))
-            })
-            .map(|f| f.content_hash.clone())
-            .collect();
-        for (spec, backend) in storages {
-            if state.thumbs_replicated.contains(spec.name()) {
-                continue;
-            }
-            let mut complete = true;
-            for h in &hashes {
-                let key = thumbs::storage_key(&rec.folder_id, h);
-                match backend.exists(&key) {
-                    Ok(true) => continue,
-                    Ok(false) => {}
-                    Err(_) => {
-                        complete = false;
-                        break;
-                    }
-                }
-                let blob = storages
-                    .iter()
-                    .filter(|(s, _)| s.name() != spec.name())
-                    .find_map(|(_, b)| b.get(&key).ok().flatten());
-                if let Some(blob) = blob {
-                    if backend.put_if_absent(&key, &blob).is_err() {
-                        complete = false;
-                        break;
-                    }
-                }
-            }
-            if complete {
-                state.thumbs_replicated.insert(spec.name().to_string());
-            }
-        }
-    }
-
-    /// Videos in plain folders on this device that have no thumbnail yet,
-    /// for an app that makes frames itself (a phone): (folder, path, file).
-    pub fn videos_without_thumbnails(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<(String, String, PathBuf)>> {
-        let mut out = Vec::new();
-        for (rec, root) in self.folders() {
-            let Some(root) = root else { continue };
-            if self.mount_is_encrypted(&rec.folder_id) {
-                continue;
-            }
-            let state = self.load_state(&rec.folder_id)?;
-            for f in state.files.values().filter(|f| {
-                !f.deleted
-                    && thumbs::is_video(&f.path)
-                    && !f.content_hash.is_empty()
-                    && !state.thumbs_done.contains(&f.content_hash)
-            }) {
-                let disk = self.disk_of(&root, &state, &f.path);
-                if disk.is_file() {
-                    out.push((rec.name.clone(), f.path.clone(), disk));
-                    if out.len() >= limit {
-                        return Ok(out);
-                    }
-                }
-            }
-        }
-        Ok(out)
-    }
-
-    /// Store a thumbnail made outside the engine (a video frame from the
-    /// phone's media framework) for the current version of a file: it is
-    /// decoded and encoded again, encrypted and written like any other.
-    pub fn store_thumbnail(&mut self, folder: &str, path: &str, picture: &[u8]) -> Result<()> {
-        let (rec, _) = self.resolve_folder(folder)?;
-        let mut state = self.load_state(&rec.folder_id)?;
-        let file = state
-            .files
-            .get(path)
-            .filter(|f| !f.deleted && !f.content_hash.is_empty())
-            .ok_or_else(|| anyhow!("{path} is not a file of {folder}"))?;
-        let hash = file.content_hash.clone();
-        let jpeg = thumbs::normalize(picture).ok_or_else(|| anyhow!("not a picture"))?;
-        let fk = self.folder_keys(&rec)?;
-        let blob = thumbs::seal(&jpeg, &self.vault.vault_id, &rec.folder_id, &hash, &fk.meta)?;
-        let key = thumbs::storage_key(&rec.folder_id, &hash);
-        for (spec, backend) in self.metadata_storages(false)? {
-            if !spec.is_carrier() {
-                backend.put_if_absent(&key, &blob)?;
-            }
-        }
-        state.thumbs_done.insert(hash);
-        self.save_state(&rec.folder_id, &state)
-    }
-
-    /// Decrypted thumbnail of a file, fetched from the first storage that has it.
-    pub fn thumbnail(&self, folder: &str, path: &str) -> Result<Option<Vec<u8>>> {
-        let (rec, _) = self.resolve_folder(folder)?;
-        let state = self.load_state(&rec.folder_id)?;
-        let Some(file) = state.files.get(path) else {
-            return Ok(None);
-        };
-        if file.deleted || file.content_hash.is_empty() {
-            return Ok(None);
-        }
-        let key = thumbs::storage_key(&rec.folder_id, &file.content_hash);
-        let metas = self.folder_keys(&rec)?.meta_keys();
-        // One unreachable or damaged storage must not hide a thumbnail another has.
-        let mut last_err = None;
-        for (_, backend) in self.metadata_storages(false)? {
-            let blob = match backend.get(&key) {
-                Ok(Some(b)) => b,
-                Ok(None) => continue,
-                Err(e) => {
-                    last_err = Some(e);
-                    continue;
-                }
-            };
-            for meta in &metas {
-                match thumbs::open(
-                    &blob,
-                    &self.vault.vault_id,
-                    &rec.folder_id,
-                    &file.content_hash,
-                    meta,
-                ) {
-                    Ok(t) => return Ok(Some(t)),
-                    Err(e) => last_err = Some(e),
-                }
-            }
-        }
-        match last_err {
-            Some(e) => Err(e),
-            None => Ok(None),
-        }
-    }
-
     /// Storages added after a manifest was published get the latest manifest.
     fn ensure_manifest_everywhere(
         &mut self,
@@ -5028,6 +4752,22 @@ impl Engine {
         let view3 = self.view3()?;
         let (manifests, changed) = self.pull_folder_records3(&folder3, &view3)?;
         let me3 = self.me3();
+        // Change history (`changes_ops`): started once from what is held,
+        // then fed by the paths every writer's records changed. Never in
+        // the way of syncing.
+        {
+            let mut hist = self.open_history(&rec.folder_id);
+            let _ = self.history_backfill3(&mut hist, &state, &manifests);
+            for (dev3, paths) in &changed {
+                if *dev3 == me3 {
+                    continue;
+                }
+                if let Some(v) = manifests.views.get(dev3) {
+                    let _ = self.history_from_view3(&mut hist, dev3, v, Some(paths));
+                }
+            }
+            let _ = hist.save();
+        }
         for (dev3, paths) in changed {
             if dev3 == me3 {
                 continue;
@@ -5090,187 +4830,11 @@ impl Engine {
             state.last_seen.insert(dev, v.seq);
             self.prefetched.clear();
         }
-        // The change history of section 57 is fed from manifests (format 2:
-        // `history_from_manifest`; f3-switch: part B feeds it from the
-        // manifest deltas).
         if encrypted_here {
             self.cache_wanted(&rec, &fk, &mut state, &storages, &mut report)?;
         }
         self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
-        Ok(report)
-    }
-
-    /// The format-2 manifest pull of `pull_inner` (f3-switch: part B
-    /// deletes it).
-    #[allow(clippy::too_many_arguments)]
-    fn pull_manifests2(
-        &mut self,
-        rec: &FolderRecord,
-        fk: &FolderKeys,
-        root: &Path,
-        state: &mut FolderState,
-        storages: &OpenStorages,
-        ignore: &mut Option<IgnoreMatcher>,
-        send_only: bool,
-        encrypted_here: bool,
-        report: &mut PullReport,
-    ) -> Result<PullReport> {
-        let mut state = std::mem::take(state);
-        let mut ignore = std::mem::take(ignore);
-        let mut report = std::mem::take(report);
-        let (rec, fk, root, storages) = (rec.clone(), fk, root.to_path_buf(), storages);
-        let newest = self.newest_manifests(&rec.folder_id, &state.last_seen, storages)?;
-
-        // A revoked device's manifests count only up to the last one its
-        // accepted ledger batches announced.
-        let capped = if self.devices.revoked.is_empty() {
-            BTreeMap::new()
-        } else {
-            self.view()?.manifests
-        };
-        let metas = fk.meta_keys();
-        // Changes made by read-only members (after they stopped being
-        // editors) are not taken, even when another device relays them.
-        let viewer_clocks = self.share_viewer_clocks(&rec);
-        let refused = |f: &FileState| {
-            viewer_clocks
-                .get(&f.modified_by)
-                .is_some_and(|c| f.modified_clock > *c)
-        };
-        // Change history (`changes_ops`): started once from what is held,
-        // then fed by every manifest taken. Never in the way of syncing.
-        let mut hist = self.open_history(&rec.folder_id);
-        let _ = self.history_backfill(&mut hist, &rec, &state, storages);
-        for (dev, (seq, idx)) in newest {
-            if !self.share_manifest_source_ok(&rec, &dev) {
-                // A device that is not a participant of the shared folder.
-                continue;
-            }
-            if self.devices.devices.contains_key(&dev)
-                && !self.is_revoked(&dev)
-                && !self.trusted(&dev)
-            {
-                // A device of the vault that is not trusted: not in the
-                // organization's roster, on a platform its policy refuses,
-                // or enrolled with an old key. What it writes is not taken
-                // (its manifest stays unread until it is trusted again).
-                continue;
-            }
-            if !self.share_writer_ok(&rec, &dev) {
-                // A read-only member: what it publishes is not taken. Its
-                // manifest stays unread (`last_seen` does not move), so a
-                // later role as editor takes its newest one.
-                if seq > state.last_seen.get(&dev).copied().unwrap_or(0) {
-                    report.writes_refused.push(self.member_name(&dev));
-                }
-                continue;
-            }
-            let seq = if self.is_revoked(&dev) {
-                seq.min(
-                    capped
-                        .get(&(rec.folder_id.clone(), dev.clone()))
-                        .copied()
-                        .unwrap_or(0),
-                )
-            } else {
-                seq
-            };
-            if seq <= state.last_seen.get(&dev).copied().unwrap_or(0) {
-                continue;
-            }
-            let key = Manifest::storage_key(&rec.folder_id, &dev, seq);
-            let Some(blob) = storages[idx].1.get(&key)? else {
-                continue;
-            };
-            let Some(m) = metas.iter().find_map(|meta| {
-                Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, meta).ok()
-            }) else {
-                if self.share_access_lost(&rec.folder_id) {
-                    // Removed from the shared folder: newer manifests are
-                    // under a key this device will not get.
-                    continue;
-                }
-                if !self.trusted(&dev) {
-                    // Not a trusted full device (a member, a replica, a
-                    // removed device, or a name planted on the storage):
-                    // what does not open is skipped, so nobody but a
-                    // trusted device can stop this folder's pull.
-                    log::warn!(folder:% = rec.folder_id, device:% = dev, seq = seq; "manifest does not open: skipped");
-                    continue;
-                }
-                bail!(
-                    "manifest {seq} of device {} does not open with any key this device holds (a newer vault key has not arrived yet?)",
-                    dev.short()
-                );
-            };
-            self.observe_clock(m.lamport)?;
-            // The newest files first (by their modification time), so that
-            // what was just made arrives first on a large pull.
-            let mut entries: Vec<(&String, &FileState)> = m.files.iter().collect();
-            entries.sort_by(|a, b| b.1.mtime.cmp(&a.1.mtime).then(a.0.cmp(b.0)));
-            if send_only {
-                for (path, remote) in &entries {
-                    if !refused(remote)
-                        && !matches!(
-                            manifest::merge(state.files.get(*path), remote),
-                            Merge::KeepLocal
-                        )
-                    {
-                        state.not_applied.insert((*path).clone(), (*remote).clone());
-                    }
-                }
-                let _ = self.history_from_manifest(&mut hist, &m, &blob, &refused);
-                report.manifests_applied += 1;
-                state.last_seen.insert(dev, seq);
-                continue;
-            }
-            // Too many deletions at once: held (this manifest stays unread
-            // until the user decides, so nothing of it is lost).
-            if let Some(pause) = self.hold_remote_deletions(&rec, &root, &mut state, &dev, &entries)
-            {
-                self.prefetched.clear();
-                self.commit_batch()?;
-                self.save_state(&rec.folder_id, &state)?;
-                return Err(pause.into());
-            }
-            report.manifests_applied += 1;
-            let fetch_ahead = !encrypted_here && !self.mount_is_selective(&rec.folder_id);
-            let mut ahead_from = 0;
-            for (i, (path, remote)) in entries.iter().enumerate() {
-                if fetch_ahead && i >= ahead_from {
-                    ahead_from = self.prefetch_small(&entries, i, &state, storages);
-                }
-                if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
-                    continue;
-                }
-                if refused(remote) {
-                    continue;
-                }
-                self.merge_one(
-                    &rec,
-                    fk,
-                    &root,
-                    &mut state,
-                    path,
-                    remote,
-                    storages,
-                    &mut report,
-                )?;
-            }
-            let _ = self.history_from_manifest(&mut hist, &m, &blob, &refused);
-            state.last_seen.insert(dev, seq);
-            // Whatever was fetched ahead and not used (a file that failed
-            // earlier in its batch) is not kept past its manifest.
-            self.prefetched.clear();
-        }
-        let _ = hist.save();
-        if encrypted_here {
-            self.cache_wanted(&rec, fk, &mut state, storages, &mut report)?;
-        }
-        self.commit_batch()?;
-        self.save_state(&rec.folder_id, &state)?;
-        self.prune_carriers(&rec)?;
         Ok(report)
     }
 

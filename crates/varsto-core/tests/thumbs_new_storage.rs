@@ -2,6 +2,8 @@
 //! A storage added after the thumbnails were made gets them too: a device that
 //! reaches only that storage (a phone with a bucket) must still show previews.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 use varsto_core::storage::StorageSpec;
@@ -64,7 +66,11 @@ fn existing_folder_with_pictures_gets_thumbnails() {
     }
     a.add_folder("pics", &dir).unwrap();
     a.push("pics").unwrap();
-    assert_eq!(thumb_files(&root.join("first")), 2);
+    // One pass makes both and writes them as one record.
+    assert_eq!(thumb_files(&root.join("first")), 1);
+    for p in ["x.png", "sub/y.png"] {
+        assert!(a.thumbnail("pics", p).unwrap().is_some(), "{p}");
+    }
 }
 
 /// The desktop app adds a folder and then keeps its files encrypted here.
@@ -85,22 +91,36 @@ fn existing_folder_kept_encrypted_gets_thumbnails() {
     assert_eq!(thumb_files(&root.join("first")), 1);
 }
 
-/// Pictures that were there before any storage existed: nothing can hold the
-/// thumbnails yet, so they must not be given up for good.
+/// Another device of the folder reads the thumbnails a device published as
+/// records, and does not make them again.
 #[test]
-#[ignore = "f3-switch: port in part B (thumbnails)"]
-fn thumbnails_wait_for_a_first_storage() {
+fn another_device_reads_the_thumbnails_from_the_records() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    let (mut a, _key) = Engine::init(&root.join("a-home"), "laptop", PASS).unwrap();
-    let dir = root.join("pics");
-    fs::create_dir_all(&dir).unwrap();
-    image::RgbImage::from_fn(300, 200, |x, y| image::Rgb([x as u8, y as u8, 5]))
-        .save(dir.join("x.png"))
-        .unwrap();
-    a.add_folder("pics", &dir).unwrap();
-    let _ = a.push("pics");
+    let (mut a, key) = Engine::init(&root.join("a-home"), "laptop", PASS).unwrap();
     a.add_storage(local(root, "first")).unwrap();
+    let dir = root.join("pics");
+    a.add_folder("pics", &dir).unwrap();
+    fs::create_dir_all(&dir).unwrap();
+    image::RgbImage::from_fn(300, 200, |x, y| image::Rgb([x as u8, y as u8, 7]))
+        .save(dir.join("a.png"))
+        .unwrap();
     a.push("pics").unwrap();
+    assert_eq!(thumb_files(&root.join("first")), 1);
+
+    let mut b = common::join_approved(
+        &root.join("b-home"),
+        "phone",
+        PASS,
+        &key,
+        local(root, "first"),
+        &mut a,
+    );
+    b.attach_folder("pics", &root.join("b-pics"), true).unwrap();
+    b.pull("pics").unwrap();
+    let t = b.thumbnail("pics", "a.png").unwrap().unwrap();
+    assert!(t.len() > 200);
+    assert_eq!(Some(t), a.thumbnail("pics", "a.png").unwrap());
+    // The phone made none of its own.
     assert_eq!(thumb_files(&root.join("first")), 1);
 }

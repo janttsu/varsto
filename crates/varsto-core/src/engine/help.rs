@@ -314,7 +314,7 @@ impl Engine {
                 inputs.ledger_rolled_back.push(d);
             }
         }
-        let view = self.view()?;
+        let view = self.view3()?;
         inputs.forked = self.forked_self || !view.forked.is_empty();
         let repair = observed
             .repair

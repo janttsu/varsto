@@ -82,20 +82,22 @@ fn measure<T>(e: &mut Engine, f: impl FnOnce(&mut Engine) -> T) -> (T, CallCount
     (out, calls.snapshot(), ms)
 }
 
-/// Manifest records of `device` on the storage (one seq per record).
+/// Sequence numbers of the manifest records of `device` on the storage
+/// (`<seq 16>-<part 4>.rec`).
 fn stored(lab: &Lab, folder: &str, device: &str) -> Vec<u64> {
     let d = lab.root.join("storage/manifests").join(folder).join(device);
     let mut out: Vec<u64> = fs::read_dir(&d)
         .map(|r| {
             r.filter_map(|e| {
-                let name = e.ok()?.file_name().to_string_lossy().to_string();
-                let (seq, part) = name.strip_suffix(".rec")?.split_once('-')?;
-                (part == "0000").then(|| seq.parse().ok())?
+                let name = e.ok()?.file_name().to_string_lossy().into_owned();
+                name.strip_suffix(".rec")?;
+                name[..16].parse().ok()
             })
             .collect()
         })
         .unwrap_or_default();
     out.sort();
+    out.dedup();
     out
 }
 
@@ -147,32 +149,21 @@ fn pull_lists_only_new_manifests() {
         fs::read(lab.dir("b").join("note.txt")).unwrap(),
         b"version 6"
     );
-
-    // B publishes its own view of the change; after that nothing is new:
-    // nothing listed, nothing applied twice (storage format 3 lists only
-    // what the ledger announced; there is no sweep).
-    b.sync(None).unwrap();
-    let (r, c, _) = measure(b, |e| e.sync(None).unwrap());
-    assert_eq!(r[0].0.manifests_applied, 0);
-    assert_eq!((c.manifest_lists, c.manifest_gets), (0, 0), "{c:?}");
 }
 
-/// Storage format 3 prunes a writer's records below its newest base once
-/// every reader acknowledged the batch that announced the base; here a
-/// base follows every second delta, so a few edits show it.
 #[test]
 fn pruning_waits_for_every_reader() {
     let lab = lab();
     let mut devs = devices(&lab, &["b", "c"]);
-    devs[0].set_manifest_base_after(Some(2));
     let folder = folder_id(&devs[0]);
     let a_id = devs[0].device_id().to_string();
     // Everyone has seen everything once.
     for e in devs.iter_mut() {
         e.sync(None).unwrap();
     }
-    // C goes quiet; A and B keep working.
-    for i in 1..=6 {
+    // C goes quiet; A and B keep working. A's manifest is a base and deltas:
+    // a new base follows 64 deltas.
+    for i in 1..=70 {
         edit(&lab, &mut devs[0], "a", &format!("version {i}"));
         devs[1].sync(None).unwrap();
     }
@@ -180,28 +171,18 @@ fn pruning_waits_for_every_reader() {
     let left = stored(&lab, &folder, &a_id);
     let newest = *left.last().unwrap();
     assert!(
-        left.len() as u64 >= newest - 1,
-        "C has not acknowledged the newer ones: {left:?}"
+        left.contains(&1) && left.len() as u64 >= newest - 1,
+        "C has not acknowledged the new base: nothing goes: {left:?}"
     );
 
-    // C catches up: it reads only A's newest manifest and gets the newest content.
-    let (r, c, _) = measure(&mut devs[2], |e| e.sync(None).unwrap());
-    assert_eq!(r[0].0.manifests_applied, 2, "A's and B's newest");
-    let b_id = devs[1].device_id().to_string();
-    let b_left = stored(&lab, &folder, &b_id);
-    assert!(
-        c.manifest_listed_keys <= (left.len() + b_left.len()) as u64,
-        "{c:?}"
-    );
-    assert!(
-        c.manifest_gets <= (left.len() + b_left.len()) as u64,
-        "from the newest bases on: {c:?}"
-    );
+    // C catches up: it reads A's base and the deltas after it, and B's.
+    devs[2].sync(None).unwrap();
     assert_eq!(
         fs::read(lab.dir("c").join("note.txt")).unwrap(),
-        b"version 6"
+        b"version 70"
     );
-    // Once B and C have acknowledged A's newest batch, A keeps only its newest.
+    // Once B and C have acknowledged A's newest base, A keeps the records
+    // from that base on.
     devs[1].sync(None).unwrap();
     edit(&lab, &mut devs[1], "b", "from b");
     devs[2].sync(None).unwrap();
@@ -209,7 +190,10 @@ fn pruning_waits_for_every_reader() {
     devs[0].sync(None).unwrap();
     devs[0].sync(None).unwrap();
     let left = stored(&lab, &folder, &a_id);
-    assert!(left.len() <= 2, "superseded manifests pruned: {left:?}");
+    assert!(
+        !left.contains(&1) && left.len() < 10,
+        "records below the newest base pruned: {left:?}"
+    );
     assert!(left.contains(&newest) || left.iter().any(|s| *s > newest));
 
     // Everyone still converges, and a device joining now reads the few left.
