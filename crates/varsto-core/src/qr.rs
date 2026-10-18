@@ -2,30 +2,26 @@
 //! Invitations as `varsto://` links and QR codes
 //! (`docs/spec/alpha-0-format.md` section 51).
 //!
-//! Three links exist:
+//! Two links exist:
 //!
 //! - `varsto://share/request?c=<request>`: a recipient asks for a share; the
-//!   value is its request code (public key and name, nothing secret).
-//! - `varsto://share/token?t=<token>`: the owner answers with a sealed token
-//!   (`vst1`/`vst2`), which only the requesting device opens.
+//!   value is its request code (public keys and name, nothing secret). The
+//!   owner answers on the storage (a grant to the code's key), not with a
+//!   link.
 //! - `varsto://pair?c=<nine digits>&a=<host:port>,…`: one of your devices
 //!   offers pairing; the code is the pairing password.
 //!
-//! Request codes and tokens carry a hybrid X25519 + ML-KEM-768 key or
-//! ciphertext (more than a kilobyte), so a link stores them in a compact
-//! binary form, Base32 encoded: the QR code then uses its alphanumeric mode
-//! (5.5 bits a character) for nearly all of it. One code is shown by
-//! default, so that a phone's own camera app can open the link; on request
-//! (a camera that cannot read the dense code) or when one code cannot hold
-//! it, the link is split into parts that Varsto shows and reads as an
-//! animated sequence (`p=<index>.<count>.<group>`). Plain tokens,
-//! which carry the folder key itself, are never put in a link.
+//! Request codes carry a hybrid Ed25519 + ML-DSA-65 key and a hybrid
+//! X25519 + ML-KEM-768 key (about three kilobytes), so a link stores them in
+//! a compact binary form, Base32 encoded: the QR code then uses its
+//! alphanumeric mode (5.5 bits a character) for nearly all of it. One code
+//! cannot hold that, so the link is split into parts that Varsto shows and
+//! reads as an animated sequence (`p=<index>.<count>.<group>`).
 //!
 //! Scanning: [`decode_luma`] and [`decode_image`] find QR codes in a camera
 //! frame or a screenshot; [`Assembler`] collects the parts of a split link.
 
-use crate::kem::EncapsKey;
-use crate::vault::{SealedShareToken, ShareRequest, SHARE_REQUEST_PREFIX};
+use crate::vault::{ShareRequest, SHARE_REQUEST_PREFIX};
 use anyhow::{anyhow, bail, Context, Result};
 use data_encoding::BASE32_NOPAD;
 use qrcode::{EcLevel, QrCode};
@@ -43,15 +39,14 @@ pub const PART_CHARS: usize = 560;
 /// Largest camera frame or image the decoder looks at (pixels a side).
 pub const MAX_IMAGE_SIDE: u32 = 4096;
 
-const REQUEST_FORMAT: u8 = 1;
+/// Format 3: K6 and K8 public keys.
+const REQUEST_FORMAT: u8 = 2;
 
 /// What a link stands for, in the text forms the rest of Varsto uses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Link {
-    /// A share request code, `vsr1.<key hex>[.<name>]`.
+    /// A share request code, `vsr1.<K6 hex>.<K8 hex>[.<name>]`.
     ShareRequest(String),
-    /// A sealed share token, `vst1.…` or `vst2.…`.
-    ShareToken(String),
     /// A pairing offer: the nine digits and the addresses it listens on.
     Pair {
         code: String,
@@ -62,7 +57,7 @@ pub enum Link {
 /// One part of a link that was split for an animated QR sequence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Part {
-    /// `request` or `token`.
+    /// `request`.
     pub kind: String,
     /// 1-based.
     pub index: usize,
@@ -82,17 +77,16 @@ pub enum Scanned {
 }
 
 impl Link {
-    /// Kind name used by the interface: `request`, `token` or `pair`.
+    /// Kind name used by the interface: `request` or `pair`.
     pub fn kind(&self) -> &'static str {
         match self {
             Link::ShareRequest(_) => "request",
-            Link::ShareToken(_) => "token",
             Link::Pair { .. } => "pair",
         }
     }
 
-    /// The link for a request code or a sealed token given as text or as a
-    /// link. Plain tokens are refused: they carry the folder key.
+    /// The link for a request code or a pairing code given as text or as a
+    /// link.
     pub fn from_text(s: &str) -> Result<Link> {
         let s = s.trim();
         if is_link(s) {
@@ -109,27 +103,22 @@ impl Link {
             ShareRequest::parse(s)?;
             return Ok(Link::ShareRequest(s.to_string()));
         }
-        if SealedShareToken::is_sealed(s) {
-            SealedShareToken::decode(s)?;
-            return Ok(Link::ShareToken(s.to_string()));
-        }
         if crate::pair::normalize(s).is_ok() {
             return Ok(Link::Pair {
                 code: crate::pair::normalize(s)?,
                 addresses: Vec::new(),
             });
         }
-        if s.split('.').count() == 4 {
-            bail!("a plain share token carries the folder key itself and is never shown as a QR code; seal it to the recipient's request code instead");
+        if s.starts_with("vst1.") || s.starts_with("vst2.") || s.split('.').count() == 4 {
+            bail!("share tokens are gone: the owner adds you with your request code, and you accept the share from the storage it names");
         }
-        bail!("not a Varsto request code, sealed share token or pairing code")
+        bail!("not a Varsto request code or pairing code")
     }
 
     /// The Base32 value of the link's `c=`/`t=` parameter (not for pairing).
     fn value(&self) -> Result<String> {
         Ok(BASE32_NOPAD.encode(&match self {
             Link::ShareRequest(code) => request_to_bytes(code)?,
-            Link::ShareToken(token) => token_to_bytes(token)?,
             Link::Pair { .. } => bail!("a pairing link has no compact value"),
         }))
     }
@@ -138,7 +127,6 @@ impl Link {
     pub fn to_uri(&self) -> Result<String> {
         Ok(match self {
             Link::ShareRequest(_) => format!("{SCHEME}share/request?c={}", self.value()?),
-            Link::ShareToken(_) => format!("{SCHEME}share/token?t={}", self.value()?),
             Link::Pair { code, addresses } => {
                 let code = crate::pair::normalize(code)?;
                 let mut u = format!("{SCHEME}pair?c={code}");
@@ -156,7 +144,6 @@ impl Link {
     pub fn to_uris(&self, single_max: usize, part_chars: usize) -> Result<Vec<String>> {
         let (path, param) = match self {
             Link::ShareRequest(_) => ("share/request", "c"),
-            Link::ShareToken(_) => ("share/token", "t"),
             Link::Pair { .. } => return Ok(vec![self.to_uri()?]),
         };
         let v = self.value()?;
@@ -178,10 +165,10 @@ impl Link {
             .collect())
     }
 
-    /// The text form (request code or token) the rest of Varsto takes.
+    /// The text form (request code or pairing code) the rest of Varsto takes.
     pub fn text(&self) -> String {
         match self {
-            Link::ShareRequest(s) | Link::ShareToken(s) => s.clone(),
+            Link::ShareRequest(s) => s.clone(),
             Link::Pair { code, .. } => code.clone(),
         }
     }
@@ -225,7 +212,6 @@ pub fn parse(s: &str) -> Result<Scanned> {
     }
     let allowed: &[&str] = match path.as_str() {
         "share/request" => &["c", "p"],
-        "share/token" => &["t", "p"],
         "pair" => &["c", "a"],
         other => bail!("unknown varsto:// link: {other}"),
     };
@@ -255,11 +241,7 @@ pub fn parse(s: &str) -> Result<Scanned> {
         }
         return Ok(Scanned::Link(Link::Pair { code, addresses }));
     }
-    let (kind, param) = if path == "share/request" {
-        ("request", "c")
-    } else {
-        ("token", "t")
-    };
+    let (kind, param) = ("request", "c");
     let value = params
         .get(param)
         .ok_or_else(|| anyhow!("the link has no {param}= value"))?
@@ -294,8 +276,8 @@ pub fn parse(s: &str) -> Result<Scanned> {
     Ok(Scanned::Link(link_from_value(kind, &value)?))
 }
 
-/// A link from its kind and its `c=`/`t=` value: the compact Base32 form, or
-/// the text form (`vsr1.…`, `vst2.…`), which is accepted too.
+/// A link from its kind and its `c=` value: the compact Base32 form, or the
+/// text form (`vsr1.…`), which is accepted too.
 fn link_from_value(kind: &str, value: &str) -> Result<Link> {
     let value = value.trim();
     match kind {
@@ -307,15 +289,6 @@ fn link_from_value(kind: &str, value: &str) -> Result<Link> {
             };
             ShareRequest::parse(&code)?;
             Ok(Link::ShareRequest(code))
-        }
-        "token" => {
-            let token = if SealedShareToken::is_sealed(value) {
-                value.to_string()
-            } else {
-                token_from_bytes(&b32(value)?)?
-            };
-            SealedShareToken::decode(&token)?;
-            Ok(Link::ShareToken(token))
         }
         _ => bail!("unknown link kind {kind}"),
     }
@@ -350,13 +323,19 @@ fn percent_decode(s: &str) -> Result<String> {
     String::from_utf8(out).map_err(|_| anyhow!("the link is not UTF-8"))
 }
 
-/// `format u8 | key length u16 BE | key | name (UTF-8, the rest)`.
+/// `format u8 | K6 length u16 BE | K6 | K8 length u16 BE | K8 | name
+/// (UTF-8, the rest)`.
 fn request_to_bytes(code: &str) -> Result<Vec<u8>> {
     let r = ShareRequest::parse(code)?;
-    let key = r.key.to_bytes();
     let mut out = vec![REQUEST_FORMAT];
-    out.extend_from_slice(&(key.len() as u16).to_be_bytes());
-    out.extend_from_slice(&key);
+    for key in [r.k6.clone(), r.key.to_bytes()] {
+        out.extend_from_slice(
+            &u16::try_from(key.len())
+                .map_err(|_| anyhow!("key too long for a link"))?
+                .to_be_bytes(),
+        );
+        out.extend_from_slice(&key);
+    }
     out.extend_from_slice(r.name.as_bytes());
     Ok(out)
 }
@@ -364,77 +343,17 @@ fn request_to_bytes(code: &str) -> Result<Vec<u8>> {
 fn request_from_bytes(b: &[u8]) -> Result<String> {
     let mut r = Reader(b);
     if r.u8()? != REQUEST_FORMAT {
-        bail!("unknown request code format in the link");
+        bail!("this request link is from an older version of Varsto: ask for a new one");
     }
     let n = r.u16()? as usize;
-    let key = EncapsKey::from_bytes(r.take(n)?)?;
+    let k6 = r.take(n)?.to_vec();
+    let n = r.u16()? as usize;
+    let k8 = r.take(n)?.to_vec();
     let name = std::str::from_utf8(r.0).map_err(|_| anyhow!("the name is not UTF-8"))?;
     crate::names::check_display_name(name.trim())?;
-    let mut code = format!("{SHARE_REQUEST_PREFIX}{}", hex::encode(key.to_bytes()));
-    if !name.trim().is_empty() {
-        code.push('.');
-        code.push_str(name.trim());
-    }
+    let code = ShareRequest::code_of(&k6, &k8, name.trim());
+    ShareRequest::parse(&code)?;
     Ok(code)
-}
-
-/// `version u8 | vault (u8 length) | folder (u8) | KEM algorithm (u8) |
-/// KEM ciphertext (u16) | sealed payload (u16) | name (UTF-8, the rest)`.
-fn token_to_bytes(token: &str) -> Result<Vec<u8>> {
-    let t = SealedShareToken::decode(token)?;
-    let mut out = vec![t.version];
-    let short = |out: &mut Vec<u8>, b: &[u8]| -> Result<()> {
-        out.push(u8::try_from(b.len()).map_err(|_| anyhow!("field too long for a link"))?);
-        out.extend_from_slice(b);
-        Ok(())
-    };
-    short(&mut out, &t.vault_id.as_bytes())?;
-    short(&mut out, &t.folder_id.as_bytes())?;
-    short(&mut out, t.kem_alg.as_bytes())?;
-    for h in [&t.kem_ct_hex, &t.sealed_key_hex] {
-        let b = hex::decode(h)?;
-        out.extend_from_slice(
-            &u16::try_from(b.len())
-                .map_err(|_| anyhow!("field too long for a link"))?
-                .to_be_bytes(),
-        );
-        out.extend_from_slice(&b);
-    }
-    out.extend_from_slice(t.name.as_bytes());
-    // The compact form must give back exactly this token (the AEAD binds
-    // the text of its fields).
-    if token_from_bytes(&out)? != t.encode() {
-        bail!("this token cannot be put in a link");
-    }
-    Ok(out)
-}
-
-fn token_from_bytes(b: &[u8]) -> Result<String> {
-    let mut r = Reader(b);
-    let version = r.u8()?;
-    if !(1..=2).contains(&version) {
-        bail!("unknown token version {version} in the link");
-    }
-    let vault = r.short()?;
-    let folder = r.short()?;
-    let alg = std::str::from_utf8(r.short()?).map_err(|_| anyhow!("bad algorithm name"))?;
-    let n = r.u16()? as usize;
-    let ct = r.take(n)?;
-    let n = r.u16()? as usize;
-    let sealed = r.take(n)?;
-    let name = std::str::from_utf8(r.0).map_err(|_| anyhow!("the folder name is not UTF-8"))?;
-    let t = SealedShareToken {
-        version,
-        vault_id: crate::ids::Id::from_bytes(vault),
-        folder_id: crate::ids::Id::from_bytes(folder),
-        name: name.to_string(),
-        kem_alg: alg.to_string(),
-        kem_ct_hex: hex::encode(ct),
-        sealed_key_hex: hex::encode(sealed),
-    };
-    let s = t.encode();
-    SealedShareToken::decode(&s)?;
-    Ok(s)
 }
 
 struct Reader<'a>(&'a [u8]);
@@ -454,10 +373,6 @@ impl<'a> Reader<'a> {
     fn u16(&mut self) -> Result<u16> {
         let b = self.take(2)?;
         Ok(u16::from_be_bytes([b[0], b[1]]))
-    }
-    fn short(&mut self) -> Result<&'a [u8]> {
-        let n = self.u8()? as usize;
-        self.take(n)
     }
 }
 
@@ -827,8 +742,13 @@ mod tests {
 
     #[test]
     fn qr_codes_render_and_decode() {
+        // A request code is too long for one code: its first part.
         let (_d, code) = request("Robin");
-        let uri = Link::from_text(&code).unwrap().to_uri().unwrap();
+        let uri = Link::from_text(&code)
+            .unwrap()
+            .to_uris(PART_CHARS, PART_CHARS)
+            .unwrap()
+            .remove(0);
         let img = to_svg(&uri).unwrap();
         assert!(img.svg.starts_with("<?xml") || img.svg.contains("<svg"));
         assert!(img.version <= 40);

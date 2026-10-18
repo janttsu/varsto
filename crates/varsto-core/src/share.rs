@@ -1,61 +1,35 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Shared folders (F-047) beyond the token: confirming who asked for a
-//! share, removing members, and the per-folder key epochs that make a
-//! removal stick (`docs/spec/alpha-0-format.md` section 23).
+//! Shared folders with other people (F-047) on storage format 3: what the
+//! two sides compare, and the roles a member gets.
 //!
-//! - **Fingerprint.** A request code carries the requester's hybrid KEM key
-//!   and, optionally, a name. Both sides derive six words from the two; the
-//!   owner compares them with the requester over another channel (a call,
-//!   in person) before the token is sealed, so a code swapped on the way is
-//!   noticed. The sealed token carries the words the owner confirmed, and the
-//!   recipient's device checks them against its own request.
-//! - **Share epochs.** Removing a member (or revoking a token that was not
-//!   accepted yet) gives the folder a new random key, a *share epoch*. New
-//!   chunks, manifests, member records and member ledger batches use it. The
-//!   owner's devices receive it under the folder-record key, members that
-//!   stay through a grant sealed to their KEM key. The epoch record, readable
-//!   with the new key only, links back to every older key of the folder and
-//!   lists who keeps access and the ledger cut-off of who left.
+//! - **Request code and fingerprint.** A request code (`vsr1`) carries the
+//!   requester's device keys (K6 and K8 public keys) and, optionally, a
+//!   name. Both sides derive six words from the three; the owner compares
+//!   them with the requester over another channel (a call, in person)
+//!   before it adds the member, so a code swapped on the way is noticed.
+//!   The member compares the owner device's six words when it accepts.
+//! - **Roles.** A member is an editor or a viewer (folder records and the
+//!   grants to the member say which, `membership3`); nothing a viewer
+//!   publishes for the folder is accepted by anyone.
 //!
-//! Share epoch numbers start at [`SHARE_EPOCH_BASE`], far above the vault key
-//! epochs of section 21, so the two never collide in a chunk reference.
+//! The format-2 tokens (`vst1`, `vst2`, plain), share epochs under keys
+//! derived from the vault key and role records are gone: an owner answers a
+//! request with a folder record that lists the member and a grant sealed to
+//! the code's K8 (`Engine::share_add`), and removing a member starts a
+//! folder epoch (`membership3`).
 
-use crate::crypto::{self, SecretKey, SigningKey, VerifyingKey};
-use crate::ids::{DeviceId, FolderId, VaultId};
-use crate::kem::{DecapsKey, EncapsKey};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use zeroize::Zeroizing;
-
-/// First share epoch of a folder; later ones count up from here.
-pub const SHARE_EPOCH_BASE: u32 = 1 << 20;
-
-/// `vault/share-epochs/<folder>/<epoch>.enc`: the epoch record, under the new key.
-pub const EPOCH_PREFIX: &str = "vault/share-epochs/";
-/// `vault/share-keys/<folder>/<epoch>.enc`: the epoch key for the owner's devices.
-pub const KEY_PREFIX: &str = "vault/share-keys/";
-/// `vault/share-grants/<folder>/<epoch>/<recipient>/<issuer>.json`: the epoch
-/// key for one member, sealed by one of the owner's devices.
-pub const GRANT_PREFIX: &str = "vault/share-grants/";
-/// `vault/share-members/<folder>/<epoch>/<device>.enc`: member records written
-/// under a share epoch's registry key (epoch-0 records stay in `vault/shares/`).
-pub const MEMBER_PREFIX: &str = "vault/share-members/";
-/// `vault/share-kem/<folder>/<device>.json`: a member's KEM key, signed by it.
-pub const KEM_PREFIX: &str = "vault/share-kem/";
-/// `vault/share-invites/<folder>/<invite>.enc`: a token the owner issued.
-pub const INVITE_PREFIX: &str = "vault/share-invites/";
 
 /// Number of words in a request fingerprint (11 bits each, 66 bits).
 pub const FINGERPRINT_WORDS: usize = 6;
 
-/// Six BIP-39 English words derived from a request's KEM key and the name
-/// bound to it. Independent of the format version, so two users on
-/// different versions see the same words.
-pub fn fingerprint(ek: &EncapsKey, name: &str) -> String {
+/// Six BIP-39 English words derived from a request's K6 and K8 public keys
+/// and the name bound to it.
+pub fn fingerprint(k6: &[u8], k8: &[u8], name: &str) -> String {
     fingerprint_words(
-        "varsto share-request fingerprint v1",
-        &[ek.to_bytes().as_slice(), name.trim().as_bytes()],
+        "varsto share-request fingerprint v3",
+        &[k6, k8, name.trim().as_bytes()],
     )
 }
 
@@ -97,341 +71,11 @@ pub fn fingerprint_matches(expected: &str, given: &str) -> bool {
     !a.is_empty() && a == b
 }
 
-/// Identity of a request key: used to tie a member device (whose KEM key is
-/// its request key) to the invitation the owner issued for it.
-pub fn invite_id(ek: &EncapsKey) -> String {
-    hex::encode(&crypto::hash(&ek.to_bytes())[..16])
-}
-
-/// A token the owner issued, so that the owner's devices can list
-/// invitations that were not accepted yet and revoke them. Sealed under the
-/// folder-record key (owner devices only).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InviteRecord {
-    pub folder: FolderId,
-    /// `invite_id` of the request key, or a random id for a plain token.
-    pub invite: String,
-    /// The request code's KEM key (hex); empty for a plain token.
-    #[serde(default)]
-    pub request_hex: String,
-    /// Name the requester bound to the code, if any.
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub fingerprint: String,
-    pub issuer: DeviceId,
-    pub issued_utc: i64,
-    /// The role the token gives (editor for tokens issued before roles).
-    #[serde(default)]
-    pub role: ShareRole,
-    /// The secret inside the sealed token from which the member derives
-    /// its join proof (hex; empty for a plain token).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub join_secret_hex: String,
-}
-
-impl InviteRecord {
-    pub fn storage_key(folder: &FolderId, invite: &str) -> String {
-        format!("{INVITE_PREFIX}{folder}/{invite}.enc")
-    }
-    fn aad(vault: &VaultId, folder: &FolderId, invite: &str) -> Vec<u8> {
-        crypto::aad(
-            "share-invite",
-            &[
-                vault.as_str().as_bytes(),
-                folder.as_str().as_bytes(),
-                invite.as_bytes(),
-            ],
-        )
-    }
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.folder, &self.invite),
-            &serde_json::to_vec(self)?,
-        )
-    }
-    pub fn open(
-        blob: &[u8],
-        vault: &VaultId,
-        folder: &FolderId,
-        invite: &str,
-        key: &SecretKey,
-    ) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, folder, invite), blob)?;
-        let r: InviteRecord = serde_json::from_slice(&plain)?;
-        if &r.folder != folder || r.invite != invite {
-            bail!("invite record does not match its name");
-        }
-        Ok(r)
-    }
-    pub fn request_key(&self) -> Option<EncapsKey> {
-        EncapsKey::from_bytes(&hex::decode(&self.request_hex).ok()?).ok()
-    }
-}
-
-/// A member removed when a share epoch began.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RemovedMember {
-    pub device: DeviceId,
-    pub name: String,
-    /// Highest ledger batch of the member that stays valid.
-    pub cutoff_seq: u64,
-}
-
-/// The record of one share epoch of a folder, encrypted under a key derived
-/// from that epoch's folder key: only holders of the new key read it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ShareEpochRecord {
-    pub folder: FolderId,
-    pub epoch: u32,
-    pub issuer: DeviceId,
-    pub issued_utc: i64,
-    /// Every earlier folder key except the epoch-0 key (hex by epoch): the
-    /// share epochs before this one and, for a folder that was re-keyed with
-    /// the vault key, its vault-epoch keys.
-    pub older: BTreeMap<u32, String>,
-    /// Devices that keep access: the owner's full devices and the members
-    /// that stay.
-    pub participants: Vec<DeviceId>,
-    /// The owner's devices among them: members accept grants of later
-    /// epochs only from these.
-    #[serde(default)]
-    pub owners: Vec<DeviceId>,
-    pub removed: Vec<RemovedMember>,
-    /// Invitations (tokens not accepted yet) that this epoch revoked.
-    #[serde(default)]
-    pub revoked_invites: Vec<String>,
-    /// Invitations still open: they get a grant addressed to the invitation.
-    #[serde(default)]
-    pub kept_invites: Vec<String>,
-}
-
-impl ShareEpochRecord {
-    pub fn storage_key(folder: &FolderId, epoch: u32) -> String {
-        format!("{EPOCH_PREFIX}{folder}/{epoch:010}.enc")
-    }
-    fn key(epoch_key: &SecretKey, folder: &FolderId) -> SecretKey {
-        epoch_key.derive("share-epoch-record", &[folder.as_str().as_bytes()])
-    }
-    fn aad(vault: &VaultId, folder: &FolderId, epoch: u32) -> Vec<u8> {
-        crypto::aad(
-            "share-epoch-record",
-            &[
-                vault.as_str().as_bytes(),
-                folder.as_str().as_bytes(),
-                &epoch.to_le_bytes(),
-            ],
-        )
-    }
-    pub fn seal(&self, vault: &VaultId, epoch_key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            &Self::key(epoch_key, &self.folder),
-            &Self::aad(vault, &self.folder, self.epoch),
-            &Zeroizing::new(serde_json::to_vec(self)?),
-        )
-    }
-    pub fn open(
-        blob: &[u8],
-        vault: &VaultId,
-        folder: &FolderId,
-        epoch: u32,
-        epoch_key: &SecretKey,
-    ) -> Result<Self> {
-        let plain = Zeroizing::new(crypto::decrypt(
-            &Self::key(epoch_key, folder),
-            &Self::aad(vault, folder, epoch),
-            blob,
-        )?);
-        let r: ShareEpochRecord = serde_json::from_slice(&plain)?;
-        if &r.folder != folder || r.epoch != epoch {
-            bail!("share epoch record does not match its name");
-        }
-        Ok(r)
-    }
-}
-
-/// A share epoch key for the owner's own devices, sealed under the
-/// folder-record key of the vault.
-pub struct ShareKeyRecord;
-
-impl ShareKeyRecord {
-    pub fn storage_key(folder: &FolderId, epoch: u32) -> String {
-        format!("{KEY_PREFIX}{folder}/{epoch:010}.enc")
-    }
-    fn aad(vault: &VaultId, folder: &FolderId, epoch: u32) -> Vec<u8> {
-        crypto::aad(
-            "share-key",
-            &[
-                vault.as_str().as_bytes(),
-                folder.as_str().as_bytes(),
-                &epoch.to_le_bytes(),
-            ],
-        )
-    }
-    pub fn seal(
-        vault: &VaultId,
-        folder: &FolderId,
-        epoch: u32,
-        epoch_key: &SecretKey,
-        record_key: &SecretKey,
-    ) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            record_key,
-            &Self::aad(vault, folder, epoch),
-            epoch_key.as_bytes(),
-        )
-    }
-    pub fn open(
-        blob: &[u8],
-        vault: &VaultId,
-        folder: &FolderId,
-        epoch: u32,
-        record_key: &SecretKey,
-    ) -> Result<SecretKey> {
-        let k = Zeroizing::new(crypto::decrypt(
-            record_key,
-            &Self::aad(vault, folder, epoch),
-            blob,
-        )?);
-        SecretKey::from_bytes(&k)
-    }
-}
-
-/// Parse `<epoch, 10 digits>.enc` or `<epoch>/...` names.
-pub fn epoch_from_name(name: &str) -> Option<u32> {
-    let head = name.split('/').next()?;
-    head.strip_suffix(".enc").unwrap_or(head).parse().ok()
-}
-
-/// A share epoch key sealed to one member's KEM key (or to the request key of
-/// an invitation not accepted yet), signed by the owner device that sealed it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ShareGrant {
-    pub format_version: u16,
-    pub folder: FolderId,
-    pub epoch: u32,
-    /// A device id, or `inv-<invite id>`.
-    pub recipient: String,
-    pub issuer: DeviceId,
-    pub kem_alg: String,
-    pub kem_ct_hex: String,
-    pub sealed_hex: String,
-    pub sig_alg: String,
-    pub sig_hex: String,
-}
-
-impl ShareGrant {
-    pub fn storage_key(
-        folder: &FolderId,
-        epoch: u32,
-        recipient: &str,
-        issuer: &DeviceId,
-    ) -> String {
-        format!("{GRANT_PREFIX}{folder}/{epoch:010}/{recipient}/{issuer}.json")
-    }
-    /// Check the issuer's signature only.
-    pub fn verify(&self, vault: &VaultId, issuer_key: &VerifyingKey) -> Result<()> {
-        issuer_key.verify(
-            &self.sig_alg,
-            &self.message(vault),
-            &hex::decode(&self.sig_hex)?,
-        )
-    }
-    pub fn invite_recipient(invite: &str) -> String {
-        format!("inv-{invite}")
-    }
-    fn aad(&self, vault: &VaultId) -> Vec<u8> {
-        crypto::aad(
-            "share-grant",
-            &[
-                vault.as_str().as_bytes(),
-                self.folder.as_str().as_bytes(),
-                &self.epoch.to_le_bytes(),
-                self.recipient.as_bytes(),
-                self.issuer.as_str().as_bytes(),
-            ],
-        )
-    }
-    fn message(&self, vault: &VaultId) -> Vec<u8> {
-        crypto::aad(
-            "share-grant-signature",
-            &[
-                vault.as_str().as_bytes(),
-                self.folder.as_str().as_bytes(),
-                &self.epoch.to_le_bytes(),
-                self.recipient.as_bytes(),
-                self.issuer.as_str().as_bytes(),
-                self.kem_alg.as_bytes(),
-                self.kem_ct_hex.as_bytes(),
-                self.sealed_hex.as_bytes(),
-            ],
-        )
-    }
-    #[allow(clippy::too_many_arguments)]
-    pub fn seal(
-        vault: &VaultId,
-        folder: &FolderId,
-        epoch: u32,
-        recipient: &str,
-        to: &EncapsKey,
-        key: &SecretKey,
-        issuer: &DeviceId,
-        signer: &SigningKey,
-    ) -> Result<Self> {
-        let (kem_ct, shared) = to.encapsulate()?;
-        let mut g = ShareGrant {
-            format_version: crate::FORMAT_VERSION,
-            folder: folder.clone(),
-            epoch,
-            recipient: recipient.to_string(),
-            issuer: issuer.clone(),
-            kem_alg: crate::kem::KEM_ALG.to_string(),
-            kem_ct_hex: hex::encode(kem_ct),
-            sealed_hex: String::new(),
-            sig_alg: signer.alg().to_string(),
-            sig_hex: String::new(),
-        };
-        g.sealed_hex = hex::encode(crypto::encrypt(&shared, &g.aad(vault), &key.0)?);
-        g.sig_hex = hex::encode(signer.sign(&g.message(vault)));
-        Ok(g)
-    }
-    /// Check the issuer's signature and open with the recipient's KEM key.
-    pub fn open(
-        &self,
-        vault: &VaultId,
-        issuer_key: &VerifyingKey,
-        dk: &DecapsKey,
-    ) -> Result<SecretKey> {
-        if self.kem_alg != crate::kem::KEM_ALG {
-            bail!("unsupported key encapsulation algorithm {}", self.kem_alg);
-        }
-        issuer_key.verify(
-            &self.sig_alg,
-            &self.message(vault),
-            &hex::decode(&self.sig_hex)?,
-        )?;
-        let shared = dk.decapsulate(&hex::decode(&self.kem_ct_hex)?)?;
-        let key = Zeroizing::new(
-            crypto::decrypt(&shared, &self.aad(vault), &hex::decode(&self.sealed_hex)?)
-                .map_err(|_| anyhow!("share grant does not open with this device's key"))?,
-        );
-        SecretKey::from_bytes(&key)
-    }
-}
-
-/// `vault/share-roles/<folder>/<seq, 10 digits>-<issuer>.json`: who of a
-/// shared folder's members may write, signed by one of the owner's devices.
-pub const ROLE_PREFIX: &str = "vault/share-roles/";
-/// `vault/share-join/<folder>/<device>.json`: a member's proof that it opened
-/// the token of one invitation (so the owner knows which role it was given).
-pub const JOIN_PREFIX: &str = "vault/share-join/";
-
 /// What a member of a shared folder may do. The owner's devices always write.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum ShareRole {
-    /// Reads and writes (every member before roles existed).
+    /// Reads and writes.
     #[default]
     Editor,
     /// Reads only: nothing it publishes for the folder is accepted.
@@ -455,214 +99,13 @@ impl ShareRole {
     pub fn is_editor(&self) -> bool {
         *self == ShareRole::Editor
     }
-}
-
-/// The role of one member device in a role record.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RoleEntry {
-    pub role: ShareRole,
-    /// The member's name when the entry was written (shown only).
-    #[serde(default)]
-    pub name: String,
-    /// When this role was given.
-    pub since_utc: i64,
-    /// A viewer that was an editor before: its changes up to this Lamport
-    /// clock (as named in file versions) were accepted then and stay so.
-    #[serde(default)]
-    pub editor_until_clock: u64,
-    /// Likewise its ledger batches up to this sequence number.
-    #[serde(default)]
-    pub editor_until_seq: u64,
-}
-
-/// Every member's role in a shared folder: a snapshot, not a delta. The
-/// valid record with the highest sequence number is the truth (ties: the
-/// later `issued_utc`, then the larger issuer id). Once a folder has one,
-/// a member it does not list is a viewer: the owner's devices list a new
-/// member under the role of its invitation once they see its join proof.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ShareRoles {
-    pub folder: FolderId,
-    pub seq: u64,
-    pub issuer: DeviceId,
-    pub issued_utc: i64,
-    /// The newest share epoch when the record was written.
-    #[serde(default)]
-    pub share_epoch: u32,
-    /// By member device id.
-    pub roles: BTreeMap<DeviceId, RoleEntry>,
-}
-
-impl ShareRoles {
-    /// Ordering of two valid records of a folder: larger wins.
-    pub fn rank(&self) -> (u64, i64, DeviceId) {
-        (self.seq, self.issued_utc, self.issuer.clone())
-    }
-}
-
-/// A role record as stored: the body encrypted under a key derived from the
-/// folder key of share epoch `epoch` (0: the folder key), signed by the
-/// issuing owner device over its place and the ciphertext.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SignedShareRoles {
-    pub format_version: u16,
-    pub folder: FolderId,
-    pub seq: u64,
-    pub issuer: DeviceId,
-    pub epoch: u32,
-    pub body_hex: String,
-    pub sig_alg: String,
-    pub sig_hex: String,
-}
-
-impl SignedShareRoles {
-    pub fn storage_key(folder: &FolderId, seq: u64, issuer: &DeviceId) -> String {
-        format!("{ROLE_PREFIX}{folder}/{seq:010}-{issuer}.json")
-    }
-    /// (seq, issuer) of a name under `vault/share-roles/<folder>/`.
-    pub fn parse_name(name: &str) -> Option<(u64, DeviceId)> {
-        let stem = name.strip_suffix(".json")?;
-        let (seq, issuer) = stem.split_once('-')?;
-        Some((seq.parse().ok()?, DeviceId::from_hex(issuer).ok()?))
-    }
-    fn key(epoch_key: &SecretKey, folder: &FolderId) -> SecretKey {
-        epoch_key.derive("share-roles", &[folder.as_str().as_bytes()])
-    }
-    fn aad(vault: &VaultId, folder: &FolderId, seq: u64, issuer: &DeviceId, epoch: u32) -> Vec<u8> {
-        crypto::aad(
-            "share-roles",
-            &[
-                vault.as_str().as_bytes(),
-                folder.as_str().as_bytes(),
-                &seq.to_le_bytes(),
-                issuer.as_str().as_bytes(),
-                &epoch.to_le_bytes(),
-            ],
-        )
-    }
-    fn message(&self, vault: &VaultId) -> Result<Vec<u8>> {
-        let body = hex::decode(&self.body_hex)?;
-        Ok(crypto::aad(
-            "share-roles-signature",
-            &[
-                vault.as_str().as_bytes(),
-                self.folder.as_str().as_bytes(),
-                &self.seq.to_le_bytes(),
-                self.issuer.as_str().as_bytes(),
-                &self.epoch.to_le_bytes(),
-                &crypto::hash(&body),
-            ],
-        ))
-    }
-    pub fn seal(
-        roles: &ShareRoles,
-        vault: &VaultId,
-        epoch: u32,
-        epoch_key: &SecretKey,
-        signer: &SigningKey,
-    ) -> Result<Self> {
-        let body = crypto::encrypt(
-            &Self::key(epoch_key, &roles.folder),
-            &Self::aad(vault, &roles.folder, roles.seq, &roles.issuer, epoch),
-            &serde_json::to_vec(roles)?,
-        )?;
-        let mut s = SignedShareRoles {
-            format_version: crate::FORMAT_VERSION,
-            folder: roles.folder.clone(),
-            seq: roles.seq,
-            issuer: roles.issuer.clone(),
-            epoch,
-            body_hex: hex::encode(body),
-            sig_alg: signer.alg().to_string(),
-            sig_hex: String::new(),
-        };
-        s.sig_hex = hex::encode(signer.sign(&s.message(vault)?));
-        Ok(s)
-    }
-    /// Check the issuer's signature, then open with the folder key of the
-    /// envelope's epoch. The body must agree with the envelope.
-    pub fn open(
-        &self,
-        vault: &VaultId,
-        issuer_key: &VerifyingKey,
-        epoch_key: &SecretKey,
-    ) -> Result<ShareRoles> {
-        issuer_key.verify(
-            &self.sig_alg,
-            &self.message(vault)?,
-            &hex::decode(&self.sig_hex)?,
-        )?;
-        let plain = crypto::decrypt(
-            &Self::key(epoch_key, &self.folder),
-            &Self::aad(vault, &self.folder, self.seq, &self.issuer, self.epoch),
-            &hex::decode(&self.body_hex)?,
-        )?;
-        let r: ShareRoles = serde_json::from_slice(&plain)?;
-        if r.folder != self.folder || r.seq != self.seq || r.issuer != self.issuer {
-            bail!("share role record does not match its envelope");
-        }
-        Ok(r)
-    }
-}
-
-/// A member's proof that it holds the token of invitation `invite`:
-/// `derive(join secret, "share-join-proof", folder, device)`. The join secret
-/// travels only inside the sealed token and in the owner's invitation
-/// record, so nobody else can tie a device to an invitation (and its role).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct JoinProof {
-    pub folder: FolderId,
-    pub device: DeviceId,
-    pub invite: String,
-    pub proof_hex: String,
-}
-
-impl JoinProof {
-    pub fn storage_key(folder: &FolderId, device: &DeviceId) -> String {
-        format!("{JOIN_PREFIX}{folder}/{device}.json")
-    }
-    pub fn proof(secret: &SecretKey, folder: &FolderId, device: &DeviceId) -> String {
-        secret
-            .derive(
-                "share-join-proof",
-                &[folder.as_str().as_bytes(), device.as_str().as_bytes()],
-            )
-            .to_hex()
-    }
-    pub fn make(secret: &SecretKey, folder: &FolderId, device: &DeviceId, invite: &str) -> Self {
-        JoinProof {
-            folder: folder.clone(),
-            device: device.clone(),
-            invite: invite.to_string(),
-            proof_hex: Self::proof(secret, folder, device),
+    /// The folder role of format 3.
+    pub fn role3(&self) -> crate::membership3::Role {
+        match self {
+            ShareRole::Editor => crate::membership3::Role::Editor,
+            ShareRole::Viewer => crate::membership3::Role::Viewer,
         }
     }
-    pub fn verify(&self, secret: &SecretKey) -> bool {
-        crypto::ct_eq(
-            Self::proof(secret, &self.folder, &self.device).as_bytes(),
-            self.proof_hex.as_bytes(),
-        )
-    }
-}
-
-/// The ledger key id of a member's batches for a folder: `share:<folder>`
-/// under the epoch-0 key, `share:<folder>@<epoch>` under a share epoch.
-pub fn ledger_key_id(folder: &FolderId, epoch: u32) -> String {
-    if epoch == 0 {
-        crate::vault::share_key_id(folder)
-    } else {
-        format!("share:{folder}@{epoch}")
-    }
-}
-
-/// Inverse of [`ledger_key_id`].
-pub fn parse_ledger_key_id(id: &str) -> Option<(FolderId, u32)> {
-    let rest = id.strip_prefix("share:")?;
-    let (fid, epoch) = match rest.split_once('@') {
-        Some((f, e)) => (f, e.parse().ok()?),
-        None => (rest, 0),
-    };
-    Some((FolderId::from_hex(fid).ok()?, epoch))
 }
 
 #[cfg(test)]
@@ -670,63 +113,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fingerprint_binds_key_and_name() {
-        let dk = DecapsKey::generate();
-        let ek = dk.public();
-        let a = fingerprint(&ek, "Alice");
+    fn fingerprint_covers_both_keys_and_the_name() {
+        let (k6, k8) = (vec![1u8; 32], vec![2u8; 32]);
+        let a = fingerprint(&k6, &k8, "Robin");
         assert_eq!(a.split(' ').count(), FINGERPRINT_WORDS);
-        assert_eq!(a, fingerprint(&ek, " Alice "));
-        assert_ne!(a, fingerprint(&ek, "Mallory"));
-        assert_ne!(a, fingerprint(&DecapsKey::generate().public(), "Alice"));
-        assert!(fingerprint_matches(&a, &a.to_uppercase().replace(' ', "-")));
+        assert_eq!(a, fingerprint(&k6, &k8, " Robin "));
+        assert_ne!(a, fingerprint(&k6, &k8, "Mallory"));
+        assert_ne!(a, fingerprint(&[3u8; 32], &k8, "Robin"));
+        assert_ne!(a, fingerprint(&k6, &[3u8; 32], "Robin"));
+        assert!(fingerprint_matches(&a, &a.to_uppercase()));
         assert!(!fingerprint_matches(&a, ""));
-    }
-
-    #[test]
-    fn grant_opens_only_for_its_recipient_and_issuer() {
-        let vault = VaultId::random();
-        let folder = FolderId::random();
-        let issuer = DeviceId::random();
-        let signer = SigningKey::generate();
-        let dk = DecapsKey::generate();
-        let key = SecretKey::random();
-        let g = ShareGrant::seal(
-            &vault,
-            &folder,
-            SHARE_EPOCH_BASE,
-            "abc",
-            &dk.public(),
-            &key,
-            &issuer,
-            &signer,
-        )
-        .unwrap();
-        assert_eq!(
-            g.open(&vault, &signer.public(), &dk).unwrap().to_hex(),
-            key.to_hex()
-        );
-        assert!(g
-            .open(&vault, &SigningKey::generate().public(), &dk)
-            .is_err());
-        assert!(g
-            .open(&vault, &signer.public(), &DecapsKey::generate())
-            .is_err());
-        let mut moved = g.clone();
-        moved.recipient = "other".into();
-        assert!(moved.open(&vault, &signer.public(), &dk).is_err());
-    }
-
-    #[test]
-    fn ledger_key_ids_round_trip() {
-        let f = FolderId::random();
-        assert_eq!(
-            parse_ledger_key_id(&ledger_key_id(&f, 0)),
-            Some((f.clone(), 0))
-        );
-        assert_eq!(
-            parse_ledger_key_id(&ledger_key_id(&f, SHARE_EPOCH_BASE + 2)),
-            Some((f, SHARE_EPOCH_BASE + 2))
-        );
-        assert_eq!(parse_ledger_key_id("ledger"), None);
     }
 }

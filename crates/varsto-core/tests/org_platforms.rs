@@ -6,6 +6,8 @@
 //! and comes back once allowed again; policies and device details that are
 //! not signed by the right device are ignored.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use varsto_core::chunking::ChunkerParams;
@@ -63,8 +65,14 @@ fn org(lab: &Lab) -> (Engine, Engine, Engine) {
     a.sync(None).unwrap();
     let mut others = Vec::new();
     for (who, platform) in [("b", "windows"), ("c", "linux")] {
-        let mut e =
-            small(Engine::join(&lab.home(who), who, PASS, &key, lab.storage.clone()).unwrap());
+        let mut e = small(common::join_approved(
+            &lab.home(who),
+            who,
+            PASS,
+            &key,
+            lab.storage.clone(),
+            &mut a,
+        ));
         e.set_platform_for_tests(platform, None);
         e.attach_folder("docs", &lab.dir(who), false).unwrap();
         e.sync(None).unwrap();
@@ -90,7 +98,6 @@ fn only(platforms: &[&str]) -> OrgPolicy {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
 fn approval_refuses_platforms_the_policy_does_not_allow() {
     let lab = Lab::new();
     let (mut a, _b, _c) = org(&lab);
@@ -133,6 +140,7 @@ fn approval_refuses_platforms_the_policy_does_not_allow() {
     let (e, _, _) = Engine::org_join(&lab.home("e"), "e-laptop", PASS, &approved.token).unwrap();
     let mut e = small(e);
     e.set_platform_for_tests("linux", None);
+    common::approve_all(&mut a, &mut e);
     e.attach_folder("docs", &lab.dir("e"), false).unwrap();
     e.sync(None).unwrap();
     assert!(lab.dir("e").join("one.txt").exists());
@@ -148,7 +156,6 @@ fn approval_refuses_platforms_the_policy_does_not_allow() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
 fn a_device_on_a_platform_no_longer_allowed_is_locked_out_until_allowed_again() {
     let lab = Lab::new();
     let (mut a, mut b, mut c) = org(&lab);
@@ -200,7 +207,6 @@ fn a_device_on_a_platform_no_longer_allowed_is_locked_out_until_allowed_again() 
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (organizations)"]
 fn unsigned_or_forged_policies_and_details_are_ignored() {
     let lab = Lab::new();
     let (mut a, mut b, mut c) = org(&lab);

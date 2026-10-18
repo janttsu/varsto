@@ -81,8 +81,6 @@ fn mailbox_through_the_cli() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (membership)"]
-// Waits for the format-3 ledger_entries listing.
 fn two_devices_through_the_cli() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -105,11 +103,14 @@ fn two_devices_through_the_cli() {
         &vault_key,
         &["join", "--name", "phone", "--storage-path", storage_s],
     );
-    // The phone asks for the folder, the laptop approves it.
-    ok(&b, &["folder", "request", "docs"]);
+    // The vault words give names, not content: B asks, A approves.
+    let req = ok(&b, &["folder", "request", "docs", "--role", "editor"]);
+    assert_eq!(
+        req["fingerprint"].as_str().unwrap().split(' ').count(),
+        6,
+        "{req}"
+    );
     ok(&a, &["folder", "approve", "docs", "phone", "--yes"]);
-    // A sync reads the grant, then the folder attaches.
-    ok(&b, &["sync"]);
     ok(&b, &["folder", "attach", "docs", b_docs.to_str().unwrap()]);
     let sync = ok(&b, &["sync"]);
     assert_eq!(sync[0][0]["files_updated"], 1);

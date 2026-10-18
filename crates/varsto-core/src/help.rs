@@ -561,7 +561,7 @@ fn no_vault(h: &mut HelpState) {
             t0("Someone shared a folder with you?"),
             t0("You can use only that folder without a vault of your own."),
         )
-        .how(t0("Choose Accept a shared folder, send the owner your request code and paste the token they send back."))
+        .how(t0("Choose Accept a shared folder, send the owner your request code, and accept once they shared the folder with it."))
         .act("setup", Some("acceptshare"), "Accept a shared folder")
         .guide("sharing")
         .0,

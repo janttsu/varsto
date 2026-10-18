@@ -218,6 +218,16 @@ impl Engine {
                 log::warn!("manifest refused: {x}");
             }
         }
+        if refused.total() > 0 {
+            let mut all = self
+                .f3
+                .records_refused
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            for (k, n) in refused.by_kind {
+                *all.by_kind.entry(k).or_insert(0) += n;
+            }
+        }
         // Writers that are no longer trusted (removed past their cut-off):
         // their views do not count.
         let trusted: Vec<Id16> = manifests.views.keys().copied().collect();

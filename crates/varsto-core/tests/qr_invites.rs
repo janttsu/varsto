@@ -36,9 +36,6 @@ fn through_camera(uris: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The links of a share and a pairing through QR codes: a request code,
-/// a sealed token in parts in any order, the single-code form, and the
-/// sizes the spec records.
 #[test]
 fn a_share_through_qr_links() {
     let tmp = tempfile::tempdir().unwrap();
@@ -51,100 +48,43 @@ fn a_share_through_qr_links() {
     fs::write(root.join("a-docs/plan.txt"), b"shared by QR").unwrap();
     a.sync(None).unwrap();
 
-    // The recipient shows its request as a QR code; the owner scans it.
+    // The recipient shows its request as QR codes (it carries two hybrid
+    // public keys, more than one code holds); the owner scans them in any
+    // order.
     let home = root.join("robin-home");
     let code = ShareRequest::code_for_named(&home, Some("Robin")).unwrap();
     let words = ShareRequest::fingerprint_for(&home).unwrap();
     let req_link = Link::from_text(&code).unwrap();
-    let req_uri = req_link.to_uri().unwrap();
-    let scanned = through_camera(std::slice::from_ref(&req_uri));
-    assert_eq!(scanned, vec![req_uri.clone()]);
-    // The owner sees the same six words for the scanned link.
-    let seen = Engine::share_request_info(&scanned[0]).unwrap();
-    assert_eq!(seen.fingerprint, words);
-    assert_eq!(seen.name, "Robin");
-    let (sealed, _) = a
-        .share_create_sealed("project", &scanned[0], Some(&words))
-        .unwrap();
-
-    // The owner shows the token, split into parts; the recipient scans them
-    // in any order.
-    let token_link = Link::from_text(&sealed.encode()).unwrap();
-    let parts = token_link.to_uris(0, qr::PART_CHARS).unwrap();
+    let parts = req_link.to_uris(qr::PART_CHARS, qr::PART_CHARS).unwrap();
     assert!(parts.len() > 1);
     let mut read = through_camera(&parts);
     read.reverse();
     let got = qr::assemble(&read).unwrap();
-    assert_eq!(got, token_link);
-    // The single-code form opens just the same.
-    let token_uri = token_link.to_uri().unwrap();
-    let single = through_camera(std::slice::from_ref(&token_uri));
-    let token = ShareRequest::open_token(&home, &single[0]).unwrap();
-    assert_eq!(token.fingerprint, words);
-
-    // Someone who photographs the token cannot open it on another device.
-    let other = root.join("eve-home");
-    ShareRequest::code_for_named(&other, Some("Eve")).unwrap();
-    assert!(ShareRequest::open_token(&other, &token_uri).is_err());
-
-    // A request link is not a token and the reverse.
-    assert!(ShareRequest::open_token(&home, &req_uri).is_err());
+    assert_eq!(got, req_link);
     assert!(matches!(qr::parse(&parts[0]).unwrap(), Scanned::Part(_)));
-
-    // Sizes recorded in the spec (section 51).
-    let report = |what: &str, text: &str, link: &Link| {
-        let uri = link.to_uri().unwrap();
-        let img = qr::to_svg(&uri).unwrap();
-        let parts = link.to_uris(0, qr::PART_CHARS).unwrap();
-        let p = qr::to_svg(&parts[0]).unwrap();
-        println!(
-            "{what}: text {} chars, link {} chars, one code version {} ({} modules, ECC {}); as parts {} code(s), first version {} ({} modules, ECC {})",
-            text.len(),
-            uri.len(),
-            img.version,
-            img.modules,
-            img.ecc,
-            parts.len(),
-            p.version,
-            p.modules,
-            p.ecc
-        );
-    };
-    report("request code (name Robin)", &code, &req_link);
-    report("sealed token vst2", &sealed.encode(), &token_link);
-    let pair = Link::Pair {
-        code: "123456789".into(),
-        addresses: vec!["192.168.1.20:41234".into()],
-    };
-    report("pairing", "123-456-789", &pair);
-}
-
-/// The recipient of a token scanned through QR codes opens the folder.
-#[test]
-#[ignore = "f3-switch: port in part B (sharing with other people: member folder-scoped batches)"]
-fn a_share_scanned_through_qr_opens_on_the_member() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root: PathBuf = tmp.path().to_path_buf();
-    let (mut a, _) = Engine::init(&root.join("a-home"), "laptop", PASS).unwrap();
-    a.chunker = ChunkerParams::SMALL;
-    a.add_storage(storage(&root)).unwrap();
-    a.add_folder("project", &root.join("a-docs")).unwrap();
-    fs::write(root.join("a-docs/plan.txt"), b"shared by QR").unwrap();
-    a.sync(None).unwrap();
-    let home = root.join("robin-home");
-    let code = ShareRequest::code_for_named(&home, Some("Robin")).unwrap();
-    let words = ShareRequest::fingerprint_for(&home).unwrap();
-    let req_uri = Link::from_text(&code).unwrap().to_uri().unwrap();
-    let scanned = through_camera(std::slice::from_ref(&req_uri));
-    let (sealed, _) = a
-        .share_create_sealed("project", &scanned[0], Some(&words))
+    // The owner sees the same six words for the scanned link.
+    let seen = Engine::share_request_info(&got.text()).unwrap();
+    assert_eq!(seen.fingerprint, words);
+    assert_eq!(seen.name, "Robin");
+    let added = a
+        .share_add(
+            "project",
+            &got.text(),
+            Some(&words),
+            varsto_core::share::ShareRole::Editor,
+        )
         .unwrap();
-    let token_uri = Link::from_text(&sealed.encode()).unwrap().to_uri().unwrap();
-    let single = through_camera(std::slice::from_ref(&token_uri));
-    let token = ShareRequest::open_token(&home, &single[0]).unwrap();
-    let mut m = Engine::accept_share(&home, "robin", PASS, &token, storage(&root)).unwrap();
+
+    // The recipient accepts from the storage, comparing the owner's words.
+    let mut m = Engine::accept_share(
+        &home,
+        "robin",
+        PASS,
+        Some(&added.owner_fingerprint),
+        storage(&root),
+    )
+    .unwrap();
     m.chunker = ChunkerParams::SMALL;
-    ShareRequest::clear(&home);
     m.attach_folder("project", &root.join("robin-docs"), false)
         .unwrap();
     m.sync(None).unwrap();
@@ -152,4 +92,30 @@ fn a_share_scanned_through_qr_opens_on_the_member() {
         fs::read(root.join("robin-docs/plan.txt")).unwrap(),
         b"shared by QR"
     );
+
+    // Share tokens are gone: their old text forms are refused with a reason.
+    let err = Link::from_text("vst2.AAAA").unwrap_err();
+    assert!(format!("{err:#}").contains("tokens are gone"), "{err:#}");
+
+    // Sizes recorded in the spec (section 51).
+    let report = |what: &str, text: &str, link: &Link| {
+        let uri = link.to_uri().unwrap();
+        let parts = link.to_uris(0, qr::PART_CHARS).unwrap();
+        let p = qr::to_svg(&parts[0]).unwrap();
+        println!(
+            "{what}: text {} chars, link {} chars; as parts {} code(s), first version {} ({} modules, ECC {})",
+            text.len(),
+            uri.len(),
+            parts.len(),
+            p.version,
+            p.modules,
+            p.ecc
+        );
+    };
+    report("request code (name Robin)", &code, &req_link);
+    let pair = Link::Pair {
+        code: "123456789".into(),
+        addresses: vec!["192.168.1.20:41234".into()],
+    };
+    report("pairing", "123-456-789", &pair);
 }

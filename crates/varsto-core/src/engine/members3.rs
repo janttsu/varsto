@@ -33,12 +33,51 @@ pub(crate) struct Members3 {
     pub revoked: BTreeSet<Id16>,
     pub revocations: BTreeMap<Id16, RevocationRecord>,
     pub refused: RecordsRefused,
+    /// A revocation of this device (`Membership::own_revocation`).
+    pub own_revocation: Option<RevocationRecord>,
+    /// Vault epoch numbers two devices wrote.
+    pub vault_forks: BTreeMap<u32, BTreeSet<Id16>>,
+    /// Devices whose ledger batches count only up to a cut-off: removed
+    /// from the vault (revocations), or member devices of other vaults
+    /// removed from a folder (folder epoch records).
+    pub cutoffs: BTreeMap<Id16, u64>,
+    /// On a member device of another vault: what its grants say.
+    pub member: Option<MemberInfo>,
+    /// The newest key wraps of every Strongroom folder.
+    pub strongrooms: BTreeMap<Id16, crate::membership3::strongrooms::StrongroomRecord>,
     /// Read at least once in this process.
     pub read: bool,
 }
 
+/// A member device's own standing in its shared folder.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MemberInfo {
+    pub folder: Id16,
+    pub role: Option<Role>,
+    pub access_lost: bool,
+    /// The owner devices whose grants counted.
+    pub owners: BTreeSet<Id16>,
+}
+
 impl Members3 {
     fn of(m: &Membership<'_>) -> Members3 {
+        let mut cutoffs: BTreeMap<Id16, u64> = BTreeMap::new();
+        for (f, ep) in &m.registry.epochs {
+            for r in ep.applied.values() {
+                for x in &r.removed {
+                    // Own devices removed from one folder still write for
+                    // the others: only another person's device is cut off.
+                    if m.devices.get(&x.device).is_none()
+                        && m.members.folders_of(&x.device).iter().all(|g| g == f)
+                    {
+                        cutoffs.insert(x.device, x.cutoff);
+                    }
+                }
+            }
+        }
+        for (d, r) in &m.revocations {
+            cutoffs.insert(*d, r.cutoff_seq);
+        }
         Members3 {
             devices: m.devices.clone(),
             registry: m.registry.clone(),
@@ -47,8 +86,46 @@ impl Members3 {
             revoked: m.revoked_set().clone(),
             revocations: m.revocations.clone(),
             refused: m.refused.clone(),
+            own_revocation: m.own_revocation.clone(),
+            vault_forks: m.vault_forks.clone(),
+            cutoffs,
+            member: None,
+            strongrooms: m.strongrooms.clone(),
             read: true,
         }
+    }
+
+    /// What a member device knows, as the same registries.
+    fn of_member(v: crate::membership3::MemberView) -> Members3 {
+        Members3 {
+            member: Some(MemberInfo {
+                folder: v.folder,
+                role: v.role,
+                access_lost: v.access_lost,
+                owners: v.owners.clone(),
+            }),
+            devices: v.devices,
+            registry: v.registry,
+            granted: v.granted,
+            members: v.members,
+            revoked: BTreeSet::new(),
+            revocations: BTreeMap::new(),
+            refused: v.refused,
+            own_revocation: None,
+            vault_forks: BTreeMap::new(),
+            cutoffs: v.cutoffs,
+            strongrooms: BTreeMap::new(),
+            read: true,
+        }
+    }
+
+    /// Whether `folder` is shared with other people's devices (once it is,
+    /// it stays so: the owners' folder events go into folder-scoped
+    /// batches the members can read).
+    pub fn shared(&self, folder: &Id16) -> bool {
+        self.registry
+            .get(folder)
+            .is_some_and(|st| !st.members.is_empty())
     }
 
     /// The trust of section 9 over these registries.
@@ -147,6 +224,15 @@ impl Storage for Tee<'_> {
     }
 }
 
+/// `member3.json` of a member device.
+const MEMBER_FILE: &str = "member3.json";
+
+#[derive(Serialize, Deserialize)]
+struct MemberState3 {
+    folder: String,
+    anchor: String,
+}
+
 /// The binary form of an id (16 bytes) of this vault.
 pub(crate) fn bin(id: &crate::ids::Id) -> Result<Id16> {
     crate::record::id16(id).ok_or_else(|| anyhow!("id {id} is not 16 bytes of hex"))
@@ -170,6 +256,38 @@ impl Engine {
     /// this device, its K8.
     pub(crate) fn keys3<'a>(&'a self, vault_keys: &'a VaultKeys) -> KeyRing<'a> {
         let m = &self.f3.members;
+        // A Strongroom's key is held only while it is unlocked here.
+        let now = util::now_utc();
+        let mut extra = Vec::new();
+        for (fid, (k13, until)) in &self.unlocked {
+            let Ok(f) = bin(fid) else { continue };
+            if *until <= now {
+                continue;
+            }
+            let keys = crate::membership3::FolderKeys {
+                folder: f,
+                epochs: BTreeMap::from([(0, k13.clone())]),
+                k11: crate::membership3::grants::k11_of(&f, k13),
+            };
+            if let Some(k) = keys.k10(0) {
+                extra.push((
+                    KeyId::Meta {
+                        folder: f,
+                        epoch: 0,
+                    },
+                    k,
+                ));
+            }
+            if let Some(k) = keys.share_ledger(0) {
+                extra.push((
+                    KeyId::ShareLedger {
+                        folder: f,
+                        epoch: 0,
+                    },
+                    k,
+                ));
+            }
+        }
         KeyRing {
             me: self.me3(),
             vault: vault_keys,
@@ -177,7 +295,7 @@ impl Engine {
             devices: Some(&m.devices),
             folders: Some(&m.granted),
             recovery: None,
-            extra: Vec::new(),
+            extra,
             members: Some(&m.members),
         }
     }
@@ -198,6 +316,17 @@ impl Engine {
         &mut self,
         f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
     ) -> Result<Option<R>> {
+        self.with_members3_as(true, f)
+    }
+
+    /// `with_members3`; without `guard` (tests: a modified client) a
+    /// revocation of this device and an unresolved vault epoch stop
+    /// nothing.
+    pub(crate) fn with_members3_as<R>(
+        &mut self,
+        guard: bool,
+        f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
+    ) -> Result<Option<R>> {
         let open = self.member_storages()?;
         if open.is_empty() {
             return Ok(None);
@@ -215,17 +344,48 @@ impl Engine {
             .collect();
         let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
         let lamport = self.clock.lamport;
+        let kept = self.vault_kept3();
+        let recovered = self.keyring_keys3()?;
         let (out, snapshot, keys, stamped) = {
             let Some(kem) = self.epochs.kem.as_ref() else {
                 bail!("this device has no KEM key (K8); it cannot take part in format-3 folders");
             };
-            let mut m = Membership::open(vault, &refs, &self.keys.signer, kem, self.vault_keys3())?;
+            let mut m = Membership::open_with(
+                vault,
+                &refs,
+                &self.keys.signer,
+                kem,
+                self.vault_keys3(),
+                kept,
+            )?;
             m.observe_lamport(lamport);
-            let out = f(&mut m);
+            for k in recovered {
+                if m.granted.get(&k.folder).is_none() {
+                    m.add_recovered(k);
+                }
+            }
+            // A removed device, or one that waits for the user's choice
+            // between two vault epochs, writes nothing.
+            let out = if !guard {
+                f(&mut m)
+            } else if m.own_revocation.is_some() {
+                Err(anyhow!("this device was removed from the vault"))
+            } else if let Some(e) = m.unresolved_vault_forks().first() {
+                Err(anyhow!(
+                    "two devices wrote key epoch {e} at once; keep one first (`varsto device resolve-epoch {e} --keep <device>`)"
+                ))
+            } else {
+                f(&mut m)
+            };
             (out, Members3::of(&m), m.vault_keys.clone(), m.lamport())
         };
+        let own = snapshot.own_revocation.clone();
+        let forks = snapshot.vault_forks.clone();
         self.adopt_members3(snapshot, keys)?;
         self.observe_clock(stamped)?;
+        if guard {
+            self.after_members3(own, forks)?;
+        }
         out.map(Some)
     }
 
@@ -237,12 +397,32 @@ impl Engine {
         )
     }
 
+    /// Copy every membership record of the local mirror to `to` (a storage
+    /// just added), put-if-absent.
+    pub(crate) fn copy_records3(&self, to: &dyn Storage) -> Result<()> {
+        let dir = self.home.join("state").join("records3");
+        if !dir.is_dir() {
+            return Ok(());
+        }
+        let mirror = self.records_mirror3()?;
+        for key in mirror.list("vault/")? {
+            if let Some(b) = mirror.get(&key)? {
+                to.put_if_absent(&key, &b)?;
+            }
+        }
+        Ok(())
+    }
+
     /// The membership as the local mirror of its records gives it (an
     /// engine just opened knows its devices and folders without a storage).
     pub(crate) fn load_members3_local(&mut self) -> Result<()> {
         let dir = self.home.join("state").join("records3");
-        if !dir.is_dir() || self.vault.member {
+        if !dir.is_dir() {
             return Ok(());
+        }
+        if self.vault.member {
+            let mirror = self.records_mirror3()?;
+            return self.read_member3(&[&mirror]);
         }
         let vault = bin(&self.vault.vault_id)?;
         let mirror = self.records_mirror3()?;
@@ -251,7 +431,14 @@ impl Engine {
             let Some(kem) = self.epochs.kem.as_ref() else {
                 return Ok(());
             };
-            let m = Membership::open(vault, &refs, &self.keys.signer, kem, self.vault_keys3())?;
+            let m = Membership::open_with(
+                vault,
+                &refs,
+                &self.keys.signer,
+                kem,
+                self.vault_keys3(),
+                self.vault_kept3(),
+            )?;
             (Members3::of(&m), m.vault_keys.clone())
         };
         self.adopt_members3(snapshot, keys)
@@ -261,10 +448,82 @@ impl Engine {
     /// device record when the registry lacks it).
     pub(crate) fn refresh_members3(&mut self) -> Result<()> {
         if self.vault.member {
-            return Ok(());
+            let open = self.member_storages()?;
+            if open.is_empty() {
+                return Ok(());
+            }
+            let mirror = self.records_mirror3()?;
+            let teed: Vec<Tee> = open
+                .iter()
+                .map(|(_, b)| Tee {
+                    inner: &**b,
+                    mirror: &mirror,
+                })
+                .collect();
+            let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
+            return self.read_member3(&refs);
         }
         self.with_enrolled3(|_| Ok(()))?;
+        // The organization's manifest, roster and log (`org_ops`), judged
+        // with the devices just read; a device its policy allows again gets
+        // the vault key it was held back from.
+        self.sync_org()?;
+        if self.org.is_some() && self.removal.is_none() {
+            let held = self.org_held3();
+            self.with_members3(|m| {
+                m.hold_grants = held;
+                m.grant_missing_vault_keys()
+            })?;
+        }
         Ok(())
+    }
+
+    /// Devices of the registry that an organization's policy locks out:
+    /// they get no new vault key until it allows them again.
+    pub(crate) fn org_held3(&self) -> BTreeSet<Id16> {
+        self.f3
+            .members
+            .devices
+            .devices
+            .keys()
+            .filter(|d| self.org_refuses_device(&DeviceId::from_bytes(*d)).is_some())
+            .copied()
+            .collect()
+    }
+
+    /// The shared folder of a member device (`member3.json`: the folder
+    /// and the owner device its trust starts from).
+    pub(crate) fn member_state3(&self) -> Option<(Id16, Id16)> {
+        let st: MemberState3 = util::read_json(&self.home.join(MEMBER_FILE)).ok()?;
+        let f = hex::decode(&st.folder).ok()?.try_into().ok()?;
+        let a = hex::decode(&st.anchor).ok()?.try_into().ok()?;
+        Some((f, a))
+    }
+
+    pub(crate) fn save_member_state3(&self, folder: &Id16, anchor: &Id16) -> Result<()> {
+        util::write_json(
+            &self.home.join(MEMBER_FILE),
+            &MemberState3 {
+                folder: hex::encode(folder),
+                anchor: hex::encode(anchor),
+            },
+        )
+    }
+
+    /// A member device: read its grants and the folder epochs, and keep
+    /// what they give as the engine's membership.
+    fn read_member3(&mut self, storages: &[&dyn Storage]) -> Result<()> {
+        let Some((folder, anchor)) = self.member_state3() else {
+            return Ok(());
+        };
+        let vault = bin(&self.vault.vault_id)?;
+        let view = {
+            let Some(kem) = self.epochs.kem.as_ref() else {
+                bail!("this member device has no KEM key (K8)");
+            };
+            crate::membership3::MemberView::read(storages, vault, self.me3(), kem, folder, anchor)?
+        };
+        self.adopt_members3(Members3::of_member(view), VaultKeys::default())
     }
 
     /// `with_members3` after publishing this device's device record when
@@ -285,14 +544,15 @@ impl Engine {
     /// Keep what a `Membership` read: the registries, newer vault keys,
     /// the folders of the vault in the local keyring (with the keys granted
     /// to this device), the device list.
-    fn adopt_members3(&mut self, mut snapshot: Members3, keys: VaultKeys) -> Result<()> {
-        // Keys this device took from escrow (`recover_folders3`) are kept
-        // in the local keyring only: they count as held.
+    /// The folder keys the local keyring holds (from grants, or taken from
+    /// escrow by `recover_folders`, which only the keyring keeps).
+    fn keyring_keys3(&self) -> Result<Vec<crate::membership3::FolderKeys>> {
+        let mut out = Vec::new();
         for rec in self.keyring.folders.values() {
             let Ok(id) = bin(&rec.folder_id) else {
                 continue;
             };
-            if snapshot.granted.get(&id).is_some() || rec.k11_hex.is_empty() {
+            if rec.k11_hex.is_empty() || rec.is_removed() {
                 continue;
             }
             let mut epochs = BTreeMap::new();
@@ -305,11 +565,22 @@ impl Engine {
             if epochs.is_empty() {
                 continue;
             }
-            snapshot.granted.add(crate::membership3::FolderKeys {
+            out.push(crate::membership3::FolderKeys {
                 folder: id,
                 epochs,
                 k11: SecretKey::from_hex(&rec.k11_hex)?,
             });
+        }
+        Ok(out)
+    }
+
+    fn adopt_members3(&mut self, mut snapshot: Members3, keys: VaultKeys) -> Result<()> {
+        // Keys this device took from escrow (`recover_folders3`) are kept
+        // in the local keyring only: they count as held.
+        for k in self.keyring_keys3()? {
+            if snapshot.granted.get(&k.folder).is_none() {
+                snapshot.granted.add(k);
+            }
         }
         let mut epochs_changed = false;
         for (e, k) in keys.keys {
@@ -330,6 +601,10 @@ impl Engine {
         }
         self.f3.members = snapshot;
         self.observe_clock(lamport)?;
+        // A folder another device converted into a Strongroom (or gave a
+        // new Strongroom key) takes the old one's place here before the
+        // old one, now removed, is forgotten.
+        self.adopt_conversions3()?;
         self.sync_keyring3()?;
         self.sync_devices3()
     }
@@ -339,7 +614,7 @@ impl Engine {
     /// folders are forgotten.
     fn sync_keyring3(&mut self) -> Result<()> {
         let mut changed = false;
-        let folders: Vec<(Id16, String, Id16, bool, Option<String>)> = self
+        let folders: Vec<(Id16, String, Id16, bool, bool, Option<String>)> = self
             .f3
             .members
             .registry
@@ -351,12 +626,13 @@ impl Engine {
                     st.name.clone(),
                     st.creator,
                     st.is_removed(),
+                    !st.members.is_empty(),
                     st.settings.get(BACKUP_SETTING).cloned(),
                 )
             })
             .collect();
         let mut removed = Vec::new();
-        for (id, name, creator, is_removed, backup) in folders {
+        for (id, name, creator, is_removed, shared, backup) in folders {
             let fid = FolderId::from_bytes(&id);
             if is_removed {
                 if self
@@ -391,11 +667,26 @@ impl Engine {
                     removed_utc: 0,
                     epoch_keys: BTreeMap::new(),
                     backup: None,
-                    share_join: None,
                 });
             if rec.name != name {
                 rec.name = name;
                 changed = true;
+            }
+            if rec.shared != shared {
+                rec.shared = shared;
+                changed = true;
+            }
+            if let Some(info) = self
+                .f3
+                .members
+                .strongrooms
+                .get(&id)
+                .and_then(|r| r.info().ok())
+            {
+                if rec.strongroom.as_ref() != Some(&info) {
+                    rec.strongroom = Some(info);
+                    changed = true;
+                }
             }
             // A backup is a folder whose record says so (`backups`).
             if rec.backup.is_none() {
@@ -444,8 +735,15 @@ impl Engine {
         let m = &self.f3.members;
         let mut devices = BTreeMap::new();
         let mut epochs = BTreeMap::new();
+        let mut details = BTreeMap::new();
         for (id, (rec, epoch)) in &m.devices.devices {
             let did = DeviceId::from_bytes(id);
+            if let Some(d) = &rec.details {
+                details.insert(
+                    did.clone(),
+                    super::devinfo::DeviceDetails::of_record(&did, d),
+                );
+            }
             devices.insert(
                 did.clone(),
                 DeviceRecord {
@@ -492,7 +790,9 @@ impl Engine {
         let changed = self.devices.devices.keys().ne(devices.keys())
             || self.devices.members.keys().ne(members.keys())
             || self.devices.revoked.keys().ne(revoked.keys())
-            || self.devices.record_epochs != epochs;
+            || self.devices.record_epochs != epochs
+            || self.devices.details != details;
+        self.devices.details = details;
         self.devices.devices = devices;
         self.devices.members = members;
         self.devices.revoked = revoked;

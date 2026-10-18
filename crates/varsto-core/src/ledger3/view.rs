@@ -512,7 +512,7 @@ impl LedgerView {
         self.max_lamport = self.max_lamport.max(batch.lamport);
         let acks = match scope {
             EventScope::Full => Some(self.acks.entry(batch.device).or_default()),
-            EventScope::Member(f) | EventScope::Viewer(f) => {
+            EventScope::Member(f) | EventScope::Viewer(f) | EventScope::Owner(f) => {
                 Some(self.folder_acks.entry((*f, batch.device)).or_default())
             }
             EventScope::Replica => None,
@@ -538,7 +538,10 @@ impl LedgerView {
                 pos,
                 dev,
             };
-            let role_ok = *scope != EventScope::Full
+            // Folder roles judge full devices and members alike: what a
+            // member wrote while it was an editor stays, what it writes
+            // as a viewer does not count.
+            let role_ok = *scope == EventScope::Replica
                 || folder_written(&ev).is_none_or(|f| {
                     roles.writes_at(&batch.device, &f, batch.lamport) != Some(false)
                 });
