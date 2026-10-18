@@ -160,6 +160,7 @@ fn device_id_is_the_hash_of_k6() {
             lamport: 9,
             device: fake,
         },
+        details: None,
     };
     Writer {
         vault: VAULT,
@@ -325,6 +326,7 @@ fn grants_and_folder_records_from_non_owners_are_refused() {
             },
         }],
         members: Vec::new(),
+        removed: None,
     };
     Writer {
         vault: VAULT,
@@ -740,6 +742,7 @@ fn body_parsers_survive_random_bytes() {
             sign_pub: d.sign.public().to_bytes(),
             kem_pub: d.kem.public().to_bytes()[..64].to_vec(),
             stamp,
+            details: None,
         },
     );
     fuzz_one(
@@ -757,6 +760,7 @@ fn body_parsers_survive_random_bytes() {
                 stamp,
             }],
             members: Vec::new(),
+            removed: None,
         },
     );
     fuzz_one(
@@ -1059,4 +1063,71 @@ fn a_member_of_another_vault_writes_by_the_member_rows() {
         (f, m, Role::Editor)
     );
     assert!(env.open_part(&MemberKem(&guest, m)).is_err());
+}
+
+#[test]
+fn a_folder_removal_counts_from_an_owner_and_device_details_travel_in_the_record() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b) = (Dev::new(), Dev::new());
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut mb = Membership::open(VAULT, &st, &b.sign, &b.kem, keys.clone()).unwrap();
+    let details = devices::DeviceDetails {
+        os: "Linux".into(),
+        os_version: "6.11".into(),
+        arch: "x86_64".into(),
+        app_version: "0.0.1".into(),
+        platform: "linux".into(),
+        updated_utc: 1_800_000_000,
+        ..Default::default()
+    };
+    mb.enrol_with("phone", Some(details.clone())).unwrap();
+    ma.refresh().unwrap();
+    assert_eq!(
+        ma.devices.get(&mb.me).unwrap().details.as_ref(),
+        Some(&details)
+    );
+    let f = ma.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    ma.approve(&f, &mb.me.clone(), Role::Editor).unwrap();
+    mb.refresh().unwrap();
+    // An editor cannot remove the folder, and a record it writes anyway
+    // does not count.
+    assert!(mb.remove_folder(&f).is_err());
+    let stamp = Stamp {
+        lamport: 500,
+        device: mb.me,
+    };
+    let rec = FolderRecord {
+        id: f,
+        name: "Docs".into(),
+        settings: BTreeMap::new(),
+        stamp,
+        creation: None,
+        participants: Vec::new(),
+        denied: Vec::new(),
+        members: Vec::new(),
+        removed: Some(stamp),
+    };
+    Writer {
+        vault: VAULT,
+        storages: &st,
+        device: mb.me,
+        key: &b.sign,
+    }
+    .write(
+        &mb.record_keys(),
+        &FolderRegistry::stream(f, mb.me),
+        None,
+        &KeyId::Registry(0),
+        &rec,
+    )
+    .unwrap();
+    ma.refresh().unwrap();
+    assert!(!ma.registry.get(&f).unwrap().is_removed());
+    // The owner's removal counts on every device.
+    ma.remove_folder(&f).unwrap();
+    mb.refresh().unwrap();
+    assert!(mb.registry.get(&f).unwrap().is_removed());
+    assert!(ma.registry.get(&f).unwrap().is_removed());
 }

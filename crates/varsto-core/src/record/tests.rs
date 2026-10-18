@@ -301,9 +301,17 @@ fn stream_for(kind: Kind, a: Id16, b: Id16) -> (StreamRef, KeyId, u64) {
             (StreamRef::new(kind, FOLDER, a), key, seq)
         }
         Kind::Snapshot => (StreamRef::new(kind, OTHER, a), meta0(), seq),
-        Kind::Peer | Kind::Policy | Kind::Settings | Kind::StorageNames | Kind::Device => {
-            (StreamRef::new(kind, [0; 16], a), KeyId::Registry(0), seq)
-        }
+        Kind::Peer
+        | Kind::Policy
+        | Kind::Settings
+        | Kind::StorageNames
+        | Kind::Device
+        | Kind::Replica
+        | Kind::OrgManifest
+        | Kind::OrgRoster
+        | Kind::OrgLog
+        | Kind::Mailbox => (StreamRef::new(kind, [0; 16], a), KeyId::Registry(0), seq),
+        Kind::Strongroom => (StreamRef::new(kind, FOLDER, a), KeyId::Registry(0), seq),
         Kind::Epoch => (StreamRef::new(kind, [0; 16], a), KeyId::Epoch(0), 1),
         Kind::ShareEpoch => (
             StreamRef::new(kind, FOLDER, a),
@@ -391,7 +399,7 @@ fn every_kind_code_has_a_name_and_round_trips() {
         assert_eq!(Kind::from_code(k.code()), Some(*k));
     }
     assert_eq!(Kind::from_code(0), None);
-    assert_eq!(Kind::from_code(23), None);
+    assert_eq!(Kind::from_code(29), None);
     let (a, b) = ([0xa1; 16], [0xb2; 16]);
     for k in Kind::ALL {
         let (stream, _, seq) = stream_for(k, a, b);
