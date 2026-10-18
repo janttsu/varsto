@@ -192,7 +192,10 @@ impl Engine {
             )
         });
         // Choose what goes to this disk before writing anything.
-        let mut left = pool.room(disk_id).unwrap_or(0);
+        // Packs are padded to a size class: what is planned must fit once
+        // padded, so the room counts as whole 64 MiB packs and the largest
+        // class that fits in the rest.
+        let mut left = crate::packs::fill_capacity(pool.room(disk_id).unwrap_or(0));
         let largest_disk = pool
             .disks()
             .iter()
@@ -289,10 +292,13 @@ impl Engine {
                 }
                 copied_packs.insert(loc.pack.clone(), false);
                 let key = crate::packs::pack_key(&loc.pack);
+                // From a docked disk of the pool, else staged by the
+                // mailbox while one was docked (section 78).
                 let Some(bytes) = pool
                     .get(&key)
                     .ok()
                     .flatten()
+                    .or_else(|| self.mailbox_object(&key))
                     .filter(|b| hex::encode(crypto::hash(b)) == loc.pack)
                 else {
                     out.unavailable += 1;
@@ -336,7 +342,9 @@ impl Engine {
                 }
             }
             if ct.is_none() {
-                ct = self.cached_object(&object);
+                ct = self
+                    .cached_object(&object)
+                    .or_else(|| self.mailbox_object(&key));
             }
             if ct.is_none() {
                 if let Some(fk) = folder_keys.get(&need.folder) {
@@ -355,15 +363,17 @@ impl Engine {
                 progress(&p);
                 continue;
             };
-            batch_bytes += ct.len();
-            batch.push((object.clone(), ct));
-            if batch_bytes >= crate::packs::HOT_TARGET {
+            // A pack never passes the top size class: the next block starts
+            // a new one when it would not fit.
+            if !batch.is_empty() && batch_bytes + ct.len() > crate::packs::HOT_TARGET {
                 let full = std::mem::take(&mut batch);
                 batch_bytes = 0;
                 if !self.fill_pack(spec, pool, disk_id, &needed, full, &mut out)? {
                     break;
                 }
             }
+            batch_bytes += ct.len();
+            batch.push((object.clone(), ct));
             progress(&p);
         }
         if !batch.is_empty() && out.failed.is_none() {
@@ -388,7 +398,7 @@ impl Engine {
             .iter()
             .map(|(o, b)| (o.as_str().to_string(), b.as_slice()))
             .collect();
-        let (id, bytes, locs) = crate::packs::build(&members);
+        let (id, bytes, locs) = crate::packs::build(&members, crate::packs::HOT_TARGET);
         match pool.add_copy_on_disk(disk_id, &crate::packs::pack_key(&id), &bytes) {
             Ok(_) => {}
             Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NoRoom { .. })) => {

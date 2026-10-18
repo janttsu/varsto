@@ -23,9 +23,6 @@ use crate::placement::{MoveReport, MoveRequest, Placement, PlacementInfo, Placem
 use crate::policy::{ChunkFacts, PolicyState};
 use std::sync::Arc;
 
-/// Blocks moved per ledger batch: their drops are sealed and pushed before
-/// any of them is deleted from the old storage.
-const MOVE_GROUP: usize = 64;
 /// How many kept blocks a report lists by name.
 const KEPT_EXAMPLES: usize = 10;
 
@@ -1037,7 +1034,21 @@ impl Engine {
         let fk = self.folder_keys(rec)?;
         let read_from = !from_spec.is_cold() || req.confirm_cold_read;
         let read_to = !to_spec.is_cold() || req.confirm_cold_read;
-        let gate = self.quota_gate(&self.view()?);
+        let view_now = self.view()?;
+        let gate = self.quota_gate(&view_now);
+        // A job from a pool: which disk that is away holds a block.
+        let from_pool: Option<PoolStorage> = (ex.staged && from_spec.is_data_only())
+            .then(|| self.open_pool(&from_spec))
+            .transpose()?;
+        let away_disk = |item: &MoveItem| -> Option<String> {
+            let p = from_pool.as_ref()?;
+            let r = view_now.locate(&rec.folder_id, &item.chunk)?;
+            let locs = p.locate_all(&super::pack_upkeep::held_key(r, from_spec.name()));
+            if locs.is_empty() || locs.iter().any(|l| l.attached) {
+                return None;
+            }
+            Some(locs[0].label.clone())
+        };
         let task = crate::activity::start(
             crate::activity::DATA_MOVE,
             &rec.name,
@@ -1047,7 +1058,12 @@ impl Engine {
         // Staged: blocks of this size and larger found no room on `to`.
         let mut full_at: Option<u64> = None;
         let mut disks_used: BTreeSet<String> = BTreeSet::new();
-        for (groups_done, group) in items.chunks(MOVE_GROUP).enumerate() {
+        // Groups of up to 15 MiB are written as one pack each; their drops are
+        // sealed and pushed before any of them is deleted from the old storage.
+        for (groups_done, group) in crate::packs::byte_groups(&items, |i| i.size)
+            .into_iter()
+            .enumerate()
+        {
             if ex.max_groups.is_some_and(|m| groups_done >= m) {
                 report.stopped_early = true;
                 break;
@@ -1086,6 +1102,17 @@ impl Engine {
                     .remove(&item.object)
                     .or_else(|| self.move_source(item, &others, from.as_ref(), read_from));
                 let Some(ct) = ct else {
+                    // A job waits for a source disk that is away instead
+                    // of leaving the block behind (the mailbox stages it
+                    // while that disk is docked, section 78).
+                    if let Some(label) = away_disk(item) {
+                        report.waiting_source_blocks += 1;
+                        report.waiting_source_bytes += item.size;
+                        if !report.waiting_source_disks.contains(&label) {
+                            report.waiting_source_disks.push(label);
+                        }
+                        continue;
+                    }
                     keep(
                         &mut report,
                         &item.object,
@@ -1391,6 +1418,10 @@ impl Engine {
             return Some(ct);
         }
         let key = chunk_storage_key(&item.object);
+        // Staged by the mailbox while the source disk was docked (section 78).
+        if let Some(ct) = self.mailbox_object(&key).filter(good) {
+            return Some(ct);
+        }
         for (_, b) in others {
             if let Ok(Some(ct)) = b.get(&key) {
                 if good(&ct) {

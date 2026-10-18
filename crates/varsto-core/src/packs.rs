@@ -77,6 +77,7 @@ impl PackLoc {
             && self.len > 0
             && self.len <= MAX_OBJECT
             && self.pack_len <= crate::storage::MAX_PACK
+            && (cfg!(not(feature = "format3")) || is_class(self.pack_len))
             && self
                 .offset
                 .checked_add(self.len)
@@ -118,14 +119,97 @@ pub fn chunk_key(object: &str) -> String {
     format!("chunks/{}/{object}", head2(object))
 }
 
-/// Build a pack from (object name, bytes): its id, bytes and members.
-pub fn build(members: &[(String, &[u8])]) -> (String, Vec<u8>, Vec<(String, PackLoc)>) {
-    let mut bytes = Vec::with_capacity(members.iter().map(|(_, b)| b.len()).sum());
+const KIB: usize = 1 << 10;
+const MIB: usize = 1 << 20;
+/// Size classes of a pack: its length is exactly one of them. Hot storages
+/// stop at 64 MiB, cold ones (target above 64 MiB) go on to 256 MiB.
+const CLASSES: [usize; 6] = [256 * KIB, MIB, 4 * MIB, 16 * MIB, 64 * MIB, 256 * MIB];
+
+/// The smallest pack: the first size class.
+pub const MIN_PACK: usize = 256 * KIB;
+
+/// The largest size class on a storage with pack `target`.
+pub fn top_class(target: usize) -> usize {
+    if target > HOT_TARGET {
+        COLD_TARGET
+    } else {
+        HOT_TARGET
+    }
+}
+
+/// Whether `len` is a size class of some storage.
+pub fn is_class(len: u64) -> bool {
+    CLASSES.iter().any(|c| *c as u64 == len)
+}
+
+/// How many bytes of members fit in `room` bytes once packs are padded to
+/// size classes: whole top-class packs and the largest class in the rest.
+pub fn fill_capacity(room: u64) -> u64 {
+    let top = HOT_TARGET as u64;
+    let rest = room % top;
+    let class = CLASSES
+        .iter()
+        .map(|c| *c as u64)
+        .filter(|c| *c <= rest && *c < top)
+        .max()
+        .unwrap_or(0);
+    room - rest + class
+}
+
+/// Split `items` into groups to write as one pack each: up to 15 MiB of
+/// members, so that a group fills the 16 MiB class (a group of 64 small
+/// blocks would be padded to a class of its own, many times its size).
+pub fn byte_groups<T>(items: &[T], size: impl Fn(&T) -> u64) -> Vec<&[T]> {
+    const GROUP_BYTES: u64 = 15 << 20;
+    let mut out = Vec::new();
+    let (mut start, mut bytes) = (0, 0u64);
+    for (i, it) in items.iter().enumerate() {
+        let n = size(it);
+        if i > start && bytes + n > GROUP_BYTES {
+            out.push(&items[start..i]);
+            start = i;
+            bytes = 0;
+        }
+        bytes += n;
+    }
+    if start < items.len() {
+        out.push(&items[start..]);
+    }
+    out
+}
+
+/// The length of a pack of `len` bytes of members on a storage with pack
+/// `target`: the smallest class that fits (256 KiB, 1, 4, 16, 64 MiB; 256
+/// MiB too on cold storages). Members of a pack never pass the top class
+/// (`PackStore` closes a pack before); the whole MiB above it is only a
+/// fallback for a caller that does not.
+pub fn padded_len(len: usize, target: usize) -> usize {
+    let top = top_class(target);
+    CLASSES
+        .iter()
+        .copied()
+        .find(|&c| c <= top && len <= c)
+        .unwrap_or_else(|| len.div_ceil(MIB) * MIB)
+}
+
+/// Build a pack from (object name, bytes): its id, bytes and members. The
+/// members are followed by random padding up to the size class (see
+/// `padded_len`); nothing addresses the padding, the id is the hash of all
+/// the bytes and `pack_len` of every place is the padded length.
+pub fn build(
+    members: &[(String, &[u8])],
+    target: usize,
+) -> (String, Vec<u8>, Vec<(String, PackLoc)>) {
+    let used: usize = members.iter().map(|(_, b)| b.len()).sum();
+    let total = padded_len(used, target);
+    let mut bytes = Vec::with_capacity(total);
     let mut spans = Vec::with_capacity(members.len());
     for (object, data) in members {
         spans.push((object.clone(), bytes.len() as u64, data.len() as u64));
         bytes.extend_from_slice(data);
     }
+    bytes.resize(total, 0);
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut bytes[used..]);
     let id = hex::encode(crate::crypto::hash(&bytes));
     let pack_len = bytes.len() as u64;
     let locs = spans
@@ -143,6 +227,29 @@ pub fn build(members: &[(String, &[u8])]) -> (String, Vec<u8>, Vec<(String, Pack
         })
         .collect();
     (id, bytes, locs)
+}
+
+/// Place members of the given sizes into bins of at most `limit` bytes,
+/// first fit decreasing: the largest member first, each into the first bin
+/// it fits. Returns the member indexes of every bin (a member larger than
+/// `limit` gets a bin of its own). Used by `PackStore` and by the pack-level
+/// moves of format 3 (`crate::storages3`), so full packs are nearly all
+/// members.
+pub fn first_fit_decreasing(sizes: &[usize], limit: usize) -> Vec<Vec<usize>> {
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(sizes[i]));
+    let mut bins: Vec<(Vec<usize>, usize)> = Vec::new();
+    for i in order {
+        let n = sizes[i];
+        match bins.iter_mut().find(|(_, used)| *used + n <= limit) {
+            Some((members, used)) => {
+                members.push(i);
+                *used += n;
+            }
+            None => bins.push((vec![i], n)),
+        }
+    }
+    bins.into_iter().map(|(m, _)| m).collect()
 }
 
 /// A pack this process wrote, not yet listed in a pack index.
@@ -205,6 +312,16 @@ impl Reader<'_> {
             len: self.u64()?,
             pack_len: self.u64()?,
         };
+        // Format 2 reads packs of any length (older builds wrote none
+        // padded); a format 3 reader refuses the rest.
+        #[cfg(feature = "format3")]
+        if !is_class(l.pack_len) {
+            bail!(
+                "pack {} has length {}, not a size class",
+                l.pack,
+                l.pack_len
+            );
+        }
         if !l.valid() {
             bail!("record body names an impossible pack member");
         }
@@ -396,6 +513,17 @@ pub struct PackContext {
     /// Pack indexes read (storage, key), and the ones no folder key opened
     /// with the folder key generation they were tried at.
     indexes: Mutex<IndexesRead>,
+    /// Format 3: the folder block map tables that give places of blocks.
+    #[cfg(feature = "format3")]
+    sources: RwLock<Vec<Arc<dyn PlaceSource>>>,
+}
+
+/// Format 3: where blocks are, as a folder's block map table says
+/// (`crate::blockmap`). A `PackStore` reads a block from the first of its
+/// places held on its storage; places come live ones first.
+#[cfg(feature = "format3")]
+pub trait PlaceSource: Send + Sync {
+    fn places(&self, object: &str) -> Vec<PackLoc>;
 }
 
 /// (storage, key) of pack indexes read, of those no folder key opened, and
@@ -516,7 +644,30 @@ impl PackContext {
     }
 
     fn candidates(&self, object: &str) -> Vec<PackLoc> {
-        self.locator.read().unwrap().candidates(object)
+        #[allow(unused_mut)]
+        let mut out = self.locator.read().unwrap().candidates(object);
+        #[cfg(feature = "format3")]
+        for s in self.sources.read().unwrap().iter() {
+            for l in s.places(object) {
+                if l.valid() && !out.contains(&l) {
+                    out.push(l);
+                }
+            }
+        }
+        out
+    }
+
+    /// Format 3: read places of blocks from `source` too (a folder's block
+    /// map table), after the ones this context knows itself.
+    #[cfg(feature = "format3")]
+    pub fn add_place_source(&self, source: Arc<dyn PlaceSource>) {
+        self.sources.write().unwrap().push(source);
+    }
+
+    /// Format 3: forget every place source (folder keys changed).
+    #[cfg(feature = "format3")]
+    pub fn clear_place_sources(&self) {
+        self.sources.write().unwrap().clear();
     }
 
     /// Every block with a known location (for listings).
@@ -599,10 +750,11 @@ impl PackStore {
         }
     }
 
-    /// The largest whole pack read here: the target plus the one block
-    /// object by which the last member may pass it.
+    /// The largest whole pack read here: the top size class, plus the block by
+    /// which a pack of an older build may pass it.
     fn pack_limit(&self) -> u64 {
-        (self.target as u64 + MAX_OBJECT).min(crate::storage::MAX_PACK)
+        // A pack of an older build passes the top class by one block object.
+        (top_class(self.target) as u64 + MAX_OBJECT).min(crate::storage::MAX_PACK)
     }
 
     /// A storage that holds blocks only (a disk pool): no tombstone lists.
@@ -863,17 +1015,20 @@ impl PackStore {
         Ok(())
     }
 
-    /// Write packs of the fresh members; returns their locations.
+    /// Write packs of the fresh members. Members are placed first-fit
+    /// decreasing into packs of at most the top size class (or the target,
+    /// when smaller), so that full packs are nearly all members; the pack
+    /// of what is left takes the smallest class it fits.
     fn write_packs(&self, fresh: &[(String, &[u8])]) -> Result<()> {
-        let mut start = 0;
-        while start < fresh.len() {
-            let mut end = start;
-            let mut bytes = 0usize;
-            while end < fresh.len() && (end == start || bytes + fresh[end].1.len() <= self.target) {
-                bytes += fresh[end].1.len();
-                end += 1;
-            }
-            let (id, data, members) = build(&fresh[start..end]);
+        let limit = self.target.min(top_class(self.target));
+        let sizes: Vec<usize> = fresh.iter().map(|(_, b)| b.len()).collect();
+        let bins = first_fit_decreasing(&sizes, limit);
+        for mut idx in bins {
+            // The order of the push inside a pack (blocks of a file next
+            // to each other).
+            idx.sort_unstable();
+            let group: Vec<(String, &[u8])> = idx.iter().map(|&i| fresh[i].clone()).collect();
+            let (id, data, members) = build(&group, self.target);
             self.inner.put_if_absent(&pack_key(&id), &data)?;
             for (o, l) in &members {
                 self.ctx.learn(o, l.clone());
@@ -882,9 +1037,24 @@ impl PackStore {
             let mut st = self.state.lock().unwrap();
             st.packs.insert(id.clone());
             st.new_packs.push(NewPack { pack: id, members });
-            start = end;
         }
         Ok(())
+    }
+
+    /// Whether `spans` (offset -> length) follow one another from the start
+    /// of a pack of `pack_len` bytes and leave only the padding this store
+    /// writes after the last one. A member this device does not know shows
+    /// as a gap, except one past the last known member, which hides in the
+    /// padding.
+    fn accounted(&self, spans: &BTreeMap<u64, u64>, pack_len: u64) -> bool {
+        let mut at = 0u64;
+        for (off, len) in spans {
+            if *off != at {
+                return false;
+            }
+            at += len;
+        }
+        at == pack_len || padded_len(at as usize, self.target) as u64 == pack_len
     }
 
     /// Rewrite the hot packs here that are more than half dead and whose
@@ -896,18 +1066,22 @@ impl PackStore {
         self.refresh()?;
         let candidates: Vec<(String, u64)> = {
             let st = self.state.lock().unwrap();
-            let mut packs: HashMap<String, u64> = HashMap::new();
+            // (pack length, end of the last known member): the padding is
+            // not counted as live.
+            let mut packs: HashMap<String, (u64, u64)> = HashMap::new();
             for (o, locs) in self.ctx.all_objects() {
                 let _ = o;
                 for l in locs {
                     if st.packs.contains(&l.pack) {
-                        packs.insert(l.pack.clone(), l.pack_len);
+                        let e = packs.entry(l.pack.clone()).or_insert((l.pack_len, 0));
+                        e.1 = e.1.max(l.offset + l.len);
                     }
                 }
             }
             packs
                 .into_iter()
-                .filter(|(p, len)| st.gone_bytes(&self.ctx, self.inner.name(), p) * 2 > *len)
+                .filter(|(p, (_, end))| st.gone_bytes(&self.ctx, self.inner.name(), p) * 2 > *end)
+                .map(|(p, (len, _))| (p, len))
                 .collect()
         };
         let mut moved = Vec::new();
@@ -937,16 +1111,7 @@ impl PackStore {
             for (off, (_, l)) in &live_unique {
                 spans.insert(*off, l.len);
             }
-            let mut at = 0u64;
-            let mut complete = true;
-            for (off, len) in &spans {
-                if *off != at {
-                    complete = false;
-                    break;
-                }
-                at += len;
-            }
-            if !complete || at != pack_len {
+            if !self.accounted(&spans, pack_len) {
                 continue;
             }
             if pack_len > self.pack_limit() {
@@ -1096,7 +1261,14 @@ impl Storage for PackStore {
                 let mut st = self.state.lock().unwrap();
                 st.mark_dead(self.inner.name(), &t, true);
                 st.pending.push(t);
-                st.gone_bytes(&self.ctx, self.inner.name(), &loc.pack) >= loc.pack_len
+                let gone = st.gone(&self.ctx, self.inner.name(), &loc.pack);
+                // No member this device knows is left, and the dead ones
+                // are all there is (padding apart).
+                let live = self.ctx.all_objects().iter().any(|(_, locs)| {
+                    locs.iter()
+                        .any(|l| l.pack == loc.pack && !gone.contains_key(&l.offset))
+                });
+                !live && self.accounted(&gone, loc.pack_len)
             };
             if empty {
                 // The block is dead either way (its tombstone is recorded);
@@ -1388,6 +1560,191 @@ mod tests {
         new
     }
 
+    fn member_refs(objs: &[(String, Vec<u8>)]) -> Vec<(String, &[u8])> {
+        objs.iter()
+            .map(|(o, b)| (o.clone(), b.as_slice()))
+            .collect()
+    }
+
+    #[test]
+    fn size_classes_hold_the_smallest_fit() {
+        let (kib, mib) = (1usize << 10, 1usize << 20);
+        for (len, hot, cold) in [
+            (0, 256 * kib, 256 * kib),
+            (1, 256 * kib, 256 * kib),
+            (256 * kib, 256 * kib, 256 * kib),
+            (256 * kib + 1, mib, mib),
+            (mib + 1, 4 * mib, 4 * mib),
+            (5 * mib, 16 * mib, 16 * mib),
+            (16 * mib + 1, 64 * mib, 64 * mib),
+            (64 * mib, 64 * mib, 64 * mib),
+            (64 * mib + 1, 65 * mib, 256 * mib),
+            (200 * mib, 200 * mib, 256 * mib),
+            (256 * mib, 256 * mib, 256 * mib),
+        ] {
+            assert_eq!(padded_len(len, HOT_TARGET), hot, "hot {len}");
+            assert_eq!(padded_len(len, COLD_TARGET), cold, "cold {len}");
+        }
+        for c in [256 * kib, mib, 4 * mib, 16 * mib, 64 * mib, 256 * mib] {
+            assert!(is_class(c as u64));
+        }
+        assert!(!is_class(100) && !is_class(2 * mib as u64) && !is_class(65 * mib as u64));
+        assert_eq!(crate::storage::MAX_PACK, 256 * mib as u64);
+    }
+
+    #[test]
+    fn a_pack_is_padded_to_its_class_with_random_bytes() {
+        let (kib, mib) = (1usize << 10, 1usize << 20);
+        for (sizes, hot) in [
+            (vec![1usize], 256 * kib),
+            (vec![2 * mib, 3 * mib], 16 * mib),
+        ] {
+            let objs = objects(&sizes);
+            let (id, bytes, locs) = build(&member_refs(&objs), HOT_TARGET);
+            assert_eq!(bytes.len(), hot);
+            assert_eq!(hex::encode(crate::crypto::hash(&bytes)), id);
+            let used: usize = sizes.iter().sum();
+            assert!(bytes[used..].iter().any(|b| *b != 0), "padding is random");
+            for ((o, b), (lo, loc)) in objs.iter().zip(&locs) {
+                assert_eq!(o, lo);
+                assert_eq!(loc.pack_len, hot as u64);
+                assert!(loc.valid());
+                assert_eq!(&bytes[loc.offset as usize..][..loc.len as usize], &b[..]);
+            }
+        }
+        // Two packs of the same members are not the same object.
+        let small = objects(&[10]);
+        assert_ne!(
+            build(&member_refs(&small), HOT_TARGET).0,
+            build(&member_refs(&small), HOT_TARGET).0
+        );
+    }
+
+    #[test]
+    fn a_push_over_the_top_class_closes_the_pack_and_starts_another() {
+        let mib = 1usize << 20;
+        let t = tempfile::tempdir().unwrap();
+        let s = store(t.path(), &ctx(2), HOT_TARGET);
+        // 7 blocks of 10 MiB: six fill one 64 MiB pack (first-fit), the
+        // last one takes the smallest class it fits.
+        let objs = objects(&[10 * mib; 7]);
+        s.put_pack(&member_refs(&objs)).unwrap();
+        let mut lens: Vec<u64> = common_pack_lens(t.path());
+        lens.sort();
+        assert_eq!(lens, vec![16 * mib as u64, 64 * mib as u64]);
+        // On a cold storage all 70 MiB go into one pack of the 256 MiB class.
+        let t = tempfile::tempdir().unwrap();
+        let s = store(t.path(), &ctx(2), COLD_TARGET);
+        s.put_pack(&member_refs(&objs)).unwrap();
+        assert_eq!(common_pack_lens(t.path()), vec![256 * mib as u64]);
+    }
+
+    fn common_pack_lens(dir: &std::path::Path) -> Vec<u64> {
+        let st = LocalDirStorage::new("x".into(), dir.to_path_buf()).unwrap();
+        st.list(PREFIX)
+            .unwrap()
+            .iter()
+            .filter(|k| pack_of_key(k).is_some())
+            .map(|k| st.get(k).unwrap().unwrap().len() as u64)
+            .collect()
+    }
+
+    #[test]
+    fn padded_packs_are_read_back_member_by_member() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(2);
+        let s = store(t.path(), &c, HOT_TARGET);
+        let objs = objects(&[1]);
+        s.put_pack(&member_refs(&objs)).unwrap();
+        let keys = s.inner.list(PREFIX).unwrap();
+        let pack = keys.iter().find(|k| pack_of_key(k).is_some()).unwrap();
+        let bytes = s.inner.get(pack).unwrap().unwrap();
+        assert_eq!(bytes.len(), 256 << 10);
+        assert_eq!(
+            hex::encode(crate::crypto::hash(&bytes)),
+            pack_of_key(pack).unwrap()
+        );
+        assert_eq!(
+            s.get(&chunk_key(&objs[0].0)).unwrap().as_deref(),
+            Some(objs[0].1.as_slice())
+        );
+        assert_eq!(s.pack_location(&objs[0].0).unwrap().pack_len, 256 << 10);
+    }
+
+    #[test]
+    fn a_fully_deleted_padded_pack_goes() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(2);
+        let s = store(t.path(), &c, HOT_TARGET);
+        let objs = objects(&[100, 200]);
+        s.put_pack(&member_refs(&objs)).unwrap();
+        s.delete(&chunk_key(&objs[0].0)).unwrap();
+        assert_eq!(
+            s.inner
+                .list(PREFIX)
+                .unwrap()
+                .iter()
+                .filter(|k| pack_of_key(k).is_some())
+                .count(),
+            1
+        );
+        s.delete(&chunk_key(&objs[1].0)).unwrap();
+        assert!(s
+            .inner
+            .list(PREFIX)
+            .unwrap()
+            .iter()
+            .all(|k| pack_of_key(k).is_none()));
+    }
+
+    // A format 3 reader refuses unpadded packs by design.
+    #[cfg(not(feature = "format3"))]
+    #[test]
+    fn a_pack_of_an_older_build_is_read_verified_and_collected() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(2);
+        let s = store(t.path(), &c, HOT_TARGET);
+        // A pack as earlier builds wrote it: members only, no padding.
+        let objs = objects(&[1000, 1000, 500]);
+        let mut bytes = Vec::new();
+        let mut spans = Vec::new();
+        for (o, b) in &objs {
+            spans.push((o.clone(), bytes.len() as u64, b.len() as u64));
+            bytes.extend_from_slice(b);
+        }
+        let id = hex::encode(crate::crypto::hash(&bytes));
+        s.inner.put_if_absent(&pack_key(&id), &bytes).unwrap();
+        for (o, offset, len) in spans {
+            c.learn(
+                &o,
+                PackLoc {
+                    pack: id.clone(),
+                    offset,
+                    len,
+                    pack_len: bytes.len() as u64,
+                },
+            );
+        }
+        for (o, b) in &objs {
+            assert_eq!(s.get(&chunk_key(o)).unwrap().as_deref(), Some(b.as_slice()));
+        }
+        let loc = s.pack_location(&objs[0].0).unwrap();
+        assert!(loc.valid() && loc.pack_len == 2500);
+        let whole = s.inner.get(&pack_key(&id)).unwrap().unwrap();
+        assert_eq!(hex::encode(crate::crypto::hash(&whole)), id);
+        // Two of three blocks die: more than half, so it is rewritten (padded).
+        s.delete(&chunk_key(&objs[0].0)).unwrap();
+        s.delete(&chunk_key(&objs[1].0)).unwrap();
+        let moved = s.collect_garbage(&|_| true).unwrap();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].1.pack_len, 256 << 10);
+        assert!(!s.inner.exists(&pack_key(&id)).unwrap());
+        assert_eq!(
+            s.get(&chunk_key(&objs[2].0)).unwrap().as_deref(),
+            Some(objs[2].1.as_slice())
+        );
+    }
+
     #[test]
     fn blocks_of_any_size_round_trip_through_packs() {
         let t = tempfile::tempdir().unwrap();
@@ -1409,10 +1766,11 @@ mod tests {
             hex::encode(crate::crypto::hash(&bytes)),
             pack_of_key(packs[0]).unwrap()
         );
-        assert_eq!(
-            bytes.len(),
-            objs.iter().map(|(_, b)| b.len()).sum::<usize>()
-        );
+        // The members, then padding up to the size class (17 MiB: the next
+        // MiB above the top class is not reached, the 64 MiB class is).
+        let used = objs.iter().map(|(_, b)| b.len()).sum::<usize>();
+        assert_eq!(bytes.len(), padded_len(used, HOT_TARGET));
+        assert_eq!(bytes.len(), 64 << 20);
         // Another device that knows the places reads every block.
         let other_ctx = ctx(3);
         share(&s, &other_ctx);
@@ -1693,7 +2051,16 @@ mod tests {
             assert_eq!(s.get(&chunk_key(o)).unwrap().as_deref(), Some(b.as_slice()));
         }
         let new = &moved[0].1;
-        assert_eq!(new.pack_len, 1500);
+        // 1500 bytes of members in the smallest class.
+        assert_eq!(new.pack_len, 256 << 10);
+        let rewritten = s.inner.get(&pack_key(&new.pack)).unwrap().unwrap();
+        assert_eq!(rewritten.len(), 256 << 10);
+        assert_eq!(
+            hex::encode(crate::crypto::hash(&rewritten)),
+            new.pack,
+            "the id is the hash of the padded bytes"
+        );
+        assert!(rewritten[1500..].iter().any(|b| *b != 0));
     }
 
     #[test]
@@ -1702,7 +2069,7 @@ mod tests {
             pack: "ab".repeat(32),
             offset: 10,
             len: 41,
-            pack_len: 100,
+            pack_len: 1 << 20,
         };
         let entries = vec![IndexEntry {
             loc: loc.clone(),
@@ -1721,10 +2088,32 @@ mod tests {
             decode_tombstones(&encode_tombstones(&tombs).unwrap()).unwrap(),
             tombs
         );
+        // A place whose pack is no size class is read in format 2 and
+        // refused, with a reason, by a format 3 reader.
+        let odd = vec![Tombstone {
+            loc: PackLoc {
+                pack_len: 100,
+                ..loc.clone()
+            },
+            object: "cd".repeat(32),
+        }];
+        let read = decode_tombstones(&encode_tombstones(&odd).unwrap());
+        if cfg!(feature = "format3") {
+            let err = read.unwrap_err();
+            assert!(
+                format!("{err:#}").contains("has length 100, not a size class"),
+                "{err:#}"
+            );
+        } else {
+            assert_eq!(read.unwrap(), odd);
+        }
         // A body of the other kind, or one naming a place past the pack.
         assert!(decode_tombstones(&encode_index(&entries).unwrap()).is_err());
         let bad = vec![Tombstone {
-            loc: PackLoc { offset: 90, ..loc },
+            loc: PackLoc {
+                offset: (1 << 20) - 10,
+                ..loc
+            },
             object: "cd".repeat(32),
         }];
         assert!(decode_tombstones(&encode_tombstones(&bad).unwrap()).is_err());

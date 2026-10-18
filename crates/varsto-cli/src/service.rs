@@ -42,6 +42,10 @@ varsto_core::redacted_debug!(ServiceFile { pid, port, started_utc, version ; tok
 /// Runtime state of the service, shared with the API.
 #[derive(Default)]
 pub struct ServiceState {
+    /// Storage format 3: folder requests already announced to the page
+    /// (`folder.request`), as `<folder>/<device>/<words>`.
+    #[cfg(feature = "format3")]
+    pub seen_requests: std::collections::BTreeSet<String>,
     pub running: bool,
     pub paused: bool,
     pub interval_secs: u64,
@@ -84,6 +88,8 @@ pub struct ServiceState {
     pub repair: Option<varsto_core::engine::RepairStatus>,
     /// Forwarding other devices' blocks to the storages: on or off, last run.
     pub forward: Option<varsto_core::engine::ForwardStatus>,
+    /// The mailbox for offline pool disks: what is staged and what it waits for.
+    pub mailbox: Option<varsto_core::mailbox::MailboxStatus>,
     /// Bit-rot check: schedule, last run, passes and damaged files waiting.
     pub scrub: Option<varsto_core::scrub::ScrubStatus>,
     /// Backups: when expiry last ran, the last snapshot taken here, and the
@@ -147,6 +153,12 @@ impl ServiceState {
         // recursion limit.
         v["forward"] = json!(self.forward);
         v["forward_text"] = json!(self.forward.as_ref().map(|f| f.describe()));
+        v["mailbox"] = json!(self.mailbox);
+        v["mailbox_text"] = json!(self
+            .mailbox
+            .as_ref()
+            .filter(|m| !m.groups.is_empty())
+            .map(|m| m.describe()));
         v
     }
     fn summary_base(&self) -> Value {
@@ -194,6 +206,44 @@ impl ServiceState {
             "move_jobs": self.move_jobs,
         })
     }
+    /// Storage format 3: tell the page about folder requests that wait for
+    /// an owner of this device (`folder.request`, and a notification). This
+    /// only reads. Answering a request is up to a person, at the page or at
+    /// a command line: nothing in this file approves, denies or grants.
+    pub fn watch_folder_requests(&mut self, engine: &mut Engine) {
+        #[cfg(feature = "format3")]
+        match engine.f3_requests(None) {
+            Ok(list) => {
+                let mut now = std::collections::BTreeSet::new();
+                for r in list {
+                    let key = format!("{}/{}/{}", r.folder_id, r.device_id, r.fingerprint);
+                    if !self.seen_requests.contains(&key) {
+                        varsto_core::events::publish(
+                            "folder.request",
+                            json!({
+                                "folder": r.folder,
+                                "folder_id": r.folder_id,
+                                "device": r.device,
+                                "device_id": r.device_id,
+                                "role": r.role_wanted,
+                                "fingerprint": r.fingerprint,
+                            }),
+                        );
+                        notify(
+                            "Varsto folder request",
+                            &format!("{} asks for folder {}", r.device, r.folder),
+                        );
+                    }
+                    now.insert(key);
+                }
+                self.seen_requests = now;
+            }
+            Err(e) => log::debug!("folder requests not checked: {e:#}"),
+        }
+        #[cfg(not(feature = "format3"))]
+        let _ = engine;
+    }
+
     /// Rank the pool disks for docking next (`disk suggest`) and, at most
     /// once a week and unless turned off, remind of a disk that is away and
     /// overdue for a check.
@@ -454,6 +504,40 @@ impl ServiceState {
             }
         }
         self.forward = Some(engine.forward_status());
+    }
+    /// The mailbox for offline pool disks (section 78): after a sync, and
+    /// whenever a pool disk came or went. Staged objects go first when the
+    /// device needs its space back (checked every 30 seconds). Returns
+    /// whether anything was staged or written.
+    pub fn mailbox_if_due(&mut self, engine: &mut Engine, after_sync: bool) -> bool {
+        let mut worked = false;
+        if !self.paused && engine.mailbox_due(after_sync) {
+            match engine.mailbox_run(&varsto_core::engine::MailboxOptions::service()) {
+                Ok(r) => {
+                    worked = r.staged + r.delivered > 0;
+                    if r.delivered > 0 {
+                        notify(
+                            "Varsto mailbox",
+                            &format!(
+                                "Wrote {} staged object(s) ({}) to {}.",
+                                r.delivered,
+                                varsto_core::util::human_bytes(r.delivered_bytes),
+                                r.delivered_to
+                                    .keys()
+                                    .cloned()
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
+                    }
+                }
+                Err(e) => log::warn!("mailbox failed: {e:#}"),
+            }
+        } else {
+            engine.mailbox_make_room();
+        }
+        self.mailbox = Some(engine.mailbox_status());
+        worked
     }
     /// Before a sync: look after the ledger. A lost or damaged local ledger
     /// (or no ledger anywhere) is rebuilt from the storages at once, before
@@ -1879,10 +1963,13 @@ pub fn run(opts: Options) -> Result<()> {
                 Some(Err(e)) => log::warn!("disk check failed: {e:#}"),
                 None => {}
             }
-            // A disk came, or one has room it had not: go on with the moves.
+            // A disk came, or one has room it had not: the mailbox stages
+            // from it or writes to it, then the moves go on (a move reads
+            // what the mailbox staged).
             let st = &mut *st;
             if let Some(e) = st.engine.as_mut() {
-                let ran = st.service.moves_if_due(e, false);
+                let staged = st.service.mailbox_if_due(e, false);
+                let ran = st.service.moves_if_due(e, false) || staged;
                 st.service.move_jobs = varsto_core::staged_move::list_active(e.home());
                 if ran {
                     st.service.suggest_disks(e);
@@ -2156,7 +2243,7 @@ pub fn run(opts: Options) -> Result<()> {
                         }
                     }
                     st = relock(st, &state);
-                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, drains, backups, trash, restic, disk suggestions, device details)");
+                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, mailbox, drains, backups, trash, restic, disk suggestions, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),
@@ -2267,6 +2354,9 @@ const UPKEEP_STEPS: &[UpkeepStep] = &[
     |s, e| s.scrub_if_due(e),
     |s, e| s.repair_if_due(e),
     |s, e| s.forward_if_due(e),
+    |s, e| {
+        s.mailbox_if_due(e, true);
+    },
     |s, e| s.drains_if_due(e),
     |s, e| s.backups_if_due(e),
     |s, e| s.trash_if_due(e),
@@ -2275,6 +2365,7 @@ const UPKEEP_STEPS: &[UpkeepStep] = &[
         s.moves_if_due(e, true);
     },
     |s, e| s.suggest_disks(e),
+    |s, e| s.watch_folder_requests(e),
     |s, e| {
         if let Err(err) = e.publish_device_details(s.last_sync_utc) {
             log::info!("device details not published: {err:#}");
@@ -2786,6 +2877,38 @@ pub mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The background service never answers a folder request (design
+    /// section 6, S-020): no call that approves, denies, grants, changes a
+    /// role, removes a device or writes recovery copies appears in this file.
+    /// (The needles are split so that this test does not match itself.)
+    #[test]
+    fn the_service_never_approves_or_grants() {
+        let src = include_str!("service.rs");
+        let needles: Vec<String> = [
+            [".appr", "ove("],
+            [".de", "ny("],
+            ["issue_", "grant"],
+            ["grant_to_", "joiner"],
+            ["f3_ap", "prove"],
+            ["f3_de", "ny"],
+            ["f3_set_", "role"],
+            ["f3_re", "move"],
+            ["f3_pair_", "grants"],
+            ["f3_write_", "escrows"],
+            ["escrow_folder_", "epoch"],
+            ["start_folder_", "epoch"],
+            ["answer_", "pair"],
+        ]
+        .iter()
+        .map(|p| p.concat())
+        .collect();
+        for n in &needles {
+            assert!(!src.contains(n.as_str()), "service.rs contains {n}");
+        }
+        // What it does call is the read-only listing.
+        assert!(src.contains("f3_requests"));
+    }
 
     #[test]
     fn a_mapping_is_published_only_after_the_probe_reached_us() {

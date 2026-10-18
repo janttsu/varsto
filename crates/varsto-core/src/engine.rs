@@ -66,8 +66,11 @@ mod ledger_heads;
 mod ledger_recovery;
 mod ledger_upkeep;
 mod local_names;
+mod mailbox;
 mod manifest_upkeep;
 mod membership;
+#[cfg(feature = "format3")]
+mod membership3_ops;
 mod notes;
 mod org_ops;
 mod pack_upkeep;
@@ -124,10 +127,16 @@ pub use ledger_recovery::{
     JunkReport, LedgerBehind, LedgerDeviceStatus, LedgerHealth, LedgerHolding, LedgerProblem,
     LedgerRebuildOptions, LedgerRebuildReport, LedgerStatus, StorageRebuildReport,
 };
+pub use mailbox::MailboxOptions;
 pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochForks, EpochRecord, Grant, KemRecord, Removal,
     Revocation, RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+};
+#[cfg(feature = "format3")]
+pub use membership3_ops::{
+    parse_role as parse_folder_role, FolderMember, FolderMembers, FolderRemoval, FolderRequest,
+    MissingRecoveryCopy,
 };
 pub use notes::{
     check_analysis, AnalysisHit, FileAnalysis, NotesExchangeReport, ANALYSIS_MAX_BYTES,
@@ -789,9 +798,40 @@ const UPLOAD_BYTES_MAX: u64 = 768 << 20;
 
 /// Bytes a push may hold for `targets` (pack sizes of the storages it
 /// writes): a pack's worth for each, and some to fill the next.
+/// Take from `jobs` the blocks of one pack of at most `target` bytes, first
+/// fit decreasing, in their original order; the others stay.
+fn take_full_pack(
+    jobs: &mut Vec<std::sync::Arc<UploadJob>>,
+    target: u64,
+) -> Vec<std::sync::Arc<UploadJob>> {
+    let mut order: Vec<usize> = (0..jobs.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(jobs[i].ct.len()));
+    let mut used = 0u64;
+    let mut take = vec![false; jobs.len()];
+    for i in order {
+        let n = jobs[i].ct.len() as u64;
+        if used + n <= target {
+            used += n;
+            take[i] = true;
+        }
+    }
+    let mut picked = Vec::new();
+    let mut rest = Vec::new();
+    for (j, t) in jobs.drain(..).zip(take) {
+        if t {
+            picked.push(j);
+        } else {
+            rest.push(j);
+        }
+    }
+    *jobs = rest;
+    picked
+}
+
 fn upload_budget(targets: impl Iterator<Item = usize>) -> u64 {
     let sum: u64 = targets.map(|t| t as u64).sum();
-    (sum + (64 << 20)).clamp(UPLOAD_BYTES, UPLOAD_BYTES_MAX)
+    // A pack being written and the buffer the next one is filled from.
+    (sum * 2 + (64 << 20)).clamp(UPLOAD_BYTES, UPLOAD_BYTES_MAX)
 }
 
 /// Count one finished write in the report and the ledger.
@@ -4077,6 +4117,25 @@ impl Engine {
                     let (jobs, held) = std::mem::take(&mut collected[i]);
                     jobs.is_empty() || job_tx.send((i, UploadBatch { jobs, held })).is_ok()
                 };
+            let send_full = |collected: &mut Vec<(Vec<std::sync::Arc<UploadJob>>, u64)>,
+                             i: usize,
+                             target: u64|
+             -> bool {
+                let (jobs, held) = &mut collected[i];
+                let picked = take_full_pack(jobs, target);
+                let sent: u64 = picked.iter().map(|j| j.ct.len() as u64).sum();
+                *held -= sent;
+                picked.is_empty()
+                    || job_tx
+                        .send((
+                            i,
+                            UploadBatch {
+                                jobs: picked,
+                                held: sent,
+                            },
+                        ))
+                        .is_ok()
+            };
             // `None` sends everything collected (at the end).
             let mut send =
                 |me: &mut Self, report: &mut PushReport, job: Option<UploadJob>| -> bool {
@@ -4117,10 +4176,17 @@ impl Engine {
                     let job = std::sync::Arc::new(job);
                     for i in to {
                         let size = job.ct.len() as u64;
+                        let target = storages_ref[i].1.pack_target().max(1) as u64;
                         collected[i].0.push(job.clone());
                         collected[i].1 += size;
-                        let target = storages_ref[i].1.pack_target().max(1) as u64;
-                        if collected[i].1 >= target && !send_to(&mut collected, i) {
+                        // Once a pack's worth and one more block are
+                        // collected, a pack is filled from the buffer
+                        // (first fit decreasing) and sent; the rest waits
+                        // for the next one. Only the last pack of the push
+                        // is not full.
+                        if collected[i].1 >= target + crate::packs::MAX_OBJECT
+                            && !send_full(&mut collected, i, target)
+                        {
                             return false;
                         }
                     }
@@ -5938,6 +6004,15 @@ impl Engine {
                 now_utc,
             );
             self.disk_group_findings(&rec, &state, view, &ctx.pools, &mut report);
+            // Blocks a mailbox holds for their target: in transit, still short.
+            if report.state != crate::policy::PolicyState::Ok {
+                if let Some((n, bytes, text)) = self.mailbox_in_transit(view, &rec.folder_id, &seen)
+                {
+                    report.chunks_in_transit = n;
+                    report.bytes_in_transit = bytes;
+                    report.reasons.push(text);
+                }
+            }
             reports.push(report);
         }
         // Why a policy may not be met: a storage at its quota or leaving.
@@ -6430,6 +6505,12 @@ impl Engine {
         let mut local_roots: Vec<PathBuf> = Vec::new();
         if self.block_cache_root().is_dir() {
             local_roots.push(self.block_cache_root());
+        }
+        // Blocks the mailbox staged (section 78): the device where their
+        // target is docked takes them from here.
+        let outbox = crate::mailbox::Outbox::new(&self.home);
+        if outbox.root().is_dir() {
+            local_roots.push(outbox.root().to_path_buf());
         }
         Ok(crate::p2p::Snapshot {
             vault_id: self.vault.vault_id.clone(),

@@ -172,6 +172,17 @@ impl Offer {
     /// Open an offer for `bundle`. Discovery is best effort: when the UDP
     /// port is taken the offer still works through a typed address.
     pub fn start(bundle: Bundle) -> Result<Offer> {
+        Self::start_with(&|digits| digits[0..3].to_string(), move |stream, digits| {
+            offer_exchange(stream, digits, &bundle)
+        })
+    }
+
+    /// An offer whose discovery answers to `rendezvous(digits)` and whose
+    /// connections run `exchange` (format 2 or format 3 pairing).
+    fn start_with(
+        rendezvous: &dyn Fn(&str) -> String,
+        exchange: impl Fn(TcpStream, &str) -> Result<String, Attempt> + Send + 'static,
+    ) -> Result<Offer> {
         let code = new_code();
         let digits = normalize(&code)?;
         let listener = TcpListener::bind(("0.0.0.0", 0)).context("cannot open a pairing port")?;
@@ -199,7 +210,7 @@ impl Offer {
         }));
         let stop = Arc::new(AtomicBool::new(false));
         if let Ok(sock) = discovery_socket() {
-            let (stop, rv) = (stop.clone(), digits[0..3].to_string());
+            let (stop, rv) = (stop.clone(), rendezvous(&digits));
             std::thread::Builder::new()
                 .name("pair-discovery".into())
                 .spawn(move || answer_queries(sock, &rv, port, &stop))?;
@@ -208,7 +219,7 @@ impl Offer {
             let (inner, stop) = (inner.clone(), stop.clone());
             std::thread::Builder::new()
                 .name("pair-offer".into())
-                .spawn(move || serve(listener, &digits, &bundle, &inner, &stop))?;
+                .spawn(move || serve(listener, &digits, &exchange, &inner, &stop))?;
         }
         Ok(Offer { inner, stop })
     }
@@ -279,7 +290,7 @@ fn answer_queries(sock: UdpSocket, rv: &str, port: u16, stop: &AtomicBool) {
 fn serve(
     listener: TcpListener,
     digits: &str,
-    bundle: &Bundle,
+    exchange: &dyn Fn(TcpStream, &str) -> Result<String, Attempt>,
     inner: &Mutex<OfferInner>,
     stop: &AtomicBool,
 ) {
@@ -303,9 +314,13 @@ fn serve(
             }
             Err(_) => continue,
         };
-        match offer_exchange(stream, digits, bundle) {
+        match exchange(stream, digits) {
             Ok(name) => {
                 close(None, Some(name));
+                return;
+            }
+            Err(Attempt::Declined(name)) => {
+                close(Some(&format!("declined {name}")), None);
                 return;
             }
             Err(Attempt::Wrong) => {
@@ -328,6 +343,9 @@ fn serve(
 enum Attempt {
     Wrong,
     Broken,
+    /// The person at the offering device said no to this device (format 3).
+    #[cfg_attr(not(feature = "format3"), allow(dead_code))]
+    Declined(String),
 }
 
 fn offer_exchange(stream: TcpStream, digits: &str, bundle: &Bundle) -> Result<String, Attempt> {
@@ -389,7 +407,11 @@ fn offer_exchange(stream: TcpStream, digits: &str, bundle: &Bundle) -> Result<St
 /// default route the Wi-Fi would otherwise never hear it.
 pub fn discover(code: &str, timeout: Duration) -> Result<Vec<SocketAddr>> {
     let digits = normalize(code)?;
-    let rv = &digits[0..3];
+    discover_rv(code, &digits[0..3], timeout)
+}
+
+/// `discover` for the rendezvous id `rv`.
+fn discover_rv(code: &str, rv: &str, timeout: Duration) -> Result<Vec<SocketAddr>> {
     let query = format!("{QUERY} {rv}");
     // One socket per interface (bound to its address, so the packet leaves
     // there) and one unbound, for the default route and the loopback.
@@ -706,11 +728,14 @@ pub fn receive(code: &str, my_name: &str, address: Option<&str>) -> Result<Bundl
     receive_with_progress(code, my_name, address, &[], &mut |_| {})
 }
 
+#[cfg(feature = "format3")]
+pub mod v3;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn bundle() -> Bundle {
+    pub(super) fn bundle() -> Bundle {
         Bundle {
             vault_id: "v".into(),
             vault_key: "k".repeat(64),
