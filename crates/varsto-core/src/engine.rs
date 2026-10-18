@@ -68,6 +68,8 @@ mod ledger_upkeep;
 mod local_names;
 mod manifest_upkeep;
 mod membership;
+#[cfg(feature = "format3")]
+mod membership3_ops;
 mod notes;
 mod org_ops;
 mod pack_upkeep;
@@ -128,6 +130,11 @@ pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochForks, EpochRecord, Grant, KemRecord, Removal,
     Revocation, RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+};
+#[cfg(feature = "format3")]
+pub use membership3_ops::{
+    parse_role as parse_folder_role, FolderMember, FolderMembers, FolderRemoval, FolderRequest,
+    MissingRecoveryCopy,
 };
 pub use notes::{
     check_analysis, AnalysisHit, FileAnalysis, NotesExchangeReport, ANALYSIS_MAX_BYTES,

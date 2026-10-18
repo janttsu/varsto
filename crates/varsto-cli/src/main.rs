@@ -19,6 +19,7 @@ mod backup;
 mod desktop;
 mod drive_mount;
 mod drives;
+mod f3cmd;
 mod filemanager;
 mod history;
 mod icon;
@@ -145,6 +146,12 @@ enum Cmd {
         /// Allow an http:// endpoint outside this computer (no transport encryption).
         #[arg(long, requires = "s3_endpoint")]
         s3_insecure_http: bool,
+        /// Storage format 3: also give the recovery words, so that every
+        /// folder with a recovery copy is rebuilt on this device. Not wired yet
+        /// (work package 12 connects it: open the membership with the vault
+        /// key, then `Membership::recover_all_folders` with these words).
+        #[arg(long)]
+        recovery_words: bool,
     },
     /// Manage storages.
     Storage {
@@ -585,6 +592,30 @@ enum RecoveryCmd {
     Kit {
         #[arg(long)]
         shares: bool,
+        /// Storage format 3: print the recovery words too, as the second word
+        /// set of the kit. The words are read from VARSTO_RECOVERY_WORDS, a
+        /// pipe, or asked for (hidden); they are never taken from the command line.
+        #[arg(long, conflicts_with = "shares")]
+        recovery_words: bool,
+        /// Storage format 3: make a new recovery key and print it as the
+        /// second word set. Folders get recovery copies under it with
+        /// `varsto recovery escrow`.
+        #[arg(long, conflicts_with_all = ["shares", "recovery_words"])]
+        new_recovery_key: bool,
+    },
+    /// Storage format 3: write the recovery copies that folders lack, so
+    /// that the vault words and the recovery words restore them. Asks for the
+    /// recovery words (hidden), unless --with-recovery-key.
+    Escrow {
+        /// Only this folder (default: every folder that lacks a copy).
+        folder: Option<String>,
+        /// Take the recovery words from VARSTO_RECOVERY_WORDS (the copy kept
+        /// for this session) without asking.
+        #[arg(long)]
+        with_recovery_key: bool,
+        /// File with the recovery words (24 words).
+        #[arg(long, value_name = "FILE")]
+        recovery_file: Option<PathBuf>,
     },
     /// Rebuild the vault key from shares (`<index>: <24 words>`, one per line).
     /// The shares are read from the files given with --file, else from standard
@@ -1419,12 +1450,79 @@ enum FolderCmd {
     },
     /// Remove a folder from the vault on every device (files already on
     /// devices stay). --purge also deletes its encrypted data from the storages.
+    ///
+    /// With a DEVICE (storage format 3): remove that device from the folder.
+    /// This starts a new folder epoch the device never gets; what it already
+    /// read stays readable to it. Asks first; --yes skips the question.
     Remove {
+        /// The folder (with DEVICE: the folder's name or id).
         name: String,
-        #[arg(long)]
+        /// Format 3: the device to remove (name or id).
+        device: Option<String>,
+        #[arg(long, conflicts_with = "device")]
         purge: bool,
         #[arg(long)]
         yes: bool,
+    },
+    /// Storage format 3: ask the folder's owners for access. Prints this
+    /// device's six words, which an owner compares before approving.
+    Request {
+        /// The folder (name or id).
+        folder: String,
+        /// The role you ask for: editor or viewer.
+        #[arg(long, default_value = "editor")]
+        role: String,
+    },
+    /// Storage format 3: requests waiting for an owner of FOLDER (default:
+    /// every folder this device owns), with each device's name and six words.
+    Requests {
+        folder: Option<String>,
+    },
+    /// Storage format 3: approve a request. Shows the device's name and six
+    /// words and asks "Do the six words match?"; a grant follows.
+    Approve {
+        folder: String,
+        /// The requesting device (name or id).
+        device: String,
+        /// The role to give (default: the one asked for): editor or viewer.
+        #[arg(long)]
+        role: Option<String>,
+        /// Skip the question (only when you compared the words already).
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Storage format 3: deny a request.
+    Deny {
+        folder: String,
+        device: String,
+    },
+    /// Storage format 3: a folder's participants with their roles, denied
+    /// devices and pending requests.
+    Members {
+        folder: String,
+    },
+    /// Storage format 3: change a participant's role (owner, editor or viewer).
+    Role {
+        folder: String,
+        device: String,
+        role: String,
+    },
+    /// Storage format 3: two owners started the same folder epoch at once;
+    /// keep the epoch of one of them.
+    ResolveEpoch {
+        folder: String,
+        /// The folder epoch number (see `varsto folder members`).
+        epoch: u32,
+        /// The device whose epoch to keep (name or id).
+        #[arg(long)]
+        keep: String,
+    },
+    /// Storage format 3: make a folder in the membership records of the
+    /// vault, this device its owner. `folder add` will do this once format 3
+    /// is the format (work package 12).
+    #[command(hide = true)]
+    CreateF3 {
+        name: String,
     },
     /// Create a folder in the vault and sync `path` into it.
     Add {
@@ -3178,7 +3276,11 @@ fn run(cli: &Cli) -> Result<()> {
             s3_access_key_id,
             s3_secret_file,
             s3_insecure_http,
+            recovery_words,
         } => {
+            if *recovery_words {
+                f3cmd::join_recovery_words()?;
+            }
             let mut s3_secret: Option<String> = None;
             // The vault key first: it may come from standard input, which the
             // secret prompt below must not touch.
@@ -3917,6 +4019,9 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Folder { cmd } => {
+            if f3cmd::folder(cli, &home, cmd)? {
+                return Ok(());
+            }
             if folder_safety_cmd(cli, &home, cmd)? {
                 return Ok(());
             }
@@ -4019,7 +4124,9 @@ fn run(cli: &Cli) -> Result<()> {
                         "{name} is no longer synced on this device; its files stay where they are"
                     );
                 }
-                FolderCmd::Remove { name, purge, yes } => {
+                FolderCmd::Remove {
+                    name, purge, yes, ..
+                } => {
                     if !*yes {
                         bail_usage::<()>("this removes the folder from the vault on every device (files on devices stay); run again with --yes")?;
                     }
@@ -4143,7 +4250,15 @@ fn run(cli: &Cli) -> Result<()> {
                 | FolderCmd::Override { .. }
                 | FolderCmd::Revert { .. }
                 | FolderCmd::Pending { .. }
-                | FolderCmd::DeletionGuard { .. } => unreachable!("handled by folder_safety_cmd"),
+                | FolderCmd::DeletionGuard { .. }
+                | FolderCmd::Request { .. }
+                | FolderCmd::Requests { .. }
+                | FolderCmd::Approve { .. }
+                | FolderCmd::Deny { .. }
+                | FolderCmd::Members { .. }
+                | FolderCmd::Role { .. }
+                | FolderCmd::ResolveEpoch { .. }
+                | FolderCmd::CreateF3 { .. } => unreachable!("handled before"),
                 FolderCmd::List => {
                     let rows: Vec<serde_json::Value> = engine
                         .folders()
@@ -4291,8 +4406,9 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 return Ok(());
             }
-            let engine = open_engine(&home)?;
+            let mut engine = open_engine(&home)?;
             let s = engine.status()?;
+            f3cmd::status_warnings(&mut engine);
             let move_lines = if cli.json {
                 Vec::new()
             } else {
@@ -5063,7 +5179,25 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Recovery { cmd } => match cmd {
-            RecoveryCmd::Kit { shares } => {
+            RecoveryCmd::Escrow {
+                folder,
+                with_recovery_key,
+                recovery_file,
+            } => f3cmd::recovery_escrow(
+                cli,
+                &home,
+                folder.as_deref(),
+                *with_recovery_key,
+                recovery_file.as_deref(),
+            )?,
+            RecoveryCmd::Kit {
+                recovery_words,
+                new_recovery_key,
+                ..
+            } if *recovery_words || *new_recovery_key => {
+                f3cmd::recovery_kit(&home, *new_recovery_key)?
+            }
+            RecoveryCmd::Kit { shares, .. } => {
                 let engine = open_engine(&home)?;
                 let key = engine.export_vault_key()?;
                 let sh = if *shares {
@@ -6457,6 +6591,15 @@ fn status_from_value(v: &serde_json::Value) -> String {
     {
         out += &format!("ledger: {}\n", h.describe());
     }
+    for w in v
+        .get("recovery_warnings")
+        .and_then(|w| w.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|w| w.as_str())
+    {
+        out += &format!("warning: {w}\n");
+    }
     out.trim_end().to_string()
 }
 
@@ -6948,7 +7091,9 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
             serde_json::json!({"name_or_id": name_or_id, "path": abs(path)?, "selective": selective, "plain": true, "mode": mode}),
         ),
         FolderCmd::Detach { name } => ("/api/folder/detach", serde_json::json!({"name": name})),
-        FolderCmd::Remove { name, purge, yes } => {
+        FolderCmd::Remove {
+            name, purge, yes, ..
+        } => {
             if !*yes {
                 return Ok(None); // the usual refusal below
             }

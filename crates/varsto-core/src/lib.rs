@@ -27,6 +27,8 @@ pub mod diskformat;
 pub mod disksuggest;
 pub mod engine;
 pub mod events;
+#[cfg(feature = "format3")]
+pub mod fingerprint;
 pub mod freespace;
 pub mod fsmeta;
 pub mod help;
@@ -40,7 +42,11 @@ pub mod ledger3;
 pub mod ledger_heads;
 pub mod logging;
 pub mod manifest;
+#[cfg(feature = "format3")]
+pub mod manifest3;
 pub mod media;
+#[cfg(feature = "format3")]
+pub mod membership3;
 pub mod names;
 pub mod netif;
 pub mod org;
@@ -68,11 +74,15 @@ pub mod s3;
 pub mod scrub;
 pub mod share;
 pub mod snapshot;
+#[cfg(feature = "format3")]
+pub mod snapshot3;
 pub mod staged_move;
 pub mod storage;
 pub mod storage_settings;
 pub mod strongroom;
 pub mod thumbs;
+#[cfg(feature = "format3")]
+pub mod trash3;
 pub mod util;
 pub mod vault;
 pub mod viz;
