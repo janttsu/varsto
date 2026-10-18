@@ -1697,7 +1697,7 @@ mod tests {
             .all(|k| pack_of_key(k).is_none()));
     }
 
-    // Format 2 only: a format 3 reader refuses packs that are no size class.
+    // A format 3 reader refuses unpadded packs by design.
     #[cfg(not(feature = "format3"))]
     #[test]
     fn a_pack_of_an_older_build_is_read_verified_and_collected() {

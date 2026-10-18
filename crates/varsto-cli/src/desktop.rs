@@ -1634,6 +1634,8 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             "has_vault": has_vault,
             "unlocked": st.engine.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
+            // Folder membership of storage format 3 is in this build.
+            "format3": cfg!(feature = "format3"),
             "platform": std::env::consts::OS,
             // Mobile shells set these so the interface can pick folder locations itself.
             "mobile": mobile(),
@@ -1792,15 +1794,28 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             if let Some(old) = st.pair.take() {
                 old.stop();
             }
+            #[cfg(feature = "format3")]
+            if input.get("format").and_then(|f| f.as_u64()) == Some(3) {
+                let offer = f3_api::start_offer(e)?;
+                let status = offer.status();
+                st.pair = Some(offer);
+                return pair_status(status);
+            }
             let offer = varsto_core::pair::Offer::start(e.pairing_bundle()?)?;
             let status = offer.status();
             st.pair = Some(offer);
             pair_status(status)
         }
-        (Method::Get, "/api/pair/status") => Ok(match &st.pair {
-            Some(o) => pair_status(o.status())?,
-            None => json!({"open": false}),
-        }),
+        (Method::Get, "/api/pair/status") => {
+            #[allow(unused_mut)]
+            let mut v = match &st.pair {
+                Some(o) => pair_status(o.status())?,
+                None => json!({"open": false}),
+            };
+            #[cfg(feature = "format3")]
+            f3_api::add_pair_ask(&mut v, st.engine.as_mut());
+            Ok(v)
+        }
         // QR invitations (section 51): the QR codes of a request code, a
         // sealed token or a pairing link, and what a scanned text is.
         (Method::Post, "/api/qr") => {
@@ -2125,7 +2140,17 @@ fn api_unlocked(
     input: &Value,
 ) -> Result<Value> {
     match (method, path) {
-        (Method::Get, "/api/status") => Ok(serde_json::to_value(engine.status()?)?),
+        (Method::Get, "/api/status") => {
+            #[allow(unused_mut)]
+            let mut v = serde_json::to_value(engine.status()?)?;
+            #[cfg(feature = "format3")]
+            if let Ok(list) = engine.f3_missing_escrows() {
+                if !list.is_empty() {
+                    v["recovery_warnings"] = json!(list.iter().map(|m| &m.warning).collect::<Vec<_>>());
+                }
+            }
+            Ok(v)
+        }
         (Method::Get, "/api/folders") => Ok(Value::Array(
             engine
                 .folders()
@@ -2213,6 +2238,21 @@ fn api_unlocked(
             service.request_sync();
             Ok(serde_json::to_value(report)?)
         }
+        // Folder membership of storage format 3 (work package 8b). Only a
+        // person at the page reaches these; the background service reads
+        // requests and never answers one.
+        (
+            m,
+            "/api/folder/requests"
+            | "/api/folder/request"
+            | "/api/folder/approve"
+            | "/api/folder/deny"
+            | "/api/folder/members"
+            | "/api/folder/role"
+            | "/api/folder/resolve-epoch"
+            | "/api/recovery/escrow"
+            | "/api/pair/answer",
+        ) => f3_api::route(engine, service, m, path, query, input),
         (Method::Get, "/api/replica/token") => {
             Ok(json!({"token": engine.replica_token()?.encode()}))
         }
@@ -2485,6 +2525,9 @@ fn api_unlocked(
             engine.detach_folder(&s(input, "name")?)?;
             service.folders_changed = true;
             Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/folder/remove") if input.get("device").is_some() => {
+            f3_api::remove_device(engine, service, input)
         }
         (Method::Post, "/api/folder/remove") => {
             let purge = input.get("purge").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -3488,6 +3531,291 @@ fn api_unlocked(
         _ => Err(anyhow!("unknown API endpoint {path}")),
     }
     .with_context(|| path.to_string())
+}
+
+/// Folder membership of storage format 3 in the local API (work package
+/// 8b): requests, approval, roles, removal, recovery copies and the pairing
+/// question. Without the `format3` feature every route answers that it is
+/// not available in this build.
+mod f3_api {
+    use super::*;
+
+    #[cfg(not(feature = "format3"))]
+    pub fn route(
+        _engine: &mut Engine,
+        _service: &mut ServiceState,
+        _method: Method,
+        _path: &str,
+        _query: &str,
+        _input: &Value,
+    ) -> Result<Value> {
+        bail!("folder membership of storage format 3 is not available in this build of Varsto")
+    }
+
+    #[cfg(not(feature = "format3"))]
+    pub fn remove_device(
+        _engine: &mut Engine,
+        _service: &mut ServiceState,
+        _input: &Value,
+    ) -> Result<Value> {
+        bail!("folder membership of storage format 3 is not available in this build of Varsto")
+    }
+
+    #[cfg(feature = "format3")]
+    pub use real::*;
+
+    #[cfg(feature = "format3")]
+    mod real {
+        use super::*;
+        use std::sync::{Condvar, Mutex as StdMutex};
+        use varsto_core::pair::v3::Joiner;
+
+        /// The folders-changed event and a sync request: other devices
+        /// fetch the new records at once.
+        fn changed(service: &mut ServiceState, folder: &str, what: &str) {
+            service.request_sync();
+            varsto_core::events::publish("folder.changed", json!({"folder": folder, "what": what}));
+        }
+
+        pub fn route(
+            engine: &mut Engine,
+            service: &mut ServiceState,
+            method: Method,
+            path: &str,
+            query: &str,
+            input: &Value,
+        ) -> Result<Value> {
+            match (method, path) {
+                (Method::Get, "/api/folder/requests") => {
+                    let folder = query_param(query, "folder");
+                    Ok(json!({ "requests": engine.f3_requests(folder.as_deref())? }))
+                }
+                (Method::Post, "/api/folder/request") => {
+                    let role = opt(input, "role").unwrap_or_else(|| "editor".into());
+                    let r = engine.f3_folder_request(&s(input, "folder")?, &role)?;
+                    changed(service, &r.folder_id, "request");
+                    Ok(serde_json::to_value(r)?)
+                }
+                (Method::Post, "/api/folder/approve") => {
+                    // The person compared the six words with the requesting
+                    // device; a call that does not say so grants nothing.
+                    if input.get("fingerprint_confirmed").and_then(|v| v.as_bool()) != Some(true) {
+                        bail!("approving needs \"fingerprint_confirmed\": true, after the six words were compared with the requesting device");
+                    }
+                    let m = engine.f3_approve(
+                        &s(input, "folder")?,
+                        &s(input, "device")?,
+                        opt(input, "role").as_deref(),
+                        opt(input, "fingerprint").as_deref(),
+                    )?;
+                    changed(service, &m.folder_id, "approve");
+                    Ok(serde_json::to_value(m)?)
+                }
+                (Method::Post, "/api/folder/deny") => {
+                    let m = engine.f3_deny(&s(input, "folder")?, &s(input, "device")?)?;
+                    changed(service, &m.folder_id, "deny");
+                    Ok(serde_json::to_value(m)?)
+                }
+                (Method::Get, "/api/folder/members") => match query_param(query, "folder") {
+                    Some(folder) => Ok(serde_json::to_value(engine.f3_members(&folder)?)?),
+                    // No folder named: every folder of the membership records.
+                    None => Ok(json!({ "folders": engine.f3_folders()? })),
+                },
+                (Method::Post, "/api/folder/role") => {
+                    let m = engine.f3_set_role(
+                        &s(input, "folder")?,
+                        &s(input, "device")?,
+                        &s(input, "role")?,
+                    )?;
+                    changed(service, &m.folder_id, "role");
+                    Ok(serde_json::to_value(m)?)
+                }
+                (Method::Post, "/api/folder/resolve-epoch") => {
+                    let epoch = input
+                        .get("epoch")
+                        .and_then(|e| e.as_u64())
+                        .and_then(|e| u32::try_from(e).ok())
+                        .ok_or_else(|| anyhow!("missing field epoch"))?;
+                    let m =
+                        engine.f3_resolve_epoch(&s(input, "folder")?, epoch, &s(input, "keep")?)?;
+                    changed(service, &m.folder_id, "resolve-epoch");
+                    Ok(serde_json::to_value(m)?)
+                }
+                (Method::Get, "/api/recovery/escrow") => {
+                    Ok(json!({ "missing": engine.f3_missing_escrows()? }))
+                }
+                (Method::Post, "/api/recovery/escrow") => {
+                    let words = s(input, "words")?;
+                    varsto_core::logging::register_secret(&words);
+                    let k1 = varsto_core::membership3::RecoveryKey::from_words(&words)?;
+                    let written = engine.f3_write_escrows(opt(input, "folder").as_deref(), &k1)?;
+                    if !written.is_empty() {
+                        changed(service, "", "escrow");
+                    }
+                    Ok(json!({ "written": written }))
+                }
+                (Method::Post, "/api/pair/answer") => answer_pair(engine, input),
+                _ => bail!("unknown route {path}"),
+            }
+        }
+
+        /// Remove a device from a folder: a new folder epoch. The call must
+        /// say it was confirmed.
+        pub fn remove_device(
+            engine: &mut Engine,
+            service: &mut ServiceState,
+            input: &Value,
+        ) -> Result<Value> {
+            if input.get("confirm").and_then(|v| v.as_bool()) != Some(true) {
+                bail!("removing a device from a folder needs \"confirm\": true; it starts a new folder epoch and the device keeps what it already read");
+            }
+            let name = opt(input, "folder")
+                .or_else(|| opt(input, "name"))
+                .ok_or_else(|| anyhow!("missing field folder"))?;
+            let r = engine.f3_remove(&name, &s(input, "device")?, None)?;
+            changed(service, &r.folder_id, "remove");
+            Ok(serde_json::to_value(r)?)
+        }
+
+        // ----- pairing: the offering device asks its person --------------
+
+        /// The joining device waiting for the person at this device.
+        struct Gate {
+            state: StdMutex<GateState>,
+            cv: Condvar,
+        }
+
+        #[derive(Default)]
+        struct GateState {
+            ask: Option<Joiner>,
+            answer: Option<bool>,
+        }
+
+        static GATE: StdMutex<Option<std::sync::Arc<Gate>>> = StdMutex::new(None);
+
+        /// How long the person has to answer.
+        const ANSWER_WITHIN: std::time::Duration = std::time::Duration::from_secs(300);
+
+        fn gate() -> Option<std::sync::Arc<Gate>> {
+            GATE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+
+        /// Open a format-3 pairing offer: the joining device's name and
+        /// six words are held for the page (`ask` in the status) until the
+        /// person answers with `POST /api/pair/answer`; nothing is sent
+        /// before.
+        pub fn start_offer(e: &Engine) -> Result<varsto_core::pair::Offer> {
+            let mut bundle = e.pairing_bundle()?;
+            let key = varsto_core::crypto::SecretKey::from_hex(&e.export_vault_key()?)?;
+            bundle.vault_key = String::new();
+            let g = std::sync::Arc::new(Gate {
+                state: StdMutex::new(GateState::default()),
+                cv: Condvar::new(),
+            });
+            *GATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(g.clone());
+            let approve: varsto_core::pair::v3::Approve = std::sync::Arc::new(move |j: &Joiner| {
+                let mut st = g.state.lock().unwrap_or_else(|e| e.into_inner());
+                st.ask = Some(j.clone());
+                st.answer = None;
+                varsto_core::events::publish(
+                    "pair.ask",
+                    json!({"name": j.name, "fingerprint": j.fingerprint}),
+                );
+                let deadline = std::time::Instant::now() + ANSWER_WITHIN;
+                let answer = loop {
+                    if let Some(a) = st.answer {
+                        break a;
+                    }
+                    let left = deadline.saturating_duration_since(std::time::Instant::now());
+                    if left.is_zero() {
+                        break false;
+                    }
+                    st =
+                        g.cv.wait_timeout(st, left)
+                            .unwrap_or_else(|e| e.into_inner())
+                            .0;
+                };
+                st.ask = None;
+                answer
+            });
+            varsto_core::pair::Offer::start_v3(bundle, key, approve)
+        }
+
+        /// What the pairing dialog shows: the joining device's name and
+        /// words, and the folders this device owns (to tick).
+        pub fn add_pair_ask(v: &mut Value, engine: Option<&mut Engine>) {
+            let Some(g) = gate() else { return };
+            let ask = g
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .ask
+                .clone();
+            let Some(j) = ask else { return };
+            let folders: Vec<Value> = engine
+                .and_then(|e| e.f3_folders().ok())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|f| f.your_role.as_deref() == Some("owner"))
+                .map(|f| json!({"id": f.folder_id, "name": f.folder}))
+                .collect();
+            v["ask"] = json!({"name": j.name, "fingerprint": j.fingerprint, "folders": folders});
+        }
+
+        /// The person's answer: with `allow`, the grants for the ticked
+        /// folders (by default none) are written first, then the vault key
+        /// is sent; without, the joining device is declined.
+        fn answer_pair(engine: &mut Engine, input: &Value) -> Result<Value> {
+            let g = gate().ok_or_else(|| anyhow!("no pairing offer is open"))?;
+            let ask = g
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .ask
+                .clone()
+                .ok_or_else(|| anyhow!("no device is waiting for an answer"))?;
+            let allow = input.get("allow").and_then(|v| v.as_bool()) == Some(true);
+            let mut granted = Vec::new();
+            if allow {
+                let folders: Vec<String> = input
+                    .get("folders")
+                    .and_then(|f| f.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !folders.is_empty() {
+                    // The words the person saw must still be the joiner's.
+                    if let Some(seen) = opt(input, "fingerprint") {
+                        if seen.split_whitespace().collect::<Vec<_>>()
+                            != ask.fingerprint.split_whitespace().collect::<Vec<_>>()
+                        {
+                            bail!("the words you saw are not the joining device's words; compare again");
+                        }
+                    }
+                    let role = opt(input, "role").unwrap_or_else(|| "editor".into());
+                    engine.f3_pair_grants(
+                        &ask.name,
+                        &ask.signing_pub,
+                        &ask.kem_pub,
+                        &folders,
+                        &role,
+                    )?;
+                    granted = folders;
+                }
+            }
+            let mut st = g.state.lock().unwrap_or_else(|e| e.into_inner());
+            st.answer = Some(allow);
+            g.cv.notify_all();
+            drop(st);
+            if !granted.is_empty() {
+                varsto_core::events::publish("folder.changed", json!({"what": "pair-grant"}));
+            }
+            Ok(json!({"ok": true, "allowed": allow, "granted": granted}))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4611,5 +4939,666 @@ mod tests {
             .find(|p| p["id"] == "aws-s3")
             .unwrap();
         assert_eq!(aws_later["stale"], true);
+    }
+
+    // ----- folder membership of storage format 3 (work package 8b) ----------
+
+    /// A vault of two devices on one directory storage, and the folder
+    /// `docs` in the membership records of the first.
+    #[cfg(feature = "format3")]
+    fn f3_pair(t: &std::path::Path) -> (Engine, Engine, String) {
+        let storage = StorageSpec::LocalDir {
+            name: "box".into(),
+            path: t.join("box"),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+            min_free: None,
+        };
+        std::fs::create_dir_all(t.join("box")).unwrap();
+        let pass = "correct horse battery staple";
+        let (mut a, key) = Engine::init(&t.join("a"), "alpha", pass).unwrap();
+        a.add_storage(storage.clone()).unwrap();
+        let b = Engine::join(&t.join("b"), "bravo", pass, &key, storage).unwrap();
+        let id = a.f3_folder_create("docs", None).unwrap();
+        (a, b, id)
+    }
+
+    #[cfg(feature = "format3")]
+    fn f3_call(
+        engine: &mut Engine,
+        service: &mut ServiceState,
+        m: Method,
+        path: &str,
+        query: &str,
+        input: Value,
+    ) -> Result<Value> {
+        api_unlocked(engine, service, m, path, query, &input)
+    }
+
+    #[cfg(feature = "format3")]
+    #[test]
+    fn folder_membership_endpoints() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut a, mut b, folder_id) = f3_pair(tmp.path());
+        let (mut sa, mut sb) = (ServiceState::default(), ServiceState::default());
+        let seen = varsto_core::events::bus().last_id();
+
+        // The requesting device asks; the owner lists the request with the words.
+        let asked = f3_call(
+            &mut b,
+            &mut sb,
+            Method::Post,
+            "/api/folder/request",
+            "",
+            json!({"folder": "docs", "role": "viewer"}),
+        )
+        .unwrap();
+        let words = asked["fingerprint"].as_str().unwrap().to_string();
+        let bravo = asked["device_id"].as_str().unwrap().to_string();
+        let listed = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/requests",
+            "",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(listed["requests"].as_array().unwrap().len(), 1);
+        assert_eq!(listed["requests"][0]["device"], "bravo");
+        assert_eq!(listed["requests"][0]["fingerprint"], json!(words));
+        let one = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/requests",
+            "folder=docs",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(one["requests"].as_array().unwrap().len(), 1);
+
+        // Approving needs the confirmation, and the words must be the request's.
+        for body in [
+            json!({"folder": "docs", "device": bravo}),
+            json!({"folder": "docs", "device": bravo, "fingerprint_confirmed": false}),
+            json!({"folder": "docs", "device": bravo, "fingerprint_confirmed": "true"}),
+        ] {
+            let e = f3_call(
+                &mut a,
+                &mut sa,
+                Method::Post,
+                "/api/folder/approve",
+                "",
+                body,
+            )
+            .unwrap_err();
+            assert!(format!("{e:#}").contains("fingerprint_confirmed"), "{e:#}");
+        }
+        let e = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/approve",
+            "",
+            json!({"folder": "docs", "device": bravo, "fingerprint_confirmed": true, "fingerprint": "one two three four five six"}),
+        )
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("request changed"), "{e:#}");
+        // Nothing was granted by the refusals.
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/members",
+            "folder=docs",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(m["participants"].as_array().unwrap().len(), 1);
+
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/approve",
+            "",
+            json!({"folder": "docs", "device": bravo, "role": "viewer", "fingerprint": words, "fingerprint_confirmed": true}),
+        )
+        .unwrap();
+        assert_eq!(m["folder_id"], json!(folder_id));
+        let roles: Vec<(String, String)> = m["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| {
+                (
+                    p["device"].as_str().unwrap().to_string(),
+                    p["role"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert!(
+            roles.contains(&("bravo".into(), "viewer".into())),
+            "{roles:?}"
+        );
+        assert!(sa.sync_requested, "other devices fetch the records at once");
+
+        // Every folder, and the role of the requesting device on its own side.
+        let all = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/members",
+            "",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(all["folders"].as_array().unwrap().len(), 1);
+        let mine = f3_call(
+            &mut b,
+            &mut sb,
+            Method::Get,
+            "/api/folder/members",
+            "folder=docs",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(mine["your_role"], "viewer");
+
+        // A role change, by an owner only.
+        let e = f3_call(
+            &mut b,
+            &mut sb,
+            Method::Post,
+            "/api/folder/role",
+            "",
+            json!({"folder": "docs", "device": bravo, "role": "editor"}),
+        )
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("not an owner"), "{e:#}");
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/role",
+            "",
+            json!({"folder": "docs", "device": bravo, "role": "editor"}),
+        )
+        .unwrap();
+        assert!(m["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["device"] == "bravo" && p["role"] == "editor"));
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/role",
+            "",
+            json!({"folder": "docs", "device": bravo, "role": "boss"})
+        )
+        .is_err());
+
+        // Deny: a second request, answered with a refusal.
+        let key = a.export_vault_key().unwrap();
+        let mut c = Engine::join(
+            &tmp.path().join("c"),
+            "charlie",
+            "correct horse battery staple",
+            &key,
+            a.storages()[0].clone(),
+        )
+        .unwrap();
+        let mut sc = ServiceState::default();
+        let asked = f3_call(
+            &mut c,
+            &mut sc,
+            Method::Post,
+            "/api/folder/request",
+            "",
+            json!({"folder": "docs"}),
+        )
+        .unwrap();
+        let charlie = asked["device_id"].as_str().unwrap().to_string();
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/deny",
+            "",
+            json!({"folder": "docs", "device": charlie}),
+        )
+        .unwrap();
+        assert!(m["denied"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["device"] == "charlie"));
+        assert!(m["pending"].as_array().unwrap().is_empty());
+
+        // Removing needs "confirm"; then a new folder epoch starts.
+        let e = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/remove",
+            "",
+            json!({"folder": "docs", "device": bravo}),
+        )
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("confirm"), "{e:#}");
+        let r = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/remove",
+            "",
+            json!({"folder": "docs", "device": bravo, "confirm": true}),
+        )
+        .unwrap();
+        assert_eq!(r["epoch"], 1);
+        assert_eq!(r["removed"], "bravo");
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/members",
+            "folder=docs",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(m["epoch"], 1);
+        assert!(!m["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["device"] == "bravo"));
+        // The vault's own folder removal keeps working on the same path.
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/remove",
+            "",
+            json!({"name": "nothing"})
+        )
+        .is_err());
+
+        // Nothing to resolve without two epochs under one number.
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/resolve-epoch",
+            "",
+            json!({"folder": "docs", "epoch": 1, "keep": "alpha"})
+        )
+        .is_err());
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/resolve-epoch",
+            "",
+            json!({"folder": "docs", "keep": "alpha"})
+        )
+        .is_err());
+
+        // Recovery copies: listed, written with the words, then none left.
+        let missing = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/recovery/escrow",
+            "",
+            json!({}),
+        )
+        .unwrap();
+        let n = missing["missing"].as_array().unwrap().len();
+        assert!(n >= 2, "epochs 0 and 1 lack a copy: {missing}");
+        assert_eq!(missing["missing"][0]["folder"], "docs");
+        assert!(missing["missing"][0]["warning"]
+            .as_str()
+            .unwrap()
+            .contains("has no recovery copy: run varsto recovery escrow docs"));
+        let st = f3_call(&mut a, &mut sa, Method::Get, "/api/status", "", json!({})).unwrap();
+        assert_eq!(st["recovery_warnings"].as_array().unwrap().len(), n);
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/recovery/escrow",
+            "",
+            json!({"words": "abandon abandon"})
+        )
+        .is_err());
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/recovery/escrow",
+            "",
+            json!({})
+        )
+        .is_err());
+        let words = varsto_core::membership3::RecoveryKey::generate()
+            .words()
+            .unwrap()
+            .to_string();
+        let w = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/recovery/escrow",
+            "",
+            json!({"words": words}),
+        )
+        .unwrap();
+        assert_eq!(w["written"].as_array().unwrap().len(), n);
+        let missing = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/recovery/escrow",
+            "",
+            json!({}),
+        )
+        .unwrap();
+        assert!(missing["missing"].as_array().unwrap().is_empty());
+        let st = f3_call(&mut a, &mut sa, Method::Get, "/api/status", "", json!({})).unwrap();
+        assert!(st.get("recovery_warnings").is_none());
+
+        // The page hears about it.
+        let kinds: Vec<String> = match varsto_core::events::bus().since(seen) {
+            varsto_core::events::Since::Events(v) => v.into_iter().map(|e| e.kind).collect(),
+            other => panic!("{other:?}"),
+        };
+        assert!(kinds.iter().any(|k| k == "folder.changed"), "{kinds:?}");
+    }
+
+    /// The service announces requests (`folder.request`) and never answers one.
+    #[cfg(feature = "format3")]
+    #[test]
+    fn the_service_announces_requests_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut a, mut b, _) = f3_pair(tmp.path());
+        let mut sb = ServiceState::default();
+        let mut service = ServiceState::default();
+        let seen = varsto_core::events::bus().last_id();
+        service.watch_folder_requests(&mut a);
+        f3_call(
+            &mut b,
+            &mut sb,
+            Method::Post,
+            "/api/folder/request",
+            "",
+            json!({"folder": "docs"}),
+        )
+        .unwrap();
+        service.watch_folder_requests(&mut a);
+        service.watch_folder_requests(&mut a);
+        let n = match varsto_core::events::bus().since(seen) {
+            varsto_core::events::Since::Events(v) => v
+                .iter()
+                .filter(|e| e.kind == "folder.request" && e.data["device"] == "bravo")
+                .count(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(n, 1, "announced once");
+        // Still pending: the service granted nothing.
+        assert_eq!(a.f3_requests(None).unwrap().len(), 1);
+        assert_eq!(a.f3_members("docs").unwrap().participants.len(), 1);
+    }
+
+    /// A device that joins by pairing, as the offering side sees it.
+    #[cfg(feature = "format3")]
+    fn f3_joiner(
+        name: &'static str,
+        code: String,
+        port: u16,
+    ) -> (std::thread::JoinHandle<Result<(), String>>, String) {
+        use varsto_core::pair::v3;
+        let sk = varsto_core::crypto::SigningKey::generate();
+        let dk = varsto_core::kem::DecapsKey::generate();
+        let sk_pub = sk.public().to_bytes();
+        let device = hex::encode(varsto_core::membership3::device_id(&sk.public()));
+        let h = std::thread::spawn(move || {
+            let keys = v3::JoinKeys {
+                name,
+                signing_pub: sk_pub,
+                kem: &dk,
+            };
+            let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
+            v3::fetch(&code, &keys, addr)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        });
+        (h, device)
+    }
+
+    /// The pairing question on the offering side: the joining device's name
+    /// and words wait for the person; nothing is sent before the answer;
+    /// ticked folders are granted before the vault key goes out.
+    #[cfg(feature = "format3")]
+    #[test]
+    fn pairing_asks_the_person_and_grants_only_ticked_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut a, _b, _) = f3_pair(tmp.path());
+        a.f3_folder_create("photos", None).unwrap();
+        let mut st = State {
+            home: tmp.path().join("a"),
+            engine: Some(a),
+            token: String::new(),
+            bound: "127.0.0.1:0".into(),
+            traffic: Arc::default(),
+            service: ServiceState::default(),
+            pair: None,
+            link: None,
+        };
+        let wait_ask = |st: &mut State| -> Value {
+            for _ in 0..200 {
+                let s = api(st, Method::Get, "/api/pair/status", "", &json!({})).unwrap();
+                if s.get("ask").is_some() {
+                    return s["ask"].clone();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            panic!("no question");
+        };
+        let started = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/start",
+            "",
+            &json!({"format": 3}),
+        )
+        .unwrap();
+        let code = started["code"].as_str().unwrap().to_string();
+        let port = started["port"].as_u64().unwrap() as u16;
+
+        // The joining device waits; the question names it and lists the owned folders.
+        let (h, device) = f3_joiner("phone", code.clone(), port);
+        let ask = wait_ask(&mut st);
+        assert_eq!(ask["name"], "phone");
+        assert_eq!(ask["fingerprint"].as_str().unwrap().split(' ').count(), 6);
+        let mut names: Vec<&str> = ask["folders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["name"].as_str().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["docs", "photos"]);
+        assert!(!h.is_finished(), "nothing is sent before the answer");
+        // Words that are not the joiner's refuse the grants and leave the question open.
+        let e = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/answer",
+            "",
+            &json!({"allow": true, "folders": ["docs"], "fingerprint": "a b c d e f"}),
+        )
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("compare again"), "{e:#}");
+        assert!(!h.is_finished());
+        // Ticking one folder grants it and no other.
+        let done = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/answer",
+            "",
+            &json!({"allow": true, "folders": ["docs"], "fingerprint": ask["fingerprint"]}),
+        )
+        .unwrap();
+        assert_eq!(done["granted"], json!(["docs"]));
+        h.join().unwrap().unwrap();
+        let a = st.engine.as_mut().unwrap();
+        let docs = a.f3_members("docs").unwrap();
+        assert!(
+            docs.participants
+                .iter()
+                .any(|p| p.device_id == device && p.role == "editor"),
+            "{docs:?}"
+        );
+        let photos = a.f3_members("photos").unwrap();
+        assert!(!photos.participants.iter().any(|p| p.device_id == device));
+
+        // A second device is declined: no grants, and it learns so.
+        let started = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/start",
+            "",
+            &json!({"format": 3}),
+        )
+        .unwrap();
+        let code2 = started["code"].as_str().unwrap().to_string();
+        let port2 = started["port"].as_u64().unwrap() as u16;
+        let (h2, device2) = f3_joiner("tablet", code2, port2);
+        wait_ask(&mut st);
+        let done = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/answer",
+            "",
+            &json!({"allow": false, "folders": ["docs"]}),
+        )
+        .unwrap();
+        assert_eq!(done["allowed"], false);
+        assert!(h2.join().unwrap().is_err());
+        let a = st.engine.as_mut().unwrap();
+        assert!(!a
+            .f3_members("docs")
+            .unwrap()
+            .participants
+            .iter()
+            .any(|p| p.device_id == device2));
+        // With no question open there is nothing to answer.
+        assert!(api(
+            &mut st,
+            Method::Post,
+            "/api/pair/answer",
+            "",
+            &json!({"allow": true})
+        )
+        .is_err());
+    }
+
+    /// The folder access card: every element the script reaches exists in
+    /// the page, approving always goes through the confirmation box, and the
+    /// pairing question is answered through the API (no browser needed).
+    #[test]
+    fn folder_access_page_is_wired() {
+        for id in [
+            "f3card",
+            "f3recovery",
+            "f3recovery-names",
+            "f3recovery-go",
+            "f3folders",
+        ] {
+            assert!(
+                INDEX_HTML.contains(&format!("id=\"{id}\"")),
+                "page lacks {id}"
+            );
+            assert!(
+                APP_JS.contains(&format!("$(\"{id}\")")),
+                "script lacks {id}"
+            );
+        }
+        // The card starts hidden: a build or vault without membership shows nothing.
+        let card = &INDEX_HTML[INDEX_HTML.find("id=\"f3card\"").unwrap()..];
+        assert!(card[..card.find('>').unwrap()].contains("hidden"));
+        // Approve: the box must be ticked before the button works, and the
+        // request carries the confirmation the API insists on.
+        assert!(APP_JS.contains("ok.disabled = true; cb.onchange"));
+        assert!(APP_JS.contains("r.values.match !== \"yes\""));
+        assert!(APP_JS.contains("fingerprint_confirmed: true"));
+        // Removal names its consequence and sends the confirmation.
+        assert!(APP_JS.contains("starts a new folder epoch"));
+        assert!(APP_JS.contains("confirm: true"));
+        // The events and the pairing question.
+        for k in [
+            "folder.request",
+            "folder.changed",
+            "pair.ask",
+            "/api/pair/answer",
+        ] {
+            assert!(APP_JS.contains(k), "script lacks {k}");
+        }
+    }
+
+    /// A build without the feature answers every route with the same text.
+    #[cfg(not(feature = "format3"))]
+    #[test]
+    fn folder_membership_routes_say_not_available() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut a, _key) = Engine::init(
+            &tmp.path().join("a"),
+            "alpha",
+            "correct horse battery staple",
+        )
+        .unwrap();
+        let mut service = ServiceState::default();
+        for (m, path) in [
+            (Method::Get, "/api/folder/requests"),
+            (Method::Post, "/api/folder/request"),
+            (Method::Post, "/api/folder/approve"),
+            (Method::Post, "/api/folder/deny"),
+            (Method::Get, "/api/folder/members"),
+            (Method::Post, "/api/folder/role"),
+            (Method::Post, "/api/folder/resolve-epoch"),
+            (Method::Get, "/api/recovery/escrow"),
+            (Method::Post, "/api/recovery/escrow"),
+        ] {
+            let e = api_unlocked(
+                &mut a,
+                &mut service,
+                m,
+                path,
+                "",
+                &json!({"folder": "docs", "device": "x"}),
+            )
+            .unwrap_err();
+            assert!(
+                format!("{e:#}").contains("not available in this build"),
+                "{path}: {e:#}"
+            );
+        }
+        let e = api_unlocked(
+            &mut a,
+            &mut service,
+            Method::Post,
+            "/api/folder/remove",
+            "",
+            &json!({"folder": "docs", "device": "x", "confirm": true}),
+        )
+        .unwrap_err();
+        assert!(
+            format!("{e:#}").contains("not available in this build"),
+            "{e:#}"
+        );
     }
 }

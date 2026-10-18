@@ -27,6 +27,8 @@ pub mod diskformat;
 pub mod disksuggest;
 pub mod engine;
 pub mod events;
+#[cfg(feature = "format3")]
+pub mod fingerprint;
 pub mod freespace;
 pub mod fsmeta;
 #[cfg(feature = "format3")]
