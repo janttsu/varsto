@@ -2167,16 +2167,18 @@ body_hash = BLAKE3(body)
 | 8 | `grant` | `vault/grants/<folder or vault>/<epoch, 10 digits>/<recipient>/<issuer>/` | `kem:<recipient>` | no | `membership3::grants` |
 | 9 | `request` | `vault/requests/<folder>/<device>/` | `registry@<e>` or `none` | no | `membership3::requests` |
 | 10 | `revocation` | `vault/revocations/<device>/<issuer>/` (scope = the removed device) | `registry@0` | no | `membership3::epochs` |
-| 11 | `policy` | `vault/policy/<device>/` | `registry@` | no | none yet |
-| 12 | `placement` | `vault/placement/<folder>/<device>/` | `registry@` | no | none yet |
+| 11 | `policy` | `vault/policy/<device>/` | `registry@` | no | `records3` |
+| 12 | `placement` | `vault/placement/<folder>/<device>/` | `registry@` | no | `records3` |
 | 13 | `checkpoint` | `ledger/<device>/checkpoint-` | `ledger@<e>` (full devices) | no | `ledger3` |
 | 14 | `batch` | `ledger/<device>/` | `ledger@<e>`, `share-ledger:<folder>@<e>` or `replica` | no | `ledger3` |
 | 15 | `folder` | `vault/folders/<folder>/<device>/` | `registry@` | no | `membership3::folders` |
 | 16 | `device` | `vault/devices/<device>/` | `registry@` | no | `membership3::devices` |
 | 17 | `escrow` | `vault/escrow/<folder>/<epoch, 10 digits>/<device>/` | `recovery` | no | `membership3::escrow` |
 | 18 | `settings` | `vault/settings/<device>/` | `registry@` | no | `trash3::settings` |
-| 19 | `storage-names` | `vault/storage-names/<device>/` | `registry@` | no | none yet |
-| 20, 21, 22 | `access`, `notes`, `thumbs` | `access/`, `notes/`, `thumbs/` + `<folder>/<device>/` | `meta:` | no | none yet |
+| 19 | `storage-names` | `vault/storage-names/<device>/` | `registry@` | no | `records3` |
+| 20, 21, 22 | `access`, `notes`, `thumbs` | `access/`, `notes/`, `thumbs/` + `<folder>/<device>/` | `meta:` | no | `records3` |
+
+**Bodies of kinds 11, 12, 19 to 22** (`records3`, work package 12). Each names its writer and seq (and, for folder kinds, the folder), which must be the envelope's. `policy`: the writer's policies by folder, each `{policy or none (cleared by hand), updated_utc, lamport}`; per folder the newest entry of any device wins by (`updated_utc`, Lamport time, device). `placement`: `{folder, device, seq, lamport, updated_utc, storages, storage_ids, places}`, newest of any device by the same order. `storage-names`: the writer's `(local name, identity)` pairs. `access`: `(path, UTC seconds)` pairs, the newest time per path over every device. `notes`: `(path, {analysis (at most 64 KiB), tags (at most 64), content hash, by, analysed_utc})`, the newest analysis per path. `thumbs`: `(content hash, JPEG of at most 1 MiB)` pairs; **interpretation:** a thumbs record carries the thumbnails made since the writer's previous one and a reader takes the union of a writer's records (one record per thumbnail would pad each to 64 KiB), the picture of the smallest (writer, seq) winning for one hash. Lists are sorted and unique; at most 2^20 items per record.
 
 The vault grant (zero scope) is named `vault/grants/vault/<epoch>/...`. `Kind::key_fits` refuses a key id of the wrong class for the kind when an envelope is decoded and when a writer seals (for `share-epoch` the epoch in the key id must equal the record's seq; `meta:` keys of folder-scoped kinds must name the record's scope; `batch` with `share-ledger:` must name the scope folder; `peer`, `policy`, `settings`, `storage-names` and `device` have zero scope). Forward leases (section 70) stay plain JSON: they decide nothing a reader trusts.
 
@@ -2312,7 +2314,7 @@ A member never writes registry kinds, epochs, revocations, `storage_retired`, sn
 - Orphan age counts from when the collector first saw a pack, not from the storage's write time (77.3).
 - Repairs, like marks, need the writer role in the folder; a K3-only device can verify and copy whole packs but not rewrite.
 - A `lost` mark is sticky; a block with no good copy anywhere stays damaged until a device that holds the file writes it again.
-- Kinds 11, 12, 19, 20, 21 and 22 (policy, placement, storage-names, access, notes, thumbs) have key and stream rules but no body type in this series; format 2's records for these remain what the engine uses until work package 12.
+- Kinds 11, 12, 19, 20, 21 and 22 have body types in `records3` (77.5); format 2's records for these remain what the engine uses until it switches to format 3.
 - Strongroom keys (K13) and the re-encryption job `varsto folder reencrypt` have no format-3 code in this series.
 - The design's estimates (77.4) are not measured in this text; the benchmarks exist and are ignored by default.
 - The test list of the design asks for fuzz targets; the series has parser mutation and random-input tests instead (77.14), and no `cargo-fuzz` targets.

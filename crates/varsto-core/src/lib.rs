@@ -73,6 +73,8 @@ pub mod rebuild3;
 #[cfg(feature = "format3")]
 pub mod record;
 pub mod record_shim;
+#[cfg(feature = "format3")]
+pub mod records3;
 pub mod recovery;
 pub mod recovery_guide;
 pub mod replica;
