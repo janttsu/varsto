@@ -301,6 +301,12 @@ pub struct MoveReport {
     pub waiting_note: Option<String>,
     /// The smallest block that found no room (0: none, or no disk at all).
     pub waiting_min_bytes: u64,
+    /// Staged moves from a pool: blocks whose only copies are on disks of
+    /// the source pool that are away (and not staged by the mailbox), their
+    /// bytes and those disks.
+    pub waiting_source_blocks: u64,
+    pub waiting_source_bytes: u64,
+    pub waiting_source_disks: Vec<String>,
     /// The run stopped at its limit of block groups; more is left to move.
     pub stopped_early: bool,
     /// Labels of the pool disks this run wrote to.

@@ -2649,13 +2649,76 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   // "Suggested next" per pool card (the interface cannot mount: it shows
   // the command), the attached disk to check instead, and disks left out.
+  // The mailbox (spec section 78): blocks staged from a docked disk for a
+  // disk or storage that is away, what still waits to be read from a disk,
+  // and what another device holds. Each sentence part is its own text.
+  function mailboxTarget(d, g) {
+    var disks = g.target_disks || [];
+    if (!disks.length) { d.appendChild(document.createTextNode("\u00ab" + g.target_name + "\u00bb")); return; }
+    d.appendChild(el("span", "", disks.length === 1 ? "disk" : "disks"));
+    disks.forEach(function (t, i) { if (i) { d.appendChild(document.createTextNode(" ")); d.appendChild(el("span", "", "or")); } d.appendChild(document.createTextNode(" \u00ab" + t + "\u00bb")); });
+  }
+  function mailboxLine(g) {
+    var d = el("div", "notice");
+    d.appendChild(document.createTextNode(fmtBytes(g.bytes) + " "));
+    if (g.state === "held") {
+      d.appendChild(el("span", "", "from disk")); d.appendChild(document.createTextNode(" \u00ab" + g.source + "\u00bb "));
+      d.appendChild(el("span", "", "waiting for")); d.appendChild(document.createTextNode(" "));
+      mailboxTarget(d, g);
+      d.appendChild(document.createTextNode(" ("));
+      if (g.here) { d.appendChild(el("span", "", "staged on this device")); }
+      else { d.appendChild(el("span", "", "staged on")); d.appendChild(document.createTextNode(" " + g.held_on)); }
+      d.appendChild(document.createTextNode(")"));
+    } else if (g.source_attached) {
+      d.appendChild(el("span", "", "still to be read from disk")); d.appendChild(document.createTextNode(" \u00ab" + g.source + "\u00bb: "));
+      d.appendChild(el("span", "", "keep it attached for about")); d.appendChild(document.createTextNode(" " + (g.keep_attached_minutes || 1) + " "));
+      d.appendChild(el("span", "", "min"));
+    } else {
+      d.appendChild(el("span", "", "waiting for disk")); d.appendChild(document.createTextNode(" \u00ab" + g.source + "\u00bb "));
+      d.appendChild(el("span", "", "to be docked"));
+    }
+    return d;
+  }
+  function mailboxSettings(mb) {
+    dialog({ title: "Mailbox settings", text: "Staging leaves at least this much free space on this device's disk, after the write: a share or an amount, several separated by ; (the larger counts). Empty: 15 % or 50 GB, whichever is more. Staged copies are the first thing removed when the device needs space.", fields: [{ name: "keep_free", label: "Free space to keep", value: (mb.keep_free || []).join("; ") }], ok: "Save" }).then(function (r) {
+      if (!r) { return; }
+      var list = r.values.keep_free.split(";").map(function (x) { return x.trim(); }).filter(function (x) { return x; });
+      return api("POST", "/api/mailbox", { keep_free: list.length ? list : "default" }).then(function (st) { log("mailbox keeps " + st.keep_free_text + " free"); return refreshStatus(); });
+    }).catch(function (e) { alertBox(e.message); });
+  }
+  function renderMailbox(box, mb, pool, first) {
+    if (!mb) { return; }
+    var seen = {};
+    (mb.groups || []).filter(function (g) { return g.pool === pool || g.target_name === pool; }).forEach(function (g) {
+      var k = g.kind + "|" + g.source + "|" + g.target + "|" + g.state + "|" + g.held_on;
+      if (seen[k]) { return; } seen[k] = 1;
+      box.appendChild(mailboxLine(g));
+    });
+    if (!first) { return; }
+    var line = el("div", "muted small");
+    var lab = el("label", "inline"); var cbx = el("input"); cbx.type = "checkbox"; cbx.checked = !!mb.enabled;
+    cbx.onchange = function () { api("POST", "/api/mailbox", { enabled: cbx.checked }).then(function () { log(cbx.checked ? "mailbox on" : "mailbox off"); }).catch(function (e) { alertBox(e.message); cbx.checked = !cbx.checked; }); };
+    lab.appendChild(cbx); lab.appendChild(el("span", "", "Keep blocks for disks that are away (mailbox)")); line.appendChild(lab);
+    line.appendChild(document.createTextNode(" \u2014 " + fmtBytes(mb.held_bytes || 0) + " "));
+    line.appendChild(el("span", "", "staged here; keeps"));
+    line.appendChild(document.createTextNode(" "));
+    line.appendChild(el("span", "", mb.keep_free_text));
+    line.appendChild(document.createTextNode(" "));
+    line.appendChild(el("span", "", "free"));
+    line.appendChild(document.createTextNode(" "));
+    var b = el("button", "secondary", "Mailbox settings\u2026"); b.type = "button"; b.onclick = function () { mailboxSettings(mb); };
+    line.appendChild(b);
+    box.appendChild(line);
+  }
   function renderDiskSuggest(pools) {
-    api("GET", "/api/disk/suggest").then(function (r) {
+    Promise.all([api("GET", "/api/disk/suggest"), api("GET", "/api/mailbox").catch(function () { return null; })]).then(function (rs) {
+      var r = rs[0], mb = rs[1];
       var s = r.suggestions;
       pools.forEach(function (p, idx) {
         var box = document.querySelector('.disk-suggest[data-suggest-for="' + (window.CSS && CSS.escape ? CSS.escape(p.name) : p.name) + '"]');
         if (!box) { return; }
         box.innerHTML = "";
+        renderMailbox(box, mb, p.name, idx === 0);
         var mine = function (x) { return x.pool === p.name; };
         (s.moves || []).filter(mine).forEach(function (m) {
           var n = el("div", "notice");
@@ -2743,7 +2806,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (j.need_second_place_bytes > 0) { d.appendChild(document.createTextNode("; " + fmtBytes(j.need_second_place_bytes) + " ")); d.appendChild(el("span", "", "need a second place")); }
     if (j.waiting) {
       d.appendChild(document.createTextNode(" \u2014 "));
-      if (j.waiting.kind === "disk" || j.waiting.kind === "place") {
+      if (j.waiting.kind === "disk" || j.waiting.kind === "place" || j.waiting.kind === "source") {
         var next = j.waiting.disk || null;
         if (next) { d.appendChild(el("span", "", "Attach disk")); d.appendChild(document.createTextNode(" \u00ab" + next + "\u00bb ")); }
         else { d.appendChild(el("span", "", "Attach a new disk")); d.appendChild(document.createTextNode(" ")); }
@@ -3855,7 +3918,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     "drain": "Draining storage «{s}»",
     "drain.records": "Copying the records off storage «{s}»",
     "history_restore": "Restoring an earlier version of a file of folder «{s}»",
-    "forward": "Forwarding blocks to the storages for «{s}»"
+    "forward": "Forwarding blocks to the storages for «{s}»",
+    "mailbox": "Writing staged blocks to the disks and storages docked now",
+    "mailbox.stage": "Copying blocks from disk «{s}» to the mailbox"
   };
   var actTimer = null, actBusy = false, lastActivity = null;
   function actTr(s) { return window.varstoLang ? window.varstoLang.t(s) : s; }

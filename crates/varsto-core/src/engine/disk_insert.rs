@@ -292,10 +292,13 @@ impl Engine {
                 }
                 copied_packs.insert(loc.pack.clone(), false);
                 let key = crate::packs::pack_key(&loc.pack);
+                // From a docked disk of the pool, else staged by the
+                // mailbox while one was docked (section 78).
                 let Some(bytes) = pool
                     .get(&key)
                     .ok()
                     .flatten()
+                    .or_else(|| self.mailbox_object(&key))
                     .filter(|b| hex::encode(crypto::hash(b)) == loc.pack)
                 else {
                     out.unavailable += 1;
@@ -339,7 +342,9 @@ impl Engine {
                 }
             }
             if ct.is_none() {
-                ct = self.cached_object(&object);
+                ct = self
+                    .cached_object(&object)
+                    .or_else(|| self.mailbox_object(&key));
             }
             if ct.is_none() {
                 if let Some(fk) = folder_keys.get(&need.folder) {

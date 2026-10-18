@@ -41,6 +41,7 @@ pub mod ledger;
 pub mod ledger3;
 pub mod ledger_heads;
 pub mod logging;
+pub mod mailbox;
 pub mod manifest;
 #[cfg(feature = "format3")]
 pub mod manifest3;
