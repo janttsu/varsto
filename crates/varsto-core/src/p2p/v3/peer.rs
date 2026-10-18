@@ -241,7 +241,18 @@ impl PeerDirectory {
     /// a trusted device and may write peer records). True when it is now
     /// the device's entry.
     pub fn offer(&mut self, rec: Record<PeerBody>) -> bool {
-        let body = rec.body;
+        self.offer_body(rec.body)
+    }
+
+    /// Take the entries of a directory read from another storage: the
+    /// newest seq of each device wins.
+    pub fn merge(&mut self, other: PeerDirectory) {
+        for (_, body) in other.entries {
+            self.offer_body(body);
+        }
+    }
+
+    fn offer_body(&mut self, body: PeerBody) -> bool {
         if body.device == self.me || body.cert_sha256 == self.own_cert {
             return false;
         }

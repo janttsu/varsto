@@ -1816,6 +1816,10 @@
  },
  "patterns": [
   [
+   "^This device's six words: (.+)\\. The other device shows the same words before it lets this one join\\.$",
+   "Den här enhetens sex ord: $1. Den andra enheten visar samma ord innan den låter den här ansluta."
+  ],
+  [
    "^(.+) or (.+), whichever is more$",
    "$1 eller $2, det som är mest"
   ],

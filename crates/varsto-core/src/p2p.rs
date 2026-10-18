@@ -5,13 +5,15 @@
 //! device that needs a chunk pulls it from whichever peer or storage has it,
 //! verifying every object against its content-addressed name. Peers on the
 //! LAN are found with a multicast beacon; peers across the internet through
-//! a rendezvous record each device publishes in the vault's own storage with
-//! the addresses it can be reached at. The objects are ciphertext already,
-//! and every request carries a proof of vault membership derived from the
-//! master key, so a listener learns nothing and a stranger gets nothing.
+//! a signed peer record each device publishes in the vault's own storage with
+//! the addresses it can be reached at and the pin of its certificate. The
+//! objects are ciphertext already; both transports run TLS 1.3 with pinned
+//! certificates from the accepted peer records, and every request carries a
+//! token bound to its TLS connection (`v3`), so a listener learns nothing
+//! and a stranger does not even complete the handshake.
 //!
-//! Two transports share one request handler: plain HTTP over TCP (LAN and
-//! user-forwarded ports) and QUIC over UDP (`quic`), which crosses NATs with
+//! Two transports share one request handler (`v3::Responder`): TLS over TCP
+//! (LAN and user-forwarded ports) and QUIC over UDP (`quic`), which crosses NATs with
 //! STUN-learned addresses (`stun`), punch datagrams and, failing that, a
 //! relay through one of the user's own reachable devices. There are no
 //! trackers and no vendor servers: the user's storage is the rendezvous.
@@ -20,12 +22,11 @@ pub mod portmap;
 pub mod quic;
 pub mod stun;
 pub mod traffic;
-#[cfg(feature = "format3")]
 pub mod v3;
 
 pub use traffic::Traffic;
 
-use crate::crypto::{self, SecretKey};
+use crate::crypto;
 use crate::ids::{DeviceId, FolderId, ObjectName, VaultId};
 use crate::vault::FolderKeys;
 use anyhow::{anyhow, bail, Context, Result};
@@ -39,20 +40,6 @@ use std::time::{Duration, Instant};
 
 pub const BEACON_GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 77, 77);
 pub const BEACON_PORT: u16 = 17892;
-const AUTH_WINDOW_SECS: i64 = 300;
-
-/// Key every device of the vault derives for peer authentication.
-pub fn peer_key(master: &SecretKey) -> SecretKey {
-    master.derive("p2p-auth", &[])
-}
-
-/// Vault identifier as seen on the wire: a keyed hash, so a listener cannot
-/// link beacons to a vault id it saw elsewhere.
-pub fn wire_vault_tag(master: &SecretKey, vault: &VaultId) -> String {
-    hex::encode(
-        &crypto::keyed_hash(&master.derive("p2p-tag", &[]), vault.as_str().as_bytes())[..12],
-    )
-}
 
 fn now() -> i64 {
     crate::util::now_utc()
@@ -63,88 +50,6 @@ fn now() -> i64 {
 /// chatter is logged at debug and trace level (`crate::logging`).
 pub(crate) fn log(what: &str) {
     log::info!("{what}");
-}
-
-/// `X-Varsto-Peer: <device>:<ts>:<nonce>:<mac>` where
-/// mac = keyed_hash(peer_key, device || ts || nonce || path). The nonce is
-/// random per request; a server remembers the nonces it accepted inside the
-/// time window, so a token seen on the wire cannot be replayed to it.
-pub fn auth_header(key: &SecretKey, device: &DeviceId, path: &str) -> String {
-    let ts = now();
-    let mut n = [0u8; 12];
-    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut n);
-    let nonce = hex::encode(n);
-    let mac = hex::encode(crypto::keyed_hash(
-        key,
-        format!("{}|{}|{}|{}", device.as_str(), ts, nonce, path).as_bytes(),
-    ));
-    format!("{}:{}:{}:{}", device.as_str(), ts, nonce, mac)
-}
-
-/// Nonces accepted recently (with their time), so each token is good once.
-type NonceCache = (
-    std::collections::HashSet<String>,
-    std::collections::VecDeque<(i64, String)>,
-);
-static SEEN_NONCES: std::sync::Mutex<Option<NonceCache>> = std::sync::Mutex::new(None);
-const SEEN_NONCES_MAX: usize = 100_000;
-
-/// Record `nonce`; false when it was used already inside the window.
-fn nonce_fresh(nonce: &str, ts: i64) -> bool {
-    let mut guard = SEEN_NONCES.lock().unwrap_or_else(|e| e.into_inner());
-    let (set, order) = guard.get_or_insert_with(Default::default);
-    let now = now();
-    while let Some((t, _)) = order.front() {
-        if now - *t > AUTH_WINDOW_SECS || order.len() > SEEN_NONCES_MAX {
-            let (_, n) = order.pop_front().expect("checked front");
-            set.remove(&n);
-        } else {
-            break;
-        }
-    }
-    if !set.insert(nonce.to_string()) {
-        return false;
-    }
-    order.push_back((ts.max(now), nonce.to_string()));
-    true
-}
-
-/// Check a token and spend its nonce: for the device that answers.
-pub fn verify_auth(key: &SecretKey, header: &str, path: &str) -> Option<DeviceId> {
-    verify_auth_inner(key, header, path, true)
-}
-
-/// Check a token without spending its nonce: for a relay, which passes the
-/// request on to the device that answers (and spends it there).
-pub fn verify_auth_relayed(key: &SecretKey, header: &str, path: &str) -> Option<DeviceId> {
-    verify_auth_inner(key, header, path, false)
-}
-
-fn verify_auth_inner(key: &SecretKey, header: &str, path: &str, spend: bool) -> Option<DeviceId> {
-    let mut parts = header.splitn(4, ':');
-    let (dev, ts, nonce, mac) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
-    let ts: i64 = ts.parse().ok()?;
-    if now().abs_diff(ts) > AUTH_WINDOW_SECS as u64 || nonce.len() != 24 {
-        return None;
-    }
-    let expected = hex::encode(crypto::keyed_hash(
-        key,
-        format!("{dev}|{ts}|{nonce}|{path}").as_bytes(),
-    ));
-    // Constant-time comparison of equal-length hex strings.
-    if expected.len() != mac.len()
-        || expected
-            .bytes()
-            .zip(mac.bytes())
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-            != 0
-    {
-        return None;
-    }
-    if spend && !nonce_fresh(nonce, ts) {
-        return None;
-    }
-    DeviceId::from_hex(dev).ok()
 }
 
 /// Where one chunk lives inside a plaintext file on this device.
@@ -165,7 +70,6 @@ pub struct Piece {
 pub struct Snapshot {
     pub vault_id: VaultId,
     pub device_id: DeviceId,
-    pub peer_key: SecretKey,
     pub folder_keys: BTreeMap<FolderId, FolderKeys>,
     pub pieces: BTreeMap<ObjectName, Piece>,
     /// Roots holding objects as single files (the block cache), served
@@ -180,10 +84,14 @@ pub struct Snapshot {
     /// organization the devices of the same user; `None` for every device
     /// of the vault.
     pub activity_audience: Option<std::collections::BTreeSet<DeviceId>>,
-    /// This device's signed ledger-head statement (`ledger_heads`, section
-    /// 74), served on `/p2p/heads` and in answer to `/p2p/changed`; empty
-    /// when there is none.
-    pub heads: Vec<u8>,
+    /// The newest batch this device holds of every full device (its own:
+    /// the newest a storage confirmed), answered on `/p2p/heads` and
+    /// `/p2p/changed` with proofs (`v3::heads`); empty for a device that
+    /// signs no vault batches.
+    pub heads: Vec<v3::HeadRef>,
+    /// The local ledger directory, where the batches proved and handed
+    /// over on `/p2p/ledger/` are read from.
+    pub ledger_dir: Option<PathBuf>,
 }
 
 crate::redacted_opaque!(Snapshot);
@@ -359,20 +267,17 @@ pub struct Server {
     listener: std::net::TcpListener,
     pub addr: SocketAddr,
     traffic: Arc<Traffic>,
-    /// Format 3: TLS 1.3 with pinned certificates on every connection, and
-    /// requests authenticated by `v3::Responder` (no plain HTTP).
-    #[cfg(feature = "format3")]
-    tls: Option<Arc<v3::tls::TcpTls>>,
+    /// TLS 1.3 with pinned certificates on every connection, and requests
+    /// authenticated by `v3::Responder` (no plain HTTP).
+    tls: Arc<v3::tls::TcpTls>,
 }
 
 /// The headers of one request that authentication looks at.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RequestHeaders {
-    /// `X-Varsto-Peer` (format 2 token).
-    pub peer: String,
-    /// `X-Varsto-Auth` (format 3 token).
+    /// `X-Varsto-Auth` (the connection-bound token).
     pub auth: String,
-    /// `X-Varsto-For` (format 3: the device a relay asks for).
+    /// `X-Varsto-For` (the device a relay asks for).
     pub for_device: String,
 }
 
@@ -460,25 +365,18 @@ impl Drop for SlotGuard<'_> {
 }
 
 impl Server {
-    pub fn bind(addr: SocketAddr) -> Result<Server> {
+    /// Listen on `addr`, serving TLS 1.3 only with the pinned certificates
+    /// and the connection-bound tokens of `v3` (format 3 design, section
+    /// 8). A client that does not speak TLS gets an alert and nothing else.
+    pub fn bind(addr: SocketAddr, tls: Arc<v3::tls::TcpTls>) -> Result<Server> {
         let listener = listener(addr).with_context(|| format!("bind p2p listener on {addr}"))?;
         let addr = listener.local_addr().unwrap_or(addr);
         Ok(Server {
             listener,
             addr,
             traffic: Arc::default(),
-            #[cfg(feature = "format3")]
-            tls: None,
+            tls,
         })
-    }
-
-    /// Format 3: serve TLS 1.3 only, with the pinned certificates and the
-    /// connection-bound tokens of `v3` (format 3 design, section 8). A
-    /// client that does not speak TLS gets an alert and nothing else.
-    #[cfg(feature = "format3")]
-    pub fn with_tls(mut self, tls: Arc<v3::tls::TcpTls>) -> Server {
-        self.tls = Some(tls);
-        self
     }
 
     /// Count what we serve in `traffic` (shared with the QUIC node and the
@@ -528,7 +426,6 @@ impl Server {
                 self.traffic.clone(),
                 heads.clone(),
             );
-            #[cfg(feature = "format3")]
             let tls = self.tls.clone();
             let spawned = std::thread::Builder::new()
                 .name("p2p-conn".into())
@@ -544,21 +441,11 @@ impl Server {
                     if prepare_socket(&sock).is_err() {
                         return;
                     }
-                    #[cfg(feature = "format3")]
-                    if let Some(tls) = tls {
-                        let _ = tls.serve(sock, remote, |stream, handler| {
-                            serve_connection(
-                                stream, remote, &snapshot, &stop, &slots, &traffic, &heads, handler,
-                            )
-                        });
-                        return;
-                    }
-                    let plain = |snap: Option<&Snapshot>, path: &str, h: &RequestHeaders| {
-                        handle_from(snap, path, &h.peer)
-                    };
-                    let _ = serve_connection(
-                        sock, remote, &snapshot, &stop, &slots, &traffic, &heads, &plain,
-                    );
+                    let _ = tls.serve(sock, remote, |stream, handler| {
+                        serve_connection(
+                            stream, remote, &snapshot, &stop, &slots, &traffic, &heads, handler,
+                        )
+                    });
                 });
             if spawned.is_err() {
                 open.fetch_sub(1, Ordering::Relaxed);
@@ -579,7 +466,7 @@ fn prepare_socket(sock: &TcpStream) -> std::io::Result<()> {
 
 /// Requests on one connection, one after another, until the peer closes it,
 /// asks to close, stays idle for `CONN_IDLE`, or the server stops. `sock`
-/// is the TCP stream (format 2) or the TLS session over it (format 3).
+/// is the TLS session over the TCP stream.
 #[allow(clippy::too_many_arguments)]
 fn serve_connection<S: Read + Write + CloseWrite>(
     mut sock: S,
@@ -656,9 +543,7 @@ fn serve_connection<S: Read + Write + CloseWrite>(
         for l in lines {
             if let Some((k, v)) = l.split_once(':') {
                 let k = k.trim();
-                if k.eq_ignore_ascii_case("X-Varsto-Peer") {
-                    hdrs.peer = v.trim().to_string();
-                } else if k.eq_ignore_ascii_case("X-Varsto-Auth") {
+                if k.eq_ignore_ascii_case("X-Varsto-Auth") {
                     hdrs.auth = v.trim().to_string();
                 } else if k.eq_ignore_ascii_case("X-Varsto-For") {
                     hdrs.for_device = v.trim().to_string();
@@ -729,55 +614,10 @@ impl CloseWrite for TcpStream {
     }
 }
 
-/// Answer one peer request, whatever transport carried it: `(status, body)`.
-/// Paths: `/p2p/info`, `/p2p/object/<name>`, `/p2p/changed` and `/p2p/activity`. No snapshot means the
-/// service is locked.
-pub fn handle(snap: Option<&Snapshot>, path: &str, auth: &str) -> (u16, Vec<u8>) {
-    let (status, body, _) = handle_from(snap, path, auth);
-    (status, body)
-}
-
-/// `handle`, plus the device that asked when its token was valid: the
-/// traffic counters charge the answer to it.
-pub fn handle_from(
-    snap: Option<&Snapshot>,
-    path: &str,
-    auth: &str,
-) -> (u16, Vec<u8>, Option<DeviceId>) {
-    let t = crate::logging::Timer::start();
-    let r = handle_from_inner(snap, path, auth);
-    let level = if path.starts_with("/p2p/object/") && (r.0 == 200 || r.0 == 404) {
-        log::Level::Trace
-    } else {
-        log::Level::Debug
-    };
-    if log::log_enabled!(level) {
-        let who = r.1.len();
-        let peer =
-            r.2.as_ref()
-                .map(|d| d.short().to_string())
-                .unwrap_or_else(|| "-".into());
-        log::log!(level, peer = peer, path = path, status = r.0, bytes = who, ms = t.ms(); "p2p request served");
-    }
-    r
-}
-
-fn handle_from_inner(
-    snap: Option<&Snapshot>,
-    path: &str,
-    auth: &str,
-) -> (u16, Vec<u8>, Option<DeviceId>) {
-    let Some(snap) = snap else {
-        return (503, b"locked".to_vec(), None);
-    };
-    match verify_auth(&snap.peer_key, auth, path) {
-        Some(dev) => serve_as(snap, path, dev),
-        None => (403, b"forbidden".to_vec(), None),
-    }
-}
-
 /// Answer `path` for `dev`, whose request was authenticated already (by its
-/// token, or in format 3 by its certificate and connection-bound token).
+/// certificate and its connection-bound token, `v3::Responder`). Paths:
+/// `/p2p/info`, `/p2p/object/<name>` and `/p2p/activity`; `/p2p/changed`,
+/// `/p2p/heads` and `/p2p/ledger/` are the responder's own.
 pub(crate) fn serve_as(
     snap: &Snapshot,
     path: &str,
@@ -806,7 +646,7 @@ pub(crate) fn serve_as(
         let body = serde_json::to_vec(&crate::activity::local(&snap.device_id)).unwrap_or_default();
         return (200, body, Some(dev));
     }
-    let (status, body) = answer(snap, path, &dev);
+    let (status, body) = answer(snap, path);
     (status, body, Some(dev))
 }
 
@@ -833,28 +673,7 @@ pub(crate) fn note_change_heard() {
     CHANGE_HEARD.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
-fn answer(snap: &Snapshot, path: &str, from: &DeviceId) -> (u16, Vec<u8>) {
-    // `/p2p/changed`, bare or with the sender's signed head statement; the
-    // answer carries this device's own statement, so one message exchanges
-    // both (section 74). The statement is only kept for the engine to check.
-    if path == "/p2p/changed" || path.starts_with(crate::ledger_heads::CHANGED_PREFIX) {
-        if let Some(st) = crate::ledger_heads::HeadStatement::from_changed_path(path) {
-            if &st.sender == from {
-                crate::ledger_heads::hear(st);
-            }
-        }
-        note_change_heard();
-        if snap.heads.is_empty() {
-            return (200, b"ok".to_vec());
-        }
-        return (200, snap.heads.clone());
-    }
-    if path == "/p2p/heads" {
-        if snap.heads.is_empty() {
-            return (404, b"no statement".to_vec());
-        }
-        return (200, snap.heads.clone());
-    }
+fn answer(snap: &Snapshot, path: &str) -> (u16, Vec<u8>) {
     if path == "/p2p/info" {
         let body = serde_json::json!({
             "device": snap.device_id.to_string(),
@@ -909,147 +728,13 @@ pub struct PeerAddr {
     pub name: String,
 }
 
-/// Rendezvous record a device publishes in the vault's storage:
-/// `vault/peers/<device>.enc`, encrypted under the device registry key.
-/// Version 1 added the UDP/QUIC fields; version 0 records (no `version`
-/// field) are still read, with the new fields empty.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PeerRecord {
-    #[serde(default)]
-    pub version: u32,
-    pub device: DeviceId,
-    pub name: String,
-    /// TCP and UDP port (the same number for both transports).
-    pub port: u16,
-    pub lan_addrs: Vec<IpAddr>,
-    /// Addresses the user configured (forwarded port, public IP, VPN).
-    pub public_addrs: Vec<SocketAddr>,
-    pub updated_utc: i64,
-    /// UDP addresses STUN servers saw for our socket.
-    #[serde(default)]
-    pub udp_public: Vec<SocketAddr>,
-    /// UDP addresses on our own interfaces.
-    #[serde(default)]
-    pub udp_local: Vec<SocketAddr>,
-    /// Hex SHA-256 of the device's QUIC certificate; empty before `p2p enable`.
-    #[serde(default)]
-    pub cert_sha256: String,
-    /// NAT guess from STUN: none, cone, symmetric or unknown.
-    #[serde(default)]
-    pub nat: stun::Nat,
-    /// Reachable devices this device keeps a relay registration with.
-    #[serde(default)]
-    pub relay_via: Vec<DeviceId>,
-    /// A public address answered our own probe, or the user configured one:
-    /// other devices can connect directly, and may relay through us.
-    #[serde(default)]
-    pub reachable: bool,
-    /// Ports the home router forwards to us (`portmap`: PCP, NAT-PMP or
-    /// UPnP), TCP and UDP: tried right after the LAN addresses.
-    #[serde(default)]
-    pub mapped_tcp: Vec<SocketAddr>,
-    #[serde(default)]
-    pub mapped_udp: Vec<SocketAddr>,
-    /// The sender's own ledger head (seq and hash of the newest batch a
-    /// storage holds), as a head statement signed with its device key with
-    /// just that entry (section 74): devices that only meet through the
-    /// storage still compare their progress with what others published.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub head: Option<crate::ledger_heads::HeadStatement>,
-}
-
-impl PeerRecord {
-    pub const PREFIX: &'static str = "vault/peers/";
-    /// Version 2 added the router-mapped addresses.
-    pub const VERSION: u32 = 2;
-    pub fn storage_key(device: &DeviceId) -> String {
-        format!("{}{}.enc", Self::PREFIX, device)
-    }
-    fn aad(vault: &VaultId, device: &DeviceId) -> Vec<u8> {
-        crypto::aad(
-            "peer-record",
-            &[vault.as_str().as_bytes(), device.as_str().as_bytes()],
-        )
-    }
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.device),
-            &serde_json::to_vec(self)?,
-        )
-    }
-    pub fn open(blob: &[u8], vault: &VaultId, device: &DeviceId, key: &SecretKey) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, device), blob)?;
-        let rec: PeerRecord = serde_json::from_slice(&plain)?;
-        if &rec.device != device {
-            bail!("peer record device mismatch");
-        }
-        Ok(rec)
-    }
-    /// TCP addresses: LAN first, then the router-mapped one, then those the
-    /// user configured.
-    pub fn addrs(&self) -> Vec<SocketAddr> {
-        let mut out: Vec<SocketAddr> = self
-            .lan_addrs
-            .iter()
-            .map(|ip| SocketAddr::new(*ip, self.port))
-            .collect();
-        for a in self.mapped_tcp.iter().chain(self.public_addrs.iter()) {
-            if !out.contains(a) {
-                out.push(*a);
-            }
-        }
-        out
-    }
-    /// UDP (QUIC) addresses, public first (router-mapped before STUN-learned):
-    /// a LAN peer was already tried over TCP.
-    pub fn udp_addrs(&self) -> Vec<SocketAddr> {
-        let mut out: Vec<SocketAddr> = Vec::new();
-        for a in self
-            .mapped_udp
-            .iter()
-            .chain(self.udp_public.iter())
-            .chain(self.public_addrs.iter())
-            .chain(self.udp_local.iter())
-        {
-            if !out.contains(a) {
-                out.push(*a);
-            }
-        }
-        out
-    }
-    /// Equal apart from the timestamp: nothing worth republishing.
-    pub fn same_as(&self, other: &PeerRecord) -> bool {
-        // The head statement is signed afresh every time; only the head it
-        // names is a change.
-        let head = |r: &PeerRecord| {
-            r.head.as_ref().map(|h| {
-                h.heads
-                    .iter()
-                    .map(|e| (e.seq, e.hash.clone()))
-                    .collect::<Vec<_>>()
-            })
-        };
-        if head(self) != head(other) {
-            return false;
-        }
-        let mut a = self.clone();
-        let mut b = other.clone();
-        a.updated_utc = 0;
-        b.updated_utc = 0;
-        a.head = None;
-        b.head = None;
-        a == b
-    }
-}
-
 /// Everything the client side knows about one device, merged from its
-/// record and from LAN beacons.
+/// accepted peer record and from signed LAN beacons.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerInfo {
     pub device: DeviceId,
     pub name: String,
-    /// HTTP over TCP, LAN first.
+    /// TLS over TCP, LAN first.
     pub tcp: Vec<SocketAddr>,
     /// QUIC over UDP, public first.
     pub udp: Vec<SocketAddr>,
@@ -1060,18 +745,6 @@ pub struct PeerInfo {
 }
 
 impl PeerInfo {
-    pub fn from_record(rec: &PeerRecord) -> PeerInfo {
-        PeerInfo {
-            device: rec.device.clone(),
-            name: rec.name.clone(),
-            tcp: rec.addrs(),
-            udp: rec.udp_addrs(),
-            cert_sha256: rec.cert_sha256.clone(),
-            relay_via: rec.relay_via.clone(),
-            nat: rec.nat,
-            reachable: rec.reachable,
-        }
-    }
     /// A peer heard on the LAN: its TCP address, and the same port over UDP
     /// when its certificate is known (the two listeners share the number).
     fn add_lan(&mut self, addr: SocketAddr) {
@@ -1143,85 +816,11 @@ impl Route {
     }
 }
 
-/// Kept-alive HTTP connections to peers, per address. A new connection per
-/// object paid a handshake and TCP's slow start for every block, which on a
-/// link with tens of milliseconds of round trip held downloads far below
-/// what the link carries. Idle connections are closed after a while; a kept
-/// one that turns out dead is replaced and the request asked again once.
-#[derive(Default)]
-pub struct TcpPool {
-    idle: Mutex<BTreeMap<SocketAddr, Vec<(TcpStream, Instant)>>>,
-}
-
-/// How long an unused connection is kept, and how many per peer address.
-const POOL_IDLE: Duration = Duration::from_secs(20);
-const POOL_PER_ADDR: usize = 32;
-
-impl TcpPool {
-    fn take(&self, addr: SocketAddr) -> Option<TcpStream> {
-        let mut idle = self.idle.lock().unwrap();
-        let v = idle.get_mut(&addr)?;
-        while let Some((s, at)) = v.pop() {
-            if at.elapsed() < POOL_IDLE {
-                return Some(s);
-            }
-        }
-        None
-    }
-
-    fn give_back(&self, addr: SocketAddr, s: TcpStream) {
-        let mut idle = self.idle.lock().unwrap();
-        let v = idle.entry(addr).or_default();
-        v.retain(|(_, at)| at.elapsed() < POOL_IDLE);
-        if v.len() < POOL_PER_ADDR {
-            v.push((s, Instant::now()));
-        }
-    }
-
-    /// GET `path` from `addr` on a kept connection, or a new one. `auth`
-    /// makes the token of each attempt: a token is good once, and the peer
-    /// may have spent the first one on a kept connection that then dropped.
-    pub fn get(
-        &self,
-        addr: SocketAddr,
-        path: &str,
-        auth: &dyn Fn() -> String,
-        timeout: Duration,
-    ) -> Result<(u16, Vec<u8>)> {
-        // A kept connection the peer closed meanwhile (restart, idle
-        // timeout) fails: then ask again on a fresh one, with a fresh token.
-        let headers = || format!("X-Varsto-Peer: {}\r\n", auth());
-        if let Some(Ok((status, body, keep))) = self.take(addr).map(|s| {
-            set_client_timeouts(&s, timeout)?;
-            exchange(s, addr, path, &headers())
-        }) {
-            if let Some(s) = keep {
-                self.give_back(addr, s);
-            }
-            return Ok((status, body));
-        }
-        let s = TcpStream::connect_timeout(&addr, timeout)?;
-        s.set_nodelay(true)?;
-        set_client_timeouts(&s, timeout)?;
-        let (status, body, keep) = exchange(s, addr, path, &headers())?;
-        if let Some(s) = keep {
-            self.give_back(addr, s);
-        }
-        Ok((status, body))
-    }
-}
-
-/// Read and write timeouts of a client connection.
-fn set_client_timeouts(s: &TcpStream, timeout: Duration) -> std::io::Result<()> {
-    s.set_read_timeout(Some(Duration::from_secs(30)))?;
-    s.set_write_timeout(Some(timeout))
-}
-
-/// One request and its response on `s` (a TCP stream, or in format 3 the
-/// TLS session over one); `headers` are the extra header lines, each ending
+/// One request and its response on `s` (the TLS session over a TCP
+/// stream); `headers` are the extra header lines, each ending
 /// in CRLF. The stream comes back when it can carry another request (a
 /// `Content-Length` body, no `Connection: close`).
-fn exchange<S: Read + Write>(
+pub(crate) fn exchange<S: Read + Write>(
     mut s: S,
     addr: SocketAddr,
     path: &str,
@@ -1333,7 +932,6 @@ pub fn decode_chunked(body: &[u8]) -> Result<Vec<u8>> {
 /// outcome is remembered for a minute so a dead peer costs one timeout per
 /// minute and a live one goes straight to the path that worked.
 pub struct Peers {
-    pub key: SecretKey,
     pub me: DeviceId,
     pub peers: Vec<PeerInfo>,
     quic: Option<Arc<quic::Node>>,
@@ -1344,17 +942,15 @@ pub struct Peers {
     pub timeout: Duration,
     /// Where downloads are counted: the QUIC node's counters when it runs.
     traffic: Arc<Traffic>,
-    /// Kept-alive TCP connections, carried over when the table is rebuilt.
-    pool: Mutex<Arc<TcpPool>>,
     /// Per device: how its object requests went (`ObjectStats`), so that
     /// peers that have what is asked, and answer fast, are asked first.
     objects: Mutex<BTreeMap<DeviceId, ObjectStats>>,
     /// Addresses that proved to be this device itself: never tried again.
     selfs: Mutex<std::collections::BTreeSet<SocketAddr>>,
-    /// Format 3: TLS over TCP and connection-bound tokens (`v3`) instead of
-    /// plain HTTP and the keyed-hash token.
-    #[cfg(feature = "format3")]
-    v3: Option<Arc<v3::Client>>,
+    /// This device's identity and its kept TLS sessions (TLS over TCP and
+    /// connection-bound tokens, `v3`); the same client across rebuilds
+    /// keeps the sessions.
+    client: Arc<v3::Client>,
 }
 
 crate::redacted_opaque!(Peers);
@@ -1384,80 +980,39 @@ impl ObjectStats {
 }
 
 const ROUTE_TTL: Duration = Duration::from_secs(60);
+/// A peer that refused our certificate (its directory did not name us
+/// yet: we published our record after its last read, and our knock makes
+/// it read the records again) rests this long only.
+const REFUSED_REST: Duration = Duration::from_secs(3);
+
+/// An error of a peer that answered but refused this device's certificate
+/// in the TLS handshake (TCP or QUIC).
+fn refused_us(e: &str) -> bool {
+    [
+        "AccessDenied",
+        "ApplicationVerificationFailure",
+        "CertificateUnknown",
+        "BadCertificate",
+    ]
+    .iter()
+    .any(|m| e.contains(m))
+}
+
+/// When to note a failure so that it rests `rest` instead of `ROUTE_TTL`.
+fn failed_at(rest: Duration) -> Instant {
+    let now = Instant::now();
+    now.checked_sub(ROUTE_TTL.saturating_sub(rest))
+        .unwrap_or(now)
+}
 
 impl Peers {
-    /// TCP-only peers from plain addresses (LAN beacons, tests).
-    pub fn new(key: SecretKey, me: DeviceId, peers: Vec<PeerAddr>) -> Self {
-        Self::build(key, me, &[], &peers, None)
-    }
-
-    /// Peers from rendezvous records plus LAN beacons, with QUIC when a node runs.
-    pub fn build(
-        key: SecretKey,
-        me: DeviceId,
-        records: &[PeerRecord],
-        lan: &[PeerAddr],
-        quic: Option<Arc<quic::Node>>,
-    ) -> Self {
-        // A record carrying this device's own certificate is this device
-        // under another id (a re-joined install): never a peer.
-        let own_cert = quic.as_ref().map(|n| n.identity().sha256.clone());
-        let mut infos: Vec<PeerInfo> = records
-            .iter()
-            .filter(|r| r.device != me)
-            .filter(|r| {
-                r.cert_sha256.is_empty() || own_cert.as_deref() != Some(r.cert_sha256.as_str())
-            })
-            .map(PeerInfo::from_record)
-            .collect();
-        for p in lan.iter().filter(|p| p.device != me) {
-            match infos.iter_mut().find(|i| i.device == p.device) {
-                Some(i) => i.add_lan(p.addr),
-                None => infos.push(PeerInfo {
-                    device: p.device.clone(),
-                    name: p.name.clone(),
-                    tcp: vec![p.addr],
-                    udp: Vec::new(),
-                    cert_sha256: String::new(),
-                    relay_via: Vec::new(),
-                    nat: stun::Nat::Unknown,
-                    reachable: false,
-                }),
-            }
-        }
-        if let Some(node) = &quic {
-            node.set_known(infos.clone());
-            node.set_peer_key(key.clone());
-        }
-        let traffic = quic
-            .as_ref()
-            .map(|n| n.traffic().clone())
-            .unwrap_or_default();
-        traffic.learn_names(infos.iter().map(|i| (&i.device, i.name.as_str())));
-        Peers {
-            key,
-            me,
-            peers: infos,
-            quic,
-            state: Mutex::new(BTreeMap::new()),
-            routes: Mutex::new(BTreeMap::new()),
-            timeout: Duration::from_millis(1500),
-            traffic,
-            pool: Mutex::default(),
-            objects: Mutex::default(),
-            selfs: Mutex::default(),
-            #[cfg(feature = "format3")]
-            v3: None,
-        }
-    }
-
-    /// Format 3: the peers of the directory (accepted peer records of
-    /// trusted full devices; never this device or its certificate), LAN
-    /// addresses heard in signed beacons for those of them only (a beacon
-    /// suggests an address; the pinned handshake decides), TLS over TCP and
-    /// connection-bound tokens. `quic` must run in format-3 mode
-    /// (`quic::Node::start_v3`).
-    #[cfg(feature = "format3")]
+    /// The peers of the directory (accepted peer records of trusted full
+    /// devices; never this device or its certificate), LAN addresses heard
+    /// in signed beacons for those of them only (a beacon suggests an
+    /// address; the pinned handshake decides), TLS over TCP and
+    /// connection-bound tokens, with QUIC when a node runs
+    /// (`quic::Node::start_v3`). The node's handshake admits the
+    /// certificates of the directory from now on (`set_known`).
     pub fn build_v3(
         client: Arc<v3::Client>,
         directory: &v3::PeerDirectory,
@@ -1470,6 +1025,15 @@ impl Peers {
                 i.add_lan(p.addr);
             }
         }
+        Self::with_infos(client, infos, quic)
+    }
+
+    /// A table over `infos` as they are (the directory's, or a test's).
+    pub(crate) fn with_infos(
+        client: Arc<v3::Client>,
+        infos: Vec<PeerInfo>,
+        quic: Option<Arc<quic::Node>>,
+    ) -> Self {
         if let Some(node) = &quic {
             node.set_known(infos.clone());
         }
@@ -1479,7 +1043,6 @@ impl Peers {
             .unwrap_or_default();
         traffic.learn_names(infos.iter().map(|i| (&i.device, i.name.as_str())));
         Peers {
-            key: SecretKey::random(),
             me: client.me().clone(),
             peers: infos,
             quic,
@@ -1487,10 +1050,9 @@ impl Peers {
             routes: Mutex::new(BTreeMap::new()),
             timeout: Duration::from_millis(1500),
             traffic,
-            pool: Mutex::default(),
             objects: Mutex::default(),
             selfs: Mutex::default(),
-            v3: Some(client),
+            client,
         }
     }
 
@@ -1531,7 +1093,6 @@ impl Peers {
         });
         *self.routes.lock().unwrap() = routes;
         *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
-        *self.pool.lock().unwrap() = previous.pool.lock().unwrap().clone();
         *self.objects.lock().unwrap() = previous.objects.lock().unwrap().clone();
         *self.selfs.lock().unwrap() = previous.selfs.lock().unwrap().clone();
     }
@@ -1573,16 +1134,9 @@ impl Peers {
     }
 
     fn try_tcp(&self, addr: SocketAddr, path: &str, p: &PeerInfo) -> Result<(u16, Vec<u8>)> {
-        #[cfg(feature = "format3")]
-        let result = match &self.v3 {
-            Some(c) => c.tcp_get(addr, &p.cert_sha256, &p.device, path, self.timeout),
-            None => self.plain_tcp(addr, path),
-        };
-        #[cfg(not(feature = "format3"))]
-        let result = {
-            let _ = p;
-            self.plain_tcp(addr, path)
-        };
+        let result = self
+            .client
+            .tcp_get(addr, &p.cert_sha256, &p.device, path, self.timeout);
         self.debug(&format!(
             "tcp {addr} {path} -> {}",
             match &result {
@@ -1591,63 +1145,29 @@ impl Peers {
             }
         ));
         let ok = result.is_ok();
-        self.state
-            .lock()
-            .unwrap()
-            .insert(addr, (ok, Instant::now()));
+        let when = match &result {
+            Err(e) if refused_us(&format!("{e:#}")) => failed_at(REFUSED_REST),
+            _ => Instant::now(),
+        };
+        self.state.lock().unwrap().insert(addr, (ok, when));
         result
     }
 
-    /// Format 2: plain HTTP with the keyed-hash token.
-    fn plain_tcp(&self, addr: SocketAddr, path: &str) -> Result<(u16, Vec<u8>)> {
-        let pool = self.pool.lock().unwrap().clone();
-        // A token per attempt: a retry on a new connection makes its own.
-        pool.get(
-            addr,
-            path,
-            &|| auth_header(&self.key, &self.me, path),
-            self.timeout,
-        )
-    }
-
     /// One request over QUIC to the device `responder` at `addr` (a relay,
-    /// for a `/p2p/via/` path). `inner` is the path the request is for in
-    /// the end: the format-2 token names it, so the relay can pass the
-    /// token on; a format-3 token is bound to this connection and names
-    /// `path` and `responder`.
+    /// for a `/p2p/via/` path), with a token bound to the connection it
+    /// goes out on, naming `path` and `responder`.
     fn try_quic(
         &self,
         addr: SocketAddr,
         cert: &str,
         path: &str,
         responder: &DeviceId,
-        inner: &str,
     ) -> Result<(u16, Vec<u8>)> {
         let node = self.quic.as_ref().ok_or_else(|| anyhow!("no QUIC node"))?;
-        #[cfg(feature = "format3")]
-        let result = match &self.v3 {
-            Some(c) => node.request_with(addr, cert, path, true, &|exporter: &[u8; 32]| {
-                c.token(exporter, responder, path)
-            }),
-            None => node.request(
-                addr,
-                cert,
-                path,
-                &auth_header(&self.key, &self.me, inner),
-                true,
-            ),
-        };
-        #[cfg(not(feature = "format3"))]
-        let result = {
-            let _ = responder;
-            node.request(
-                addr,
-                cert,
-                path,
-                &auth_header(&self.key, &self.me, inner),
-                true,
-            )
-        };
+        let c = &self.client;
+        let result = node.request_with(addr, cert, path, true, &|exporter: &[u8; 32]| {
+            c.token(exporter, responder, path)
+        });
         self.debug(&format!(
             "quic {addr} {path} -> {}",
             match &result {
@@ -1661,13 +1181,10 @@ impl Peers {
     /// A request to `p` on the connection it keeps with us as its relay.
     fn try_registrant(&self, p: &PeerInfo, path: &str) -> Result<(u16, Vec<u8>)> {
         let node = self.quic.as_ref().ok_or_else(|| anyhow!("no QUIC node"))?;
-        #[cfg(feature = "format3")]
-        if let Some(c) = &self.v3 {
-            return node.request_registrant_with(&p.device, path, &|exporter: &[u8; 32]| {
-                c.token(exporter, &p.device, path)
-            });
-        }
-        node.request_registrant(&p.device, path, &auth_header(&self.key, &self.me, path))
+        let c = &self.client;
+        node.request_registrant_with(&p.device, path, &|exporter: &[u8; 32]| {
+            c.token(exporter, &p.device, path)
+        })
     }
 
     /// Ask a specific peer once, over a given route; the error says why the
@@ -1696,7 +1213,7 @@ impl Peers {
                 if self.is_self_addr(*a) {
                     bail!("that address is this device itself");
                 }
-                let (status, body) = self.try_quic(*a, &p.cert_sha256, path, &p.device, path)?;
+                let (status, body) = self.try_quic(*a, &p.cert_sha256, path, &p.device)?;
                 if status == 403 && body == SELF_ANSWER {
                     log(&format!("{a} answered as this very device; not used again"));
                     self.selfs.lock().unwrap().insert(*a);
@@ -1713,7 +1230,7 @@ impl Peers {
                     .map(|r| r.cert_sha256.clone())
                     .ok_or_else(|| anyhow!("relay record unknown"))?;
                 let via = format!("/p2p/via/{}{}", p.device, path);
-                self.try_quic(*a, &cert, &via, relay, path)
+                self.try_quic(*a, &cert, &via, relay)
             }
         }
     }
@@ -1852,7 +1369,15 @@ impl Peers {
                 tried.join("; ")
             }
         ));
-        self.remember(&p.device, None, 0);
+        if !tried.is_empty() && tried.iter().all(|t| refused_us(t)) {
+            // It answered and refused us: it reads our record soon.
+            self.routes
+                .lock()
+                .unwrap()
+                .insert(p.device.clone(), (None, 0, failed_at(REFUSED_REST)));
+        } else {
+            self.remember(&p.device, None, 0);
+        }
         None
     }
 
@@ -1897,51 +1422,12 @@ impl Peers {
     }
 
     /// Tell every peer that this device published something new (a folder,
-    /// changed files), so that it syncs now. Best effort: a peer that does
-    /// not answer finds the change at its next interval anyway.
-    pub fn notify_changed(&self) {
-        self.notify_changed_with(None);
-    }
-
-    /// `notify_changed`, carrying this device's signed ledger-head statement
-    /// (section 74) when it fits a request path. The answer of a peer that
-    /// has one of its own is kept for the engine to check.
-    pub fn notify_changed_with(&self, statement: Option<&crate::ledger_heads::HeadStatement>) {
-        let path = statement
-            .and_then(|s| s.changed_path())
-            .unwrap_or_else(|| "/p2p/changed".to_string());
-        for p in self.ordered() {
-            if let Some((200, body, _)) = self.fetch(&p, &path) {
-                self.hear_statement(&p.device, &body);
-            }
-        }
-    }
-
-    /// Keep a head statement a peer sent, when it is that peer's own.
-    fn hear_statement(&self, from: &DeviceId, body: &[u8]) {
-        if body == b"ok" {
-            return;
-        }
-        if let Ok(st) = crate::ledger_heads::HeadStatement::decode(body) {
-            if &st.sender == from {
-                crate::ledger_heads::hear(st);
-            }
-        }
-    }
-
-    /// Ask every peer for its signed ledger-head statement (`/p2p/heads`)
-    /// and keep what comes back for the engine to check (section 74).
-    /// Returns how many peers answered with one.
-    pub fn exchange_heads(&self) -> usize {
-        let path = "/p2p/heads";
-        let mut got = 0;
-        for p in self.ordered() {
-            if let Some((200, body, _)) = self.fetch(&p, path) {
-                self.hear_statement(&p.device, &body);
-                got += 1;
-            }
-        }
-        got
+    /// changed files), so that it syncs now, with this device's head list
+    /// (`v3::heads`): each answer carries the peer's own list and proofs of
+    /// what it holds beyond ours, returned per peer. Best effort: a peer
+    /// that does not answer finds the change at its next interval anyway.
+    pub fn notify_changed(&self, mine: &[v3::HeadRef]) -> Vec<(DeviceId, v3::HeadsAnswer)> {
+        v3::notify_changed(self, mine)
     }
 
     /// One request to one peer, over the route that worked last: `None`
@@ -1954,7 +1440,6 @@ impl Peers {
 
     /// One request to every peer worth asking now: `(device, status, body)`
     /// of those that answered.
-    #[cfg(feature = "format3")]
     pub fn ask_each(&self, path: &str) -> Vec<(DeviceId, u16, Vec<u8>)> {
         self.ordered()
             .into_iter()
@@ -2009,75 +1494,7 @@ impl Peers {
     }
 }
 
-/// LAN discovery: `VARSTO1 <tag> <device> <port>` every few seconds to a
-/// multicast group; listeners learn (device, sender ip:port).
-pub struct Beacon {
-    sock: UdpSocket,
-    tag: String,
-    device: DeviceId,
-    port: u16,
-}
-
-impl Beacon {
-    pub fn new(tag: String, device: DeviceId, port: u16) -> Result<Beacon> {
-        let sock = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, BEACON_PORT))
-            .or_else(|_| UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)))
-            .context("bind beacon socket")?;
-        let _ = sock.join_multicast_v4(&BEACON_GROUP, &Ipv4Addr::UNSPECIFIED);
-        sock.set_read_timeout(Some(Duration::from_millis(500)))?;
-        Ok(Beacon {
-            sock,
-            tag,
-            device,
-            port,
-        })
-    }
-    pub fn announce(&self) {
-        let msg = format!(
-            "VARSTO1 {} {} {}",
-            self.tag,
-            self.device.as_str(),
-            self.port
-        );
-        let _ = self
-            .sock
-            .send_to(msg.as_bytes(), (BEACON_GROUP, BEACON_PORT));
-    }
-    /// Collect peers heard for `dur`; only beacons with our vault tag count.
-    pub fn listen(&self, dur: Duration) -> Vec<PeerAddr> {
-        let deadline = Instant::now() + dur;
-        let mut out: Vec<PeerAddr> = Vec::new();
-        let mut buf = [0u8; 256];
-        while Instant::now() < deadline {
-            let Ok((n, from)) = self.sock.recv_from(&mut buf) else {
-                continue;
-            };
-            let msg = String::from_utf8_lossy(&buf[..n]).to_string();
-            let parts: Vec<&str> = msg.split_whitespace().collect();
-            if parts.len() != 4 || parts[0] != "VARSTO1" || parts[1] != self.tag {
-                continue;
-            }
-            let (Ok(device), Ok(port)) = (DeviceId::from_hex(parts[2]), parts[3].parse::<u16>())
-            else {
-                continue;
-            };
-            if device == self.device {
-                continue;
-            }
-            let addr = SocketAddr::new(from.ip(), port);
-            if !out.iter().any(|p| p.addr == addr) {
-                out.push(PeerAddr {
-                    device,
-                    addr,
-                    name: String::new(),
-                });
-            }
-        }
-        out
-    }
-}
-
-/// Non-loopback IPv4 addresses of this host, for the rendezvous record.
+/// Non-loopback IPv4 addresses of this host, for the peer record.
 pub fn local_ipv4_addrs() -> Vec<IpAddr> {
     // Portable trick: a UDP socket "connected" to a public address reveals
     // the interface address the OS would use, without sending anything.
@@ -2135,70 +1552,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_peer_token_is_good_once() {
-        let key = SecretKey::random();
-        let dev = DeviceId::random();
-        let h = auth_header(&key, &dev, "/p2p/info");
-        assert_eq!(verify_auth(&key, &h, "/p2p/info"), Some(dev.clone()));
-        assert_eq!(verify_auth(&key, &h, "/p2p/info"), None, "replayed");
-        assert_eq!(
-            verify_auth(&key, &auth_header(&key, &dev, "/p2p/info"), "/p2p/other"),
-            None
-        );
-        assert_eq!(
-            verify_auth(&SecretKey::random(), &auth_header(&key, &dev, "/x"), "/x"),
-            None
-        );
-        assert_eq!(
-            verify_auth(
-                &key,
-                &format!("{dev}:{}:{}", i64::MIN, "00".repeat(32)),
-                "/x"
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn revoked_devices_are_refused_even_with_a_valid_token() {
-        let key = SecretKey::random();
-        let (good, gone) = (DeviceId::random(), DeviceId::random());
-        let snap = Snapshot {
-            vault_id: crate::ids::VaultId::random(),
-            device_id: DeviceId::random(),
-            peer_key: key.clone(),
-            folder_keys: BTreeMap::new(),
-            pieces: BTreeMap::new(),
-            local_roots: Vec::new(),
-            packed: BTreeMap::new(),
-            revoked: [gone.clone()].into_iter().collect(),
-            activity_audience: None,
-            heads: Vec::new(),
-        };
-        let ask = |dev: &DeviceId| {
-            handle(
-                Some(&snap),
-                "/p2p/info",
-                &auth_header(&key, dev, "/p2p/info"),
-            )
-            .0
-        };
-        assert_eq!(ask(&good), 200);
-        assert_eq!(ask(&gone), 403);
-        let stale = auth_header(&SecretKey::random(), &good, "/p2p/info");
-        assert_eq!(handle(Some(&snap), "/p2p/info", &stale).0, 403);
-    }
-
-    #[test]
-    fn activity_is_told_to_authenticated_devices_of_the_audience_only() {
-        let key = SecretKey::random();
-        let me = DeviceId::random();
-        let (same_user, other_user) = (DeviceId::random(), DeviceId::random());
-        let mut snap = Snapshot {
+    fn snap(me: &DeviceId) -> Snapshot {
+        Snapshot {
             vault_id: crate::ids::VaultId::random(),
             device_id: me.clone(),
-            peer_key: key.clone(),
             folder_keys: BTreeMap::new(),
             pieces: BTreeMap::new(),
             local_roots: Vec::new(),
@@ -2206,97 +1563,53 @@ mod tests {
             revoked: Default::default(),
             activity_audience: None,
             heads: Vec::new(),
-        };
+            ledger_dir: None,
+        }
+    }
+
+    #[test]
+    fn revoked_devices_are_refused_even_when_authenticated() {
+        let (good, gone) = (DeviceId::random(), DeviceId::random());
+        let mut s = snap(&DeviceId::random());
+        s.revoked = [gone.clone()].into_iter().collect();
+        assert_eq!(serve_as(&s, "/p2p/info", good.clone()).0, 200);
+        assert_eq!(serve_as(&s, "/p2p/info", gone).0, 403);
+    }
+
+    #[test]
+    fn activity_is_told_to_devices_of_the_audience_only() {
+        let me = DeviceId::random();
+        let (same_user, other_user) = (DeviceId::random(), DeviceId::random());
+        let mut s = snap(&me);
         let path = "/p2p/activity";
-        let ask = |snap: &Snapshot, dev: &DeviceId| {
-            handle(Some(snap), path, &auth_header(&key, dev, path))
-        };
-        let (status, body) = ask(&snap, &other_user);
+        let (status, body, _) = serve_as(&s, path, other_user.clone());
         assert_eq!(status, 200);
         let a: crate::activity::DeviceActivity = serde_json::from_slice(&body).unwrap();
         assert_eq!(a.device, me.to_string());
         assert!(a.state == "idle" || a.state == "busy");
-        // No token, or a token of another vault: nothing.
-        assert_eq!(handle(Some(&snap), path, "").0, 403);
-        let stranger = auth_header(&SecretKey::random(), &same_user, path);
-        assert_eq!(handle(Some(&snap), path, &stranger).0, 403);
-        assert_eq!(
-            handle(None, path, &auth_header(&key, &same_user, path)).0,
-            503
-        );
         // An organization: only the devices of the same user.
-        snap.activity_audience = Some([same_user.clone()].into_iter().collect());
-        assert_eq!(ask(&snap, &same_user).0, 200);
-        let (status, body) = ask(&snap, &other_user);
+        s.activity_audience = Some([same_user.clone()].into_iter().collect());
+        assert_eq!(serve_as(&s, path, same_user).0, 200);
+        let (status, body, _) = serve_as(&s, path, other_user);
         assert_eq!(status, 403);
         assert!(!String::from_utf8_lossy(&body).contains("idle"));
     }
 
     #[test]
     fn a_request_from_this_very_device_is_refused_and_never_counted() {
-        let key = SecretKey::random();
         let (me, other) = (DeviceId::random(), DeviceId::random());
-        let snap = Snapshot {
-            vault_id: crate::ids::VaultId::random(),
-            device_id: me.clone(),
-            peer_key: key.clone(),
-            folder_keys: BTreeMap::new(),
-            pieces: BTreeMap::new(),
-            local_roots: Vec::new(),
-            packed: BTreeMap::new(),
-            revoked: Default::default(),
-            activity_audience: None,
-            heads: Vec::new(),
-        };
-        for path in ["/p2p/info", "/p2p/activity", "/p2p/changed"] {
-            let (status, body, peer) =
-                handle_from(Some(&snap), path, &auth_header(&key, &me, path));
+        let s = snap(&me);
+        for path in ["/p2p/info", "/p2p/activity", "/p2p/object/00"] {
+            let (status, body, peer) = serve_as(&s, path, me.clone());
             assert_eq!((status, body.as_slice(), peer), (403, SELF_ANSWER, None));
         }
         // Another device of the vault is answered and counted as before.
-        let (status, _, peer) = handle_from(
-            Some(&snap),
-            "/p2p/info",
-            &auth_header(&key, &other, "/p2p/info"),
-        );
+        let (status, _, peer) = serve_as(&s, "/p2p/info", other.clone());
         assert_eq!((status, peer), (200, Some(other)));
     }
 
     #[test]
-    fn the_server_keeps_connections_and_still_answers_old_clients() {
-        let server = Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
-        let addr = server.addr;
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let snap: Arc<Mutex<Option<Arc<Snapshot>>>> = Arc::default();
-        let (s2, st2) = (snap.clone(), stop.clone());
-        let th = std::thread::spawn(move || server.run(s2, st2));
-        // Kept-alive: three requests, one connection.
-        let pool = TcpPool::default();
-        for _ in 0..3 {
-            let (status, body) = pool
-                .get(addr, "/p2p/info", &|| "x".into(), Duration::from_secs(2))
-                .unwrap();
-            assert_eq!((status, body.as_slice()), (503, b"locked".as_slice()));
-        }
-        assert_eq!(
-            pool.idle.lock().unwrap().get(&addr).map(|v| v.len()),
-            Some(1)
-        );
-        // A client of 0.0.1-alpha.8: `Connection: close`, body read to the end.
-        let mut s = TcpStream::connect(addr).unwrap();
-        write!(s, "GET /p2p/info HTTP/1.1\r\nHost: {addr}\r\nX-Varsto-Peer: x\r\nConnection: close\r\n\r\n").unwrap();
-        let mut raw = Vec::new();
-        s.read_to_end(&mut raw).unwrap();
-        let text = String::from_utf8_lossy(&raw);
-        assert!(text.starts_with("HTTP/1.1 503 "), "{text}");
-        assert!(text.ends_with("\r\n\r\nlocked"), "{text}");
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        th.join().unwrap();
-    }
-
-    #[test]
-    fn unfinished_request_heads_are_limited_and_time_out() {
-        // The limit per address, on its own.
+    fn unfinished_request_heads_are_limited_per_address() {
         let heads = Arc::new(PerIp::default());
         let ip: std::net::IpAddr = "192.0.2.7".parse().unwrap();
         let held: Vec<_> = (0..MAX_HEADS_PER_IP)
@@ -2306,118 +1619,6 @@ mod tests {
         assert!(heads.enter("192.0.2.8".parse().unwrap()).is_some());
         drop(held);
         assert!(heads.enter(ip).is_some(), "slots are given back");
-
-        // Against a real listener.
-        let server = Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
-        let addr = server.addr;
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let snap: Arc<Mutex<Option<Arc<Snapshot>>>> = Arc::default();
-        let (s2, st2) = (snap.clone(), stop.clone());
-        let th = std::thread::spawn(move || server.run(s2, st2));
-        // Eight connections begin a head and stop: they fill the slots.
-        let trickling: Vec<TcpStream> = (0..MAX_HEADS_PER_IP)
-            .map(|_| {
-                let mut s = TcpStream::connect(addr).unwrap();
-                s.write_all(b"GET /p2p/info HT").unwrap();
-                s
-            })
-            .collect();
-        std::thread::sleep(Duration::from_millis(400));
-        // A ninth one that begins a head is closed at once ...
-        let mut b = [0u8; 8];
-        let mut ninth = TcpStream::connect(addr).unwrap();
-        ninth.write_all(b"GET /p2p").unwrap();
-        ninth
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        assert_eq!(ninth.read(&mut b).unwrap_or(0), 0, "dropped, not served");
-        // ... while an ordinary request, whole in one piece, is answered.
-        let pool = TcpPool::default();
-        let (status, _) = pool
-            .get(addr, "/p2p/info", &|| "x".into(), Duration::from_secs(2))
-            .unwrap();
-        assert_eq!(status, 503);
-        // The trickling ones are closed at the deadline, not after the idle time.
-        let started = Instant::now();
-        let first = &trickling[0];
-        first
-            .set_read_timeout(Some(HEAD_DEADLINE + Duration::from_secs(4)))
-            .unwrap();
-        assert_eq!((&*first).read(&mut b).unwrap_or(0), 0);
-        assert!(
-            started.elapsed() < HEAD_DEADLINE + Duration::from_secs(3),
-            "closed after {:?}",
-            started.elapsed()
-        );
-        // A connection that never sends a byte is closed at the deadline too.
-        let mut mute = TcpStream::connect(addr).unwrap();
-        mute.set_read_timeout(Some(HEAD_DEADLINE + Duration::from_secs(4)))
-            .unwrap();
-        let started = Instant::now();
-        assert_eq!(mute.read(&mut b).unwrap_or(0), 0);
-        assert!(started.elapsed() < HEAD_DEADLINE + Duration::from_secs(3));
-        drop(trickling);
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        th.join().unwrap();
-    }
-
-    #[test]
-    fn a_retry_after_a_dropped_kept_connection_carries_a_fresh_token() {
-        // A peer that answers the first request with keep-alive, spends the
-        // token of the second and drops the connection without answering,
-        // then answers on a new connection only to a token it has not seen.
-        let key = SecretKey::random();
-        let me = DeviceId::random();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let k2 = key.clone();
-        let peer = std::thread::spawn(move || {
-            let read_head = |s: &mut TcpStream| -> String {
-                let mut buf = Vec::new();
-                let mut b = [0u8; 1];
-                while !buf.ends_with(b"\r\n\r\n") {
-                    if s.read(&mut b).unwrap_or(0) == 0 {
-                        break;
-                    }
-                    buf.push(b[0]);
-                }
-                let head = String::from_utf8_lossy(&buf).to_string();
-                head.lines()
-                    .find_map(|l| l.strip_prefix("X-Varsto-Peer: "))
-                    .unwrap_or("")
-                    .trim()
-                    .to_string()
-            };
-            let answer = |s: &mut TcpStream, status: u16| {
-                write!(s, "HTTP/1.1 {status} X\r\nContent-Length: 2\r\n\r\nok").unwrap();
-            };
-            let (mut c1, _) = listener.accept().unwrap();
-            let t = read_head(&mut c1);
-            let ok = verify_auth(&k2, &t, "/p2p/info").is_some();
-            answer(&mut c1, if ok { 200 } else { 403 });
-            let t = read_head(&mut c1);
-            assert!(verify_auth(&k2, &t, "/p2p/info").is_some());
-            drop(c1); // the token is spent, no answer
-            let (mut c2, _) = listener.accept().unwrap();
-            let t = read_head(&mut c2);
-            let ok = verify_auth(&k2, &t, "/p2p/info").is_some();
-            answer(&mut c2, if ok { 200 } else { 403 });
-        });
-        let peers = Peers::new(key.clone(), me.clone(), Vec::new());
-        let info = PeerInfo {
-            device: DeviceId::random(),
-            name: String::new(),
-            tcp: vec![addr],
-            udp: Vec::new(),
-            cert_sha256: String::new(),
-            relay_via: Vec::new(),
-            nat: stun::Nat::Unknown,
-            reachable: false,
-        };
-        assert_eq!(peers.try_tcp(addr, "/p2p/info", &info).unwrap().0, 200);
-        let (status, _) = peers.try_tcp(addr, "/p2p/info", &info).unwrap();
-        assert_eq!(status, 200, "the retry on a new connection is accepted");
-        peer.join().unwrap();
     }
 
     #[test]
@@ -2428,73 +1629,47 @@ mod tests {
     }
 
     #[test]
-    fn peer_records_seal_open_and_read_old_versions() {
-        let key = SecretKey::random();
-        let vault = VaultId::from_bytes(&[9u8; 16]);
-        let dev = DeviceId::from_bytes(&[3u8; 16]);
-        let relay = DeviceId::from_bytes(&[4u8; 16]);
-        let rec = PeerRecord {
-            version: PeerRecord::VERSION,
-            device: dev.clone(),
+    fn peer_record_addresses_put_the_router_mapping_after_the_lan() {
+        let rec = v3::PeerBody {
+            device: [3u8; 16],
+            seq: 1,
             name: "laptop".into(),
             port: 17893,
             lan_addrs: vec!["192.168.1.5".parse().unwrap()],
-            public_addrs: vec![],
-            updated_utc: 1_700_000_000,
+            public_addrs: vec!["198.51.100.2:17893".parse().unwrap()],
             udp_public: vec!["203.0.113.7:40000".parse().unwrap()],
             udp_local: vec!["192.168.1.5:17893".parse().unwrap()],
-            cert_sha256: "ab".repeat(32),
+            mapped_tcp: vec!["203.0.113.7:17893".parse().unwrap()],
+            mapped_udp: vec!["203.0.113.7:17894".parse().unwrap()],
+            cert_sha256: [0xab; 32],
             nat: stun::Nat::Cone,
-            relay_via: vec![relay.clone()],
+            relay_via: vec![[4u8; 16]],
             reachable: false,
-            mapped_tcp: vec![],
-            mapped_udp: vec![],
-            head: None,
+            heads: Vec::new(),
+            pushed: Vec::new(),
         };
-        let blob = rec.seal(&vault, &key).unwrap();
-        let back = PeerRecord::open(&blob, &vault, &dev, &key).unwrap();
-        assert_eq!(back, rec);
-        assert_eq!(back.udp_addrs().len(), 2);
-        assert_eq!(back.udp_addrs()[0], rec.udp_public[0]);
-        // Another device id or key does not open it.
-        assert!(PeerRecord::open(&blob, &vault, &relay, &key).is_err());
-        assert!(PeerRecord::open(&blob, &vault, &dev, &SecretKey::random()).is_err());
-        // Same content, new timestamp: nothing to republish.
-        let mut later = rec.clone();
-        later.updated_utc += 600;
-        assert!(later.same_as(&rec));
-        later.reachable = true;
-        assert!(!later.same_as(&rec));
-
         // A port the router forwards comes right after the LAN for TCP and
         // first for QUIC.
-        let mut mapped = rec.clone();
-        mapped.public_addrs = vec!["198.51.100.2:17893".parse().unwrap()];
-        mapped.mapped_tcp = vec!["203.0.113.7:17893".parse().unwrap()];
-        mapped.mapped_udp = vec!["203.0.113.7:17894".parse().unwrap()];
         assert_eq!(
-            mapped.addrs(),
+            rec.tcp_addrs(),
             vec![
-                "192.168.1.5:17893".parse().unwrap(),
+                "192.168.1.5:17893".parse::<SocketAddr>().unwrap(),
                 "203.0.113.7:17893".parse().unwrap(),
                 "198.51.100.2:17893".parse().unwrap()
             ]
         );
-        assert_eq!(mapped.udp_addrs()[0], "203.0.113.7:17894".parse().unwrap());
-        assert_eq!(mapped.udp_addrs()[1], rec.udp_public[0]);
-
-        // A version 0 record written by alpha.4 has none of the new fields.
-        let old = serde_json::json!({
-            "device": dev.to_string(), "name": "desk", "port": 17893,
-            "lan_addrs": ["10.0.0.2"], "public_addrs": ["198.51.100.9:17893"], "updated_utc": 1
-        });
-        let old: PeerRecord = serde_json::from_value(old).unwrap();
-        assert_eq!(old.version, 0);
-        assert_eq!(old.nat, stun::Nat::Unknown);
-        assert!(old.cert_sha256.is_empty() && old.udp_public.is_empty() && !old.reachable);
-        assert_eq!(old.addrs().len(), 2);
-        let info = PeerInfo::from_record(&old);
-        assert_eq!(info.udp, old.public_addrs);
+        let udp = rec.udp_addrs();
+        assert_eq!(udp[0], "203.0.113.7:17894".parse().unwrap());
+        assert_eq!(udp[1], rec.udp_public[0]);
+        let info = rec.info();
+        assert_eq!(info.cert_sha256, "ab".repeat(32));
+        assert_eq!(info.relay_via, vec![DeviceId::from_bytes(&[4u8; 16])]);
+        // Equal apart from the seq: nothing to republish.
+        let mut later = rec.clone();
+        later.seq = 7;
+        assert!(later.same_as(&rec));
+        later.reachable = true;
+        assert!(!later.same_as(&rec));
     }
 
     #[test]
@@ -2508,22 +1683,6 @@ mod tests {
         assert!(is_lan("127.0.0.1".parse().unwrap()));
         assert!(is_lan("fe80::1".parse().unwrap()));
         assert!(!is_lan("2001:db8::1".parse().unwrap()));
-    }
-
-    #[test]
-    fn auth_header_roundtrip_and_tamper() {
-        let k = SecretKey::random();
-        let d = DeviceId::from_bytes(&[1u8; 16]);
-        let h = auth_header(&k, &d, "/p2p/object/abc");
-        assert_eq!(verify_auth(&k, &h, "/p2p/object/abc"), Some(d.clone()));
-        assert_eq!(verify_auth(&k, &h, "/p2p/object/abd"), None);
-        assert_eq!(
-            verify_auth(&SecretKey::random(), &h, "/p2p/object/abc"),
-            None
-        );
-        let mut bad = h.clone();
-        bad.pop();
-        assert_eq!(verify_auth(&k, &bad, "/p2p/object/abc"), None);
     }
 
     #[test]

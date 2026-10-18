@@ -131,10 +131,11 @@ fn setup() -> Setup {
     }
 }
 
-/// The phone: joined, "docs" attached and kept encrypted here.
-fn phone(s: &Setup, selective: bool) -> (Engine, PathBuf, PathBuf) {
+/// The phone: joined, given "docs" by the laptop, the folder attached and
+/// kept encrypted here.
+fn phone(s: &mut Setup, selective: bool) -> (Engine, PathBuf, PathBuf) {
     let (home, dir) = (s.root.join("b-home"), s.root.join("b-docs"));
-    let mut b = Engine::join(&home, "phone", PASS, &s.key, s.storage.clone()).unwrap();
+    let mut b = common::join_approved(&home, "phone", PASS, &s.key, s.storage.clone(), &mut s.a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &dir, selective).unwrap();
     b.set_encrypted_here("docs", true).unwrap();
@@ -142,10 +143,9 @@ fn phone(s: &Setup, selective: bool) -> (Engine, PathBuf, PathBuf) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn not_selective_caches_every_block_and_no_plaintext() {
-    let s = setup();
-    let (mut b, home, dir) = phone(&s, false);
+    let mut s = setup();
+    let (mut b, home, dir) = phone(&mut s, false);
     b.sync(None).unwrap();
     // Every object of the folder is in the block cache, as stored.
     let stored = common::object_names(&s.root.join("storage"));
@@ -179,10 +179,9 @@ fn not_selective_caches_every_block_and_no_plaintext() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn selective_caches_fetched_files_only_and_frees_them() {
-    let s = setup();
-    let (mut b, home, dir) = phone(&s, true);
+    let mut s = setup();
+    let (mut b, home, dir) = phone(&mut s, true);
     b.sync(None).unwrap();
     assert_eq!(state_of(&b, "docs", "trip/photo.bin"), "placeholder");
     assert_eq!(state_of(&b, "docs", "notes.bin"), "placeholder");
@@ -212,33 +211,53 @@ fn selective_caches_fetched_files_only_and_frees_them() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn free_refuses_blocks_without_a_storage_copy() {
     let tmp = tempfile::tempdir().unwrap();
-    // A device with no storage at all: what it writes exists only here.
+    let store = tmp.path().join("storage");
+    // A folder's records live on a storage (format 3), so the device has
+    // one; it is out of reach when the file is written: what is written
+    // exists only here.
     let (mut c, _) = Engine::init(&tmp.path().join("home"), "phone", PASS).unwrap();
+    c.add_storage(StorageSpec::LocalDir {
+        name: "box".into(),
+        path: store.clone(),
+        cold: false,
+        carrier: false,
+        place: String::new(),
+        min_free: None,
+    })
+    .unwrap();
     c.add_folder("notes", &tmp.path().join("notes")).unwrap();
     c.set_encrypted_here("notes", true).unwrap();
+    let away = tmp.path().join("storage-away");
+    fs::rename(&store, &away).unwrap();
+    fs::write(&store, b"not a directory: unreachable").unwrap();
     let text = pseudo_random(5_000, 3);
-    c.write_file("notes", "draft.bin", &text).unwrap();
+    let _ = c.write_file("notes", "draft.bin", &text);
     assert_eq!(state_of(&c, "notes", "draft.bin"), "local");
     let before = objects(&tmp.path().join("home/block-cache"));
     assert!(!before.is_empty());
     let err = c.free_file("notes", "draft.bin").unwrap_err();
     assert!(err.to_string().contains("not fully stored"), "{err}");
     assert_eq!(c.free_folder("notes").unwrap(), (0, 1));
-    c.sync(None).unwrap();
+    let _ = c.sync(None);
     assert_eq!(objects(&tmp.path().join("home/block-cache")), before);
     assert_eq!(state_of(&c, "notes", "draft.bin"), "local");
     assert_eq!(c.read_file("notes", "draft.bin").unwrap(), text);
     assert_no_plaintext(&[tmp.path()], &[&text]);
+    // Once the storage is back and the blocks are on it, they may go.
+    fs::remove_file(&store).unwrap();
+    fs::rename(&away, &store).unwrap();
+    c.sync(None).unwrap();
+    c.free_file("notes", "draft.bin").unwrap();
+    assert_eq!(state_of(&c, "notes", "draft.bin"), "placeholder");
+    assert_eq!(c.read_file("notes", "draft.bin").unwrap(), text);
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn viewer_reads_from_the_cache_with_storages_unreachable() {
-    let s = setup();
-    let (mut b, home, dir) = phone(&s, false);
+    let mut s = setup();
+    let (mut b, home, dir) = phone(&mut s, false);
     b.sync(None).unwrap();
     // The storage goes away (offline phone).
     fs::rename(s.root.join("storage"), s.root.join("storage-away")).unwrap();
@@ -258,10 +277,9 @@ fn viewer_reads_from_the_cache_with_storages_unreachable() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn files_added_on_the_phone_reach_other_devices_without_plaintext_here() {
     let mut s = setup();
-    let (mut b, home, dir) = phone(&s, true);
+    let (mut b, home, dir) = phone(&mut s, true);
     b.sync(None).unwrap();
     // Small file through write_file, a large one streamed through a writer
     // (as /api/upload does, without the engine while the bytes arrive).
@@ -309,14 +327,13 @@ fn files_added_on_the_phone_reach_other_devices_without_plaintext_here() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn plain_copies_from_the_previous_layout_are_converted() {
     let mut s = setup();
     let (home, dir) = (s.root.join("b-home"), s.root.join("b-docs"));
     // The phone as older versions left it: the folder was synced with plain
     // files while unlocked, one file was freed to a placeholder file, one
     // was changed on the phone and one added, neither synced yet.
-    let mut b = Engine::join(&home, "phone", PASS, &s.key, s.storage.clone()).unwrap();
+    let mut b = common::join_approved(&home, "phone", PASS, &s.key, s.storage.clone(), &mut s.a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &dir, true).unwrap();
     b.sync(None).unwrap();
@@ -351,10 +368,9 @@ fn plain_copies_from_the_previous_layout_are_converted() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn locking_deletes_nothing_and_exports_are_removed() {
-    let s = setup();
-    let (mut b, home, dir) = phone(&s, false);
+    let mut s = setup();
+    let (mut b, home, dir) = phone(&mut s, false);
     b.sync(None).unwrap();
     // "Open in another app": the only decrypted copy, on explicit request.
     let out = b.export_file("docs", "trip/photo.bin").unwrap();
@@ -385,10 +401,9 @@ fn locking_deletes_nothing_and_exports_are_removed() {
 /// the thumbnail must exist by then, and a thumbnail that could not be made while the
 /// blocks were away is made again once they are back (it was marked done for good before).
 #[test]
-#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn streamed_pictures_keep_a_thumbnail_after_their_blocks_are_freed() {
-    let s = setup();
-    let (mut b, _home, dir) = phone(&s, true);
+    let mut s = setup();
+    let (mut b, _home, dir) = phone(&mut s, true);
     b.sync(None).unwrap();
     let mut jpg = Vec::new();
     image::RgbImage::from_fn(900, 600, |x, y| image::Rgb([x as u8, y as u8, 9]))
@@ -409,12 +424,11 @@ fn streamed_pictures_keep_a_thumbnail_after_their_blocks_are_freed() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (encrypted cache)"]
 fn freeing_a_file_does_not_turn_a_send_only_folder_selective() {
     // Camera upload frees each uploaded file; the send-only folder stays an
     // ordinary (not selective) folder kept encrypted on the phone.
-    let s = setup();
-    let (mut b, _home, dir) = phone(&s, false);
+    let mut s = setup();
+    let (mut b, _home, dir) = phone(&mut s, false);
     b.set_folder_mode("docs", varsto_core::vault::FolderMode::SendOnly)
         .unwrap();
     fs::write(dir.join("cam.bin"), vec![5u8; 30_000]).unwrap();

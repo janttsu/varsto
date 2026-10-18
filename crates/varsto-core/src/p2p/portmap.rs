@@ -314,7 +314,7 @@ impl PortMapper {
     }
 
     /// Map, renew or map again as due at `now`. Returns whether the external
-    /// addresses changed (the rendezvous record should go out again).
+    /// addresses changed (the peer record should go out again).
     pub fn tick(&mut self, now: Instant) -> bool {
         let before = (self.external(Proto::Tcp), self.external(Proto::Udp));
         if self.mappings.is_empty() {

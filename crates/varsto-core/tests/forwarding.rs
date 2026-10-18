@@ -11,12 +11,8 @@ mod common;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::engine::ForwardOptions;
-use varsto_core::p2p;
 use varsto_core::policy::{Policy, PolicyState};
 use varsto_core::storage::StorageSpec;
 use varsto_core::strongroom::{Method, SoftwareKey};
@@ -120,46 +116,11 @@ fn laptop(lab: &Lab, name: &str, key: &str) -> Engine {
     l
 }
 
-/// The phone serves its blocks over TCP to `to`.
-struct Served {
-    stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl Drop for Served {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-    }
-}
-
-fn serve(phone: &Engine, to: &mut [&mut Engine]) -> Served {
-    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let addr = server.addr;
-    let snap = Arc::new(Mutex::new(Some(Arc::new(phone.peer_snapshot().unwrap()))));
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop2 = stop.clone();
-    let thread = std::thread::spawn(move || {
-        server.run(snap, stop2);
-    });
-    for e in to.iter_mut() {
-        let peers = p2p::Peers::new(
-            e.peer_key(),
-            e.device_id().clone(),
-            vec![p2p::PeerAddr {
-                device: phone.device_id().clone(),
-                addr,
-                name: "phone".into(),
-            }],
-        );
-        e.set_peers(Some(Arc::new(peers)));
-    }
-    Served {
-        stop,
-        thread: Some(thread),
-    }
+/// The phone serves its blocks over TLS on TCP to `to`.
+fn serve(phone: &mut Engine, to: &mut [&mut Engine]) -> common::p2p::Serving {
+    let serving = common::p2p::Serving::start(phone);
+    common::p2p::connect(phone, &serving, to);
+    serving
 }
 
 fn camera_state(e: &Engine) -> PolicyState {
@@ -216,7 +177,7 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
     assert_eq!(common::object_count(&lab.p("bucket")), 0);
 
     // The phone is online.
-    let served = serve(&phone, &mut [&mut laptop]);
+    let served = serve(&mut phone, &mut [&mut laptop]);
     let r = laptop.forward(&ForwardOptions::manual()).unwrap();
     let f = &r.folders[0];
     assert_eq!(f.blocks, waiting, "{r:?}");
@@ -305,9 +266,9 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
 #[ignore = "f3-switch: port in part B (forwarding)"]
 fn turned_off_it_forwards_nothing() {
     let lab = Lab::new();
-    let (phone, key) = phone(&lab);
+    let (mut phone, key) = phone(&lab);
     let mut laptop = laptop(&lab, "laptop", &key);
-    let _served = serve(&phone, &mut [&mut laptop]);
+    let _served = serve(&mut phone, &mut [&mut laptop]);
     laptop.set_forwarding(false).unwrap();
     let r = laptop.forward(&ForwardOptions::manual()).unwrap();
     assert!(!r.enabled && r.blocks == 0, "{r:?}");
@@ -346,7 +307,7 @@ fn a_locked_strongroom_is_not_forwarded() {
         .attach_folder("vault", &lab.p("laptop-vault"), true)
         .unwrap();
     let _ = laptop.sync(None);
-    let _served = serve(&phone, &mut [&mut laptop]);
+    let _served = serve(&mut phone, &mut [&mut laptop]);
 
     // Locked: the laptop holds no key for the folder and forwards nothing.
     let r = laptop.forward(&ForwardOptions::manual()).unwrap();
@@ -369,10 +330,10 @@ fn a_locked_strongroom_is_not_forwarded() {
 #[ignore = "f3-switch: port in part B (forwarding)"]
 fn two_laptops_with_one_bucket_write_every_block_once() {
     let lab = Lab::new();
-    let (phone, key) = phone(&lab);
+    let (mut phone, key) = phone(&lab);
     let mut one = laptop(&lab, "laptop1", &key);
     let mut two = laptop(&lab, "laptop2", &key);
-    let _served = serve(&phone, &mut [&mut one, &mut two]);
+    let _served = serve(&mut phone, &mut [&mut one, &mut two]);
 
     // The first stops after one block (its budget) and keeps the lease.
     let small = ForwardOptions {
