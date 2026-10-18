@@ -1,6 +1,6 @@
 # Specifications
 
-Status of the documents that will define formats and protocols. Sections 32 to 60 of alpha-0-format.md are new in 0.0.1-alpha.14 and sections 62 to 71 new in 0.0.1-alpha.15. Most of what exists is described in [alpha-0-format.md](alpha-0-format.md), section by section; anything marked **not started** has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.
+Status of the documents that will define formats and protocols. Sections 32 to 60 of alpha-0-format.md are new in 0.0.1-alpha.14 and sections 62 to 71 new in 0.0.1-alpha.15; sections 72 to 77 follow alpha.15 (section 77 describes storage format 3, not yet enabled). Most of what exists is described in [alpha-0-format.md](alpha-0-format.md), section by section; anything marked **not started** has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.
 
 | Document | Status |
 |---|---|
@@ -29,6 +29,6 @@ Status of the documents that will define formats and protocols. Sections 32 to 6
 
 Storage format version history (which releases read which formats): see [format-versions.md](format-versions.md).
 
-Storage format 3 (planned, not implemented): pack-level ledger, folder block maps, signed records, base + delta manifests and padded packs. Binding design: [format-3-design.md](format-3-design.md).
+Storage format 3 (built behind the `format3` cargo feature, not enabled): pack-level ledger, folder block maps, signed records, folder key grants with recovery escrow, base + delta manifests and padded packs of fixed size classes. It ships only when `FORMAT_VERSION` becomes 3. Text: [alpha-0-format.md](alpha-0-format.md) section 77 (with sections 75 and 76 for peers and membership); binding design: [format-3-design.md](format-3-design.md).
 
 Failure model (what fails and what does not): see [../failure-model.md](../failure-model.md).
