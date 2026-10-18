@@ -40,9 +40,12 @@ New-Item -ItemType Directory -Force $st, "$docs\Invoices" | Out-Null
 "- The Design of Everyday Things`n- Thinking in Systems`n- A Pattern Language" | Set-Content "$docs\Reading-list.txt"
 "Invoice 2026-041`nTotal 1 240,00 EUR" | Set-Content "$docs\Invoices\2026-041.txt"
 $bytes = New-Object byte[] 6000000; (New-Object Random 7).NextBytes($bytes); [IO.File]::WriteAllBytes("$docs\Archive-2025.zip", $bytes)
-& $Exe --home $h init --name laptop | Out-Null
+$init = & $Exe --home $h init --name laptop --json | ConvertFrom-Json
+# The kit's recovery words make the folder's recovery copy (format 3).
+$env:VARSTO_RECOVERY_WORDS = (([regex]::Matches(($init.kit -csplit "RECOVERY WORDS")[1], '\d+\.\s+([a-z]+)') | ForEach-Object { $_.Groups[1].Value }) -join " ")
 & $Exe --home $h storage add-local box $st | Out-Null
 & $Exe --home $h folder add Documents $docs | Out-Null
+Remove-Item Env:VARSTO_RECOVERY_WORDS
 & $Exe --home $h sync | Out-Null
 Start-Process -FilePath $Exe -ArgumentList "--home", $h, "tray" -RedirectStandardOutput "$Work\tray.log" -RedirectStandardError "$Work\tray.err"
 for ($i = 0; $i -lt 60 -and -not (Test-Path "$h\service.json"); $i++) { Start-Sleep 1 }

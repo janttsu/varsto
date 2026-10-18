@@ -37,9 +37,11 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -259,13 +261,16 @@ class Bench:
         self.node_sh("par", "svc-stop", "/bench/w", check=False)
         key_cmd = f"{v} init --name writer-paris --json"
         self.ssh("par", f"rm -rf /bench/w /bench/w.*; VARSTO_PASSPHRASE=bench-passphrase {key_cmd} > /bench/init.json")
-        self.state["vault_key"] = json.loads(self.ssh("par", "cat /bench/init.json"))["vault_key"]
+        init = json.loads(self.ssh("par", "cat /bench/init.json"))
+        self.state["vault_key"] = init["vault_key"]
+        # The kit's recovery words make each folder's recovery copy (format 3).
+        words = " ".join(re.findall(r"\d+\.\s+([a-z]+)", init["kit"].split("RECOVERY WORDS")[1]))
         self.save()
         _, access, _ = self.s3_env()
         self.ssh("par", f"{self.secret_env()} VARSTO_PASSPHRASE=bench-passphrase {v} storage add-s3 cloud --endpoint https://s3.fr-par.scw.cloud "
                         f"--region fr-par --bucket {self.state['bucket']} --access-key-id {access}")
         for s in self.args.sets.split(","):
-            self.ssh("par", f"VARSTO_PASSPHRASE=bench-passphrase {v} folder add {s} /bench/data/{s}")
+            self.ssh("par", f"VARSTO_RECOVERY_WORDS='{words}' VARSTO_PASSPHRASE=bench-passphrase {v} folder add {s} /bench/data/{s}")
         self.ssh("par", f"VARSTO_PASSPHRASE=bench-passphrase {v} verify set --off >/dev/null")
 
     def push_local(self):
@@ -316,8 +321,8 @@ class Bench:
     def purge_chunks(self):
         env, _, _ = self.s3_env()
         b = self.state["bucket"]
-        subprocess.run(["rclone", "purge", f"scw:{b}/chunks"], env=env, check=False)
-        left = subprocess.run(["rclone", "lsf", "-R", f"scw:{b}/chunks"], env=env, capture_output=True, text=True).stdout.split()
+        subprocess.run(["rclone", "purge", f"scw:{b}/packs"], env=env, check=False)
+        left = subprocess.run(["rclone", "lsf", "-R", f"scw:{b}/packs"], env=env, capture_output=True, text=True).stdout.split()
         top = subprocess.run(["rclone", "lsf", f"scw:{b}"], env=env, capture_output=True, text=True).stdout.split()
         self.record({"kind": "purge-chunks", "chunks_left": len(left), "bucket_top": top})
 
@@ -353,12 +358,21 @@ class Bench:
                 subprocess.run(["rclone", "deletefile", f"scw:{self.state['bucket']}/vault/peers/{name}"], env=env,
                                capture_output=True)
 
+        approve_lock = threading.Lock()
+
         def prepare(r):
             h = homes[r]
             # Leftovers of an aborted run: stop its service first.
             self.ssh(r, "for h in /bench/h-*; do [ -f $h/service.json ] && bash /bench/bench-node.sh svc-stop $h >/dev/null; done; true")
             self.ssh(r, f"rm -rf /bench/h-* /bench/r-*; {self.secret_env()} VARSTO_PASSPHRASE=bench-passphrase VARSTO_VAULT_KEY={self.state['vault_key']} /bench/varsto --home {h} join "
                         f"--name {r}-{tag} {self.s3_flags()} > /dev/null")
+            # Format 3: the device asks for the folder and the writer approves
+            # (one approval at a time on the writer's vault).
+            self.ssh(r, f"{self.secret_env()} VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home {h} folder request {FOLDERS[s]} >/dev/null")
+            with approve_lock:
+                self.ssh("par", f"{self.secret_env()} VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home /bench/w sync >/dev/null && "
+                                f"{self.secret_env()} VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home /bench/w folder approve {FOLDERS[s]} {r}-{tag} --yes >/dev/null")
+            self.ssh(r, f"{self.secret_env()} VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home {h} sync >/dev/null")
             # Automatic verification would download (and repair) blocks in the
             # background while the run is measured: off for the benchmark devices.
             self.ssh(r, f"VARSTO_PASSPHRASE=bench-passphrase /bench/varsto --home {h} verify set --off >/dev/null")

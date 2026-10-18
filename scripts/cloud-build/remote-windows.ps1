@@ -20,11 +20,18 @@ $home1 = "C:\build\home-a"; $home2 = "C:\build\home-b"; $st = "C:\build\storage"
 New-Item -ItemType Directory -Force $st, $fa, $fb | Out-Null
 $init = & $exe --home $home1 init --name win-a --json | ConvertFrom-Json
 & $exe --home $home1 storage add-local box $st
+$env:VARSTO_RECOVERY_WORDS = (([regex]::Matches(($init.kit -csplit "RECOVERY WORDS")[1], '\d+\.\s+([a-z]+)') | ForEach-Object { $_.Groups[1].Value }) -join " ")
 & $exe --home $home1 folder add docs $fa
+Remove-Item Env:VARSTO_RECOVERY_WORDS
 "hello from windows" | Set-Content "$fa\note.txt"
 & $exe --home $home1 sync
 $env:VARSTO_VAULT_KEY = $init.vault_key
 & $exe --home $home2 join --name win-b --storage-path $st
+# Format 3: the second device asks for the folder, the first approves.
+& $exe --home $home2 folder request docs
+& $exe --home $home1 sync
+& $exe --home $home1 folder approve docs win-b --yes
+& $exe --home $home2 sync
 & $exe --home $home2 folder attach docs $fb
 & $exe --home $home2 sync
 if ((Get-Content "$fb\note.txt") -ne "hello from windows") { throw "sync across two device directories failed" }
