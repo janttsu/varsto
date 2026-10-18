@@ -50,8 +50,8 @@ pub mod pad;
 mod tests;
 
 pub use accept::{
-    Acceptor, Announced, Junk, Listed, Outcome, Parts, Record, RecordBody, RecordMeta, RecordStore,
-    RecordTrust, RecordsRefused, Refusal, Refused, StreamRead, MAX_AHEAD,
+    Acceptor, Announced, Checked, Junk, Listed, Outcome, Parts, Record, RecordBody, RecordMeta,
+    RecordStore, RecordTrust, RecordsRefused, Refusal, Refused, StreamRead, MAX_AHEAD,
 };
 pub use envelope::{
     record_hash, DeviceSigner, RecordKeys, RecordPublished, RecordSigner, RecordWriter,

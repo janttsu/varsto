@@ -46,6 +46,22 @@ pub struct Denied {
     pub stamp: Stamp,
 }
 
+/// A member device of another person's vault, as an owner lists it: the
+/// keys of its request code (section 6, "Other people's devices ask out of
+/// band with the `vsr1` request code"), so every device of this vault can
+/// check what the member writes and seal grants to it. The role is a
+/// participant entry like any other.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct MemberKeys {
+    pub device: Id16,
+    pub name: String,
+    /// K6 public key; BLAKE3 of it gives `device`.
+    pub k6: Vec<u8>,
+    /// K8 public key.
+    pub k8: Vec<u8>,
+    pub stamp: Stamp,
+}
+
 /// The body of a `folder` record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FolderRecord {
@@ -61,6 +77,8 @@ pub struct FolderRecord {
     pub creation: Option<[u8; 16]>,
     pub participants: Vec<Participant>,
     pub denied: Vec<Denied>,
+    /// Member devices (other people's) this record lists.
+    pub members: Vec<MemberKeys>,
 }
 
 impl RecordBody for FolderRecord {
@@ -71,7 +89,10 @@ impl RecordBody for FolderRecord {
         if self.name.len() > MAX_NAME {
             return Err("folder name longer than 128 bytes".into());
         }
-        if self.participants.len() > MAX_PARTICIPANTS || self.denied.len() > MAX_PARTICIPANTS {
+        if self.participants.len() > MAX_PARTICIPANTS
+            || self.denied.len() > MAX_PARTICIPANTS
+            || self.members.len() > MAX_PARTICIPANTS
+        {
             return Err("too many entries".into());
         }
         if self.settings.len() > 1024
@@ -86,8 +107,17 @@ impl RecordBody for FolderRecord {
         if !mine(&self.stamp)
             || !self.participants.iter().all(|p| mine(&p.stamp))
             || !self.denied.iter().all(|d| mine(&d.stamp))
+            || !self.members.iter().all(|m| mine(&m.stamp))
         {
             return Err("an entry carries another device's stamp".into());
+        }
+        for m in &self.members {
+            if m.name.len() > MAX_NAME || m.k6.len() > 4096 || m.k8.len() > 4096 {
+                return Err("a member entry is too large".into());
+            }
+            if crate::crypto::hash(&m.k6)[..16] != m.device {
+                return Err("a member's keys do not give its device id".into());
+            }
         }
         if let Some(nonce) = &self.creation {
             if folder_id(&meta.device, nonce) != self.id {
@@ -119,6 +149,13 @@ pub struct FolderState {
     pub entries_refused: u64,
     /// The largest Lamport time of any accepted entry.
     pub max_lamport: u64,
+    /// Per device, every accepted change of its role in stamp order (the
+    /// creator's first entry has the zero stamp): what its role was at a
+    /// given Lamport time (`role_at`).
+    pub history: BTreeMap<Id16, Vec<(Stamp, Option<Role>)>>,
+    /// Member devices (other people's) the owners listed, newest entry
+    /// per device.
+    pub members: BTreeMap<Id16, MemberKeys>,
 }
 
 /// Ordered so that the replay is the same in any reading order, even for
@@ -127,6 +164,7 @@ pub struct FolderState {
 enum Entry {
     Name(String, BTreeMap<String, String>),
     Set(Id16, Option<Role>),
+    Member(MemberKeys),
 }
 
 impl FolderState {
@@ -146,6 +184,8 @@ impl FolderState {
             entries: BTreeMap::from([(creator, (Some(Role::Owner), Stamp::default()))]),
             entries_refused: 0,
             max_lamport: 0,
+            history: BTreeMap::from([(creator, vec![(Stamp::default(), Some(Role::Owner))])]),
+            members: BTreeMap::new(),
         };
         let mut all: Vec<(Stamp, Id16, Entry)> = Vec::new();
         for r in records {
@@ -160,6 +200,9 @@ impl FolderState {
             }
             for d in &r.body.denied {
                 all.push((d.stamp, w, Entry::Set(d.device, None)));
+            }
+            for m in &r.body.members {
+                all.push((m.stamp, w, Entry::Member(m.clone())));
             }
         }
         all.sort();
@@ -182,6 +225,16 @@ impl FolderState {
                     let newer = st.entries.get(&device).is_none_or(|(_, old)| stamp > *old);
                     if newer {
                         st.entries.insert(device, (role, stamp));
+                        st.history.entry(device).or_default().push((stamp, role));
+                    }
+                }
+                Entry::Member(m) => {
+                    let newer = st
+                        .members
+                        .get(&m.device)
+                        .is_none_or(|old| stamp > old.stamp);
+                    if newer {
+                        st.members.insert(m.device, m);
                     }
                 }
             }
@@ -196,6 +249,17 @@ impl FolderState {
 
     pub fn is_denied(&self, device: &Id16) -> bool {
         matches!(self.entries.get(device), Some((None, _)))
+    }
+
+    /// The device's role at Lamport time `lamport`: the newest accepted
+    /// entry for it whose stamp is not later (`None`: no role then).
+    pub fn role_at(&self, device: &Id16, lamport: u64) -> Option<Role> {
+        self.history
+            .get(device)?
+            .iter()
+            .rev()
+            .find(|(s, _)| s.lamport <= lamport)
+            .and_then(|(_, r)| *r)
     }
 
     pub fn participants(&self) -> Vec<Participant> {
@@ -280,8 +344,24 @@ impl FolderRegistry {
         self.role(device, folder, epoch) == Some(Role::Owner)
     }
 
+    /// The role of `device` in `folder` at Lamport time `lamport`, for
+    /// ledger events: `None` when this registry does not know the folder
+    /// (no judgement), `Some(None)` when the device had no role then.
+    pub fn role_at(&self, device: &Id16, folder: &Id16, lamport: u64) -> Option<Option<Role>> {
+        Some(self.folders.get(folder)?.role_at(device, lamport))
+    }
+
     /// The stream of `device`'s folder records of `folder`.
     pub fn stream(folder: Id16, device: Id16) -> StreamRef {
         StreamRef::new(Kind::Folder, folder, device)
+    }
+}
+
+/// Which full devices may make folder events in the ledger (section 9):
+/// owners and editors at the batch's Lamport time.
+impl crate::ledger3::scope::FolderRoles for FolderRegistry {
+    fn writes_at(&self, device: &Id16, folder: &Id16, lamport: u64) -> Option<bool> {
+        self.role_at(device, folder, lamport)
+            .map(|r| matches!(r, Some(Role::Owner | Role::Editor)))
     }
 }

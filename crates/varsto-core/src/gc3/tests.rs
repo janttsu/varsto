@@ -211,9 +211,14 @@ impl World {
                 name: "photos".into(),
                 settings: BTreeMap::new(),
                 creator: devs[0].id,
+                history: entries
+                    .iter()
+                    .map(|(d, (r, s))| (*d, vec![(*s, *r)]))
+                    .collect(),
                 entries,
                 entries_refused: 0,
                 max_lamport: 0,
+                members: BTreeMap::new(),
             },
         );
         World {
@@ -321,6 +326,7 @@ impl World {
                 devices,
                 revoked,
                 folders: Some(folders),
+                members: None,
             },
             view,
             permissive,
@@ -646,6 +652,7 @@ impl World {
                 devices: &self.devices,
                 revoked: &self.revoked,
                 folders: Some(&self.folders),
+                members: None,
             },
             view: &self.view,
             permissive: false,
@@ -945,6 +952,7 @@ impl World {
                 devices: &w.devices,
                 revoked: &w.revoked,
                 folders: Some(&w.folders),
+                members: None,
             },
             view: &w.view,
             permissive: true,

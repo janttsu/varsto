@@ -2,7 +2,7 @@
 //! Tests of the format-3 ledger: events, scopes, the pack-level view, the
 //! store's chains, gaps, forks and checkpoints, and the settle queries.
 
-use super::envelope::{self, kind, Header, SignedRecord};
+use super::envelope::{self, kind, Header, LedgerRecord, SignedRecord};
 use super::events::*;
 use super::scope::{ledger_key_id, share_ledger_key_id, EventScope, KEY_REPLICA};
 use super::view::*;
@@ -153,7 +153,7 @@ fn every_event_code_round_trips() {
         )
         .unwrap();
     assert_eq!(rec.kind, kind::BATCH);
-    let again = SignedRecord::decode(&rec.encode().unwrap()).unwrap();
+    let again = SignedRecord::decode(&rec.encode()).unwrap();
     assert_eq!(again, rec);
     let opened = store::check_batch(&again, &VAULT, &s.public(), Some(&key))
         .unwrap()
@@ -1463,4 +1463,173 @@ fn rescan_rebuilds_heads() {
     let after = again.head(&d);
     assert_eq!((after.seq, after.hash), (before.seq, before.hash));
     assert_eq!(after.base.map(|b| b.seq), Some(3));
+}
+
+// ---- the record envelope and folder roles (work package 12) ----------------
+
+/// Folder roles for the tests: (device, folder) -> role changes by Lamport
+/// time (`true`: owner or editor from then on).
+struct Roles(Vec<(DeviceBin, FolderBin, u64, bool)>);
+
+impl scope::FolderRoles for Roles {
+    fn writes_at(&self, device: &DeviceBin, folder: &FolderBin, lamport: u64) -> Option<bool> {
+        if !self.0.iter().any(|(_, f, _, _)| f == folder) {
+            return None;
+        }
+        Some(
+            self.0
+                .iter()
+                .filter(|(d, f, at, _)| d == device && f == folder && *at <= lamport)
+                .max_by_key(|(_, _, at, _)| *at)
+                .is_some_and(|(_, _, _, w)| *w),
+        )
+    }
+}
+
+/// A full device's batch counts for the vault, but its claims naming a
+/// folder and its announcements of a folder's manifests, maps and trash
+/// count only while it is an owner or editor there (section 9): a viewer
+/// and a device without a grant (K3 only) copy whole packs, verify and
+/// drop, and nothing they claim for the folder counts; an editor demoted
+/// later keeps what it wrote before. A folder the roles do not know is not
+/// judged.
+#[test]
+fn full_devices_folder_events_follow_their_folder_roles() {
+    let (editor, viewer, k3_only, demoted) = ([1; 16], [2; 16], [3; 16], [4; 16]);
+    let (f, unknown) = (fid(1), fid(9));
+    let roles = Roles(vec![
+        (editor, f, 0, true),
+        (viewer, f, 0, false),
+        (demoted, f, 0, true),
+        (demoted, f, 50, false),
+    ]);
+    let batches = [
+        batch(
+            editor,
+            1,
+            10,
+            &[stored("h1", 1, 1, 1), published(kind::MANIFEST, 1, 1, 1, 1)],
+        ),
+        batch(
+            viewer,
+            1,
+            11,
+            &[
+                stored("h1", 2, 1, 1),
+                published(kind::MANIFEST, 1, 1, 1, 2),
+                published(kind::BLOCK_MAP, 1, 1, 1, 2),
+                verified("h1", 1),
+                // A whole-pack copy: zero folder.
+                stored("h2", 1, 0, 0),
+            ],
+        ),
+        batch(
+            k3_only,
+            1,
+            12,
+            &[
+                stored("h3", 3, 1, 1),
+                published(kind::TRASH, 1, 1, 1, 3),
+                stored("h3", 1, 0, 0),
+                dropped("h1", 1),
+            ],
+        ),
+        batch(demoted, 1, 20, &[stored("h1", 4, 1, 1)]),
+        batch(demoted, 2, 60, &[stored("h1", 5, 1, 2)]),
+        batch(viewer, 2, 70, &[stored("h1", 6, 9, 1)]),
+    ];
+    let mut v = LedgerView::default();
+    for b in &batches {
+        v.apply_scoped_with(b, &EventScope::Full, &roles);
+    }
+    let v = v.finish(Vec::<DeviceBin>::new());
+    // The editor's claim and announcement count.
+    assert_eq!(v.pack_folder(&pid(1)), Some(f));
+    assert!(v.announced(kind::MANIFEST, &f, &editor, 1).is_some());
+    // The viewer's and the K3-only device's claims for the folder do not.
+    assert!(v.pack(&pid(2)).is_none());
+    assert!(v.pack(&pid(3)).is_none());
+    assert!(v.stream(kind::MANIFEST, &f, &viewer).is_none());
+    assert!(v.stream(kind::BLOCK_MAP, &f, &viewer).is_none());
+    assert!(v.stream(kind::TRASH, &f, &k3_only).is_none());
+    // Their copies, verifications and drops do.
+    assert_eq!(v.holders(&pid(1)), vec!["h2", "h3"]);
+    assert!(v.dropped_from(&pid(1), "h1"));
+    // Before its demotion the editor's claim counts, after it not.
+    assert_eq!(v.pack_folder(&pid(4)), Some(f));
+    assert!(v.pack(&pid(5)).is_none());
+    // A folder the roles do not know: not judged.
+    assert_eq!(v.pack_folder(&pid(6)), Some(unknown));
+    assert_eq!(v.events_refused, 6);
+    // Without roles every full device's event counts, as before.
+    let mut all = LedgerView::default();
+    for b in &batches {
+        all.apply(b);
+    }
+    assert!(all.finish(Vec::<DeviceBin>::new()).pack(&pid(5)).is_some());
+}
+
+/// Batches are `record::SignedRecord`s: the signature and the body's
+/// associated data bind storage format 3 (not the build's format), the
+/// acceptance rule of every record checks the name it was read under, and
+/// a relabelled key id is refused.
+#[test]
+fn batches_are_signed_records_bound_to_format_3() {
+    let s = signer(1);
+    let d = dev_of(&s);
+    let key = SecretKey::random();
+    let dir = tempfile::tempdir().unwrap();
+    let mut own = store(&dir, "own");
+    let rec = own
+        .append_own(
+            &d,
+            vec![stored("h1", 1, 1, 1).to_raw()],
+            Vec::new(),
+            1,
+            &key,
+            &ledger_key_id(0),
+            NO_FOLDER,
+            &s,
+        )
+        .unwrap();
+    assert_eq!(rec.format, 3);
+    rec.verify(&s.public()).unwrap();
+    let aad = |format: u16| {
+        crate::crypto::aad_for_format(
+            format,
+            "batch",
+            &[
+                &rec.vault,
+                &rec.scope,
+                &rec.device,
+                &rec.seq.to_le_bytes(),
+                &rec.part.to_le_bytes(),
+                &rec.parts.to_le_bytes(),
+                rec.key_id.as_bytes(),
+            ],
+        )
+    };
+    assert!(crate::crypto::decrypt(&key, &aad(3), &rec.body).is_ok());
+    assert!(crate::crypto::decrypt(&key, &aad(2), &rec.body).is_err());
+    let mut other = store(&dir, "other");
+    // Read under another seq's name: refused by the acceptance rule.
+    let wrong = checkpoint::batch_key(&d, 2);
+    assert!(other
+        .ingest_named(&wrong, rec.clone(), &s.public(), Some(&key), u64::MAX)
+        .is_err());
+    // A relabelled key id breaks the signature.
+    let mut relabelled = rec.clone();
+    relabelled.key_id = ledger_key_id(1);
+    assert!(other.ingest(relabelled, &s.public(), Some(&key)).is_err());
+    // Another device's key: refused.
+    assert!(other
+        .ingest(rec.clone(), &signer(2).public(), Some(&key))
+        .is_err());
+    let right = checkpoint::batch_key(&d, 1);
+    assert_eq!(
+        other
+            .ingest_named(&right, rec, &s.public(), Some(&key), u64::MAX)
+            .unwrap(),
+        Ingest::New
+    );
 }

@@ -12,7 +12,7 @@
 
 use super::envelope::kind;
 use super::events::Event;
-use super::{FolderBin, NO_FOLDER};
+use super::{DeviceBin, FolderBin, NO_FOLDER};
 
 /// Key id prefixes of batch envelopes (section 1).
 pub const KEY_LEDGER_PREFIX: &str = "ledger@";
@@ -47,6 +47,43 @@ pub fn share_ledger_key_id(folder: &FolderBin, epoch: u32) -> String {
 
 fn epoch_digits(s: &str) -> bool {
     !s.is_empty() && s.len() <= 10 && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Folder roles of full devices, from the folder records (section 9): a
+/// full device's batch counts in full for the vault, but its claims that
+/// name a folder and its announcements of a folder's manifests, maps and
+/// trash count only while it is an owner or editor of that folder. Copies
+/// of whole packs (zero folder), verifications, drops and retirements stay
+/// with every full device, as for a device that holds the vault key alone.
+pub trait FolderRoles {
+    /// Whether `device` was an owner or editor of `folder` at Lamport time
+    /// `lamport`; `None` when the folder is not known (no judgement).
+    fn writes_at(&self, device: &DeviceBin, folder: &FolderBin, lamport: u64) -> Option<bool>;
+}
+
+/// No folder roles known: a full device's events all count.
+pub struct NoRoles;
+
+impl FolderRoles for NoRoles {
+    fn writes_at(&self, _: &DeviceBin, _: &FolderBin, _: u64) -> Option<bool> {
+        None
+    }
+}
+
+/// The folder a full device's event writes for, if it writes for one: a
+/// claim naming a folder, or an announcement of a folder's manifest, map
+/// or trash record.
+pub fn folder_written(ev: &Event) -> Option<FolderBin> {
+    match ev {
+        Event::PackStored(p) if p.folder != NO_FOLDER => Some(p.folder),
+        Event::RecordPublished(a)
+            if a.scope != NO_FOLDER
+                && matches!(a.kind, kind::MANIFEST | kind::BLOCK_MAP | kind::TRASH) =>
+        {
+            Some(a.scope)
+        }
+        _ => None,
+    }
 }
 
 /// What an event in a scope needs before it counts.
