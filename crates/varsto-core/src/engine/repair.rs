@@ -74,6 +74,33 @@ impl Damage {
     }
 }
 
+/// A damaged copy of a whole pack (storage format 3 repairs packs): its
+/// object and chunk are the pack id, its folder the one the view gives the
+/// pack (zeros when none).
+pub(super) fn pack_damage(
+    view: &crate::ledger3::LedgerView,
+    pack: &[u8; 32],
+    storage: &str,
+    kind: DamageKind,
+    found_by: &str,
+    now: i64,
+) -> Damage {
+    Damage {
+        folder: view
+            .pack_folder(pack)
+            .map(|f| FolderId::from_bytes(&f))
+            .unwrap_or_else(|| FolderId::from_bytes(&[0; 16])),
+        chunk: ChunkId::from_bytes(pack),
+        object: ObjectName::from_bytes(pack),
+        storage: storage.to_string(),
+        kind,
+        found_by: found_by.to_string(),
+        found_utc: now,
+        retry_utc: 0,
+        reason: None,
+    }
+}
+
 /// How one repair run behaves.
 #[derive(Clone, Debug)]
 pub struct RepairOptions {
