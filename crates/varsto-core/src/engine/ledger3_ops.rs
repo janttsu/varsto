@@ -432,10 +432,15 @@ impl Engine {
         let mut forks = BTreeSet::new();
         let (mut malformed, mut refused) = (0u64, 0u64);
         let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
+        // What each storage's listing showed, for the rollback judge. The
+        // listing starts after the head held here, so a storage that lists
+        // nothing newer counts as showing that head.
+        let mut views: Vec<crate::p2p::v3::heads::StorageView> = Vec::new();
         for (spec, backend) in self.metadata_storages(false)? {
             if spec.is_carrier() {
                 continue;
             }
+            let mut shown: BTreeMap<Id16, u64> = BTreeMap::new();
             for (dev, pk) in &keys {
                 let head = self.f3.ledger.head(dev);
                 if !self.keep3(dev, head.seq + 1) {
@@ -448,6 +453,17 @@ impl Engine {
                     ledger3::checkpoint::batch_key(dev, head.seq)
                 };
                 let names = backend.list_after(&prefix, &after)?;
+                let top = names
+                    .iter()
+                    .filter_map(|n| n.strip_prefix(&prefix))
+                    .filter_map(ledger3::LedgerObject::parse)
+                    .filter_map(|o| match o {
+                        ledger3::LedgerObject::Batch(s) => Some(s),
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0);
+                shown.insert(*dev, top.max(head.seq));
                 // The newest checkpoint first: it stands in for batches a
                 // pruning device deleted (other devices' only; one of this
                 // device's own is its own).
@@ -522,12 +538,23 @@ impl Engine {
                     }
                 }
             }
+            if let Some(storage) = super::verify::storage_identity(backend.as_ref())
+                .ok()
+                .and_then(|id| crate::record::kinds::parse_id16(&id))
+            {
+                views.push(crate::p2p::v3::heads::StorageView {
+                    storage,
+                    name: spec.name().to_string(),
+                    reachable: true,
+                    shown,
+                });
+            }
         }
         let view = self.view3()?;
         self.observe_clock(view.max_lamport)?;
         // A storage that shows less than a writer confirmed and a peer
         // proved, two pulls in a row: the rollback warning.
-        match self.p2p_judge_rollback(pull_utc, None) {
+        match self.p2p_judge_rollback(pull_utc, Some(views)) {
             Ok(w) => {
                 let mut devices: Vec<String> = w
                     .iter()
