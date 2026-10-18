@@ -561,7 +561,9 @@ fn the_own_certificate_is_refused_both_ways() {
         .err()
         .unwrap();
     assert!(e.to_string().contains("own"), "{e}");
-    assert!(!node.probe_self(node.local_addr));
+    // The reachability self-probe is the one exchange its own certificate
+    // may make, in format 3 as in format 2.
+    assert!(node.probe_self(node.local_addr));
 }
 
 // ----- QUIC in format-3 mode ----------------------------------------------------------
