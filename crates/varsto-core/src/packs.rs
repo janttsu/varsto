@@ -192,14 +192,15 @@ pub fn padded_len(len: usize, target: usize) -> usize {
         .unwrap_or_else(|| len.div_ceil(MIB) * MIB)
 }
 
+/// A pack as `build` makes it: its id, its bytes and the places of its
+/// members.
+pub type BuiltPack = (String, Vec<u8>, Vec<(String, PackLoc)>);
+
 /// Build a pack from (object name, bytes): its id, bytes and members. The
 /// members are followed by random padding up to the size class (see
 /// `padded_len`); nothing addresses the padding, the id is the hash of all
 /// the bytes and `pack_len` of every place is the padded length.
-pub fn build(
-    members: &[(String, &[u8])],
-    target: usize,
-) -> (String, Vec<u8>, Vec<(String, PackLoc)>) {
+pub fn build(members: &[(String, &[u8])], target: usize) -> BuiltPack {
     let used: usize = members.iter().map(|(_, b)| b.len()).sum();
     let total = padded_len(used, target);
     let mut bytes = Vec::with_capacity(total);
@@ -1321,6 +1322,59 @@ impl Storage for PackStore {
         }
         self.write_packs(&fresh)?;
         Ok(written)
+    }
+
+    fn put_built_pack(
+        &self,
+        id: &str,
+        data: &[u8],
+        members: &[(String, PackLoc)],
+    ) -> Result<Option<Vec<bool>>> {
+        // A pack of another storage's class, or one whose members do not
+        // fit it, is not taken as it is.
+        if !is_class(data.len() as u64)
+            || data.len() > top_class(self.target)
+            || members
+                .iter()
+                .any(|(_, l)| l.pack != id || l.pack_len != data.len() as u64 || !l.valid())
+        {
+            return Ok(None);
+        }
+        self.ensure_listed()?;
+        let mut checked: HashMap<String, bool> = HashMap::new();
+        for (o, _) in members {
+            let here = match self.locate(o, false)? {
+                Some(loc) => match checked.get(&loc.pack) {
+                    Some(v) => *v,
+                    None => {
+                        let v = self.inner.exists(&pack_key(&loc.pack))?;
+                        if !v {
+                            self.forget_pack(&loc.pack);
+                        }
+                        checked.insert(loc.pack.clone(), v);
+                        v
+                    }
+                },
+                None => self.unlisted_here(o, &mut checked)?,
+            };
+            if here {
+                // Writing the whole pack would put a second copy of a
+                // block here: this storage builds its own pack instead.
+                return Ok(None);
+            }
+        }
+        self.inner.put_if_absent(&pack_key(id), data)?;
+        for (o, l) in members {
+            self.ctx.learn(o, l.clone());
+        }
+        debug_registry::written(members);
+        let mut st = self.state.lock().unwrap();
+        st.packs.insert(id.to_string());
+        st.new_packs.push(NewPack {
+            pack: id.to_string(),
+            members: members.to_vec(),
+        });
+        Ok(Some(vec![true; members.len()]))
     }
 
     fn pack_target(&self) -> usize {

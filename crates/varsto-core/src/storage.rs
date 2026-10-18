@@ -141,6 +141,21 @@ pub trait Storage: Send + Sync {
             .map(|(o, b)| self.put_if_absent(&format!("chunks/{}/{o}", o.get(..2).unwrap_or(o)), b))
             .collect()
     }
+    /// Write a pack built elsewhere (`packs::build`), byte for byte, so
+    /// that every storage of one target set holds it under one id: `id`
+    /// and `data` as built, `members` the places of its block objects.
+    /// `Ok(None)` when this storage does not take a built pack (it keeps
+    /// no packs, or holds one of the members already); the caller then
+    /// writes the members with `put_pack`. `Some`: one flag per member,
+    /// written now.
+    fn put_built_pack(
+        &self,
+        _id: &str,
+        _data: &[u8],
+        _members: &[(String, crate::packs::PackLoc)],
+    ) -> Result<Option<Vec<bool>>> {
+        Ok(None)
+    }
     /// The size of the packs written here (0: block objects are not packed).
     fn pack_target(&self) -> usize {
         0
@@ -208,6 +223,14 @@ impl Storage for SharedStorage {
     }
     fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
         self.0.put_pack(members)
+    }
+    fn put_built_pack(
+        &self,
+        id: &str,
+        data: &[u8],
+        members: &[(String, crate::packs::PackLoc)],
+    ) -> Result<Option<Vec<bool>>> {
+        self.0.put_built_pack(id, data, members)
     }
     fn pack_target(&self) -> usize {
         self.0.pack_target()
@@ -922,6 +945,15 @@ impl Storage for CountingStorage {
         self.calls.puts.fetch_add(1, Ordering::Relaxed);
         self.inner.put_pack(members)
     }
+    fn put_built_pack(
+        &self,
+        id: &str,
+        data: &[u8],
+        members: &[(String, crate::packs::PackLoc)],
+    ) -> Result<Option<Vec<bool>>> {
+        self.calls.puts.fetch_add(1, Ordering::Relaxed);
+        self.inner.put_built_pack(id, data, members)
+    }
     fn pack_target(&self) -> usize {
         self.inner.pack_target()
     }
@@ -1104,6 +1136,26 @@ impl Storage for LoggedStorage {
                 }
                 Err(e) => {
                     log::debug!(storage = self.inner.name(), op = "put_pack", members = members.len(), first = first, ms = t.ms(); "storage request failed: {e:#}")
+                }
+            }
+        }
+        r
+    }
+    fn put_built_pack(
+        &self,
+        id: &str,
+        data: &[u8],
+        members: &[(String, crate::packs::PackLoc)],
+    ) -> Result<Option<Vec<bool>>> {
+        let t = crate::logging::Timer::start();
+        let r = self.inner.put_built_pack(id, data, members);
+        if log::log_enabled!(log::Level::Debug) {
+            match &r {
+                Ok(v) => {
+                    log::debug!(storage = self.inner.name(), op = "put_built_pack", members = members.len(), taken = v.is_some(), sent = data.len(), ms = t.ms(); "storage request")
+                }
+                Err(e) => {
+                    log::debug!(storage = self.inner.name(), op = "put_built_pack", members = members.len(), ms = t.ms(); "storage request failed: {e:#}")
                 }
             }
         }

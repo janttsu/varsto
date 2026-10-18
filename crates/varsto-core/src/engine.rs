@@ -799,19 +799,21 @@ const UPLOAD_BYTES_MAX: u64 = 768 << 20;
 /// Bytes a push may hold for `targets` (pack sizes of the storages it
 /// writes): a pack's worth for each, and some to fill the next.
 /// Take from `jobs` the blocks of one pack of at most `target` bytes, first
-/// fit decreasing, in their original order; the others stay.
+/// fit decreasing (`packs::first_fit_decreasing`: its first bin, the one
+/// filled with the largest blocks first), in their original order; the
+/// others stay.
 fn take_full_pack(
     jobs: &mut Vec<std::sync::Arc<UploadJob>>,
     target: u64,
 ) -> Vec<std::sync::Arc<UploadJob>> {
-    let mut order: Vec<usize> = (0..jobs.len()).collect();
-    order.sort_by_key(|&i| std::cmp::Reverse(jobs[i].ct.len()));
-    let mut used = 0u64;
+    let sizes: Vec<usize> = jobs.iter().map(|j| j.ct.len()).collect();
+    let limit = usize::try_from(target).unwrap_or(usize::MAX);
     let mut take = vec![false; jobs.len()];
-    for i in order {
-        let n = jobs[i].ct.len() as u64;
-        if used + n <= target {
-            used += n;
+    if let Some(bin) = crate::packs::first_fit_decreasing(&sizes, limit)
+        .into_iter()
+        .next()
+    {
+        for i in bin {
             take[i] = true;
         }
     }
@@ -826,6 +828,119 @@ fn take_full_pack(
     }
     *jobs = rest;
     picked
+}
+
+/// Write the blocks of one batch to every storage of its target set: built
+/// once into packs of the set's size classes (`packs::build`) and the same
+/// bytes written everywhere, so a pack has one id on every storage of the
+/// set (`docs/spec/format-3-design.md` section 2). A storage that does not
+/// take a built pack (one that holds a member already, or keeps no packs)
+/// gets the members through its own `put_pack`. One outcome list per
+/// storage of the set, one entry per job: written now, or why not.
+fn write_to_set(
+    backends: &[&dyn Storage],
+    jobs: &[std::sync::Arc<UploadJob>],
+) -> Vec<Vec<Result<bool>>> {
+    let failed_all = |e: &anyhow::Error| -> Vec<Result<bool>> {
+        // A full disk stays that error (the storage is left out, not the
+        // push), and so does a pool's "no disk".
+        let low = crate::freespace::low_space(e).cloned();
+        let pool = pool::pool_error(e).cloned();
+        let msg = format!("{e:#}");
+        jobs.iter()
+            .map(|_| match (&low, &pool) {
+                (Some(l), _) => Err(anyhow::Error::new(l.clone())),
+                (None, Some(p)) => Err(anyhow::Error::new(p.clone())),
+                _ => Err(anyhow!("{msg}")),
+            })
+            .collect()
+    };
+    let members: Vec<(String, &[u8])> = jobs
+        .iter()
+        .map(|j| (j.object.as_str().to_string(), j.ct.as_slice()))
+        .collect();
+    if backends.len() == 1 {
+        return vec![match backends[0].put_pack(&members) {
+            Ok(flags) => flags.into_iter().map(Ok).collect(),
+            Err(e) => failed_all(&e),
+        }];
+    }
+    // One copy of each object (two files of the push may share a block);
+    // a repeat is "not written now", as `put_pack` says of it.
+    let mut seen: HashSet<&str> = HashSet::new();
+    let unique: Vec<usize> = members
+        .iter()
+        .enumerate()
+        .filter(|(_, (o, _))| seen.insert(o.as_str()))
+        .map(|(i, _)| i)
+        .collect();
+    let target = backends[0].pack_target().max(1);
+    let limit = target.min(crate::packs::top_class(target));
+    let sizes: Vec<usize> = unique.iter().map(|&i| members[i].1.len()).collect();
+    let mut bins: Vec<Vec<usize>> = crate::packs::first_fit_decreasing(&sizes, limit)
+        .into_iter()
+        .map(|bin| {
+            let mut idx: Vec<usize> = bin.into_iter().map(|b| unique[b]).collect();
+            // The order of the push inside a pack (blocks of a file together).
+            idx.sort_unstable();
+            idx
+        })
+        .collect();
+    bins.sort_by_key(|b| b.first().copied());
+    let built: Vec<crate::packs::BuiltPack> = bins
+        .iter()
+        .map(|idx| {
+            let group: Vec<(String, &[u8])> = idx.iter().map(|&i| members[i].clone()).collect();
+            crate::packs::build(&group, target)
+        })
+        .collect();
+    let mut out = Vec::with_capacity(backends.len());
+    for backend in backends {
+        let mut flags: Vec<Option<Result<bool>>> = (0..jobs.len()).map(|_| None).collect();
+        let mut error = None;
+        for (idx, (id, data, locs)) in bins.iter().zip(&built) {
+            let taken = match backend.put_built_pack(id, data, locs) {
+                Ok(Some(f)) => Ok(f),
+                Ok(None) => {
+                    let own: Vec<(String, &[u8])> =
+                        idx.iter().map(|&i| members[i].clone()).collect();
+                    backend.put_pack(&own)
+                }
+                Err(e) => Err(e),
+            };
+            match taken {
+                Ok(f) => {
+                    for (&i, w) in idx.iter().zip(f) {
+                        flags[i] = Some(Ok(w));
+                    }
+                }
+                Err(e) => {
+                    error = Some(e);
+                    break;
+                }
+            }
+        }
+        match error {
+            // The whole batch counts as not written on this storage; its
+            // blocks are tried there again at the next push (a pack that
+            // did go is found then and not written twice).
+            Some(e) => out.push(failed_all(&e)),
+            None => out.push(flags.into_iter().map(|f| f.unwrap_or(Ok(false))).collect()),
+        }
+    }
+    out
+}
+
+/// The target sets of one block: the storages it goes to (by index),
+/// grouped by the pack size they are written with, so that a pack's class
+/// fits every storage of its set (hot, local, pool and transferrer
+/// storages up to 64 MiB; cold ones, which go on to 256 MiB, apart).
+fn target_sets(to: &[usize], pack_target: impl Fn(usize) -> usize) -> Vec<Vec<usize>> {
+    let mut by_target: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for &i in to {
+        by_target.entry(pack_target(i)).or_default().push(i);
+    }
+    by_target.into_values().collect()
 }
 
 fn upload_budget(targets: impl Iterator<Item = usize>) -> u64 {
@@ -4050,7 +4165,8 @@ impl Engine {
         // side and a storage sees pack sizes only. The queue is bounded, and
         // so are the bytes held (`upload_budget`): when the budget is used
         // up, what each storage collected goes out as it is.
-        let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<(usize, UploadBatch)>(UPLOAD_QUEUE);
+        let (job_tx, job_rx) =
+            std::sync::mpsc::sync_channel::<(Vec<usize>, UploadBatch)>(UPLOAD_QUEUE);
         let job_rx = std::sync::Mutex::new(job_rx);
         let (done_tx, done_rx) = std::sync::mpsc::channel::<UploadDone>();
         let storages_ref = &storages;
@@ -4065,76 +4181,67 @@ impl Engine {
             for _ in 0..UPLOADERS.max(storages.len()) {
                 let (job_rx, done_tx) = (&job_rx, done_tx.clone());
                 s.spawn(move || loop {
-                    let (i, batch) = match job_rx.lock().unwrap().recv() {
+                    let (set, batch) = match job_rx.lock().unwrap().recv() {
                         Ok(j) => j,
                         Err(_) => break,
                     };
-                    let (spec, backend) = &storages_ref[i];
-                    let members: Vec<(String, &[u8])> = batch
-                        .jobs
-                        .iter()
-                        .map(|j| (j.object.as_str().to_string(), j.ct.as_slice()))
-                        .collect();
-                    let outcomes: Vec<Result<bool>> = match backend.put_pack(&members) {
-                        Ok(flags) => flags.into_iter().map(Ok).collect(),
-                        Err(e) => {
-                            // A full disk stays that error (the storage is
-                            // left out, not the push), and so does a pool's
-                            // "no disk".
-                            let low = crate::freespace::low_space(&e).cloned();
-                            let pool = pool::pool_error(&e).cloned();
-                            let msg = format!("{e:#}");
-                            batch
-                                .jobs
-                                .iter()
-                                .map(|_| match (&low, &pool) {
-                                    (Some(l), _) => Err(anyhow::Error::new(l.clone())),
-                                    (None, Some(p)) => Err(anyhow::Error::new(p.clone())),
-                                    _ => Err(anyhow!("{msg}")),
-                                })
-                                .collect()
+                    let backends: Vec<&dyn Storage> =
+                        set.iter().map(|&i| storages_ref[i].1.as_ref()).collect();
+                    let outcomes = write_to_set(&backends, &batch.jobs);
+                    for (&i, outcomes) in set.iter().zip(outcomes) {
+                        let spec = &storages_ref[i].0;
+                        for (job, outcome) in batch.jobs.iter().zip(outcomes) {
+                            let _ = done_tx.send(UploadDone {
+                                storage: spec.name().to_string(),
+                                chunk: job.chunk.clone(),
+                                object: job.object.clone(),
+                                size: job.ct.len() as u64,
+                                outcome,
+                            });
                         }
-                    };
-                    for (job, outcome) in batch.jobs.iter().zip(outcomes) {
-                        let _ = done_tx.send(UploadDone {
-                            storage: spec.name().to_string(),
-                            chunk: job.chunk.clone(),
-                            object: job.object.clone(),
-                            size: job.ct.len() as u64,
-                            outcome,
-                        });
                     }
                     *budget_ref.0.lock().unwrap() -= batch.held;
                     budget_ref.1.notify_all();
                 });
             }
             drop(done_tx);
-            // What each storage collected for its next pack.
-            let mut collected: Vec<(Vec<std::sync::Arc<UploadJob>>, u64)> =
-                storages.iter().map(|_| (Vec::new(), 0)).collect();
-            let send_to =
-                |collected: &mut Vec<(Vec<std::sync::Arc<UploadJob>>, u64)>, i: usize| -> bool {
-                    let (jobs, held) = std::mem::take(&mut collected[i]);
-                    jobs.is_empty() || job_tx.send((i, UploadBatch { jobs, held })).is_ok()
+            // What each target set (the storages of one size-class range a
+            // block goes to, `target_sets`) collected for its next pack: its
+            // blocks and their bytes. One pack is built per set and written
+            // to all of its storages under one id.
+            type Collected = BTreeMap<Vec<usize>, (Vec<std::sync::Arc<UploadJob>>, u64)>;
+            let mut collected: Collected = BTreeMap::new();
+            let send_to = |collected: &mut Collected, set: &Vec<usize>| -> bool {
+                let Some((jobs, bytes)) = collected.remove(set) else {
+                    return true;
                 };
-            let send_full = |collected: &mut Vec<(Vec<std::sync::Arc<UploadJob>>, u64)>,
-                             i: usize,
-                             target: u64|
-             -> bool {
-                let (jobs, held) = &mut collected[i];
+                let held = bytes * set.len() as u64;
+                jobs.is_empty()
+                    || job_tx
+                        .send((set.clone(), UploadBatch { jobs, held }))
+                        .is_ok()
+            };
+            let send_full = |collected: &mut Collected, set: &Vec<usize>, target: u64| -> bool {
+                let Some((jobs, bytes)) = collected.get_mut(set) else {
+                    return true;
+                };
                 let picked = take_full_pack(jobs, target);
                 let sent: u64 = picked.iter().map(|j| j.ct.len() as u64).sum();
-                *held -= sent;
+                *bytes -= sent;
                 picked.is_empty()
                     || job_tx
                         .send((
-                            i,
+                            set.clone(),
                             UploadBatch {
                                 jobs: picked,
-                                held: sent,
+                                held: sent * set.len() as u64,
                             },
                         ))
                         .is_ok()
+            };
+            let send_all = |collected: &mut Collected| -> bool {
+                let sets: Vec<Vec<usize>> = collected.keys().cloned().collect();
+                sets.iter().all(|set| send_to(collected, set))
             };
             // `None` sends everything collected (at the end).
             let mut send =
@@ -4146,7 +4253,7 @@ impl Engine {
                         return false;
                     }
                     let Some(job) = job else {
-                        return (0..collected.len()).all(|i| send_to(&mut collected, i));
+                        return send_all(&mut collected);
                     };
                     let to: Vec<usize> = storages_ref
                         .iter()
@@ -4164,7 +4271,7 @@ impl Engine {
                     };
                     if over {
                         // Hand over what is collected, then wait for room.
-                        if !(0..collected.len()).all(|i| send_to(&mut collected, i)) {
+                        if !send_all(&mut collected) {
                             return false;
                         }
                         let mut used = budget_ref.0.lock().unwrap();
@@ -4174,18 +4281,19 @@ impl Engine {
                     }
                     *budget_ref.0.lock().unwrap() += need;
                     let job = std::sync::Arc::new(job);
-                    for i in to {
-                        let size = job.ct.len() as u64;
-                        let target = storages_ref[i].1.pack_target().max(1) as u64;
-                        collected[i].0.push(job.clone());
-                        collected[i].1 += size;
+                    let size = job.ct.len() as u64;
+                    for set in target_sets(&to, |i| storages_ref[i].1.pack_target()) {
+                        let target = storages_ref[set[0]].1.pack_target().max(1) as u64;
+                        let e = collected.entry(set.clone()).or_default();
+                        e.0.push(job.clone());
+                        e.1 += size;
                         // Once a pack's worth and one more block are
                         // collected, a pack is filled from the buffer
                         // (first fit decreasing) and sent; the rest waits
                         // for the next one. Only the last pack of the push
                         // is not full.
-                        if collected[i].1 >= target + crate::packs::MAX_OBJECT
-                            && !send_full(&mut collected, i, target)
+                        if e.1 >= target + crate::packs::MAX_OBJECT
+                            && !send_full(&mut collected, &set, target)
                         {
                             return false;
                         }
