@@ -1006,7 +1006,6 @@ impl Engine {
         for rec in backups {
             self.expire_backup(&rec, now, &mut report)?;
         }
-        self.flush_pack_deletions();
         Ok(report)
     }
 

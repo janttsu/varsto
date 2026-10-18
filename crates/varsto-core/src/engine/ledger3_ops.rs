@@ -585,7 +585,9 @@ impl Engine {
         }
         let me = self.me3();
         let view = self.view3()?;
-        // 1. Acknowledge other devices' checkpoints in a batch of our own.
+        // 1. Acknowledge other devices' checkpoints, and other writers'
+        // dead marks (they settle only once every writer did), in a batch
+        // of our own.
         let ack_due = self.f3.ledger.devices().iter().any(|d| {
             *d != me
                 && self
@@ -594,7 +596,7 @@ impl Engine {
                     .head(d)
                     .base
                     .is_some_and(|b| view.acked(&me, d, None) < b.seq)
-        });
+        }) || self.acks_due3(&view);
         if ack_due && self.cycle.is_none() {
             let (key_id, key) = self.ledger_key3()?;
             let lamport = self.tick()?;

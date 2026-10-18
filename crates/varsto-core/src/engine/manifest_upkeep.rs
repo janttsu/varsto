@@ -171,10 +171,12 @@ impl Engine {
     /// manifest, and delete own manifests every reader has seen past from
     /// the hot storages. Anything left undone is retried after the next sync.
     pub fn manifest_upkeep(&mut self) -> Result<()> {
-        // Format 3 prunes manifest records below the newest base once every
-        // reader acknowledged it (`manifest3::prune_stream`; f3-switch:
-        // part B). The format-2 pruning below reads format-2 names only.
-        Ok(())
+        if !self.manifest_policy.prune || !self.pending.is_empty() {
+            return Ok(());
+        }
+        crate::logged_op_plain!("manifest upkeep", "", {
+            self.prune_records3().map(|_| ())
+        })
     }
 
     /// Format 2 (f3-switch: part B deletes it).

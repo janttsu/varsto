@@ -1904,8 +1904,6 @@ impl Engine {
         if self.cycle.is_some() {
             return;
         }
-        // Deletions of the operation go out as tombstone lists now.
-        self.flush_pack_deletions();
         self.learn_conditional_writes();
         self.forget_storages();
     }
@@ -3476,9 +3474,6 @@ impl Engine {
     /// The format-2 batch of the events recorded (f3-switch: part B
     /// deletes it).
     fn commit_batch2(&mut self) -> Result<Option<u64>> {
-        // Blocks written since: their places into the claims, pack indexes
-        // and tombstone lists out (`pack_upkeep`).
-        self.settle_packs();
         if self.pending.is_empty() {
             return Ok(None);
         }
@@ -4958,9 +4953,6 @@ impl Engine {
         }
         let fk = self.folder_keys(&rec)?;
         let storages = self.open_storages(false)?;
-        if self.vault.member || rec.share_join.is_some() {
-            self.learn_folder_pack_indexes(&rec, &storages);
-        }
         // Counted by the files' downloads (`progress`); the total is not known.
         let _task = activity::start(activity::DOWNLOAD, &rec.name, 0, activity::Unit::Bytes);
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);

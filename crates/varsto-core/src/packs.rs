@@ -226,7 +226,8 @@ pub fn build(members: &[(String, &[u8])], target: usize) -> BuiltPack {
                 },
             )
         })
-        .collect();
+        .collect::<Vec<_>>();
+    debug_registry::written(&locs);
     (id, bytes, locs)
 }
 
