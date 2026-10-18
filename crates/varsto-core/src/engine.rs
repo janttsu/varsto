@@ -2722,10 +2722,33 @@ impl Engine {
             .copied()
             .collect();
         let storages = self.open_storages(true)?;
+        // The folder's records on each storage, listed first so that the
+        // task counts them too.
+        let hex_id = hex::encode(id);
+        let mut record_keys: Vec<(usize, String)> = Vec::new();
+        for (i, (spec, backend)) in storages.iter().enumerate() {
+            if spec.is_data_only() {
+                continue;
+            }
+            for prefix in [
+                "manifests",
+                "maps",
+                "trash",
+                "access",
+                "notes",
+                "thumbs",
+                "snapshots",
+                "vault/strongroom",
+            ] {
+                for key in backend.list(&format!("{prefix}/{hex_id}/"))? {
+                    record_keys.push((i, key));
+                }
+            }
+        }
         let task = activity::start(
             activity::FOLDER_PURGE,
             name,
-            (packs.len() * storages.len()) as u64,
+            (packs.len() * storages.len() + record_keys.len()) as u64,
             activity::Unit::Items,
         );
         // The drops are recorded and pushed before anything is deleted.
@@ -2755,26 +2778,10 @@ impl Engine {
             }
             task.advance(1);
         }
-        let hex_id = hex::encode(id);
-        for (spec, backend) in storages {
-            if spec.is_data_only() {
-                continue;
-            }
-            for prefix in [
-                "manifests",
-                "maps",
-                "trash",
-                "access",
-                "notes",
-                "thumbs",
-                "snapshots",
-                "vault/strongroom",
-            ] {
-                for key in backend.list(&format!("{prefix}/{hex_id}/"))? {
-                    backend.delete(&key)?;
-                    records += 1;
-                }
-            }
+        for (i, key) in record_keys {
+            storages[i].1.delete(&key)?;
+            records += 1;
+            task.advance(1);
         }
         Ok((objects, records))
     }
