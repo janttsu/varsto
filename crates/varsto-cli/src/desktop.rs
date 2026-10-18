@@ -3863,7 +3863,6 @@ mod tests {
     /// direction; a receive-only folder kept encrypted is refused before
     /// anything is attached.
     #[test]
-    #[ignore = "f3-switch: port in part B (folder grants in the desktop attach route)"]
     fn attaching_takes_selective_sync_and_the_direction() {
         let tmp = tempfile::tempdir().unwrap();
         let t = tmp.path();
@@ -3883,6 +3882,13 @@ mod tests {
         a.add_folder("notes", &t.join("a-notes")).unwrap();
         a.sync(None).unwrap();
         let mut b = Engine::join(&t.join("b"), "laptop", pass, &key, storage).unwrap();
+        // The folders open on the laptop once the phone approved its request.
+        for f in ["camera", "notes"] {
+            let req = b.f3_folder_request(f, "editor").unwrap();
+            a.f3_approve(f, "laptop", None, Some(&req.fingerprint))
+                .unwrap();
+        }
+        b.refresh_devices().unwrap();
 
         let refused = attach_request(
             &mut b,
