@@ -34,6 +34,9 @@ pub(crate) struct Core3 {
     pub recovery: Option<crate::membership3::RecoveryKey>,
     /// Events of the next batch.
     pub pending: Vec<Event3>,
+    /// Folder records (manifests, maps, trash) refused in this process,
+    /// by kind.
+    pub records_refused: std::sync::Mutex<crate::record::RecordsRefused>,
 }
 
 pub(crate) type MapTable3 = crate::blockmap::MapTable;
@@ -51,7 +54,20 @@ impl Core3 {
             tables: Default::default(),
             recovery: None,
             pending: Vec::new(),
+            records_refused: Default::default(),
         })
+    }
+}
+
+impl Engine {
+    /// Folder records of other writers refused by the acceptance rule in
+    /// this process (a viewer's manifests, junk under a writer's name).
+    pub fn records_refused3(&self) -> u64 {
+        self.f3
+            .records_refused
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .total()
     }
 }
 
@@ -392,6 +408,41 @@ impl Engine {
         }
         self.push_own_batches3()?;
         Ok(last)
+    }
+
+    /// Tests: what a modified client could sign, one batch of exactly
+    /// `events` (a member device: its folder-scoped batch; otherwise under
+    /// the vault ledger key) at Lamport time `lamport`, pushed to every
+    /// storage. Other devices must take from it only what this device's
+    /// role allows.
+    #[doc(hidden)]
+    pub fn seal_batch3_unchecked(&mut self, events: Vec<Event3>, lamport: u64) -> Result<u64> {
+        let me = self.me3();
+        let (key_id, key, scope) = match &self.f3.members.member {
+            Some(m) => {
+                let f = m.folder;
+                let (id, k) = self.share_ledger_key3(&f)?;
+                (id, k, f)
+            }
+            None => {
+                let (id, k) = self.ledger_key3()?;
+                (id, k, ledger3::NO_FOLDER)
+            }
+        };
+        let seen = self.f3.ledger.vault_seen(&me);
+        let raw = events.iter().map(Event3::to_raw).collect();
+        let rec = self.f3.ledger.append_own(
+            &me,
+            raw,
+            seen,
+            lamport,
+            &key,
+            &key_id,
+            scope,
+            &self.keys.signer,
+        )?;
+        self.push_own_batches3()?;
+        Ok(rec.seq)
     }
 
     /// The share-ledger key id and key of `folder`'s newest epoch held.

@@ -357,7 +357,6 @@ fn untrusted_replica_holds_copies_without_keys() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (sharing with other people)"]
 fn shared_folder_between_two_users() {
     let lab = lab();
     let (mut a, _key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
@@ -373,10 +372,25 @@ fn shared_folder_between_two_users() {
     .unwrap();
     fs::write(lab.a_dir.join("plan.txt"), b"shared plan").unwrap();
     a.sync(None).unwrap();
-    let token = a.share_create("project").unwrap();
-    // User C accepts with only the token and the shared storage.
-    let mut c =
-        Engine::accept_share(&lab.b_home, "c-laptop", PASS, &token, lab.storage.clone()).unwrap();
+    // User C asks with a request code; A adds it and tells its own words.
+    let code = varsto_core::vault::ShareRequest::code_for(&lab.b_home).unwrap();
+    let added = a
+        .share_add(
+            "project",
+            &code,
+            None,
+            varsto_core::share::ShareRole::Editor,
+        )
+        .unwrap();
+    // C accepts with only those words and the shared storage.
+    let mut c = Engine::accept_share(
+        &lab.b_home,
+        "c-laptop",
+        PASS,
+        Some(&added.owner_fingerprint),
+        lab.storage.clone(),
+    )
+    .unwrap();
     c.chunker = ChunkerParams::SMALL;
     assert!(c.is_member());
     assert_eq!(c.folders().len(), 1, "a member sees only the shared folder");
@@ -575,9 +589,8 @@ fn thumbnails_are_generated_once_and_shared_encrypted() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (sharing with other people)"]
-fn sealed_share_token_opens_only_on_the_requesting_device() {
-    use varsto_core::vault::{SealedShareToken, ShareRequest};
+fn a_share_opens_only_on_the_requesting_device() {
+    use varsto_core::vault::ShareRequest;
     let lab = lab();
     let (mut owner, _key) = Engine::init(&lab.a_home, "owner", PASS).unwrap();
     owner.chunker = ChunkerParams::SMALL;
@@ -589,28 +602,48 @@ fn sealed_share_token_opens_only_on_the_requesting_device() {
     // Recipient creates a request code before it has any vault.
     let code = ShareRequest::code_for(&lab.b_home).unwrap();
     assert!(code.starts_with("vsr1."));
-    let plain = owner.share_create("docs").unwrap();
-    let sealed = plain
-        .seal(&ShareRequest::parse_code(&code).unwrap())
+    let added = owner
+        .share_add("docs", &code, None, varsto_core::share::ShareRole::Editor)
         .unwrap();
-    let encoded = sealed.encode();
-    assert!(SealedShareToken::is_sealed(&encoded));
-    assert!(
-        !encoded.contains(&plain.key_hex),
-        "folder key must not appear in the sealed token"
-    );
+    // Nothing on the storage holds the folder key in the clear.
+    let key_hex = owner.folders()[0].0.key_hex.clone();
+    for e in walkdir::WalkDir::new(lab.a_home.with_file_name("storage"))
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let data = fs::read(e.path()).unwrap();
+        assert!(
+            !String::from_utf8_lossy(&data).contains(&key_hex),
+            "the folder key appears in {}",
+            e.path().display()
+        );
+    }
 
-    // A different device cannot open it.
+    // A different device (another request) finds nothing shared with it.
     let other = tempfile::tempdir().unwrap();
     ShareRequest::code_for(other.path()).unwrap();
-    assert!(ShareRequest::open_token(other.path(), &encoded).is_err());
+    assert!(Engine::share_offers(other.path(), &lab.storage, None)
+        .unwrap()
+        .is_empty());
+    assert!(Engine::accept_share(
+        other.path(),
+        "eve",
+        PASS,
+        Some(&added.owner_fingerprint),
+        lab.storage.clone()
+    )
+    .is_err());
 
-    // The requesting device opens it and syncs the folder.
-    let opened = ShareRequest::open_token(&lab.b_home, &encoded).unwrap();
-    assert_eq!(opened.key_hex, plain.key_hex);
-    let mut member =
-        Engine::accept_share(&lab.b_home, "friend", PASS, &opened, lab.storage.clone()).unwrap();
-    ShareRequest::clear(&lab.b_home);
+    // The requesting device accepts and syncs the folder.
+    let mut member = Engine::accept_share(
+        &lab.b_home,
+        "friend",
+        PASS,
+        Some(&added.owner_fingerprint),
+        lab.storage.clone(),
+    )
+    .unwrap();
     member.chunker = ChunkerParams::SMALL;
     member.attach_folder("docs", &lab.b_dir, false).unwrap();
     member.pull("docs").unwrap();
@@ -855,7 +888,13 @@ fn strongroom_folder_needs_the_security_key_on_every_device() {
         Some(true)
     );
     assert!(
-        a.share_create("taxes").is_err(),
+        a.share_add(
+            "taxes",
+            &varsto_core::vault::ShareRequest::code_for(&lab.b_home.with_file_name("x-home")).unwrap(),
+            None,
+            varsto_core::share::ShareRole::Editor
+        )
+        .is_err(),
         "strongrooms cannot be shared"
     );
 

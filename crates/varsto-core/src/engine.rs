@@ -3899,19 +3899,6 @@ impl Engine {
             self.save_state(&rec.folder_id, &state)?;
             return Ok(report);
         }
-        // Format 3: a viewer of the folder publishes nothing (its records
-        // would be refused by every reader). Keeping its local changes aside
-        // as `share_roles` does: f3-switch: part B.
-        if self
-            .f3
-            .members
-            .role(&self.me3(), &members3::bin(&rec.folder_id)?)
-            == Some(crate::membership3::Role::Viewer)
-        {
-            report.read_only = true;
-            report.batch_seq = self.commit_batch()?;
-            return Ok(report);
-        }
         let (scanned, changed) = match scan.filter(|s| s.folder == rec.folder_id) {
             // The pull of this sync scanned the folder moments ago, and the
             // state it saved carries what it found.

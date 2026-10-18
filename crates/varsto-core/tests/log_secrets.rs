@@ -7,7 +7,7 @@ use varsto_core::crypto::{SecretKey, SigningKey};
 use varsto_core::logging::{self, Options};
 use varsto_core::replica::ReplicaToken;
 use varsto_core::s3::S3Config;
-use varsto_core::vault::{SecretStore, ShareToken};
+use varsto_core::vault::SecretStore;
 
 #[test]
 fn no_secret_reaches_the_log() {
@@ -31,11 +31,22 @@ fn no_secret_reaches_the_log() {
     // Tokens.
     let vault = "1a".repeat(16);
     let folder = "2b".repeat(16);
-    let share = ShareToken::decode(&format!("{vault}.{folder}.{folder_hex}.Photos")).unwrap();
-    let share_text = share.encode();
+    // A folder grant (its keys) and a folder key in text form.
+    let share = varsto_core::membership3::GrantRecord {
+        folder: [0x2b; 16],
+        epoch: 0,
+        recipient: [3; 16],
+        issuer: [4; 16],
+        role: varsto_core::membership3::Role::Editor,
+        k9: folder_key.0,
+        k11: [5; 32],
+        older: Vec::new(),
+        directory: None,
+    };
+    let share_text = format!("{vault}.{folder}.{folder_hex}.Photos");
     let replica_hex = SecretKey::random().to_hex();
     let replica = ReplicaToken {
-        vault_id: share.vault_id.clone(),
+        vault_id: varsto_core::ids::VaultId::from_hex(&vault).unwrap(),
         replica_key_hex: replica_hex.clone(),
     };
     let replica_text = replica.encode();

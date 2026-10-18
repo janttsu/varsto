@@ -899,7 +899,7 @@ impl<'a> Membership<'a> {
     }
 
     fn write_grant(
-        &self,
+        &mut self,
         keys: &FolderKeys,
         epoch: u32,
         recipient: Id16,
@@ -911,9 +911,14 @@ impl<'a> Membership<'a> {
             .ok_or_else(|| anyhow!("folder epoch {epoch} is not held here"))?;
         let older = keys.epochs.range(..epoch).map(|(e, k)| (*e, k.0)).collect();
         // A member device of another vault cannot read the registry: its
-        // grant carries the folder's participants with their keys.
+        // grant carries the folder's participants with their keys, under a
+        // stamp of its own (the newest directory counts).
         let directory = if self.devices.get(&recipient).is_none() {
-            self.directory(&keys.folder)
+            let stamp = self.next_stamp();
+            self.directory(&keys.folder).map(|mut d| {
+                d.stamp = stamp;
+                d
+            })
         } else {
             None
         };
