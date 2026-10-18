@@ -490,6 +490,17 @@ pub struct PackContext {
     /// Pack indexes read (storage, key), and the ones no folder key opened
     /// with the folder key generation they were tried at.
     indexes: Mutex<IndexesRead>,
+    /// Format 3: the folder block map tables that give places of blocks.
+    #[cfg(feature = "format3")]
+    sources: RwLock<Vec<Arc<dyn PlaceSource>>>,
+}
+
+/// Format 3: where blocks are, as a folder's block map table says
+/// (`crate::blockmap`). A `PackStore` reads a block from the first of its
+/// places held on its storage; places come live ones first.
+#[cfg(feature = "format3")]
+pub trait PlaceSource: Send + Sync {
+    fn places(&self, object: &str) -> Vec<PackLoc>;
 }
 
 /// (storage, key) of pack indexes read, of those no folder key opened, and
@@ -610,7 +621,30 @@ impl PackContext {
     }
 
     fn candidates(&self, object: &str) -> Vec<PackLoc> {
-        self.locator.read().unwrap().candidates(object)
+        #[allow(unused_mut)]
+        let mut out = self.locator.read().unwrap().candidates(object);
+        #[cfg(feature = "format3")]
+        for s in self.sources.read().unwrap().iter() {
+            for l in s.places(object) {
+                if l.valid() && !out.contains(&l) {
+                    out.push(l);
+                }
+            }
+        }
+        out
+    }
+
+    /// Format 3: read places of blocks from `source` too (a folder's block
+    /// map table), after the ones this context knows itself.
+    #[cfg(feature = "format3")]
+    pub fn add_place_source(&self, source: Arc<dyn PlaceSource>) {
+        self.sources.write().unwrap().push(source);
+    }
+
+    /// Format 3: forget every place source (folder keys changed).
+    #[cfg(feature = "format3")]
+    pub fn clear_place_sources(&self) {
+        self.sources.write().unwrap().clear();
     }
 
     /// Every block with a known location (for listings).

@@ -16,6 +16,8 @@ pub mod activity;
 pub mod advice;
 pub mod autoverify;
 pub mod blockdev;
+#[cfg(feature = "format3")]
+pub mod blockmap;
 pub mod changes;
 pub mod chunk_seal;
 pub mod chunking;
