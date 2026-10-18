@@ -51,8 +51,6 @@ const KEEP_LISTED_SECS: i64 = 7 * DAY;
 const READ_EVERY_SECS: i64 = 600;
 /// How often the background service runs the trash upkeep.
 pub const TRASH_UPKEEP_EVERY_SECS: i64 = DAY;
-/// Blocks per ledger batch when moving to the trash storage.
-const MOVE_GROUP: usize = 64;
 
 /// One deleted file version.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1284,7 +1282,7 @@ impl Engine {
         // it is (`quotas`).
         let gate = self.quota_gate(&view);
         let mut failed = 0u64;
-        for group in items.chunks(MOVE_GROUP) {
+        for group in crate::packs::byte_groups(&items, |(c, _)| c.size) {
             task.advance(group.iter().map(|(c, _)| c.size).sum());
             let mut deletes: Vec<(String, ObjectName, u64)> = Vec::new();
             // The blocks the trash storage lacks, fetched and then written

@@ -798,9 +798,40 @@ const UPLOAD_BYTES_MAX: u64 = 768 << 20;
 
 /// Bytes a push may hold for `targets` (pack sizes of the storages it
 /// writes): a pack's worth for each, and some to fill the next.
+/// Take from `jobs` the blocks of one pack of at most `target` bytes, first
+/// fit decreasing, in their original order; the others stay.
+fn take_full_pack(
+    jobs: &mut Vec<std::sync::Arc<UploadJob>>,
+    target: u64,
+) -> Vec<std::sync::Arc<UploadJob>> {
+    let mut order: Vec<usize> = (0..jobs.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(jobs[i].ct.len()));
+    let mut used = 0u64;
+    let mut take = vec![false; jobs.len()];
+    for i in order {
+        let n = jobs[i].ct.len() as u64;
+        if used + n <= target {
+            used += n;
+            take[i] = true;
+        }
+    }
+    let mut picked = Vec::new();
+    let mut rest = Vec::new();
+    for (j, t) in jobs.drain(..).zip(take) {
+        if t {
+            picked.push(j);
+        } else {
+            rest.push(j);
+        }
+    }
+    *jobs = rest;
+    picked
+}
+
 fn upload_budget(targets: impl Iterator<Item = usize>) -> u64 {
     let sum: u64 = targets.map(|t| t as u64).sum();
-    (sum + (64 << 20)).clamp(UPLOAD_BYTES, UPLOAD_BYTES_MAX)
+    // A pack being written and the buffer the next one is filled from.
+    (sum * 2 + (64 << 20)).clamp(UPLOAD_BYTES, UPLOAD_BYTES_MAX)
 }
 
 /// Count one finished write in the report and the ledger.
@@ -4086,6 +4117,25 @@ impl Engine {
                     let (jobs, held) = std::mem::take(&mut collected[i]);
                     jobs.is_empty() || job_tx.send((i, UploadBatch { jobs, held })).is_ok()
                 };
+            let send_full = |collected: &mut Vec<(Vec<std::sync::Arc<UploadJob>>, u64)>,
+                             i: usize,
+                             target: u64|
+             -> bool {
+                let (jobs, held) = &mut collected[i];
+                let picked = take_full_pack(jobs, target);
+                let sent: u64 = picked.iter().map(|j| j.ct.len() as u64).sum();
+                *held -= sent;
+                picked.is_empty()
+                    || job_tx
+                        .send((
+                            i,
+                            UploadBatch {
+                                jobs: picked,
+                                held: sent,
+                            },
+                        ))
+                        .is_ok()
+            };
             // `None` sends everything collected (at the end).
             let mut send =
                 |me: &mut Self, report: &mut PushReport, job: Option<UploadJob>| -> bool {
@@ -4126,10 +4176,17 @@ impl Engine {
                     let job = std::sync::Arc::new(job);
                     for i in to {
                         let size = job.ct.len() as u64;
+                        let target = storages_ref[i].1.pack_target().max(1) as u64;
                         collected[i].0.push(job.clone());
                         collected[i].1 += size;
-                        let target = storages_ref[i].1.pack_target().max(1) as u64;
-                        if collected[i].1 >= target && !send_to(&mut collected, i) {
+                        // Once a pack's worth and one more block are
+                        // collected, a pack is filled from the buffer
+                        // (first fit decreasing) and sent; the rest waits
+                        // for the next one. Only the last pack of the push
+                        // is not full.
+                        if collected[i].1 >= target + crate::packs::MAX_OBJECT
+                            && !send_full(&mut collected, i, target)
+                        {
                             return false;
                         }
                     }
