@@ -30,6 +30,8 @@ pub mod events;
 #[cfg(feature = "format3")]
 pub mod fingerprint;
 pub mod freespace;
+#[cfg(feature = "format3")]
+pub mod fsck3;
 pub mod fsmeta;
 pub mod help;
 pub mod ids;
@@ -65,6 +67,8 @@ pub mod providers;
 pub mod qr;
 pub mod rclone;
 #[cfg(feature = "format3")]
+pub mod rebuild3;
+#[cfg(feature = "format3")]
 pub mod record;
 pub mod record_shim;
 pub mod recovery;
@@ -73,6 +77,8 @@ pub mod replica;
 pub mod restic;
 pub mod s3;
 pub mod scrub;
+#[cfg(feature = "format3")]
+pub mod scrub3;
 pub mod share;
 pub mod snapshot;
 #[cfg(feature = "format3")]
