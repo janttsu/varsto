@@ -55,6 +55,36 @@ def nas_state(led):
     return root
 
 
+def dock_bay(led=None, disk=False):
+    """Docking bay for bare SATA drives: a base, two walls and two end caps around an open-top slot, a
+    status LED and a power button on the front. With `disk` a 3.5-inch drive stands in the slot, about
+    a third of it inserted, its label facing the front; `led` is the colour of both LEDs (None: off)."""
+    root = K.empty("dock")
+    wall = K.mat("paper")
+    K.box(0.80, 0.46, 0.05, K.mat("slate"), bevel=0.02, parent=root, name="base")
+    K.box(0.76, 0.14, 0.14, wall, bevel=0.018, at=(0, -0.14, 0.05), parent=root, name="front")
+    K.box(0.76, 0.14, 0.22, wall, bevel=0.018, at=(0, 0.14, 0.05), parent=root, name="back")
+    for sx in (-0.34, 0.34):
+        K.box(0.08, 0.16, 0.14, wall, bevel=0.015, at=(sx, 0, 0.05), parent=root, name="cap")
+    K.box(0.60, 0.15, 0.012, K.mat("dark"), bevel=0.004, at=(0, 0, 0.05), parent=root, name="floor")
+    K.box(0.36, 0.045, 0.02, K.mat("slate"), bevel=0.004, at=(0, 0, 0.062), parent=root, name="connector")
+    # Front: power button (ring and mark) and status LED.
+    K.cyl(0.04, 0.012, K.mat("mid", rough=0.4), parent=root, at=(-0.30, -0.222, 0.12), axis="Y", name="button")
+    K.cyl(0.018, 0.014, K.mat("glyph", rough=0.4), parent=root, at=(-0.30, -0.224, 0.12), axis="Y", name="buttonmark")
+    K.cyl(0.024, 0.012, K.mat(led or "mid", emission=1.6 if led else 0.0, rough=0.3), parent=root,
+          at=(0.30, -0.222, 0.12), axis="Y", name="led")
+    if disk:
+        K.box(0.52, 0.115, 0.80, K.mat("paper"), bevel=0.02, at=(0, 0, 0.09), parent=root, name="drive")
+        K.box(0.40, 0.01, 0.40, K.mat("light"), bevel=0.004, at=(0, -0.0575, 0.42), parent=root, name="label")
+        K.cyl(0.15, 0.008, K.mat("grey"), parent=root, at=(0, -0.0675, 0.58), axis="Y", name="platter")
+        K.cyl(0.13, 0.01, K.mat("light"), parent=root, at=(0, -0.0695, 0.58), axis="Y", name="platter2")
+        K.cyl(0.05, 0.014, K.mat("paper"), parent=root, at=(0, -0.0715, 0.58), axis="Y", name="hub")
+        K.box(0.22, 0.01, 0.03, K.mat("grey"), bevel=0.004, at=(0, -0.0625, 0.37), parent=root, name="line")
+        K.cyl(0.028, 0.012, K.mat(led or "mid", emission=1.6 if led else 0.0, rough=0.3), parent=root,
+              at=(0.19, -0.0695, 0.83), axis="Y", name="driveled")
+    return root
+
+
 def coins():
     root = K.empty("coins")
     g = K.gold()
@@ -73,12 +103,11 @@ def sprites():
         "monitor": (lambda: K.monitor("lines"), 1.4, 0.0),
         "nas": (lambda: nas_state("green"), 1.7, 0.0),
         "nas-warn": (lambda: nas_state("gold"), 1.7, 0.0),
-        "disk": (lambda: K.disk("green"), 2.0, 0.0),
-        "disk-busy": (lambda: K.disk("gold"), 2.0, 0.0),
-        "disk-off": (lambda: K.disk(None), 2.0, 0.0),
-        "disk-bad": (lambda: K.disk("red"), 2.0, 0.0),
         "shelf": (lambda: K.shelf(), 1.25, 0.0),
-        "dock": (lambda: K.dock(), 2.4, 0.0),
+        "dock": (lambda: dock_bay(), 2.1, 0.0),
+        "dock-disk": (lambda: dock_bay("green", True), 2.1, 0.0),
+        "dock-disk-busy": (lambda: dock_bay("gold", True), 2.1, 0.0),
+        "dock-disk-bad": (lambda: dock_bay("red", True), 2.1, 0.0),
         "usb": (lambda: K.usb_stick(), 3.0, 0.0),
         "cloud": (lambda: K.cloud(), 1.7, 0.25),
         "bucket": (lambda: K.bucket(), 2.0, 0.0),
@@ -202,8 +231,7 @@ def main():
                     "--convert-only"], check=True)
 
 
-ALL_NAMES = ["laptop", "phone", "tablet", "monitor", "nas", "nas-warn", "disk", "disk-busy", "disk-off",
-             "disk-bad", "shelf", "dock", "usb", "cloud", "bucket", "archive", "lock", "coins"]
+ALL_NAMES = ["laptop", "phone", "tablet", "monitor", "nas", "nas-warn", "shelf", "dock", "dock-disk", "dock-disk-busy", "dock-disk-bad", "usb", "cloud", "bucket", "archive", "lock", "coins"]
 
 if __name__ == "__main__":
     main()

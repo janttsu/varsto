@@ -53,12 +53,22 @@ pub const FINGERPRINT_WORDS: usize = 6;
 /// bound to it. Independent of the format version, so two users on
 /// different versions see the same words.
 pub fn fingerprint(ek: &EncapsKey, name: &str) -> String {
+    fingerprint_words(
+        "varsto share-request fingerprint v1",
+        &[ek.to_bytes().as_slice(), name.trim().as_bytes()],
+    )
+}
+
+/// The derivation behind [`fingerprint`]: `FINGERPRINT_WORDS` BIP-39 words
+/// from the top 66 bits of `BLAKE3.derive_key(context, len-prefixed
+/// parts)`. Format 3 uses it over a device's K6 and K8 public keys.
+pub fn fingerprint_words(context: &str, parts: &[&[u8]]) -> String {
     let mut ikm = Vec::new();
-    for part in [ek.to_bytes().as_slice(), name.trim().as_bytes()] {
+    for part in parts {
         ikm.extend_from_slice(&(part.len() as u32).to_le_bytes());
         ikm.extend_from_slice(part);
     }
-    let h = blake3::derive_key("varsto share-request fingerprint v1", &ikm);
+    let h = blake3::derive_key(context, &ikm);
     let words = bip39::Language::English.word_list();
     let mut bits: u128 = 0;
     for b in &h[..9] {

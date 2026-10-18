@@ -16,7 +16,7 @@
 //! | file system | 25 when its last forced check corrected errors, plus `10 × min(age / 365 days, 1)` |
 //! | unseen | `20 × min(days since last seen / 365, 1)` |
 //! | staged move | `65 × min(room / bytes left, 1)`, at least `MIN_SCORE`, when an open move job (`staged_move`) waits for room on the disk's pool |
-//! | mailbox | `60 × (staged bytes docking it writes / all staged bytes waiting for a target)`, at least `MIN_SCORE` (section 72) |
+//! | mailbox | `60 × (staged bytes docking it writes / all staged bytes waiting for a target)`, at least `MIN_SCORE` (section 78) |
 //! | mailbox source | `45 × (bytes waiting to be read from it / all such bytes)`, at least `MIN_SCORE`; on an attached disk: "keep it attached for about N min" |
 //!
 //! `share` is the share of the disk's bytes whose last check is older than
@@ -35,7 +35,7 @@ use crate::blockdev::FsckVerdict;
 use crate::mailbox::MailboxWait;
 use crate::pool::DiskStatus;
 use crate::staged_move::MoveWait;
-use crate::util;
+use crate::util::{self, plural};
 use serde::{Deserialize, Serialize};
 
 /// Below this score nothing is suggested ("no disk needs docking").
@@ -140,7 +140,7 @@ pub struct DiskSuggestions {
     /// needed.
     #[serde(default)]
     pub new_disk_needed: Vec<NewDiskNeeded>,
-    /// What the mailbox waits for (section 72).
+    /// What the mailbox waits for (section 78).
     #[serde(default)]
     pub mailbox: Vec<MailboxWait>,
 }
@@ -187,10 +187,6 @@ pub fn ago(now: i64, t: i64) -> String {
     }
 }
 
-fn plural(n: u64, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
-}
-
 /// The reasons (and points) of one disk at `now`.
 pub fn reasons(d: &DiskStatus, now: i64) -> Vec<SuggestReason> {
     reasons_with(d, now, &[])
@@ -201,7 +197,7 @@ pub fn reasons_with(d: &DiskStatus, now: i64, moves: &[MoveWait]) -> Vec<Suggest
     reasons_full(d, now, moves, &[])
 }
 
-/// `reasons_with`, with what the mailbox (section 72) waits for: staged
+/// `reasons_with`, with what the mailbox (section 78) waits for: staged
 /// objects that docking the disk writes, and objects waiting to be read
 /// from it.
 pub fn reasons_full(
@@ -494,7 +490,7 @@ pub fn rank_with_moves(disks: &[DiskStatus], now: i64, moves: &[MoveWait]) -> Di
     rank_full(disks, now, moves, &[])
 }
 
-/// `rank_with_moves`, with what the mailbox (section 72) waits for.
+/// `rank_with_moves`, with what the mailbox (section 78) waits for.
 pub fn rank_full(
     disks: &[DiskStatus],
     now: i64,

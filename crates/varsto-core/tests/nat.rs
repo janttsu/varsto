@@ -332,3 +332,78 @@ fn wildcard_server_answers_from_the_address_it_was_reached_at() {
         .unwrap();
     assert_eq!(status, 200);
 }
+
+#[test]
+fn a_device_is_never_its_own_peer() {
+    let lab = lab();
+    let (a, _key, _big) = seed(&lab, "a");
+    let snap_a: Snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
+    let node_a = node(&a, snap_a.clone());
+    let traffic: Arc<p2p::traffic::Traffic> = Arc::default();
+    traffic.set_me(a.device_id(), a.own_device_name());
+
+    // A TCP listener of A's own, as the service runs.
+    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap())
+        .unwrap()
+        .with_traffic(traffic.clone());
+    let port = server.addr.port();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (s2, st2) = (snap_a.clone(), stop.clone());
+    let th = std::thread::spawn(move || server.run(s2, st2));
+
+    // 1. The table never lists the own device id, nor an old id of this
+    // install that still carries the own certificate.
+    let mut own = record(&a, &node_a, true);
+    let mut old_id = own.clone();
+    old_id.device = DeviceId::from_bytes(&[9u8; 16]);
+    assert!(Peers::build(
+        a.peer_key(),
+        a.device_id().clone(),
+        &[own.clone(), old_id],
+        &[],
+        Some(node_a.clone()),
+    )
+    .peers
+    .is_empty());
+
+    // 2. A handshake with the own certificate is refused outright.
+    let err = node_a
+        .request(
+            node_a.local_addr,
+            &node_a.identity().sha256,
+            "/p2p/info",
+            &p2p::auth_header(&a.peer_key(), a.device_id(), "/p2p/info"),
+            false,
+        )
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("own"), "{err:#}");
+
+    // 3. Another device's record that lists an address of A itself (no
+    // certificate to compare): the first request is answered "self", the
+    // address is remembered, no traffic is counted for anybody, and the
+    // address is not tried again.
+    own.device = DeviceId::from_bytes(&[7u8; 16]);
+    own.cert_sha256 = String::new();
+    own.port = port;
+    own.lan_addrs = vec!["127.0.0.1".parse().unwrap()];
+    let peers = Peers::build(a.peer_key(), a.device_id().clone(), &[own], &[], None)
+        .with_traffic(traffic.clone());
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    assert!(!peers.is_self_addr(addr));
+    let st = peers.probe();
+    assert!(st.iter().all(|s| !s.ok), "{st:?}");
+    assert!(peers.is_self_addr(addr));
+    let r = traffic.report();
+    assert!(
+        r.peers.iter().all(|p| p.rx_total == 0 && p.tx_total == 0),
+        "{:?}",
+        r.peers
+    );
+    assert!(r.peers.iter().all(|p| &p.device != a.device_id()));
+    assert_eq!(r.totals.tx_total + r.totals.rx_total, 0);
+    let again = peers.probe();
+    assert_eq!(again[0].path, "unreachable", "{again:?}");
+
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    th.join().unwrap();
+}

@@ -32,6 +32,10 @@ mod drive_mount;
 mod filemanager;
 #[path = "../../varsto-cli/src/mcp_keys.rs"]
 mod mcp_keys;
+#[path = "../../varsto-cli/src/readcache.rs"]
+mod readcache;
+#[path = "../../varsto-cli/src/remember.rs"]
+mod remember;
 #[path = "../../varsto-cli/src/service.rs"]
 mod service;
 #[path = "../../varsto-cli/src/sse.rs"]

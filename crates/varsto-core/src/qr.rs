@@ -736,6 +736,66 @@ mod tests {
     }
 
     #[test]
+    fn a_pairing_link_carries_every_candidate_in_ranked_order() {
+        // What an offer builds from a table of interfaces (spec section 68).
+        let table = [
+            crate::netif::Iface {
+                name: "utun3".into(),
+                ip: [10, 8, 0, 2].into(),
+                prefix: 24,
+                up: true,
+                loopback: false,
+            },
+            crate::netif::Iface {
+                name: "en0".into(),
+                ip: [192, 168, 1, 23].into(),
+                prefix: 24,
+                up: true,
+                loopback: false,
+            },
+            crate::netif::Iface {
+                name: "en5".into(),
+                ip: [10, 1, 2, 3].into(),
+                prefix: 16,
+                up: true,
+                loopback: false,
+            },
+        ];
+        let addresses: Vec<String> = crate::netif::rank(&table)
+            .into_iter()
+            .map(|c| format!("{}:41234", c.ip))
+            .collect();
+        assert_eq!(
+            addresses,
+            ["192.168.1.23:41234", "10.1.2.3:41234", "10.8.0.2:41234"]
+        );
+        let l = Link::Pair {
+            code: "123-456-789".into(),
+            addresses: addresses.clone(),
+        };
+        let uri = l.to_uri().unwrap();
+        assert!(code_for(&uri).is_ok(), "fits one QR code");
+        match parse(&uri).unwrap() {
+            Scanned::Link(Link::Pair { code, addresses: a }) => {
+                assert_eq!(code, "123456789");
+                assert_eq!(a, addresses, "order is the ranking");
+            }
+            other => panic!("{other:?}"),
+        }
+        // The largest offer still fits one code.
+        let many: Vec<String> = (0..crate::netif::MAX_CANDIDATES)
+            .map(|i| format!("192.168.{}.200:65535", 100 + i))
+            .collect();
+        let big = Link::Pair {
+            code: "123-456-789".into(),
+            addresses: many,
+        }
+        .to_uri()
+        .unwrap();
+        assert!(code_for(&big).is_ok());
+    }
+
+    #[test]
     fn split_links_reassemble_in_any_order() {
         let (_d, code) = request("Robin");
         let l = Link::from_text(&code).unwrap();

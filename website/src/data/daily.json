@@ -1,0 +1,73 @@
+{
+  "channel": {
+    "name": "daily",
+    "url": "https://varsto.net/daily/",
+    "updater": false,
+    "keep": 7
+  },
+  "platforms": [
+    {
+      "key": "linux-x86_64",
+      "label": "Linux x86_64 (static, musl)",
+      "latest": "varsto-daily-linux-x86_64.tar.gz"
+    },
+    {
+      "key": "android",
+      "label": "Android (debug APK)",
+      "latest": "varsto-daily-android-debug.apk"
+    },
+    {
+      "key": "windows-setup",
+      "label": "Windows installer",
+      "latest": "varsto-daily-windows-setup.exe"
+    },
+    {
+      "key": "macos",
+      "label": "macOS Apple Silicon (dmg)",
+      "latest": "varsto-daily-macos-apple-silicon.dmg"
+    },
+    {
+      "key": "ios",
+      "label": "iOS (unsigned ipa)",
+      "latest": "varsto-daily-ios-unsigned.ipa"
+    }
+  ],
+  "known_gaps": [
+    {
+      "id": "unsigned",
+      "text": "The builds carry no release signature and no Apple or Microsoft code signing. The checksum list is signed with the separate daily key (checked by varsto update --daily), which shows that a build came from the project's CI, not that it has been tested."
+    },
+    {
+      "id": "os-warnings",
+      "text": "macOS, Windows and iOS warn about unsigned software; expect right-click and Open on macOS, and SmartScreen on Windows."
+    },
+    {
+      "id": "windows-ci-only",
+      "text": "The Windows installer has been smoke-tested on CI only (install, upgrade, repair, downgrade refusal, uninstall), not on a real machine."
+    },
+    {
+      "id": "ios-untested",
+      "text": "The iOS ipa has not been run on a real device. Sideload it with AltStore, SideStore or Sideloadly."
+    },
+    {
+      "id": "ui-strings",
+      "text": "Some strings in the app interface are not translated yet; they are logged."
+    },
+    {
+      "id": "windows-ios-previous",
+      "text": "Windows and iOS are still from the previous build 20261016-316c579; they were not rebuilt this round."
+    },
+    {
+      "id": "grace-default",
+      "text": "The grace period before a storage that has fallen behind is given up (package E) defaults to 30 days."
+    },
+    {
+      "id": "devices-unverified",
+      "text": "The Kotlin, Swift and Windows full-screen code and the pairing fix have not been verified on real devices."
+    },
+    {
+      "id": "first-daily-update",
+      "text": "The first update with --daily needs a binary that already contains the feature, so install this build by hand once; after that varsto update --daily can take over."
+    }
+  ]
+}

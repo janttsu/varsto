@@ -62,12 +62,15 @@ mod guide;
 mod help;
 mod history;
 mod imports;
+mod ledger_heads;
 mod ledger_recovery;
 mod ledger_upkeep;
 mod local_names;
 mod mailbox;
 mod manifest_upkeep;
 mod membership;
+#[cfg(feature = "format3")]
+mod membership3_ops;
 mod notes;
 mod org_ops;
 mod pack_upkeep;
@@ -129,6 +132,11 @@ pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochForks, EpochRecord, Grant, KemRecord, Removal,
     Revocation, RevokeReport, Revoked, SignedEpoch, SignedRevocation,
+};
+#[cfg(feature = "format3")]
+pub use membership3_ops::{
+    parse_role as parse_folder_role, FolderMember, FolderMembers, FolderRemoval, FolderRequest,
+    MissingRecoveryCopy,
 };
 pub use notes::{
     check_analysis, AnalysisHit, FileAnalysis, NotesExchangeReport, ANALYSIS_MAX_BYTES,
@@ -770,6 +778,16 @@ type OpenedStorages = HashMap<String, (StorageSpec, std::sync::Arc<dyn Storage>)
 
 /// Threads that write objects during a push, and how many encrypted
 /// blocks may wait for them.
+/// The thumbnail pass of one sync stops after this many pictures or this
+/// much time, whichever comes first; the next sync continues (the made ones
+/// are remembered in the folder state). A folder added with thousands of
+/// pictures then neither holds the service nor the UI for minutes.
+const THUMBS_PER_PASS: usize = 200;
+const THUMBS_PASS_TIME: std::time::Duration = std::time::Duration::from_secs(20);
+/// The early pass, before the upload of a big folder: a first screenful.
+const THUMBS_EARLY_PER_PASS: usize = 48;
+const THUMBS_EARLY_TIME: std::time::Duration = std::time::Duration::from_secs(8);
+
 const UPLOADERS: usize = 8;
 const UPLOAD_QUEUE: usize = 16;
 /// At least this much encrypted data may wait for or be with the uploaders
@@ -1031,11 +1049,7 @@ impl Engine {
         })?;
         let meta: VaultMeta = serde_json::from_slice(&meta_bytes)?;
         if meta.format_version != crate::FORMAT_VERSION {
-            bail!(
-                "vault format version {} is not readable by this version ({})",
-                meta.format_version,
-                crate::FORMAT_VERSION
-            );
+            bail!("{}", crate::format_mismatch(meta.format_version));
         }
         let master = SecretKey::from_hex(vault_key_hex)?;
         let epochs = membership::discover_epochs(backend.as_ref(), &meta.vault_id, &master)?;
@@ -1444,10 +1458,7 @@ impl Engine {
         let vault: LocalVault = util::read_json(&home.join("vault.json"))
             .with_context(|| format!("no vault in {}", home.display()))?;
         if vault.format_version != crate::FORMAT_VERSION {
-            bail!(
-                "local vault format {} is not readable by this version",
-                vault.format_version
-            );
+            bail!("{}", crate::format_mismatch(vault.format_version));
         }
         util::private_home(home)?;
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
@@ -2975,6 +2986,16 @@ impl Engine {
         Ok(())
     }
 
+    /// Look for the device records other devices published since (a device
+    /// that just joined), without a sync: one listing per storage. True when
+    /// the vault's device list changed. The service asks every few seconds
+    /// after something that may have added a device and backs off.
+    pub fn refresh_devices(&mut self) -> Result<bool> {
+        let before = self.devices.devices.len();
+        self.pull_registry()?;
+        Ok(self.devices.devices.len() != before)
+    }
+
     fn pull_registry(&mut self) -> Result<()> {
         let reg_keys = self.registry_keys();
         let fr_keys = self.folder_record_keys();
@@ -3879,8 +3900,18 @@ impl Engine {
             self.notify_peers_changed();
             log::debug!("push {}: file list published before the upload", rec.name);
         }
+        // A folder added with many pictures shows its first thumbnails
+        // before the (possibly hours long) upload, not only after it.
+        report.thumbnails = self.make_thumbnails(
+            &rec,
+            &root,
+            &mut state,
+            THUMBS_EARLY_PER_PASS,
+            THUMBS_EARLY_TIME,
+        )?;
         self.upload_missing(&rec, &root, &state, &mut report)?;
-        report.thumbnails = self.make_thumbnails(&rec, &root, &mut state)?;
+        report.thumbnails +=
+            self.make_thumbnails(&rec, &root, &mut state, THUMBS_PER_PASS, THUMBS_PASS_TIME)?;
         if let Some(seq) = self.publish_manifest(&rec, &mut state)? {
             report.manifest_seq = Some(seq);
         }
@@ -4217,11 +4248,17 @@ impl Engine {
     }
 
     /// Encrypted thumbnails for image and video files that have none yet (F-046).
+    ///
+    /// Bounded: at most `limit` pictures and `budget` of time per call (a
+    /// low-priority background pass; the rest follows on the next sync). With
+    /// no storage to put them on nothing is made and nothing is marked done.
     fn make_thumbnails(
         &mut self,
         rec: &FolderRecord,
         root: &Path,
         state: &mut FolderState,
+        limit: usize,
+        budget: std::time::Duration,
     ) -> Result<u64> {
         if state.thumbs_rev < 2 {
             let videos: Vec<String> = state
@@ -4240,6 +4277,9 @@ impl Engine {
             .into_iter()
             .filter(|(s, _)| !s.is_carrier())
             .collect();
+        if storages.is_empty() {
+            return Ok(0);
+        }
         self.replicate_thumbnails(rec, state, &storages);
         let videos_here = thumbs::video_tool_available();
         let candidates: Vec<(String, String)> = state
@@ -4260,7 +4300,12 @@ impl Engine {
         let meta = fk.meta.clone();
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         let mut made = 0u64;
+        let started = std::time::Instant::now();
+        let mut attempts = 0usize;
         for (path, hash) in candidates {
+            if attempts >= limit || started.elapsed() >= budget {
+                break;
+            }
             // Without a tool for videos (a phone, a computer without ffmpeg)
             // they wait: the app around the service may hand in a frame
             // (`store_thumbnail`), or ffmpeg is installed later.
@@ -4303,6 +4348,7 @@ impl Engine {
                 }
                 thumbs::make_with(&disk, &path, &self.config.thumbnails)
             };
+            attempts += 1;
             let Some(bytes) = made_here else {
                 state.thumbs_done.insert(hash); // cannot make one; do not retry every time
                 continue;
@@ -5860,13 +5906,28 @@ impl Engine {
 
     fn policy_check_at_inner(&self, now_utc: i64) -> Result<Vec<PolicyReport>> {
         let view = self.view()?;
+        self.policy_reports(&view, now_utc, |id| {
+            self.load_state(id).map(std::borrow::Cow::Owned)
+        })
+    }
+
+    /// The policy check on a view and folder states the caller has.
+    fn policy_reports<'s, F>(
+        &self,
+        view: &LedgerView,
+        now_utc: i64,
+        state_of: F,
+    ) -> Result<Vec<PolicyReport>>
+    where
+        F: Fn(&FolderId) -> Result<std::borrow::Cow<'s, FolderState>>,
+    {
         let mut ctx = self.policy_ctx();
         let mut reports = Vec::new();
         for (rec, _) in self.folders() {
             let Some(policy) = rec.effective_policy() else {
                 continue;
             };
-            let state = self.load_state(&rec.folder_id)?;
+            let state = state_of(&rec.folder_id)?;
             let mut seen = BTreeSet::new();
             let mut facts = Vec::new();
             for file in state.files.values().filter(|f| !f.deleted) {
@@ -5874,7 +5935,7 @@ impl Engine {
                     if !seen.insert(cr.chunk.clone()) {
                         continue;
                     }
-                    facts.push(self.chunk_facts(&mut ctx, &view, &rec.folder_id, &cr.chunk));
+                    facts.push(self.chunk_facts(&mut ctx, view, &rec.folder_id, &cr.chunk));
                 }
             }
             let mut report = crate::policy::evaluate(
@@ -5885,11 +5946,11 @@ impl Engine {
                 &ctx.unknown,
                 now_utc,
             );
-            self.disk_group_findings(&rec, &state, &view, &ctx.pools, &mut report);
+            self.disk_group_findings(&rec, &state, view, &ctx.pools, &mut report);
             // Blocks a mailbox holds for their target: in transit, still short.
             if report.state != crate::policy::PolicyState::Ok {
                 if let Some((n, bytes, text)) =
-                    self.mailbox_in_transit(&view, &rec.folder_id, &seen)
+                    self.mailbox_in_transit(view, &rec.folder_id, &seen)
                 {
                     report.chunks_in_transit = n;
                     report.bytes_in_transit = bytes;
@@ -5899,7 +5960,7 @@ impl Engine {
             reports.push(report);
         }
         // Why a policy may not be met: a storage at its quota or leaving.
-        let notes = self.storage_notes(&view);
+        let notes = self.storage_notes(view);
         for r in reports.iter_mut().filter(|r| {
             matches!(
                 r.state,
@@ -5964,10 +6025,15 @@ impl Engine {
         chunk: &ChunkId,
     ) -> crate::policy::ChunkFacts {
         let mut copies = Vec::new();
+        let mut stored_utc = 0i64;
         if let Some(record) = view.locate(folder, chunk) {
             for (name, loc) in &record.storages {
                 if loc.claimed_by.is_empty() || ctx.carriers.contains(name) {
                     continue;
+                }
+                // When the block was first stored: the earliest claim.
+                if loc.claimed_utc > 0 && (stored_utc == 0 || loc.claimed_utc < stored_utc) {
+                    stored_utc = loc.claimed_utc;
                 }
                 let place = if name.starts_with("replica:") {
                     "replica".to_string()
@@ -5998,7 +6064,7 @@ impl Engine {
                 copies.push((name.clone(), place, verified, verified_utc));
             }
         }
-        crate::policy::ChunkFacts { copies }
+        crate::policy::ChunkFacts { copies, stored_utc }
     }
 
     /// The vault key (hex) for the recovery kit. Only an unlocked owner
@@ -6291,7 +6357,10 @@ impl Engine {
     /// published; on a thread of its own, so a slow peer holds nothing up.
     pub fn notify_peers_changed(&self) {
         if let Some(peers) = self.peers.clone() {
-            std::thread::spawn(move || peers.notify_changed());
+            // The message carries this device's signed ledger heads (and
+            // the answer the peer's), section 74.
+            let heads = self.head_statement();
+            std::thread::spawn(move || peers.notify_changed_with(heads.as_ref()));
         }
     }
 
@@ -6381,7 +6450,7 @@ impl Engine {
         if self.block_cache_root().is_dir() {
             local_roots.push(self.block_cache_root());
         }
-        // Blocks the mailbox staged (section 72): the device where their
+        // Blocks the mailbox staged (section 78): the device where their
         // target is docked takes them from here.
         let outbox = crate::mailbox::Outbox::new(&self.home);
         if outbox.root().is_dir() {
@@ -6405,6 +6474,10 @@ impl Engine {
                 .cloned()
                 .collect(),
             activity_audience: self.activity_audience(),
+            heads: self
+                .head_statement()
+                .map(|s| s.encode())
+                .unwrap_or_default(),
         })
     }
 
@@ -6462,6 +6535,7 @@ impl Engine {
             reachable: !self.config.p2p.public_addrs.is_empty(),
             mapped_tcp: Vec::new(),
             mapped_udp: Vec::new(),
+            head: self.own_head_statement(),
         }
     }
 
@@ -6507,6 +6581,11 @@ impl Engine {
                 }) else {
                     continue;
                 };
+                // The head it carries is checked at the next ledger pull,
+                // whichever storage's copy is the newest.
+                if let Some(h) = rec.head.clone().filter(|h| h.sender == dev) {
+                    crate::ledger_heads::hear(h);
+                }
                 match out.iter_mut().find(|r| r.device == dev) {
                     Some(have) if have.updated_utc < rec.updated_utc => *have = rec,
                     Some(_) => {}
@@ -6935,11 +7014,26 @@ impl Engine {
     // ----- reporting ----------------------------------------------------------
 
     pub fn status(&self) -> Result<StatusReport> {
+        // One view and one read of each folder's state for the whole report
+        // (the protection and the policy check below use them too): on a big
+        // vault each costs a good part of a second.
         let view = self.view()?;
-        let mut protection = self.protection()?;
+        let mut states: BTreeMap<FolderId, FolderState> = BTreeMap::new();
+        for (rec, _) in self.folders() {
+            let st = self.load_state(&rec.folder_id)?;
+            states.insert(rec.folder_id.clone(), st);
+        }
+        let state_of = |id: &FolderId| -> Result<std::borrow::Cow<'_, FolderState>> {
+            Ok(match states.get(id) {
+                Some(s) => std::borrow::Cow::Borrowed(s),
+                None => std::borrow::Cow::Owned(self.load_state(id)?),
+            })
+        };
+        let reports = self.policy_reports(&view, util::now_utc(), state_of).ok();
+        let mut protection = self.protection_with(&view, reports.as_deref(), state_of)?;
         let mut folders = Vec::new();
         for (rec, mount) in self.folders() {
-            let state = self.load_state(&rec.folder_id)?;
+            let state = state_of(&rec.folder_id)?;
             let mut chunks = BTreeSet::new();
             let mut bytes = 0u64;
             let mut files = 0u64;

@@ -329,34 +329,12 @@ pub fn describe(dev: &BlockDev) -> String {
 /// Filesystem label: ASCII letters, digits, `-` and `_`, at most 16 bytes
 /// (the ext4 limit). Other characters become `-`.
 pub fn fs_label(label: &str) -> String {
-    let mut s: String = label
-        .trim()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    while s.contains("--") {
-        s = s.replace("--", "-");
-    }
-    let s = s.trim_matches('-');
-    let s: String = s.chars().take(16).collect();
-    let s = s.trim_end_matches('-').to_string();
-    if s.is_empty() {
-        "varsto".into()
-    } else {
-        s
-    }
+    crate::diskformat::volume_label(label, 16)
 }
 
 /// GPT partition name: `varsto-<label>`, at most 36 characters.
 pub fn gpt_name(label: &str) -> String {
-    let clean: String = label.trim().chars().filter(|c| !c.is_control()).collect();
-    format!("varsto-{clean}").chars().take(36).collect()
+    crate::diskformat::gpt_name(label)
 }
 
 /// A random (version 4) partition UUID.
@@ -379,9 +357,12 @@ pub fn new_partuuid() -> String {
 
 /// The script run as root to prepare a drive. Arguments, never pasted into
 /// the script text: $1 drive, $2 partition UUID, $3 GPT name, $4
-/// filesystem label, $5 owner uid:gid, $6 inode ratio. It wipes every
-/// signature (partitions first), writes a new GPT with one Linux partition
-/// over the whole drive under the UUID chosen beforehand, waits for udev to
+/// filesystem label, $5 owner uid:gid, $6 inode ratio, $7 partition start
+/// (1 MiB) and $8 the `sgdisk` partition type code, both from
+/// `diskformat`, which builds the same commands as a pure list (a test
+/// keeps the two equal). It wipes every signature (partitions first),
+/// writes a new GPT (with its protective MBR) with one Linux partition
+/// from 1 MiB to the end under the UUID chosen beforehand, waits for udev to
 /// show it and makes an ext4 filesystem owned by the user with no blocks
 /// reserved for root (the pool keeps its own reserve).
 pub const INIT_SCRIPT: &str = r#"set -eu
@@ -392,7 +373,7 @@ echo "step: new GPT partition table"
 sgdisk -Z "$1" >/dev/null 2>&1 || true
 sgdisk -o "$1" >/dev/null
 echo "step: one ext4 partition over the whole drive"
-sgdisk -n 1:0:0 -t 1:8300 -u "1:$2" -c "1:$3" "$1" >/dev/null
+sgdisk -n "1:$7:0" -t "1:$8" -u "1:$2" -c "1:$3" "$1" >/dev/null
 partprobe "$1" 2>/dev/null || blockdev --rereadpt "$1" 2>/dev/null || true
 udevadm settle
 i=0
@@ -587,6 +568,18 @@ pub fn prepare_drive(
     }
     let prefix = privilege(r)?;
     let uuid = new_partuuid();
+    // The same validation as the pure plan: a whole-drive path under /dev.
+    crate::diskformat::linux_commands(
+        &crate::diskformat::Spec {
+            device: device.to_string(),
+            name: label.to_string(),
+            fs: crate::diskformat::Fs::Ext4,
+        },
+        &[],
+        &uuid,
+        &format!("{}:{}", owner.0, owner.1),
+        INODE_RATIO,
+    )?;
     let fsl = fs_label(label);
     let mut cmd = prefix.clone();
     cmd.extend(argv(&["sh", "-c", INIT_SCRIPT, "varsto-disk-init"]));
@@ -597,6 +590,8 @@ pub fn prepare_drive(
         fsl.clone(),
         format!("{}:{}", owner.0, owner.1),
         INODE_RATIO.to_string(),
+        crate::diskformat::PART_START.to_string(),
+        crate::diskformat::Fs::Ext4.sgdisk_code().to_string(),
     ]);
     let out = r.run(&cmd)?;
     let steps: Vec<String> = out
@@ -1221,10 +1216,70 @@ mod tests {
                 "varsto-Blue 4TB",
                 "Blue-4TB",
                 "1000:1000",
-                "65536"
+                "65536",
+                "1M",
+                "8300"
             ]
         );
         assert!(!script[3].contains("Blue"));
+    }
+
+    /// The script and the pure command list of `diskformat` must say the
+    /// same: substitute the arguments into the script's `sgdisk` lines.
+    #[test]
+    fn init_script_matches_the_pure_command_list() {
+        use crate::diskformat::{linux_commands, Fs, Spec};
+        let uuid = "11111111-2222-4333-8444-555555555555";
+        let spec = Spec {
+            device: "/dev/sdb".into(),
+            name: "Blue 4TB".into(),
+            fs: Fs::Ext4,
+        };
+        let planned: Vec<String> = linux_commands(&spec, &[], uuid, "1000:1000", INODE_RATIO)
+            .unwrap()
+            .iter()
+            .filter(|c| c[0] == "sgdisk" && c[1] != "-Z")
+            .map(|c| c.join(" "))
+            .collect();
+        let args = [
+            "/dev/sdb",
+            uuid,
+            "varsto-Blue 4TB",
+            "Blue-4TB",
+            "1000:1000",
+            "65536",
+            "1M",
+            "8300",
+        ];
+        let from_script: Vec<String> = INIT_SCRIPT
+            .lines()
+            .filter(|l| l.starts_with("sgdisk") && !l.starts_with("sgdisk -Z"))
+            .map(|l| {
+                let mut l = l.split(" >").next().unwrap().replace('"', "");
+                for (i, a) in args.iter().enumerate().rev() {
+                    l = l.replace(&format!("${}", i + 1), a);
+                }
+                l
+            })
+            .collect();
+        assert_eq!(from_script, planned);
+        assert!(
+            INIT_SCRIPT.contains("mkfs.ext4 -q -F -L \"$4\" -m 0 -i \"$6\" -E \"root_owner=$5\"")
+        );
+    }
+
+    #[test]
+    fn prepare_refuses_a_path_that_is_not_a_device_before_running_anything() {
+        let mut fake = Fake {
+            calls: vec![],
+            programs: vec!["wipefs", "sgdisk", "mkfs.ext4", "udevadm", "lsblk", "sudo"],
+            uid: 1000,
+            answer: Box::new(|_| ok("")),
+        };
+        for bad in ["/tmp/disk.img", "sdb", "/dev/../tmp/x"] {
+            assert!(prepare_drive(&mut fake, bad, "x", (1, 1)).is_err(), "{bad}");
+        }
+        assert!(fake.calls.is_empty());
     }
 
     #[test]

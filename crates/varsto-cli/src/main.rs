@@ -19,6 +19,7 @@ mod backup;
 mod desktop;
 mod drive_mount;
 mod drives;
+mod f3cmd;
 mod filemanager;
 mod history;
 mod icon;
@@ -27,6 +28,8 @@ mod logcmd;
 mod mcp;
 mod mcp_keys;
 mod placing;
+mod readcache;
+mod remember;
 mod restic;
 mod service;
 mod sse;
@@ -143,6 +146,12 @@ enum Cmd {
         /// Allow an http:// endpoint outside this computer (no transport encryption).
         #[arg(long, requires = "s3_endpoint")]
         s3_insecure_http: bool,
+        /// Storage format 3: also give the recovery words, so that every
+        /// folder with a recovery copy is rebuilt on this device. Not wired yet
+        /// (work package 12 connects it: open the membership with the vault
+        /// key, then `Membership::recover_all_folders` with these words).
+        #[arg(long)]
+        recovery_words: bool,
     },
     /// Manage storages.
     Storage {
@@ -356,7 +365,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ReplicaCmd,
     },
-    /// Check for a new release and install it over this binary.
+    /// Check for a new release and install it over this binary. With
+    /// `--daily`: the newest daily (test) build instead of a release, from a
+    /// list signed with the separate daily key.
     Update {
         /// Only report whether an update exists.
         #[arg(long)]
@@ -365,6 +376,13 @@ enum Cmd {
         /// when the GitHub release cannot be reached to cross-check it.
         #[arg(long)]
         allow_single_source: bool,
+        /// Take the latest daily build (a development build, not a release)
+        /// instead of a release. The background updater never does this.
+        #[arg(long, conflicts_with = "stable")]
+        daily: bool,
+        /// Take releases (the default); on a daily build, go back to them.
+        #[arg(long, conflicts_with = "daily")]
+        stable: bool,
     },
     /// Show or change settings of this device. `varsto config` lists them;
     /// `varsto config auto-update off` stops the daily check for a new version
@@ -581,6 +599,30 @@ enum RecoveryCmd {
     Kit {
         #[arg(long)]
         shares: bool,
+        /// Storage format 3: print the recovery words too, as the second word
+        /// set of the kit. The words are read from VARSTO_RECOVERY_WORDS, a
+        /// pipe, or asked for (hidden); they are never taken from the command line.
+        #[arg(long, conflicts_with = "shares")]
+        recovery_words: bool,
+        /// Storage format 3: make a new recovery key and print it as the
+        /// second word set. Folders get recovery copies under it with
+        /// `varsto recovery escrow`.
+        #[arg(long, conflicts_with_all = ["shares", "recovery_words"])]
+        new_recovery_key: bool,
+    },
+    /// Storage format 3: write the recovery copies that folders lack, so
+    /// that the vault words and the recovery words restore them. Asks for the
+    /// recovery words (hidden), unless --with-recovery-key.
+    Escrow {
+        /// Only this folder (default: every folder that lacks a copy).
+        folder: Option<String>,
+        /// Take the recovery words from VARSTO_RECOVERY_WORDS (the copy kept
+        /// for this session) without asking.
+        #[arg(long)]
+        with_recovery_key: bool,
+        /// File with the recovery words (24 words).
+        #[arg(long, value_name = "FILE")]
+        recovery_file: Option<PathBuf>,
     },
     /// Rebuild the vault key from shares (`<index>: <24 words>`, one per line).
     /// The shares are read from the files given with --file, else from standard
@@ -1116,8 +1158,10 @@ enum ServiceCmd {
     },
     /// Stop starting at login.
     Uninstall,
-    /// Keep the passphrase in the system keyring so the service unlocks itself.
+    /// Keep the passphrase so the service unlocks itself after a restart: in the desktop keyring, else (also over SSH) encrypted with systemd-creds, else in the kernel keyring (until restart). Says which one was used.
     Remember,
+    /// Remove the remembered passphrase from every place `remember` may have put it.
+    Forget,
     /// Show whether the service is running and what it did last.
     Status,
     /// Ask the running service to quit.
@@ -1413,12 +1457,79 @@ enum FolderCmd {
     },
     /// Remove a folder from the vault on every device (files already on
     /// devices stay). --purge also deletes its encrypted data from the storages.
+    ///
+    /// With a DEVICE (storage format 3): remove that device from the folder.
+    /// This starts a new folder epoch the device never gets; what it already
+    /// read stays readable to it. Asks first; --yes skips the question.
     Remove {
+        /// The folder (with DEVICE: the folder's name or id).
         name: String,
-        #[arg(long)]
+        /// Format 3: the device to remove (name or id).
+        device: Option<String>,
+        #[arg(long, conflicts_with = "device")]
         purge: bool,
         #[arg(long)]
         yes: bool,
+    },
+    /// Storage format 3: ask the folder's owners for access. Prints this
+    /// device's six words, which an owner compares before approving.
+    Request {
+        /// The folder (name or id).
+        folder: String,
+        /// The role you ask for: editor or viewer.
+        #[arg(long, default_value = "editor")]
+        role: String,
+    },
+    /// Storage format 3: requests waiting for an owner of FOLDER (default:
+    /// every folder this device owns), with each device's name and six words.
+    Requests {
+        folder: Option<String>,
+    },
+    /// Storage format 3: approve a request. Shows the device's name and six
+    /// words and asks "Do the six words match?"; a grant follows.
+    Approve {
+        folder: String,
+        /// The requesting device (name or id).
+        device: String,
+        /// The role to give (default: the one asked for): editor or viewer.
+        #[arg(long)]
+        role: Option<String>,
+        /// Skip the question (only when you compared the words already).
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Storage format 3: deny a request.
+    Deny {
+        folder: String,
+        device: String,
+    },
+    /// Storage format 3: a folder's participants with their roles, denied
+    /// devices and pending requests.
+    Members {
+        folder: String,
+    },
+    /// Storage format 3: change a participant's role (owner, editor or viewer).
+    Role {
+        folder: String,
+        device: String,
+        role: String,
+    },
+    /// Storage format 3: two owners started the same folder epoch at once;
+    /// keep the epoch of one of them.
+    ResolveEpoch {
+        folder: String,
+        /// The folder epoch number (see `varsto folder members`).
+        epoch: u32,
+        /// The device whose epoch to keep (name or id).
+        #[arg(long)]
+        keep: String,
+    },
+    /// Storage format 3: make a folder in the membership records of the
+    /// vault, this device its owner. `folder add` will do this once format 3
+    /// is the format (work package 12).
+    #[command(hide = true)]
+    CreateF3 {
+        name: String,
     },
     /// Create a folder in the vault and sync `path` into it.
     Add {
@@ -3172,7 +3283,11 @@ fn run(cli: &Cli) -> Result<()> {
             s3_access_key_id,
             s3_secret_file,
             s3_insecure_http,
+            recovery_words,
         } => {
+            if *recovery_words {
+                f3cmd::join_recovery_words()?;
+            }
             let mut s3_secret: Option<String> = None;
             // The vault key first: it may come from standard input, which the
             // secret prompt below must not touch.
@@ -3911,6 +4026,9 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Folder { cmd } => {
+            if f3cmd::folder(cli, &home, cmd)? {
+                return Ok(());
+            }
             if folder_safety_cmd(cli, &home, cmd)? {
                 return Ok(());
             }
@@ -4013,7 +4131,9 @@ fn run(cli: &Cli) -> Result<()> {
                         "{name} is no longer synced on this device; its files stay where they are"
                     );
                 }
-                FolderCmd::Remove { name, purge, yes } => {
+                FolderCmd::Remove {
+                    name, purge, yes, ..
+                } => {
                     if !*yes {
                         bail_usage::<()>("this removes the folder from the vault on every device (files on devices stay); run again with --yes")?;
                     }
@@ -4137,7 +4257,15 @@ fn run(cli: &Cli) -> Result<()> {
                 | FolderCmd::Override { .. }
                 | FolderCmd::Revert { .. }
                 | FolderCmd::Pending { .. }
-                | FolderCmd::DeletionGuard { .. } => unreachable!("handled by folder_safety_cmd"),
+                | FolderCmd::DeletionGuard { .. }
+                | FolderCmd::Request { .. }
+                | FolderCmd::Requests { .. }
+                | FolderCmd::Approve { .. }
+                | FolderCmd::Deny { .. }
+                | FolderCmd::Members { .. }
+                | FolderCmd::Role { .. }
+                | FolderCmd::ResolveEpoch { .. }
+                | FolderCmd::CreateF3 { .. } => unreachable!("handled before"),
                 FolderCmd::List => {
                     let rows: Vec<serde_json::Value> = engine
                         .folders()
@@ -4250,6 +4378,11 @@ fn run(cli: &Cli) -> Result<()> {
             // The running service answers without a passphrase while it is
             // unlocked; the line about the service comes first either way.
             let svc = service::status(&home);
+            if !cli.json {
+                if let Some(note) = update::channel_note(&home) {
+                    println!("varsto {} ({note})", env!("CARGO_PKG_VERSION"));
+                }
+            }
             let api = |path: &str| -> Option<serde_json::Value> {
                 let (f, _) = svc.as_ref()?;
                 let t = service::http_get(&format!("http://127.0.0.1:{}{path}", f.port), &f.token)
@@ -4280,8 +4413,9 @@ fn run(cli: &Cli) -> Result<()> {
                 }
                 return Ok(());
             }
-            let engine = open_engine(&home)?;
+            let mut engine = open_engine(&home)?;
             let s = engine.status()?;
+            f3cmd::status_warnings(&mut engine);
             let move_lines = if cli.json {
                 Vec::new()
             } else {
@@ -4457,32 +4591,37 @@ fn run(cli: &Cli) -> Result<()> {
                 Engine::open(&home, &pass)?; // wrong passphrases are not stored
                 println!("{}", service::remember_passphrase(&home, &pass)?);
             }
+            ServiceCmd::Forget => println!("{}", service::forget_passphrase(&home)?),
             ServiceCmd::Status => match service::status(&home) {
-                Some((f, v)) => print(
-                    cli,
-                    &serde_json::json!({"pid": f.pid, "port": f.port, "version": f.version, "service": v}),
-                    |v| {
-                        format!(
-                            "running: pid {} port {} version {}; {}{}",
-                            v["pid"],
-                            v["port"],
-                            v["version"],
-                            v["service"],
-                            v["service"]["auto_verify_text"]
-                                .as_str()
-                                .map(|t| format!("\n{t}"))
-                                .unwrap_or_default()
-                                + &v["service"]["repair_text"]
+                Some((f, v)) => {
+                    let store = remember::where_remembered(&home);
+                    print(
+                        cli,
+                        &serde_json::json!({"pid": f.pid, "port": f.port, "version": f.version, "service": v, "passphrase_store": store.map(|s| s.id()), "passphrase_text": remember::status_text(store)}),
+                        |v| {
+                            format!(
+                                "running: pid {} port {} version {}; {}\n{}{}",
+                                v["pid"],
+                                v["port"],
+                                v["version"],
+                                v["service"],
+                                v["passphrase_text"].as_str().unwrap_or(""),
+                                v["service"]["auto_verify_text"]
                                     .as_str()
                                     .map(|t| format!("\n{t}"))
                                     .unwrap_or_default()
-                                + &v["service"]["scrub_text"]
-                                    .as_str()
-                                    .map(|t| format!("\n{t}"))
-                                    .unwrap_or_default()
-                        )
-                    },
-                )?,
+                                    + &v["service"]["repair_text"]
+                                        .as_str()
+                                        .map(|t| format!("\n{t}"))
+                                        .unwrap_or_default()
+                                    + &v["service"]["scrub_text"]
+                                        .as_str()
+                                        .map(|t| format!("\n{t}"))
+                                        .unwrap_or_default()
+                            )
+                        },
+                    )?
+                }
                 None => {
                     println!("not running");
                     std::process::exit(1);
@@ -5013,29 +5152,26 @@ fn run(cli: &Cli) -> Result<()> {
                     code,
                     address,
                 } => {
-                    // The link of the other device's QR code carries the code and its addresses.
                     // The link of the other device's QR code carries the code and
-                    // its addresses: discovery first, then each address.
-                    let (code, mut tries) = match varsto_core::qr::Link::from_text(code) {
-                        Ok(varsto_core::qr::Link::Pair { code, addresses }) => (
-                            code,
-                            std::iter::once(None)
-                                .chain(addresses.into_iter().map(Some))
-                                .collect::<Vec<_>>(),
-                        ),
-                        _ => (code.clone(), vec![None]),
+                    // all its candidate addresses, best first. Order of tries:
+                    // --address, the link's addresses, then the LAN search.
+                    let (code, offered) = match varsto_core::qr::Link::from_text(code) {
+                        Ok(varsto_core::qr::Link::Pair { code, addresses }) => (code, addresses),
+                        _ => (code.clone(), Vec::new()),
                     };
-                    if address.is_some() {
-                        tries = vec![address.clone()];
-                    }
                     let pass = passphrase()?;
-                    let mut result = Err(anyhow!("the other device was not found"));
-                    for a in &tries {
-                        result = varsto_core::pair::receive(&code, name, a.as_deref());
-                        if result.is_ok() {
-                            break;
-                        }
-                    }
+                    let result = varsto_core::pair::receive_with_progress(
+                        &code,
+                        name,
+                        address.as_deref(),
+                        &offered,
+                        &mut |step| match step {
+                            varsto_core::pair::Step::Trying(a) => eprintln!("trying {a} ..."),
+                            varsto_core::pair::Step::Looking => {
+                                eprintln!("looking for the device on the network ...")
+                            }
+                        },
+                    );
                     let bundle = result?;
                     let (engine, notes) = Engine::join_paired(&home, name, &pass, &bundle)?;
                     println!(
@@ -5051,7 +5187,25 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Recovery { cmd } => match cmd {
-            RecoveryCmd::Kit { shares } => {
+            RecoveryCmd::Escrow {
+                folder,
+                with_recovery_key,
+                recovery_file,
+            } => f3cmd::recovery_escrow(
+                cli,
+                &home,
+                folder.as_deref(),
+                *with_recovery_key,
+                recovery_file.as_deref(),
+            )?,
+            RecoveryCmd::Kit {
+                recovery_words,
+                new_recovery_key,
+                ..
+            } if *recovery_words || *new_recovery_key => {
+                f3cmd::recovery_kit(&home, *new_recovery_key)?
+            }
+            RecoveryCmd::Kit { shares, .. } => {
                 let engine = open_engine(&home)?;
                 let key = engine.export_vault_key()?;
                 let sh = if *shares {
@@ -5582,8 +5736,50 @@ fn run(cli: &Cli) -> Result<()> {
             }
         },
         Cmd::Update {
+            daily: true, check, ..
+        } => {
+            let c = update::check_daily(&home)?;
+            if *check {
+                print(cli, &c, |c| {
+                    if c.available {
+                        format!(
+                            "daily build available: {} -> {} ({})",
+                            c.current_build.as_deref().unwrap_or("(a release)"),
+                            c.latest_build,
+                            c.archive.clone().unwrap_or_default()
+                        )
+                    } else if c.newer {
+                        format!(
+                            "daily build {} is out; this copy cannot install it itself ({}): download it from {}",
+                            c.latest_build,
+                            c.reason.as_deref().unwrap_or("no file for this platform"),
+                            c.download_page
+                        )
+                    } else {
+                        format!("up to date: daily build {}", c.latest_build)
+                    }
+                })?;
+            } else {
+                let policy = update::Policy::new(&home, false);
+                let running = service::status(&home).is_some();
+                println!("{}", update::apply_daily(&c, &policy)?);
+                let installer = c.archive.as_deref() == Some(update::DAILY_SETUP);
+                if c.available && running && !installer {
+                    if service::restart_and_wait(&home) {
+                        println!(
+                            "the background service restarted with daily build {}",
+                            c.latest_build
+                        );
+                    } else {
+                        eprintln!("could not restart the background service: start it with `varsto service run` or `varsto install`");
+                    }
+                }
+            }
+        }
+        Cmd::Update {
             check,
             allow_single_source,
+            ..
         } => {
             let c = update::check()?;
             if *check {
@@ -5604,9 +5800,18 @@ fn run(cli: &Cli) -> Result<()> {
                         format!("up to date: {} (latest {})", c.current, c.latest)
                     }
                 })?;
+                if !cli.json {
+                    if let Some(h) = update::stable_hint(&home, &c) {
+                        println!("{h}");
+                    }
+                }
             } else {
                 let policy = update::Policy::new(&home, *allow_single_source);
                 let running = service::status(&home).is_some();
+                if let Some(h) = update::stable_hint(&home, &c) {
+                    println!("{h}");
+                    return Ok(());
+                }
                 println!("{}", update::apply(&c, &policy)?);
                 // The Windows setup program restarts Varsto itself.
                 if c.available && running && !c.installer() {
@@ -5867,6 +6072,23 @@ fn run(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
+/// `varsto [--home DIR] [--json] --version` (or `-V`): the device directory
+/// given on the command line, if any. `None` for any other command line.
+fn version_request(args: &[String]) -> Option<Option<PathBuf>> {
+    let mut home = None;
+    let mut it = args.iter().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--version" | "-V" => return Some(home),
+            "--home" => home = it.next().map(PathBuf::from),
+            "--json" => {}
+            a if a.starts_with("--home=") => home = Some(PathBuf::from(&a["--home=".len()..])),
+            _ => return None,
+        }
+    }
+    None
+}
+
 fn main() {
     // Launched from an app bundle or by double-click: no arguments (macOS may add
     // a -psn_ process serial number). Open the desktop interface.
@@ -5888,6 +6110,18 @@ fn main() {
         } else {
             "desktop".to_string()
         });
+    }
+    if let Some(home) = version_request(&args) {
+        // `--version` names the daily build of a copy installed from that channel.
+        let note = home
+            .or_else(|| std::env::var_os("VARSTO_HOME").map(PathBuf::from))
+            .or_else(|| default_home().ok())
+            .and_then(|h| update::channel_note(&h));
+        match note {
+            Some(n) => println!("varsto {} ({n})", env!("CARGO_PKG_VERSION")),
+            None => println!("varsto {}", env!("CARGO_PKG_VERSION")),
+        }
+        return;
     }
     let cli = Cli::parse_from(args);
     init_logging(&cli);
@@ -6073,15 +6307,9 @@ fn after_command(cli: &Cli) {
     {
         use std::io::IsTerminal;
         let own = cli.home.is_none() && std::env::var_os("VARSTO_NO_INSTALL").is_none();
-        let locked_here = service::keyring_locked() == Some(true) && !service::has_display();
-        if setup && own && std::io::stdin().is_terminal() && locked_here && typed.is_some() {
-            // Asking would only lead to a store that waits for an unlock
-            // window that cannot appear in this session.
-            eprintln!("Your keyring is locked and this session has no desktop to unlock it, so the passphrase is not stored: after a restart the background service waits until any varsto command that asks for the passphrase unlocks it. To store it, run `varsto service remember` from your desktop session.");
-        }
-        if setup && own && std::io::stdin().is_terminal() && !locked_here {
+        if setup && own && std::io::stdin().is_terminal() {
             if let Some(pass) = &typed {
-                print!("Keep the passphrase in your keyring so background sync unlocks itself after a restart? [Y/n] ");
+                print!("Remember the passphrase on this computer so background sync unlocks itself after a restart? [Y/n] ");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 let mut answer = String::new();
                 let _ = std::io::stdin().read_line(&mut answer);
@@ -6370,6 +6598,15 @@ fn status_from_value(v: &serde_json::Value) -> String {
         .and_then(|h| serde_json::from_value::<varsto_core::engine::LedgerHealth>(h.clone()).ok())
     {
         out += &format!("ledger: {}\n", h.describe());
+    }
+    for w in v
+        .get("recovery_warnings")
+        .and_then(|w| w.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|w| w.as_str())
+    {
+        out += &format!("warning: {w}\n");
     }
     out.trim_end().to_string()
 }
@@ -6862,7 +7099,9 @@ fn folder_via_service(home: &std::path::Path, cmd: &FolderCmd) -> Result<Option<
             serde_json::json!({"name_or_id": name_or_id, "path": abs(path)?, "selective": selective, "plain": true, "mode": mode}),
         ),
         FolderCmd::Detach { name } => ("/api/folder/detach", serde_json::json!({"name": name})),
-        FolderCmd::Remove { name, purge, yes } => {
+        FolderCmd::Remove {
+            name, purge, yes, ..
+        } => {
             if !*yes {
                 return Ok(None); // the usual refusal below
             }
@@ -6993,7 +7232,7 @@ fn transfers(home: &std::path::Path, watch: bool, json: bool) -> Result<()> {
                 .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
                 .is_some_and(|v| v["has_vault"] == true && v["unlocked"] == false);
             if locked {
-                out.push_str("Background sync: LOCKED, waiting for the passphrase; nothing syncs until any varsto command that uses it runs (or `varsto service remember` keeps it in the keyring)\n");
+                out.push_str("Background sync: LOCKED, waiting for the passphrase; nothing syncs until any varsto command that uses it runs (or `varsto service remember` keeps it, in the keyring, with systemd-creds or in the kernel keyring)\n");
             }
             match &summary {
                 Some(_) if locked => {}
@@ -7802,5 +8041,79 @@ mod secret_input_tests {
         let lines = secret_lines(&[a, b], "share: ").unwrap();
         let lines: Vec<&str> = lines.iter().map(|l| l.as_str()).collect();
         assert_eq!(lines, ["1: one two", "2: three four", "3: five six"]);
+    }
+}
+
+#[cfg(test)]
+mod update_flag_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("varsto").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn update_takes_daily_or_stable_but_not_both() {
+        let cli = parse(&["update", "--daily"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Update {
+                daily: true,
+                stable: false,
+                check: false,
+                ..
+            }
+        ));
+        let cli = parse(&["update", "--check", "--daily"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Update {
+                daily: true,
+                check: true,
+                ..
+            }
+        ));
+        let cli = parse(&["update", "--stable"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Update {
+                stable: true,
+                daily: false,
+                ..
+            }
+        ));
+        // The plain command is the stable channel.
+        let cli = parse(&["update"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Update {
+                daily: false,
+                stable: false,
+                ..
+            }
+        ));
+        assert!(parse(&["update", "--daily", "--stable"]).is_err());
+        assert!(parse(&["update", "--stable", "--daily"]).is_err());
+    }
+
+    #[test]
+    fn version_names_the_daily_build() {
+        let a = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
+        assert_eq!(version_request(&a(&["varsto", "--version"])), Some(None));
+        assert_eq!(version_request(&a(&["varsto", "-V"])), Some(None));
+        assert_eq!(
+            version_request(&a(&["varsto", "--home", "/x", "--version"])),
+            Some(Some(PathBuf::from("/x")))
+        );
+        assert_eq!(
+            version_request(&a(&["varsto", "--home=/y", "--json", "-V"])),
+            Some(Some(PathBuf::from("/y")))
+        );
+        assert_eq!(version_request(&a(&["varsto", "status"])), None);
+        assert_eq!(
+            version_request(&a(&["varsto", "update", "--version"])),
+            None
+        );
+        assert_eq!(version_request(&a(&["varsto"])), None);
     }
 }

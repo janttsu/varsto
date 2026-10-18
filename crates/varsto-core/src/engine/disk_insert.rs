@@ -290,7 +290,7 @@ impl Engine {
                 copied_packs.insert(loc.pack.clone(), false);
                 let key = crate::packs::pack_key(&loc.pack);
                 // From a docked disk of the pool, else staged by the
-                // mailbox while one was docked (section 72).
+                // mailbox while one was docked (section 78).
                 let Some(bytes) = pool
                     .get(&key)
                     .ok()

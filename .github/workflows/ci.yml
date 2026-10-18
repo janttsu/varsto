@@ -1,6 +1,7 @@
 # Every platform is built and tested on GitHub-hosted runners (free for a
-# public repository): Linux and the cross-compiled Windows package on Ubuntu,
-# the Windows package and its installer (Inno Setup) tested and photographed on Windows Server 2025, the
+# public repository): Linux and the cross-compiled Windows programs on Ubuntu,
+# the Windows programs tested and photographed on Windows Server 2025 and
+# packaged as the one Windows download, the installer (Inno Setup), the
 # Android app in the emulator, the native macOS app and the iOS shell on
 # Apple Silicon. Two collecting jobs put the packages together as one download
 # set (an unsigned SHA256SUMS; the maintainer signs it offline, RELEASING.md)
@@ -15,12 +16,22 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+  # The daily build workflow (daily.yml) calls this one for a given commit.
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit, branch or tag to build (default is the caller's ref)
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
+# github.workflow is the caller's name in a called workflow, so a daily run
+# and a push run of the same commit do not queue behind each other.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
 # bash with pipefail everywhere, so `cmd | tee log` fails when cmd fails.
@@ -38,6 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -66,7 +78,16 @@ jobs:
         run: cargo deny check
       - name: Tests
         run: cargo test --workspace 2>&1 | tee test.log
-      - name: Linux and Windows packages
+      # Storage format 3 is built up behind the `format3` feature
+      # (docs/spec/format-3-design.md): keep it compiling, lint-free and
+      # tested until it becomes the default.
+      - name: Clippy with the format3 feature
+        run: cargo clippy --workspace --all-targets --features varsto-core/format3,varsto-cli/format3,varsto-ffi/format3 -- -D warnings
+      - name: Tests of varsto-core with the format3 feature
+        run: cargo test -p varsto-core --features format3 --lib
+      - name: Site tooling (daily-sync.py against a fake release)
+        run: python3 -I -m unittest discover -s ops/site -p 'test_*.py'
+      - name: Linux package and Windows programs
         run: website/build-release.sh x86_64-unknown-linux-musl x86_64-pc-windows-gnu 2>&1 | tee build.log
       - name: Smoke test the Linux package
         run: |
@@ -81,8 +102,20 @@ jobs:
           python3 -m pip install --quiet --break-system-packages playwright pillow
           python3 -m playwright install --with-deps chromium >/dev/null
           DEMO_HOME=/home/aino scripts/screenshots/demo-vault.sh "$VARSTO_BIN" "$RUNNER_TEMP/demo"
-      - name: Screenshots of the interface
-        run: python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots
+      - name: Screenshots of the interface (English, Finnish, Swedish)
+        run: |
+          # Three runs against the same demo vault, one directory per language
+          # (the website shows each language's pictures on its own pages).
+          python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots
+          python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots-fi --lang fi
+          python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots-sv --lang sv
+      - name: Screenshot of the full-screen visualization (TV scene, 4K)
+        # The invented TV scene in 4K; finalize.py scales it to the website's
+        # 1920 px viz-tv.png. A failed render keeps the website's last picture.
+        continue-on-error: true
+        run: |
+          python3 website/tools/screenshots/viz_tv_scene.py "$RUNNER_TEMP/viz-tv-scene.json"
+          ONLY=viz-tv-4k VIZ_SCENE="$RUNNER_TEMP/viz-tv-scene.json" python3 scripts/screenshots/viz-shots.py "$RUNNER_TEMP/demo" dist/shots-viz
       - name: Screenshots of the Linux desktop (tray, own window)
         run: scripts/screenshots/linux-desktop.sh "$VARSTO_BIN" "$RUNNER_TEMP/demo" dist/shots
       - name: Stop the demo
@@ -102,13 +135,37 @@ jobs:
           name: packages-linux-windows
           path: |
             website/public/downloads/varsto-*-x86_64-unknown-linux-musl.tar.gz
-            website/public/downloads/varsto-*-x86_64-pc-windows-gnu.zip
+          if-no-files-found: error
+      # The cross-compiled Windows programs: input of the installer job and of
+      # the Windows smoke test, not a download.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-programs
+          path: dist/windows/app
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: shots-linux
           path: dist/shots
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux-fi
+          path: dist/shots-fi
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux-sv
+          path: dist/shots-sv
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux-viz
+          path: dist/shots-viz
           if-no-files-found: warn
 
   windows:
@@ -121,18 +178,19 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/download-artifact@v4
         with:
-          name: packages-linux-windows
+          name: windows-programs
           path: pkg
       - name: Smoke test on Windows
         run: |
           New-Item -ItemType Directory -Force C:\build | Out-Null
-          Copy-Item (Get-ChildItem pkg\varsto-*-x86_64-pc-windows-gnu.zip | Select-Object -First 1).FullName C:\build\varsto-windows.zip
-          & scripts\cloud-build\remote-windows.ps1
+          & scripts\cloud-build\remote-windows.ps1 -Exe (Resolve-Path pkg\varsto.exe).Path
       - name: Screenshots of the Windows desktop (tray, own window)
         run: |
-          $exe = (Get-ChildItem C:\build\unzipped -Recurse -Filter varsto.exe | Select-Object -First 1).FullName
+          $exe = (Resolve-Path pkg\varsto.exe).Path
           & scripts\screenshots\windows-desktop.ps1 -Exe $exe -Work "C:\Users\aino" -Out "$env:GITHUB_WORKSPACE\dist\shots"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -151,17 +209,15 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/download-artifact@v4
         with:
-          name: packages-linux-windows
-          path: pkg
-      - name: Unpack the Windows package
+          name: windows-programs
+          path: dist/windows/app
+      - name: Version and programs
         run: |
-          $zip = (Get-ChildItem pkg\varsto-*-x86_64-pc-windows-gnu.zip | Select-Object -First 1).FullName
           $version = (Get-Content Cargo.toml | Select-String -Pattern '^version\s*=\s*"(.*)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-          Expand-Archive $zip -DestinationPath unpacked
-          New-Item -ItemType Directory -Force dist\windows\app | Out-Null
-          Copy-Item (Get-ChildItem unpacked -Recurse -File).FullName dist\windows\app
           Get-ChildItem dist\windows\app | Format-Table Name, Length
           "VARSTO_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Build the installer
@@ -190,6 +246,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -241,6 +299,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
@@ -342,6 +402,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios, aarch64-apple-ios-sim
@@ -375,6 +437,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
@@ -407,15 +470,27 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/download-artifact@v4
         with:
           path: art
+      - name: Dry run of the website sync (fixture package, no network)
+        run: python3 -I ops/site/tests/test_screenshots_sync.py
       - name: Website names and sizes
         run: |
           python3 -m pip install --quiet --break-system-packages pillow
           version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
-          python3 scripts/screenshots/finalize.py art dist/screenshots --version "$version" --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --source "GitHub Actions run ${{ github.run_number }}"
+          # One package for the website: en/ fi/ sv/ viz/ and shots.json with the
+          # sizes per set (artifact folders shots-linux-fi/-sv/-viz are the
+          # localized and visualization pictures, everything else is en/).
+          # HEAD of the checkout: the commit a called run (daily.yml) built, not
+          # the caller's github.sha; a pull request keeps its own head commit.
+          commit="${{ github.event.pull_request.head.sha }}"
+          [ -n "$commit" ] || commit="$(git rev-parse HEAD)"
+          python3 scripts/screenshots/finalize.py art dist/screenshots --pack --version "$version" \
+            --commit "$commit" \
+            --source "GitHub Actions run ${{ github.run_number }}" --run "${{ github.run_number }}"
           cat dist/screenshots/shots.json
       - uses: actions/upload-artifact@v4
         with:

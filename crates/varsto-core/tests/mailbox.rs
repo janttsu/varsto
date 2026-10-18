@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! The mailbox for offline pool disks (spec section 72). One dock: disk A
+//! The mailbox for offline pool disks (spec section 78). One dock: disk A
 //! holds the only copy of blocks that disk B (another place of the same
 //! pool, or another pool) should hold too, and the two are never docked at
 //! the same time. The dock host stages what B needs while A is docked and

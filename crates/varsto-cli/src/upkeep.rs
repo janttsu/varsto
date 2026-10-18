@@ -116,7 +116,7 @@ pub enum MailboxCmd {
     },
 }
 
-/// `varsto mailbox`: the mailbox for offline pool disks (spec section 72).
+/// `varsto mailbox`: the mailbox for offline pool disks (spec section 78).
 /// A run goes through the background service when one runs, because it
 /// knows the peers that staged blocks come from.
 pub fn mailbox(cli: &Cli, home: &Path, cmd: &Option<MailboxCmd>) -> Result<()> {

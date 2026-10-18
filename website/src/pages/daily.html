@@ -1,0 +1,30 @@
+---
+title: Daily builds
+nav: Downloads
+output: daily/index.html
+description: Development builds of Varsto from the main line, with a checksum list signed by a separate daily key. Not releases, not for production data.
+---
+    <h1>Daily builds</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>These are development builds from the main line, not releases.</strong></p>
+      <ul>
+        <li>They are not releases and have not been through release testing. They carry no release signature and no Apple or Microsoft code signing. Do not use them for production data.</li>
+        <li>The storage format can change from one build to the next without any migration. Format 2 will require vaults to be recreated.</li>
+        <li><code>varsto update --daily</code> installs the latest daily build for your platform (the Linux and Windows command-line builds; the macOS app and the Android APK are installed by hand). Plain <code>varsto update</code> stays on releases and never installs a daily build.</li>
+        <li>Keep your own backups.</li>
+      </ul>
+      <p>Looking for something to rely on? Use the <a href="{{P}}downloads/">stable downloads</a> instead.</p>
+    </div>
+    {{DAILY_BUILD}}
+    {{DAILY_TABLE}}
+    <h2>Verify</h2>
+    <p>Put <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> next to the files you downloaded (the file names are the stable ones in the table) and run</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Leave out <code>--ignore-missing</code> if you downloaded every file. The list is signed with the separate daily key (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign format; the key is <a href="{{P}}daily-key.pub">daily-key.pub</a>), which is what <code>varsto update --daily</code> checks. Besides telling you that a download is complete and intact, the signature shows that the list came from the project's own build.</p>
+    <h2>What is in it</h2>
+    {{DAILY_INCLUDED}}
+    <h2>Known gaps</h2>
+    {{DAILY_GAPS}}
+    <h2>Previous builds</h2>
+    <p>The seven most recent builds are kept, with the same file names; each has its own signed list.</p>
+    {{DAILY_HISTORY}}

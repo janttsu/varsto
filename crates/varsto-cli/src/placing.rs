@@ -176,7 +176,7 @@ pub fn status_lines(home: &Path) -> Vec<String> {
         .iter()
         .map(|j| format!("move {}", j.line()))
         .collect();
-    // What the mailbox carries for disks that are away (section 72).
+    // What the mailbox carries for disks that are away (section 78).
     out.extend(varsto_core::mailbox::MailboxState::load(home).summary_lines());
     out
 }

@@ -20,6 +20,8 @@ pub mod portmap;
 pub mod quic;
 pub mod stun;
 pub mod traffic;
+#[cfg(feature = "format3")]
+pub mod v3;
 
 pub use traffic::Traffic;
 
@@ -178,6 +180,10 @@ pub struct Snapshot {
     /// organization the devices of the same user; `None` for every device
     /// of the vault.
     pub activity_audience: Option<std::collections::BTreeSet<DeviceId>>,
+    /// This device's signed ledger-head statement (`ledger_heads`, section
+    /// 74), served on `/p2p/heads` and in answer to `/p2p/changed`; empty
+    /// when there is none.
+    pub heads: Vec<u8>,
 }
 
 crate::redacted_opaque!(Snapshot);
@@ -353,11 +359,30 @@ pub struct Server {
     listener: std::net::TcpListener,
     pub addr: SocketAddr,
     traffic: Arc<Traffic>,
+    /// Format 3: TLS 1.3 with pinned certificates on every connection, and
+    /// requests authenticated by `v3::Responder` (no plain HTTP).
+    #[cfg(feature = "format3")]
+    tls: Option<Arc<v3::tls::TcpTls>>,
 }
+
+/// The headers of one request that authentication looks at.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RequestHeaders {
+    /// `X-Varsto-Peer` (format 2 token).
+    pub peer: String,
+    /// `X-Varsto-Auth` (format 3 token).
+    pub auth: String,
+    /// `X-Varsto-For` (format 3: the device a relay asks for).
+    pub for_device: String,
+}
+
+/// Answers one request on a connection: `(status, body, peer)`.
+type Handler<'a> =
+    dyn Fn(Option<&Snapshot>, &str, &RequestHeaders) -> (u16, Vec<u8>, Option<DeviceId>) + 'a;
 
 const CONN_IDLE: Duration = Duration::from_secs(30);
 const MAX_CONNS: usize = 256;
-const MAX_HEAD: usize = 16 * 1024;
+const MAX_HEAD: usize = 32 * 1024;
 /// A request head must arrive whole within this long of its first byte, and
 /// a new connection must start one within this long of being accepted
 /// (a slow trickle of bytes held a thread for the whole idle time).
@@ -442,7 +467,18 @@ impl Server {
             listener,
             addr,
             traffic: Arc::default(),
+            #[cfg(feature = "format3")]
+            tls: None,
         })
+    }
+
+    /// Format 3: serve TLS 1.3 only, with the pinned certificates and the
+    /// connection-bound tokens of `v3` (format 3 design, section 8). A
+    /// client that does not speak TLS gets an alert and nothing else.
+    #[cfg(feature = "format3")]
+    pub fn with_tls(mut self, tls: Arc<v3::tls::TcpTls>) -> Server {
+        self.tls = Some(tls);
+        self
     }
 
     /// Count what we serve in `traffic` (shared with the QUIC node and the
@@ -492,6 +528,8 @@ impl Server {
                 self.traffic.clone(),
                 heads.clone(),
             );
+            #[cfg(feature = "format3")]
+            let tls = self.tls.clone();
             let spawned = std::thread::Builder::new()
                 .name("p2p-conn".into())
                 .spawn(move || {
@@ -503,8 +541,24 @@ impl Server {
                         }
                     }
                     let _done = Done(conns);
-                    let _ =
-                        serve_connection(sock, remote, &snapshot, &stop, &slots, &traffic, &heads);
+                    if prepare_socket(&sock).is_err() {
+                        return;
+                    }
+                    #[cfg(feature = "format3")]
+                    if let Some(tls) = tls {
+                        let _ = tls.serve(sock, remote, |stream, handler| {
+                            serve_connection(
+                                stream, remote, &snapshot, &stop, &slots, &traffic, &heads, handler,
+                            )
+                        });
+                        return;
+                    }
+                    let plain = |snap: Option<&Snapshot>, path: &str, h: &RequestHeaders| {
+                        handle_from(snap, path, &h.peer)
+                    };
+                    let _ = serve_connection(
+                        sock, remote, &snapshot, &stop, &slots, &traffic, &heads, &plain,
+                    );
                 });
             if spawned.is_err() {
                 open.fetch_sub(1, Ordering::Relaxed);
@@ -514,21 +568,29 @@ impl Server {
     }
 }
 
+/// Socket options of an accepted connection: blocking, no delay, a short
+/// read timeout so the loop below can watch its deadlines.
+fn prepare_socket(sock: &TcpStream) -> std::io::Result<()> {
+    sock.set_nonblocking(false)?;
+    sock.set_nodelay(true)?;
+    sock.set_read_timeout(Some(Duration::from_secs(1)))?;
+    sock.set_write_timeout(Some(Duration::from_secs(60)))
+}
+
 /// Requests on one connection, one after another, until the peer closes it,
-/// asks to close, stays idle for `CONN_IDLE`, or the server stops.
-fn serve_connection(
-    mut sock: TcpStream,
+/// asks to close, stays idle for `CONN_IDLE`, or the server stops. `sock`
+/// is the TCP stream (format 2) or the TLS session over it (format 3).
+#[allow(clippy::too_many_arguments)]
+fn serve_connection<S: Read + Write + CloseWrite>(
+    mut sock: S,
     remote: SocketAddr,
     snapshot: &Mutex<Option<Arc<Snapshot>>>,
     stop: &std::sync::atomic::AtomicBool,
     slots: &Slots,
     traffic: &Traffic,
     heads: &Arc<PerIp>,
+    handler: &Handler<'_>,
 ) -> Result<()> {
-    sock.set_nonblocking(false)?;
-    sock.set_nodelay(true)?;
-    sock.set_read_timeout(Some(Duration::from_secs(1)))?;
-    sock.set_write_timeout(Some(Duration::from_secs(60)))?;
     let mut buf: Vec<u8> = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
     let mut idle_since = Instant::now();
@@ -589,13 +651,17 @@ fn serve_connection(
             parts.next().unwrap_or(""),
             parts.next().unwrap_or(""),
         );
-        let mut auth = String::new();
+        let mut hdrs = RequestHeaders::default();
         let mut connection = String::new();
         for l in lines {
             if let Some((k, v)) = l.split_once(':') {
                 let k = k.trim();
                 if k.eq_ignore_ascii_case("X-Varsto-Peer") {
-                    auth = v.trim().to_string();
+                    hdrs.peer = v.trim().to_string();
+                } else if k.eq_ignore_ascii_case("X-Varsto-Auth") {
+                    hdrs.auth = v.trim().to_string();
+                } else if k.eq_ignore_ascii_case("X-Varsto-For") {
+                    hdrs.for_device = v.trim().to_string();
                 } else if k.eq_ignore_ascii_case("Connection") {
                     connection = v.trim().to_ascii_lowercase();
                 }
@@ -610,7 +676,7 @@ fn serve_connection(
         let (status, body, peer) = if method == "GET" {
             let snap = snapshot.lock().unwrap().clone();
             let _slot = slots.take();
-            handle_from(snap.as_deref(), &path, &auth)
+            handler(snap.as_deref(), &path, &hdrs)
         } else {
             (405, b"method not allowed".to_vec(), None)
         };
@@ -632,6 +698,7 @@ fn serve_connection(
         .into_bytes();
         out.extend_from_slice(&body);
         sock.write_all(&out)?;
+        sock.flush()?;
         if let Some(d) = &peer {
             traffic.record(
                 d,
@@ -643,10 +710,22 @@ fn serve_connection(
             );
         }
         if !keep {
-            let _ = sock.shutdown(std::net::Shutdown::Write);
+            sock.close_write();
             return Ok(());
         }
         idle_since = Instant::now();
+    }
+}
+
+/// Ending the sending side of a served connection, so that what was
+/// written reaches the client before the connection closes.
+pub(crate) trait CloseWrite {
+    fn close_write(&mut self);
+}
+
+impl CloseWrite for TcpStream {
+    fn close_write(&mut self) {
+        let _ = self.shutdown(std::net::Shutdown::Write);
     }
 }
 
@@ -691,10 +770,29 @@ fn handle_from_inner(
     let Some(snap) = snap else {
         return (503, b"locked".to_vec(), None);
     };
-    let dev = match verify_auth(&snap.peer_key, auth, path) {
-        Some(dev) if !snap.revoked.contains(&dev) => dev,
-        _ => return (403, b"forbidden".to_vec(), None),
-    };
+    match verify_auth(&snap.peer_key, auth, path) {
+        Some(dev) => serve_as(snap, path, dev),
+        None => (403, b"forbidden".to_vec(), None),
+    }
+}
+
+/// Answer `path` for `dev`, whose request was authenticated already (by its
+/// token, or in format 3 by its certificate and connection-bound token).
+pub(crate) fn serve_as(
+    snap: &Snapshot,
+    path: &str,
+    dev: DeviceId,
+) -> (u16, Vec<u8>, Option<DeviceId>) {
+    if snap.revoked.contains(&dev) {
+        return (403, b"forbidden".to_vec(), None);
+    }
+    // A request that carries this device's own id came from this device
+    // itself (an address of ours listed for another device, a stale record
+    // of our own): not a peer, never counted. The caller learns the address
+    // is its own from the body.
+    if dev == snap.device_id {
+        return (403, SELF_ANSWER.to_vec(), None);
+    }
     if path == "/p2p/activity" {
         // What this device is doing now; in an organization only for the
         // devices of the same user.
@@ -708,9 +806,12 @@ fn handle_from_inner(
         let body = serde_json::to_vec(&crate::activity::local(&snap.device_id)).unwrap_or_default();
         return (200, body, Some(dev));
     }
-    let (status, body) = answer(snap, path);
+    let (status, body) = answer(snap, path, &dev);
     (status, body, Some(dev))
 }
+
+/// The body of the refusal given to a request from this very device.
+pub(crate) const SELF_ANSWER: &[u8] = b"self";
 
 /// A whole object went over the wire (not an info answer or an error).
 pub(crate) fn is_object(path: &str, status: u16) -> bool {
@@ -727,10 +828,32 @@ pub fn take_change_heard() -> bool {
     CHANGE_HEARD.swap(false, std::sync::atomic::Ordering::SeqCst)
 }
 
-fn answer(snap: &Snapshot, path: &str) -> (u16, Vec<u8>) {
-    if path == "/p2p/changed" {
-        CHANGE_HEARD.store(true, std::sync::atomic::Ordering::SeqCst);
-        return (200, b"ok".to_vec());
+/// A peer said it published something new.
+pub(crate) fn note_change_heard() {
+    CHANGE_HEARD.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn answer(snap: &Snapshot, path: &str, from: &DeviceId) -> (u16, Vec<u8>) {
+    // `/p2p/changed`, bare or with the sender's signed head statement; the
+    // answer carries this device's own statement, so one message exchanges
+    // both (section 74). The statement is only kept for the engine to check.
+    if path == "/p2p/changed" || path.starts_with(crate::ledger_heads::CHANGED_PREFIX) {
+        if let Some(st) = crate::ledger_heads::HeadStatement::from_changed_path(path) {
+            if &st.sender == from {
+                crate::ledger_heads::hear(st);
+            }
+        }
+        note_change_heard();
+        if snap.heads.is_empty() {
+            return (200, b"ok".to_vec());
+        }
+        return (200, snap.heads.clone());
+    }
+    if path == "/p2p/heads" {
+        if snap.heads.is_empty() {
+            return (404, b"no statement".to_vec());
+        }
+        return (200, snap.heads.clone());
     }
     if path == "/p2p/info" {
         let body = serde_json::json!({
@@ -827,6 +950,12 @@ pub struct PeerRecord {
     pub mapped_tcp: Vec<SocketAddr>,
     #[serde(default)]
     pub mapped_udp: Vec<SocketAddr>,
+    /// The sender's own ledger head (seq and hash of the newest batch a
+    /// storage holds), as a head statement signed with its device key with
+    /// just that entry (section 74): devices that only meet through the
+    /// storage still compare their progress with what others published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<crate::ledger_heads::HeadStatement>,
 }
 
 impl PeerRecord {
@@ -891,10 +1020,25 @@ impl PeerRecord {
     }
     /// Equal apart from the timestamp: nothing worth republishing.
     pub fn same_as(&self, other: &PeerRecord) -> bool {
+        // The head statement is signed afresh every time; only the head it
+        // names is a change.
+        let head = |r: &PeerRecord| {
+            r.head.as_ref().map(|h| {
+                h.heads
+                    .iter()
+                    .map(|e| (e.seq, e.hash.clone()))
+                    .collect::<Vec<_>>()
+            })
+        };
+        if head(self) != head(other) {
+            return false;
+        }
         let mut a = self.clone();
         let mut b = other.clone();
         a.updated_utc = 0;
         b.updated_utc = 0;
+        a.head = None;
+        b.head = None;
         a == b
     }
 }
@@ -1044,10 +1188,11 @@ impl TcpPool {
     ) -> Result<(u16, Vec<u8>)> {
         // A kept connection the peer closed meanwhile (restart, idle
         // timeout) fails: then ask again on a fresh one.
-        if let Some(Ok((status, body, keep))) = self
-            .take(addr)
-            .map(|s| exchange(s, addr, path, auth, timeout))
-        {
+        let headers = format!("X-Varsto-Peer: {auth}\r\n");
+        if let Some(Ok((status, body, keep))) = self.take(addr).map(|s| {
+            set_client_timeouts(&s, timeout)?;
+            exchange(s, addr, path, &headers)
+        }) {
             if let Some(s) = keep {
                 self.give_back(addr, s);
             }
@@ -1055,7 +1200,8 @@ impl TcpPool {
         }
         let s = TcpStream::connect_timeout(&addr, timeout)?;
         s.set_nodelay(true)?;
-        let (status, body, keep) = exchange(s, addr, path, auth, timeout)?;
+        set_client_timeouts(&s, timeout)?;
+        let (status, body, keep) = exchange(s, addr, path, &headers)?;
         if let Some(s) = keep {
             self.give_back(addr, s);
         }
@@ -1063,21 +1209,27 @@ impl TcpPool {
     }
 }
 
-/// One request and its response on `s`; the stream comes back when it can
-/// carry another request (a `Content-Length` body, no `Connection: close`).
-fn exchange(
-    mut s: TcpStream,
+/// Read and write timeouts of a client connection.
+fn set_client_timeouts(s: &TcpStream, timeout: Duration) -> std::io::Result<()> {
+    s.set_read_timeout(Some(Duration::from_secs(30)))?;
+    s.set_write_timeout(Some(timeout))
+}
+
+/// One request and its response on `s` (a TCP stream, or in format 3 the
+/// TLS session over one); `headers` are the extra header lines, each ending
+/// in CRLF. The stream comes back when it can carry another request (a
+/// `Content-Length` body, no `Connection: close`).
+fn exchange<S: Read + Write>(
+    mut s: S,
     addr: SocketAddr,
     path: &str,
-    auth: &str,
-    timeout: Duration,
-) -> Result<(u16, Vec<u8>, Option<TcpStream>)> {
-    s.set_read_timeout(Some(Duration::from_secs(30)))?;
-    s.set_write_timeout(Some(timeout))?;
+    headers: &str,
+) -> Result<(u16, Vec<u8>, Option<S>)> {
     s.write_all(
-        format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nX-Varsto-Peer: {auth}\r\nConnection: keep-alive\r\n\r\n")
+        format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n{headers}Connection: keep-alive\r\n\r\n")
             .as_bytes(),
     )?;
+    s.flush()?;
     let mut raw: Vec<u8> = Vec::with_capacity(64 * 1024);
     let mut buf = vec![0u8; 64 * 1024];
     let sep = loop {
@@ -1195,6 +1347,12 @@ pub struct Peers {
     /// Per device: how its object requests went (`ObjectStats`), so that
     /// peers that have what is asked, and answer fast, are asked first.
     objects: Mutex<BTreeMap<DeviceId, ObjectStats>>,
+    /// Addresses that proved to be this device itself: never tried again.
+    selfs: Mutex<std::collections::BTreeSet<SocketAddr>>,
+    /// Format 3: TLS over TCP and connection-bound tokens (`v3`) instead of
+    /// plain HTTP and the keyed-hash token.
+    #[cfg(feature = "format3")]
+    v3: Option<Arc<v3::Client>>,
 }
 
 crate::redacted_opaque!(Peers);
@@ -1239,9 +1397,15 @@ impl Peers {
         lan: &[PeerAddr],
         quic: Option<Arc<quic::Node>>,
     ) -> Self {
+        // A record carrying this device's own certificate is this device
+        // under another id (a re-joined install): never a peer.
+        let own_cert = quic.as_ref().map(|n| n.identity().sha256.clone());
         let mut infos: Vec<PeerInfo> = records
             .iter()
             .filter(|r| r.device != me)
+            .filter(|r| {
+                r.cert_sha256.is_empty() || own_cert.as_deref() != Some(r.cert_sha256.as_str())
+            })
             .map(PeerInfo::from_record)
             .collect();
         for p in lan.iter().filter(|p| p.device != me) {
@@ -1279,6 +1443,52 @@ impl Peers {
             traffic,
             pool: Mutex::default(),
             objects: Mutex::default(),
+            selfs: Mutex::default(),
+            #[cfg(feature = "format3")]
+            v3: None,
+        }
+    }
+
+    /// Format 3: the peers of the directory (accepted peer records of
+    /// trusted full devices; never this device or its certificate), LAN
+    /// addresses heard in signed beacons for those of them only (a beacon
+    /// suggests an address; the pinned handshake decides), TLS over TCP and
+    /// connection-bound tokens. `quic` must run in format-3 mode
+    /// (`quic::Node::start_v3`).
+    #[cfg(feature = "format3")]
+    pub fn build_v3(
+        client: Arc<v3::Client>,
+        directory: &v3::PeerDirectory,
+        lan: &[PeerAddr],
+        quic: Option<Arc<quic::Node>>,
+    ) -> Self {
+        let mut infos = directory.infos();
+        for p in lan {
+            if let Some(i) = infos.iter_mut().find(|i| i.device == p.device) {
+                i.add_lan(p.addr);
+            }
+        }
+        if let Some(node) = &quic {
+            node.set_known(infos.clone());
+        }
+        let traffic = quic
+            .as_ref()
+            .map(|n| n.traffic().clone())
+            .unwrap_or_default();
+        traffic.learn_names(infos.iter().map(|i| (&i.device, i.name.as_str())));
+        Peers {
+            key: SecretKey::random(),
+            me: client.me().clone(),
+            peers: infos,
+            quic,
+            state: Mutex::new(BTreeMap::new()),
+            routes: Mutex::new(BTreeMap::new()),
+            timeout: Duration::from_millis(1500),
+            traffic,
+            pool: Mutex::default(),
+            objects: Mutex::default(),
+            selfs: Mutex::default(),
+            v3: Some(client),
         }
     }
 
@@ -1321,6 +1531,12 @@ impl Peers {
         *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
         *self.pool.lock().unwrap() = previous.pool.lock().unwrap().clone();
         *self.objects.lock().unwrap() = previous.objects.lock().unwrap().clone();
+        *self.selfs.lock().unwrap() = previous.selfs.lock().unwrap().clone();
+    }
+
+    /// Whether `addr` is known to be this device itself.
+    pub fn is_self_addr(&self, addr: SocketAddr) -> bool {
+        self.selfs.lock().unwrap().contains(&addr)
     }
 
     /// Peers worth asking now: unreachable ones rest for a minute, the ones
@@ -1354,9 +1570,17 @@ impl Peers {
         log::debug!("{what}");
     }
 
-    fn try_tcp(&self, addr: SocketAddr, path: &str, auth: &str) -> Result<(u16, Vec<u8>)> {
-        let pool = self.pool.lock().unwrap().clone();
-        let result = pool.get(addr, path, auth, self.timeout);
+    fn try_tcp(&self, addr: SocketAddr, path: &str, p: &PeerInfo) -> Result<(u16, Vec<u8>)> {
+        #[cfg(feature = "format3")]
+        let result = match &self.v3 {
+            Some(c) => c.tcp_get(addr, &p.cert_sha256, &p.device, path, self.timeout),
+            None => self.plain_tcp(addr, path),
+        };
+        #[cfg(not(feature = "format3"))]
+        let result = {
+            let _ = p;
+            self.plain_tcp(addr, path)
+        };
         self.debug(&format!(
             "tcp {addr} {path} -> {}",
             match &result {
@@ -1372,15 +1596,51 @@ impl Peers {
         result
     }
 
+    /// Format 2: plain HTTP with the keyed-hash token.
+    fn plain_tcp(&self, addr: SocketAddr, path: &str) -> Result<(u16, Vec<u8>)> {
+        let pool = self.pool.lock().unwrap().clone();
+        let auth = auth_header(&self.key, &self.me, path);
+        pool.get(addr, path, &auth, self.timeout)
+    }
+
+    /// One request over QUIC to the device `responder` at `addr` (a relay,
+    /// for a `/p2p/via/` path). `inner` is the path the request is for in
+    /// the end: the format-2 token names it, so the relay can pass the
+    /// token on; a format-3 token is bound to this connection and names
+    /// `path` and `responder`.
     fn try_quic(
         &self,
         addr: SocketAddr,
         cert: &str,
         path: &str,
-        auth: &str,
+        responder: &DeviceId,
+        inner: &str,
     ) -> Result<(u16, Vec<u8>)> {
         let node = self.quic.as_ref().ok_or_else(|| anyhow!("no QUIC node"))?;
-        let result = node.request(addr, cert, path, auth, true);
+        #[cfg(feature = "format3")]
+        let result = match &self.v3 {
+            Some(c) => node.request_with(addr, cert, path, true, &|exporter: &[u8; 32]| {
+                c.token(exporter, responder, path)
+            }),
+            None => node.request(
+                addr,
+                cert,
+                path,
+                &auth_header(&self.key, &self.me, inner),
+                true,
+            ),
+        };
+        #[cfg(not(feature = "format3"))]
+        let result = {
+            let _ = responder;
+            node.request(
+                addr,
+                cert,
+                path,
+                &auth_header(&self.key, &self.me, inner),
+                true,
+            )
+        };
         self.debug(&format!(
             "quic {addr} {path} -> {}",
             match &result {
@@ -1391,9 +1651,21 @@ impl Peers {
         result
     }
 
+    /// A request to `p` on the connection it keeps with us as its relay.
+    fn try_registrant(&self, p: &PeerInfo, path: &str) -> Result<(u16, Vec<u8>)> {
+        let node = self.quic.as_ref().ok_or_else(|| anyhow!("no QUIC node"))?;
+        #[cfg(feature = "format3")]
+        if let Some(c) = &self.v3 {
+            return node.request_registrant_with(&p.device, path, &|exporter: &[u8; 32]| {
+                c.token(exporter, &p.device, path)
+            });
+        }
+        node.request_registrant(&p.device, path, &auth_header(&self.key, &self.me, path))
+    }
+
     /// Ask a specific peer once, over a given route; the error says why the
     /// route gave nothing (including "resting" for one that just failed).
-    fn over(&self, route: &Route, path: &str, auth: &str, p: &PeerInfo) -> Result<(u16, Vec<u8>)> {
+    fn over(&self, route: &Route, path: &str, p: &PeerInfo) -> Result<(u16, Vec<u8>)> {
         match route {
             Route::Tcp(a) => {
                 // A TCP address that just failed rests for a minute.
@@ -1402,14 +1674,30 @@ impl Peers {
                         bail!("resting after a failure");
                     }
                 }
-                self.try_tcp(*a, path, auth)
+                if self.is_self_addr(*a) {
+                    bail!("that address is this device itself");
+                }
+                let (status, body) = self.try_tcp(*a, path, p)?;
+                if status == 403 && body == SELF_ANSWER {
+                    log(&format!("{a} answered as this very device; not used again"));
+                    self.selfs.lock().unwrap().insert(*a);
+                    bail!("that address is this device itself");
+                }
+                Ok((status, body))
             }
-            Route::Quic(a) => self.try_quic(*a, &p.cert_sha256, path, auth),
-            Route::Registered(_) => self
-                .quic
-                .as_ref()
-                .ok_or_else(|| anyhow!("no QUIC node"))?
-                .request_registrant(&p.device, path, auth),
+            Route::Quic(a) => {
+                if self.is_self_addr(*a) {
+                    bail!("that address is this device itself");
+                }
+                let (status, body) = self.try_quic(*a, &p.cert_sha256, path, &p.device, path)?;
+                if status == 403 && body == SELF_ANSWER {
+                    log(&format!("{a} answered as this very device; not used again"));
+                    self.selfs.lock().unwrap().insert(*a);
+                    bail!("that address is this device itself");
+                }
+                Ok((status, body))
+            }
+            Route::Registered(_) => self.try_registrant(p, path),
             Route::Relay(relay, _, a) => {
                 let cert = self
                     .peers
@@ -1418,7 +1706,7 @@ impl Peers {
                     .map(|r| r.cert_sha256.clone())
                     .ok_or_else(|| anyhow!("relay record unknown"))?;
                 let via = format!("/p2p/via/{}{}", p.device, path);
-                self.try_quic(*a, &cert, &via, auth)
+                self.try_quic(*a, &cert, &via, relay, path)
             }
         }
     }
@@ -1440,7 +1728,20 @@ impl Peers {
                 }
             }
         }
-        let mut routes = order_routes(&p.tcp, if quic { &p.udp } else { &[] }, relays);
+        let selfs = self.selfs.lock().unwrap().clone();
+        let tcp: Vec<SocketAddr> = p
+            .tcp
+            .iter()
+            .filter(|a| !selfs.contains(a))
+            .copied()
+            .collect();
+        let udp: Vec<SocketAddr> = p
+            .udp
+            .iter()
+            .filter(|a| !selfs.contains(a))
+            .copied()
+            .collect();
+        let mut routes = order_routes(&tcp, if quic { &udp } else { &[] }, relays);
         // A peer that keeps its relay registration with us is reached on
         // that connection first: it is open already, and behind a symmetric
         // NAT nothing else reaches it from here.
@@ -1457,10 +1758,10 @@ impl Peers {
     /// One request to peer `p`: the route that worked last time first, then
     /// every candidate in order. Records the outcome and logs every change
     /// of path, so the service log tells how a NAT was (not) crossed.
-    fn fetch(&self, p: &PeerInfo, path: &str, auth: &str) -> Option<(u16, Vec<u8>, Route)> {
+    fn fetch(&self, p: &PeerInfo, path: &str) -> Option<(u16, Vec<u8>, Route)> {
         let _active = self.traffic.begin(&p.device);
         let t = crate::logging::Timer::start();
-        let got = self.fetch_uncounted(p, path, auth);
+        let got = self.fetch_uncounted(p, path);
         let chatty = path.starts_with("/p2p/object/");
         let level = if chatty && got.as_ref().is_some_and(|g| g.0 == 200 || g.0 == 404) {
             log::Level::Trace
@@ -1495,12 +1796,7 @@ impl Peers {
         got
     }
 
-    fn fetch_uncounted(
-        &self,
-        p: &PeerInfo,
-        path: &str,
-        auth: &str,
-    ) -> Option<(u16, Vec<u8>, Route)> {
+    fn fetch_uncounted(&self, p: &PeerInfo, path: &str) -> Option<(u16, Vec<u8>, Route)> {
         let who = if p.name.is_empty() {
             p.device.short().to_string()
         } else {
@@ -1514,7 +1810,7 @@ impl Peers {
             _ => None,
         };
         if let Some(r) = last {
-            match self.over(&r, path, auth, p) {
+            match self.over(&r, path, p) {
                 Ok((s, b)) => {
                     // Requests run side by side: one may have switched the
                     // peer to a better route meanwhile; keep that one.
@@ -1532,7 +1828,7 @@ impl Peers {
         }
         let mut tried = Vec::new();
         for r in self.candidate_routes(p) {
-            match self.over(&r, path, auth, p) {
+            match self.over(&r, path, p) {
                 Ok((s, b)) => {
                     log(&format!("{who}: {} answered {s}", r.describe()));
                     self.remember(&p.device, Some(r.clone()), s);
@@ -1571,9 +1867,8 @@ impl Peers {
             });
         }
         for p in order {
-            let auth = auth_header(&self.key, &self.me, &path);
             let t = Instant::now();
-            let got = self.fetch(&p, &path, &auth);
+            let got = self.fetch(&p, &path);
             let mut stats = self.objects.lock().unwrap();
             let e = stats.entry(p.device.clone()).or_default();
             match got {
@@ -1598,11 +1893,48 @@ impl Peers {
     /// changed files), so that it syncs now. Best effort: a peer that does
     /// not answer finds the change at its next interval anyway.
     pub fn notify_changed(&self) {
-        let path = "/p2p/changed";
+        self.notify_changed_with(None);
+    }
+
+    /// `notify_changed`, carrying this device's signed ledger-head statement
+    /// (section 74) when it fits a request path. The answer of a peer that
+    /// has one of its own is kept for the engine to check.
+    pub fn notify_changed_with(&self, statement: Option<&crate::ledger_heads::HeadStatement>) {
+        let path = statement
+            .and_then(|s| s.changed_path())
+            .unwrap_or_else(|| "/p2p/changed".to_string());
         for p in self.ordered() {
-            let auth = auth_header(&self.key, &self.me, path);
-            let _ = self.fetch(&p, path, &auth);
+            if let Some((200, body, _)) = self.fetch(&p, &path) {
+                self.hear_statement(&p.device, &body);
+            }
         }
+    }
+
+    /// Keep a head statement a peer sent, when it is that peer's own.
+    fn hear_statement(&self, from: &DeviceId, body: &[u8]) {
+        if body == b"ok" {
+            return;
+        }
+        if let Ok(st) = crate::ledger_heads::HeadStatement::decode(body) {
+            if &st.sender == from {
+                crate::ledger_heads::hear(st);
+            }
+        }
+    }
+
+    /// Ask every peer for its signed ledger-head statement (`/p2p/heads`)
+    /// and keep what comes back for the engine to check (section 74).
+    /// Returns how many peers answered with one.
+    pub fn exchange_heads(&self) -> usize {
+        let path = "/p2p/heads";
+        let mut got = 0;
+        for p in self.ordered() {
+            if let Some((200, body, _)) = self.fetch(&p, path) {
+                self.hear_statement(&p.device, &body);
+                got += 1;
+            }
+        }
+        got
     }
 
     /// One request to one peer, over the route that worked last: `None`
@@ -1610,8 +1942,20 @@ impl Peers {
     /// route reached it. For small requests (`/p2p/activity`).
     pub fn ask(&self, device: &DeviceId, path: &str) -> Option<(u16, Vec<u8>)> {
         let p = self.ordered().into_iter().find(|p| &p.device == device)?;
-        let auth = auth_header(&self.key, &self.me, path);
-        self.fetch(&p, path, &auth).map(|(s, b, _)| (s, b))
+        self.fetch(&p, path).map(|(s, b, _)| (s, b))
+    }
+
+    /// One request to every peer worth asking now: `(device, status, body)`
+    /// of those that answered.
+    #[cfg(feature = "format3")]
+    pub fn ask_each(&self, path: &str) -> Vec<(DeviceId, u16, Vec<u8>)> {
+        self.ordered()
+            .into_iter()
+            .filter_map(|p| {
+                self.fetch(&p, path)
+                    .map(|(s, b, _)| (p.device.clone(), s, b))
+            })
+            .collect()
     }
 
     /// Which peers answer right now, and over which path.
@@ -1620,8 +1964,7 @@ impl Peers {
         self.peers
             .iter()
             .map(|p| {
-                let auth = auth_header(&self.key, &self.me, path);
-                let _ = self.fetch(p, path, &auth);
+                let _ = self.fetch(p, path);
                 self.status_of(p)
             })
             .collect()
@@ -1824,6 +2167,7 @@ mod tests {
             packed: BTreeMap::new(),
             revoked: [gone.clone()].into_iter().collect(),
             activity_audience: None,
+            heads: Vec::new(),
         };
         let ask = |dev: &DeviceId| {
             handle(
@@ -1854,6 +2198,7 @@ mod tests {
             packed: BTreeMap::new(),
             revoked: Default::default(),
             activity_audience: None,
+            heads: Vec::new(),
         };
         let path = "/p2p/activity";
         let ask = |snap: &Snapshot, dev: &DeviceId| {
@@ -1878,6 +2223,36 @@ mod tests {
         let (status, body) = ask(&snap, &other_user);
         assert_eq!(status, 403);
         assert!(!String::from_utf8_lossy(&body).contains("idle"));
+    }
+
+    #[test]
+    fn a_request_from_this_very_device_is_refused_and_never_counted() {
+        let key = SecretKey::random();
+        let (me, other) = (DeviceId::random(), DeviceId::random());
+        let snap = Snapshot {
+            vault_id: crate::ids::VaultId::random(),
+            device_id: me.clone(),
+            peer_key: key.clone(),
+            folder_keys: BTreeMap::new(),
+            pieces: BTreeMap::new(),
+            local_roots: Vec::new(),
+            packed: BTreeMap::new(),
+            revoked: Default::default(),
+            activity_audience: None,
+            heads: Vec::new(),
+        };
+        for path in ["/p2p/info", "/p2p/activity", "/p2p/changed"] {
+            let (status, body, peer) =
+                handle_from(Some(&snap), path, &auth_header(&key, &me, path));
+            assert_eq!((status, body.as_slice(), peer), (403, SELF_ANSWER, None));
+        }
+        // Another device of the vault is answered and counted as before.
+        let (status, _, peer) = handle_from(
+            Some(&snap),
+            "/p2p/info",
+            &auth_header(&key, &other, "/p2p/info"),
+        );
+        assert_eq!((status, peer), (200, Some(other)));
     }
 
     #[test]
@@ -2008,6 +2383,7 @@ mod tests {
             reachable: false,
             mapped_tcp: vec![],
             mapped_udp: vec![],
+            head: None,
         };
         let blob = rec.seal(&vault, &key).unwrap();
         let back = PeerRecord::open(&blob, &vault, &dev, &key).unwrap();

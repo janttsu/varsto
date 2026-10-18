@@ -259,7 +259,7 @@ impl Engine {
     }
 
     /// The blocks an open job still has to move (planned from the ledger as
-    /// a run would): for the mailbox (section 72), which stages those whose
+    /// a run would): for the mailbox (section 78), which stages those whose
     /// only copy is on a docked disk while the target cannot take them.
     pub(super) fn move_job_pending(&self, job: &MoveJob) -> Result<HashSet<(FolderId, ChunkId)>> {
         let (rec, _) = self.resolve_folder(&job.folder_id)?;

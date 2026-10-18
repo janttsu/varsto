@@ -1,6 +1,6 @@
 # Specifications
 
-Status of the documents that will define formats and protocols. Sections 32 to 60 of alpha-0-format.md are on main new in 0.0.1-alpha.14. Most of what exists is described in [alpha-0-format.md](alpha-0-format.md), section by section; anything marked **not started** has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.
+Status of the documents that will define formats and protocols. Sections 32 to 60 of alpha-0-format.md are new in 0.0.1-alpha.14 and sections 62 to 71 new in 0.0.1-alpha.15. Most of what exists is described in [alpha-0-format.md](alpha-0-format.md), section by section; anything marked **not started** has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.
 
 | Document | Status |
 |---|---|
@@ -14,7 +14,7 @@ Status of the documents that will define formats and protocols. Sections 32 to 6
 | Version, trash and retention model | alpha-0 merge rules: [alpha-0-format.md](alpha-0-format.md) section 7; vault-wide trash with retention and a trash storage: section 43, and version history with staggered thinning: section 50 (both released in 0.0.1-alpha.14) |
 | Durability policy language | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 14 |
 | Removable-disk layout | alpha implemented (disk pool): [alpha-0-format.md](alpha-0-format.md) section 19; whole drives and disk bookkeeping: sections 34 and 40 (released in 0.0.1-alpha.14) |
-| Local control API and MCP surface | alpha implemented: [alpha-0-format.md](alpha-0-format.md) sections 10 and 13; event stream for the interface: section 54 (released in 0.0.1-alpha.14); the Windows window, installer and automatic updates: section 63 |
+| Local control API and MCP surface | alpha implemented: [alpha-0-format.md](alpha-0-format.md) sections 10 and 13; event stream for the interface: section 54 (released in 0.0.1-alpha.14); the Windows window, installer and automatic updates: section 65 (released in 0.0.1-alpha.15) |
 | Recovery kit | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 18 |
 | Data placement, moving data and disk groups | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 23 |
 | Automatic repair | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 26 |
@@ -28,5 +28,7 @@ Status of the documents that will define formats and protocols. Sections 32 to 6
 | Change history of files (`varsto changes`) | released in 0.0.1-alpha.14: [alpha-0-format.md](alpha-0-format.md) section 57 |
 
 Storage format version history (which releases read which formats): see [format-versions.md](format-versions.md).
+
+Storage format 3 (planned, not implemented): pack-level ledger, folder block maps, signed records, base + delta manifests and padded packs. Binding design: [format-3-design.md](format-3-design.md).
 
 Failure model (what fails and what does not): see [../failure-model.md](../failure-model.md).

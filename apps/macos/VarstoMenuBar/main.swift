@@ -282,6 +282,8 @@ final class MainWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, 
     init() {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent() // the session token never touches disk
+        // Full screen of an element of the page (a video in the viewer) is allowed too.
+        if #available(macOS 12.3, *) { config.preferences.isElementFullscreenEnabled = true }
         web = WKWebView(frame: .zero, configuration: config)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -290,6 +292,8 @@ final class MainWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, 
         window.minSize = NSSize(width: 720, height: 480)
         window.center()
         window.setFrameAutosaveName("VarstoMain")
+        // The visualization page asks for the window's own full-screen mode (the green button's).
+        window.collectionBehavior.insert(.fullScreenPrimary)
         window.contentView = web
         super.init(window: window)
         window.delegate = self
@@ -298,9 +302,25 @@ final class MainWindow: NSWindowController, WKNavigationDelegate, WKUIDelegate, 
         // WKWebView ignores window.print(): the page posts here instead (print / save as PDF
         // of the recovery package).
         web.configuration.userContentController.add(self, name: "varstoPrint")
+        // Full screen on the page's request: { fullscreen: Bool }.
+        web.configuration.userContentController.add(self, name: "varstoShell")
     }
 
+    /// Tell the page the window's full-screen state, so its button and Esc handling follow it
+    /// (also when the user left with the green button or the system gesture).
+    private func notifyFullscreen(_ on: Bool) {
+        web.evaluateJavaScript("window.varstoShellFullscreen && window.varstoShellFullscreen(\(on ? "true" : "false"))", completionHandler: nil)
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) { notifyFullscreen(true) }
+    func windowDidExitFullScreen(_ notification: Notification) { notifyFullscreen(false) }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "varstoShell" {
+            guard let window = window, let body = message.body as? [String: Any], let on = body["fullscreen"] as? Bool else { return }
+            if on != window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
+            return
+        }
         guard message.name == "varstoPrint", let window = window else { return }
         let info = NSPrintInfo.shared
         info.horizontalPagination = .fit

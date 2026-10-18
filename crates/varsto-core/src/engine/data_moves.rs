@@ -791,6 +791,7 @@ impl Engine {
                     rules,
                     &[ChunkFacts {
                         copies: after.clone(),
+                        stored_utc: 0,
                     }],
                     &BTreeMap::new(),
                     &[],
@@ -1101,7 +1102,7 @@ impl Engine {
                 let Some(ct) = ct else {
                     // A job waits for a source disk that is away instead
                     // of leaving the block behind (the mailbox stages it
-                    // while that disk is docked, section 72).
+                    // while that disk is docked, section 78).
                     if let Some(label) = away_disk(item) {
                         report.waiting_source_blocks += 1;
                         report.waiting_source_bytes += item.size;
@@ -1415,7 +1416,7 @@ impl Engine {
             return Some(ct);
         }
         let key = chunk_storage_key(&item.object);
-        // Staged by the mailbox while the source disk was docked (section 72).
+        // Staged by the mailbox while the source disk was docked (section 78).
         if let Some(ct) = self.mailbox_object(&key).filter(good) {
             return Some(ct);
         }

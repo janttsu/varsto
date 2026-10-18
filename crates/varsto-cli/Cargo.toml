@@ -17,6 +17,8 @@ default = ["mimalloc"]
 fsevents = ["notify/macos_fsevent"]
 # `--software` security keys (a secret in a file): tests and the lab only.
 software-key = ["varsto-core/software-key"]
+# Storage format 3 work in progress (varsto-core `format3`).
+format3 = ["varsto-core/format3"]
 # mimalloc as the global allocator: faster than the system allocator on the
 # allocation-heavy paths (JSON, file lists, per-block buffers), much faster
 # than musl's. Builds C; turn it off where no C compiler is at hand.
@@ -55,3 +57,4 @@ windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "W
 
 [dev-dependencies]
 serde_json.workspace = true
+image.workspace = true

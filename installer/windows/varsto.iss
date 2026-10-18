@@ -1,7 +1,7 @@
 ; SPDX-License-Identifier: PolyForm-Shield-1.0.0
 ; Inno Setup script of the Varsto installer for Windows.
 ;
-;   iscc /DAppVersion=0.0.1-alpha.14 /DSourceDir=<folder with varsto.exe and varsto-window.exe> installer\windows\varsto.iss
+;   iscc /DAppVersion=0.0.1-alpha.15 /DSourceDir=<folder with varsto.exe and varsto-window.exe> installer\windows\varsto.iss
 ;
 ; installer\windows\build.ps1 does the whole build (icon, WebView2 bootstrapper,
 ; compiler). Output: Varsto-<AppVersion>-setup.exe.
@@ -11,7 +11,7 @@
 ; changes: it is how a new version finds the old installation and replaces it.
 
 #ifndef AppVersion
-  #error Pass the version: iscc /DAppVersion=0.0.1-alpha.14 ...
+  #error Pass the version: iscc /DAppVersion=0.0.1-alpha.15 ...
 #endif
 #ifndef NumericVersion
   #define NumericVersion "0.0.0.0"
@@ -148,7 +148,7 @@ begin
     Delete(S, 1, 1);
 end;
 
-// "0.0.1-alpha.14" as numbers: major, minor, patch, pre-release rank
+// "0.0.1-alpha.15" as numbers: major, minor, patch, pre-release rank
 // (none ranks above alpha < beta < rc), pre-release number.
 procedure SplitVersion(V: String; var K: array of Integer);
 var

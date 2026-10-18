@@ -37,6 +37,7 @@ import androidx.core.content.FileProvider
 import android.content.res.Configuration
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
 
 /** Shows the local Varsto interface served by the background service. */
@@ -48,6 +49,8 @@ class MainActivity : AppCompatActivity() {
     // A varsto:// link the app was opened with, until the page is there to take it.
     private var pendingLink: String? = null
     private var pageLoaded = false
+    // The visualization page asked for full screen: the system bars are hidden until it leaves.
+    private var fullscreen = false
     // The page's QR scanner asked for the camera; answered once Android has.
     private var cameraRequest: PermissionRequest? = null
     private val askCamera: ActivityResultLauncher<String> =
@@ -85,6 +88,8 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (url?.startsWith("http://127.0.0.1") != true) return
                 pageLoaded = true
+                // A reloaded page starts out of full screen: the bars come back with it.
+                if (fullscreen) applyFullscreen(false)
                 pendingLink?.let { pendingLink = null; openLink(it) }
             }
         }
@@ -130,6 +135,23 @@ class MainActivity : AppCompatActivity() {
             }
         })
         load()
+    }
+
+    /**
+     * Immersive full screen for the page: status and navigation bars hidden (a swipe from the
+     * edge shows them for a moment), the content stays out of the camera cutout. Back leaves it through the
+     * page (`varstoBack`), which then calls this with false.
+     */
+    private fun applyFullscreen(on: Boolean) {
+        fullscreen = on
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (on) {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+        AppLog.i("activity", "full screen: $on")
     }
 
     private fun leave() {
@@ -229,6 +251,12 @@ class MainActivity : AppCompatActivity() {
 
     /** What the page may ask the shell for: all files access, camera upload, and handing a file to another app. */
     inner class Bridge {
+        /** Real full screen for the visualization page (the system bars go; the page covers the screen). */
+        @JavascriptInterface
+        fun setFullscreen(on: Boolean) {
+            runOnUiThread { applyFullscreen(on) }
+        }
+
         @JavascriptInterface
         fun hasAllFilesAccess(): Boolean =
             Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()

@@ -10,6 +10,24 @@ During alpha development, storage formats may change without migration paths. On
 |---|---|---|---|---|
 | 0 (alpha-0) | 0.0.1-alpha.0 | 0.0.1-alpha.0 to 0.0.1-alpha.3 (no `v0.0.1-alpha.3` tag exists; the last format-0 reader tag is `v0.0.1-alpha.2`) | none (`varsto pull` and `varsto fsck` of those versions) | see the format version 1 note below |
 | 1 (compression, alpha-0-format.md section 16) | 0.0.1-alpha.4 | 0.0.1-alpha.4 and later, including 0.0.1-alpha.13 | none yet (`varsto pull` and `varsto fsck` of the same version) | every tag from `v0.0.1-alpha.4` on |
+| 2 (blocks, packs and keyed chunker, alpha-0-format.md section 62) | 0.0.1-alpha.15 | 0.0.1-alpha.15 and later. Vaults of format 1 (0.0.1-alpha.14 and earlier) are not read: alpha.15 refuses them and says to recreate the vault | none yet (`varsto pull` and `varsto fsck` of the same version) | `v0.0.1-alpha.15` |
+| 3 (planned: signed records, folder key grants) | not yet assigned | not yet released | none yet | none yet |
+
+## Format version 2 (0.0.1-alpha.15)
+
+`FORMAT_VERSION` is 2. There is no migration from format 1: block objects of their own (`chunks/`) are not read, so an alpha.14 vault opens without its data. Checked in the lab (`upgrade-from-alpha-14`) with the format number left at 1: `status` worked and `fsck --verify` reported every block of the vault missing. With the bump an alpha.15 build refuses a format 1 vault when it opens it or joins through its storage and says to recreate it (`varsto reset --yes`, `varsto init`, then sync the files into the new vault). Alpha.14 refuses a format 2 vault with "vault format version 2 is not readable by this version (1)". Release rule 3 (a reader for the previous format) is met by the alpha.14 binary, which stays downloadable and is the tool to read an alpha.14 vault.
+
+## Ledger heads between peers after 0.0.1-alpha.15 (format version 2 unchanged)
+
+Alpha-0-format.md section 74. A peer-to-peer message (`/p2p/heads`, the head statement on `/p2p/changed`), one optional field `head` in the rendezvous record `vault/peers/<device>.enc` and the device-local file `ledger/heads-seen.json`. Batches, checkpoints and the storage layout are unchanged. Older versions answer `404` to the new path, skip the new record field and never read the file, so devices of different versions work together; only the newer ones compare heads.
+
+## Format 3 peers and transport, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 75. Builds with the `format3` feature carry the format-3 peer records (`vault/peers/<device>/<seq>-0000.rec`, SignedRecords), TLS-only TCP, connection-bound tokens, signed beacons, the format-3 pairing hello and the head exchange with proofs (`ledger/watch.json`), but nothing switches to them before the format does: every build still reads, writes and speaks format 2.
+
+## Format 3 folder membership for people, behind the `format3` feature (format version 2 unchanged)
+
+Alpha-0-format.md section 76. Commands, local API routes, event-stream events (`folder.request`, `folder.changed`, `pair.ask`) and a pairing question for the format-3 membership records of section 6 of the design. No stored format changes: builds with the feature write `request`, `grant`, `folder`, `share-epoch` and `escrow` SignedRecords only when a person runs those commands, and no build reads them for anything else before the format flips.
 
 ## Release rules
 
@@ -19,9 +37,13 @@ During alpha development, storage formats may change without migration paths. On
 4. Update this table before publishing each storage format version, with the release number and reader status.
 5. Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.
 
-## The mailbox for offline pool disks (alpha-0-format.md section 72; storage format unchanged)
+## The mailbox for offline pool disks (alpha-0-format.md section 78; storage format unchanged)
 
 New objects `vault/mailbox/<device>/<utc>.enc` (each device's list of staged objects, sealed under the device registry key; the writer deletes its older lists) and `vault/mailbox-leases/<slot>.json` (plain JSON leases as in section 70), the device-local `outbox/` directory (staged ciphertext objects, never a storage), `state/mailbox.json`, `state/mailbox.lock` and a `mailbox` block in `config.json`. Additive fields `chunks_in_transit` and `bytes_in_transit` in policy reports, `waiting_source_*` in move reports and the `source` kind of a move job's `waiting`. No new ledger event: delivered copies are `chunk_stored` claims (and, for move jobs, the `chunk_verified` and `chunk_dropped` events of section 59) as before. Earlier versions ignore the lists and leases, never stage, and read the claims as usual.
+
+## Daily update channel after 0.0.1-alpha.13 (format version 1 unchanged)
+
+Device-local files only (alpha-0-format.md section 67): `update-state-daily.json` and `update-channel.json` in the device directory. Earlier versions ignore them. The download site gains `daily/latest/SHA256SUMS.sig`, signed with a separate daily key.
 
 ## Forwarding (alpha-0-format.md section 70; storage format unchanged)
 

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alternative à rclone : Varsto et rclone comparés</title>
+<meta name="description" content="Vous utilisez rclone avec une destination crypt pour conserver des copies chiffrées sur S3 ou un autre cloud ? À quoi sert rclone, comment fonctionnent son backend crypt et bisync, et comment il se compare à Varsto.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/compare/rclone/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alternative à rclone : Varsto et rclone comparés">
+<meta property="og:description" content="Vous utilisez rclone avec une destination crypt pour conserver des copies chiffrées sur S3 ou un autre cloud ? À quoi sert rclone, comment fonctionnent son backend crypt et bisync, et comment il se compare à Varsto.">
+<meta property="og:url" content="https://varsto.net/fr/compare/rclone/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/rclone/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/rclone/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/rclone/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/rclone/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/rclone/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=e9308487f1">
+<script src="../../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../fr/"><img src="../../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../../compare/rclone/" hreflang="en" lang="en">English</a> <a href="../../../fi/compare/rclone/" hreflang="fi" lang="fi">Suomi</a> <a href="../../../sv/compare/rclone/" hreflang="sv" lang="sv">Svenska</a> <a href="../../../fr/compare/rclone/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../../fr/">Projet</a>
+      <a href="../../../fr/features/">Fonctionnalités</a>
+      <a href="../../../fr/use-cases/">Cas d'usage</a>
+      <a href="../../../fr/compare/" aria-current="page">Comparaison</a>
+      <a href="../../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../../fr/screenshots/">Captures d'écran</a>
+      <a href="../../../docs/">Documentation (en)</a>
+      <a href="../../../fr/downloads/">Téléchargements</a>
+      <a href="../../../blog/">Blog (en)</a>
+      <a href="../../../forum/">Forum (en)</a>
+      <a href="../../../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Toutes les comparaisons</a></p>
+    <h1>Varsto et rclone</h1>
+    <p class="lead">rclone est l’outil en ligne de commande pour copier et synchroniser des fichiers vers et depuis plus de soixante-dix systèmes de stockage cloud. Son backend crypt chiffre ce qui y transite, et beaucoup de gens utilisent les deux ensemble comme sauvegarde chiffrée faite maison. Varsto peut lui-même utiliser n’importe quelle destination rclone comme stockage.</p>
+
+    <h2>Comment fonctionne rclone</h2>
+    <p>rclone copie des fichiers entre un dossier local et une destination, ou entre deux destinations : <code>rclone copy</code>, <code>rclone sync</code> (à sens unique, rend la destination identique à la source), <code>rclone mount</code> et bien d’autres. Une destination <em>crypt</em> en enveloppe une autre et chiffre le contenu des fichiers avec NaCl SecretBox (XSalsa20 et Poly1305) ; les noms de fichiers et de répertoires sont eux aussi chiffrés dans son mode par défaut, et peuvent être laissés en clair ou simplement brouillés. En dehors d’une destination crypt, rclone ne chiffre rien. La synchronisation bidirectionnelle existe sous la forme de <code>rclone bisync</code>, qui conserve un listage des deux côtés issu de l’exécution précédente et propage les changements dans les deux sens ; rclone la qualifie de commande avancée, elle doit d’abord être configurée avec <code>--resync</code>, et les fichiers modifiés pendant une exécution peuvent être perdus. rclone ne tient aucun registre des copies qui existent et de leur emplacement au-delà de ce que chaque exécution compare, et n’a pas la notion d’appareil : chaque machine exécute ses propres commandes.</p>
+
+    <h2>Côte à côte</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">rclone</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Où vivent vos fichiers</th><td>Là où vous les copiez : dossiers locaux et toute destination prise en charge.</td><td>Sur vos propres appareils et sur les stockages que vous choisissez : buckets compatibles S3, n’importe quelle destination rclone, dossiers locaux ou réseau, et pools de disques amovibles.</td></tr>
+      <tr><th scope="row">Compte ou serveur central</th><td>Aucun ; seulement les comptes des destinations que vous utilisez.</td><td>Aucun. Il n’y a pas de serveur Varsto ; les appareils se trouvent via vos stockages et sur le réseau local.</td></tr>
+      <tr><th scope="row">Chiffrement</th><td>Uniquement via une destination crypt : XSalsa20-Poly1305 pour le contenu ; noms de fichiers et de répertoires chiffrés dans le mode par défaut, en clair ou brouillés si vous le choisissez. Les autres destinations sont écrites telles quelles.</td><td>De bout en bout, côté client, avant que quoi que ce soit ne quitte l’appareil ; hybride post-quantique (ML-KEM pour les clés de partage, signatures Ed25519 + ML-DSA-65). Pas encore audité de façon indépendante.</td></tr>
+      <tr><th scope="row">Synchronisation entre plusieurs appareils</th><td>À sens unique par défaut (<code>sync</code>). Le bidirectionnel demande une configuration <code>bisync</code> distincte pour chaque paire de chemins, avec ses propres listages et un <code>--resync</code> initial.</td><td>Oui, entre tous les appareils du coffre : les changements fusionnent avec des vecteurs de version, les modifications concurrentes conservent les deux versions, et les appareils se synchronisent via vos stockages ou en pair à pair.</td></tr>
+      <tr><th scope="row">Appareils en ligne en même temps</th><td>Inutile : chaque exécution parle à la destination.</td><td>Inutile : les appareils se synchronisent via vos stockages, et directement en pair à pair lorsqu’ils peuvent se joindre.</td></tr>
+      <tr><th scope="row">Sait où se trouve chaque copie</th><td>Non : chaque commande compare les deux côtés qu’on lui a donnés et ne garde aucun registre.</td><td>Oui : un registre signé enregistre quel stockage et quel appareil détient chaque bloc ; des politiques de durabilité (par défaut 1 copie n’importe où, 1 externe, 1 sur vos propres appareils ou disques, vérifiée par un autre appareil sous 30 jours) avertissent lorsqu’une règle n’est pas respectée.</td></tr>
+      <tr><th scope="row">Disques amovibles et hors ligne</th><td>Un disque est un chemin local tant qu’il est monté ; rien ne le suit lorsqu’il est absent.</td><td>Oui : les pools de disques sont remplis, vérifiés et reconnus à leur retour ; les fichiers situés sur un disque absent demandent ce disque.</td></tr>
+      <tr><th scope="row">Sauvegardes</th><td>Copies faites par <code>copy</code> ou <code>sync</code> ; conserver d’anciennes versions demande la gestion des versions de la destination ou des options comme <code>--backup-dir</code>.</td><td>Oui : choisissez un dossier sur n’importe quel appareil et Varsto en conserve des instantanés chiffrés en lecture seule sur vos stockages externes uniquement, jamais sur vos appareils, pendant le nombre de jours que vous choisissez (90 par défaut), puis supprime ceux qui ont expiré. Restaurez n’importe quel instantané dans un dossier que vous nommez, depuis l’application ou la ligne de commande.</td></tr>
+      <tr><th scope="row">Licence et prix</th><td>Open source (MIT), gratuit.</td><td>Code source disponible (PolyForm Shield 1.0.0), gratuit ; vous ne payez que votre fournisseur de stockage.</td></tr>
+      <tr><th scope="row">Maturité</th><td>Projet mature et ancien.</td><td>Alpha : pas pour des données de production, les formats peuvent encore changer.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Lequel choisir</h2>
+    <div class="grid two">
+      <div class="card"><h3>rclone</h3><p>Choisissez rclone quand vous voulez un outil mature qui copie des fichiers vers presque n’importe quel cloud selon votre propre calendrier, que vous êtes à l’aise pour scripter vous-même les exécutions, et que des copies à sens unique ou une paire bisync suffisent.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Choisissez Varsto quand plusieurs appareils doivent rester alignés d’eux-mêmes, que chaque octet doit être chiffré avant de partir, que vous voulez un registre de l’emplacement de chaque copie et des politiques qui avertissent, tout en continuant à utiliser les destinations rclone que vous avez déjà.</p></div>
+    </div>
+    <p class="note">Varsto est un logiciel alpha : ne lui confiez pas de données dont vous n’avez aucune autre copie, et sa cryptographie n’a pas été auditée de façon indépendante. Les autres produits présentés ici sont matures. Les faits les concernant ont été vérifiés dans leur propre documentation en octobre 2026 ; les prix et les offres changent souvent, consultez donc leurs pages pour les chiffres actuels. Les corrections sont les bienvenues sur le <a href="../../../forum/">forum</a> ou sur GitHub.</p>
+
+    <h2>Sources</h2>
+    <ul>
+      <li><a href="https://rclone.org/">Site web de rclone</a></li>
+      <li><a href="https://rclone.org/crypt/">Destination crypt (chiffrement du contenu et des noms de fichiers)</a></li>
+      <li><a href="https://rclone.org/bisync/">bisync (synchronisation bidirectionnelle)</a></li>
+      <li><a href="https://github.com/rclone/rclone/blob/master/COPYING">Licence (MIT)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../../docs/licence.html">Licence</a> · <a href="../../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>

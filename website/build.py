@@ -6,7 +6,9 @@ Sources:
 - website/src/pages/*.html   page bodies with a small front matter (title, nav, description)
 - website/src/posts/*.md     blog posts (front matter: title, date, summary)
 - repository Markdown files  rendered into docs/ with pandoc (GitHub-flavoured Markdown)
-- website/public/downloads/SHA256SUMS  if present, becomes the download table
+- website/public/downloads/SHA256SUMS  if present, becomes the download table; without it the
+  live site's list is read, read-only (DOWNLOADS_SOURCE_URL, default https://varsto.net/downloads/,
+  empty turns this off)
 
 No inline scripts or styles are emitted (strict CSP). Run from anywhere:
     python3 website/build.py
@@ -36,8 +38,10 @@ ALPHA = (
 REPO = "https://github.com/janttsu/varsto"
 # The last tagged release. Update it when tagging a release: the pages say
 # "released" with this value, while {{VERSION}} follows Cargo.toml (main).
-RELEASED_VERSION = "0.0.1-alpha.14"
+RELEASED_VERSION = "0.0.1-alpha.15"
 RELEASE_KEY = ROOT / "release-key.pub"
+# The daily channel has its own key; it signs only daily/latest/SHA256SUMS.
+DAILY_KEY = ROOT / "daily-key.pub"
 FOOTER = [
     f'{BRAND} is a working name. Source: <a href="{REPO}">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).',
     "No cookies, no tracking. The web server keeps a standard access log for at most seven days.",
@@ -98,7 +102,7 @@ def version_images(body: str) -> str:
 # Website languages: English at the root, the others under /<lang>/ with
 # pages translated in website/src/i18n/<lang>/pages/. Docs, blog and forum
 # stay English (internal documentation is English only).
-LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska")]
+LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska"), ("fr", "Français")]
 NAV_I18N = {
     "fi": {"Project": "Projekti", "Features": "Ominaisuudet", "Use cases": "Käyttötapaukset", "Compare": "Vertailu",
            "How it works": "Miten se toimii", "Screenshots": "Kuvakaappaukset", "Docs": "Dokumentaatio (en)",
@@ -106,11 +110,15 @@ NAV_I18N = {
     "sv": {"Project": "Projekt", "Features": "Funktioner", "Use cases": "Användningsfall", "Compare": "Jämförelse",
            "How it works": "Så fungerar det", "Screenshots": "Skärmbilder", "Docs": "Dokumentation (en)",
            "Downloads": "Nedladdningar", "Blog": "Blogg (en)", "Forum": "Forum (en)", "Contribute": "Bidra", "GitHub": "GitHub"},
+    "fr": {"Project": "Projet", "Features": "Fonctionnalités", "Use cases": "Cas d'usage", "Compare": "Comparaison",
+           "How it works": "Fonctionnement", "Screenshots": "Captures d'écran", "Docs": "Documentation (en)",
+           "Downloads": "Téléchargements", "Blog": "Blog (en)", "Forum": "Forum (en)", "Contribute": "Contribuer", "GitHub": "GitHub"},
 }
 ENGLISH_ONLY = ("docs/", "blog/", "forum/")
 ALPHA_I18N = {
     "fi": "<strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.",
     "sv": "<strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.",
+    "fr": "<strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.",
 }
 FOOTER_I18N = {
     "fi": [
@@ -123,15 +131,22 @@ FOOTER_I18N = {
         "Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.",
         '<a href="{p}docs/security-policy.html">Säkerhetspolicy</a> · <a href="{p}docs/licence.html">Licens</a> · <a href="{p}docs/trademark.html">Varumärke</a> (på engelska)',
     ],
+    "fr": [
+        f'{BRAND} est un nom de travail. Code source : <a href="{REPO}">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).',
+        "Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.",
+        '<a href="{p}docs/security-policy.html">Politique de sécurité</a> · <a href="{p}docs/licence.html">Licence</a> · <a href="{p}docs/trademark.html">Marque</a> (en anglais)',
+    ],
 }
-SKIP_I18N = {"en": "Skip to content", "fi": "Siirry sisältöön", "sv": "Hoppa till innehållet"}
+SKIP_I18N = {"en": "Skip to content", "fi": "Siirry sisältöön", "sv": "Hoppa till innehållet",
+             "fr": "Aller au contenu"}
 # The home page title: what people search for.
 TAGLINE = {"en": "encrypted file sync and backup on your own storage",
            "fi": "salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan",
-           "sv": "krypterad filsynkronisering och säkerhetskopiering till din egen lagring"}
+           "sv": "krypterad filsynkronisering och säkerhetskopiering till din egen lagring",
+           "fr": "synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage"}
 
 
-OG_LOCALE = {"en": "en_GB", "fi": "fi_FI", "sv": "sv_SE"}
+OG_LOCALE = {"en": "en_GB", "fi": "fi_FI", "sv": "sv_SE", "fr": "fr_FR"}
 
 
 def absolute(lang: str, page_rel: str) -> str:
@@ -297,6 +312,8 @@ def rewrite_links(body: str, slug_by_name: dict[str, str], docs_prefix: str = ""
     return re.sub(r'href="([^"#]+)(#[^"]*)?"', repl, body)
 
 
+IOS_NOT_YET = "Not downloadable yet: the app shell is in the repository (apps/ios) and needs a Mac with Xcode to build. The unsigned .ipa comes with the next release."
+
 PLATFORMS = [
     # (title, icon, matcher for the primary file, matchers for alternatives, status line)
     ("Linux", "linux", lambda n: n.endswith("-x86_64-unknown-linux-musl.tar.gz"), [],
@@ -304,13 +321,12 @@ PLATFORMS = [
     ("macOS", "macos", lambda n: n.endswith("-macos.dmg") or n.endswith("-macos.zip") or n.endswith("-macos-apple-silicon-lite.zip"),
      [("Command line only (Apple Silicon)", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz"))],
      "Apple Silicon. Open the disk image and drag Varsto to Applications. The app has its own window, a menu-bar item, Finder actions (right-click a file: Download or Free up space with Varsto; double-click a placeholder to download and open it), the background service and the varsto command line inside the bundle. Unsigned: right-click, Open the first time."),
-    ("Windows", "windows", lambda n: n.endswith("-setup.exe") or n.endswith("-x86_64-pc-windows-gnu.zip"),
-     [("Portable zip (no installer)", lambda n: n.endswith("-x86_64-pc-windows-gnu.zip"))],
+    ("Windows", "windows", lambda n: n.endswith("-setup.exe"), [],
      "x86_64 installer. Installs for your user without administrator rights (or for everyone): Start menu and desktop icons, Varsto in its own window, the background service and tray at login, automatic updates. Run it again to upgrade or repair; your data stays. Not code-signed, so SmartScreen may ask you to confirm. Built and smoke-tested on Windows Server 2025 in CI; not yet through the manual checklist on a real machine."),
     ("Android", "android", lambda n: n.endswith("-android-debug.apk"), [],
      "Debug-signed APK for sideloading: allow the install when the phone asks. Runs the same core as a foreground service. Tested in the Android 15 emulator only."),
-    ("iOS", "ios", None, [],
-     "Not downloadable yet: the app shell is in the repository (apps/ios) and needs a Mac with Xcode to build."),
+    ("iOS", "ios", lambda n: n.endswith("-ios-unsigned.ipa"), [],
+     "Unsigned .ipa for iPhone and iPad: it does not install by itself. Sideload it with AltStore, SideStore or Sideloadly (they sign it with your own Apple ID; see docs/ios-build.md). Built by CI on a Mac runner; not yet run on a real device."),
     ("Source", "source", lambda n: n.endswith("-source.tar.gz"), [],
      "Git archive of the tagged release. Build with a stable Rust toolchain: cargo build --release."),
 ]
@@ -325,42 +341,105 @@ ICONS = {
 }
 
 
+_REMOTE_SET: dict | None = None
+
+
+def remote_download_set() -> dict | None:
+    """The live site's current download set, read-only, for a checkout that has
+    none of its own (the binaries and SHA256SUMS are not in the repository).
+    DOWNLOADS_SOURCE_URL names the directory (default https://varsto.net/downloads/);
+    set it to an empty string to turn the fallback off. Returns
+    {"sums": text, "manifest": dict, "sizes": {name: bytes}} or None when it
+    cannot be fetched or does not look like a download set."""
+    global _REMOTE_SET
+    if _REMOTE_SET is not None:
+        return _REMOTE_SET or None
+    _REMOTE_SET = {}
+    base = os.environ.get("DOWNLOADS_SOURCE_URL", f"{SITE_URL}/downloads/")
+    if not base:
+        return None
+    base = base.rstrip("/") + "/"
+    import urllib.request
+
+    def fetch(name: str, method: str = "GET"):
+        req = urllib.request.Request(base + name, method=method, headers={"User-Agent": "varsto-website-build"})
+        return urllib.request.urlopen(req, timeout=20)
+
+    try:
+        with fetch("SHA256SUMS") as r:
+            sums = r.read(1 << 20).decode()
+        try:
+            with fetch("manifest.json") as r:
+                manifest = json.loads(r.read(1 << 20).decode())
+        except Exception:
+            manifest = {}
+        line = re.compile(r"^[0-9a-f]{64}  \*?[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
+        lines = [ln for ln in sums.splitlines() if ln.strip()]
+        if not lines or not all(line.match(ln) for ln in lines):
+            raise ValueError("SHA256SUMS is not a checksum list")
+        sizes = {}
+        for ln in lines:
+            name = ln.split(maxsplit=1)[1].lstrip("*")
+            try:
+                with fetch(name, "HEAD") as r:
+                    sizes[name] = int(r.headers.get("Content-Length", 0))
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"warning: cannot read the live download set from {base}: {e}", file=sys.stderr)
+        return None
+    print(f"download set read from {base} ({len(lines)} files, read-only)")
+    _REMOTE_SET = {"sums": sums, "manifest": manifest if isinstance(manifest, dict) else {}, "sizes": sizes}
+    return _REMOTE_SET
+
+
 def downloads_table(depth: int) -> str:
     sums = OUT / "downloads" / "SHA256SUMS"
     manifest = OUT / "downloads" / "manifest.json"
-    if not sums.exists():
+    remote = None if sums.exists() else remote_download_set()
+    if not sums.exists() and not remote:
         return '<p class="note">No binaries are published yet. Build from source with <code>cargo build --release</code>.</p>'
-    notes = json.loads(manifest.read_text()) if manifest.exists() else {}
+    if remote:
+        notes, sums_text = remote["manifest"], remote["sums"]
+    else:
+        notes, sums_text = (json.loads(manifest.read_text()) if manifest.exists() else {}), sums.read_text()
     files = []
-    for line in sums.read_text().splitlines():
+    for line in sums_text.splitlines():
         if not line.strip():
             continue
         digest, name = line.split(maxsplit=1)
         name = name.lstrip("*")
-        size = (OUT / "downloads" / name).stat().st_size if (OUT / "downloads" / name).exists() else 0
+        if remote:
+            size = remote["sizes"].get(name, 0)
+        else:
+            size = (OUT / "downloads" / name).stat().st_size if (OUT / "downloads" / name).exists() else 0
         files.append((name, digest, size))
     version = notes.get("_version", "")
     pre = "../" * depth
 
     def human(n: int) -> str:
+        if not n:
+            return ""
         return f"{n / 1048576:.1f} MB" if n >= 1048576 else f"{n // 1024} KB"
 
     cards = []
     for title, icon, primary, alts, status in PLATFORMS:
         candidates = [(n, d, sz) for n, d, sz in files if primary and primary(n)]
-        # The Mac-built app first, the Windows installer before the portable zip.
-        candidates.sort(key=lambda t: (t[0].endswith("-lite.zip"), not t[0].endswith("-setup.exe")))
+        # The Mac-built app before the interim lite apps.
+        candidates.sort(key=lambda t: t[0].endswith("-lite.zip"))
         main = candidates[0] if candidates else None
         icon_svg = f'<svg class="dl-icon" viewBox="0 0 24 24" aria-hidden="true">{ICONS[icon]}</svg>'
         if main:
             name, digest, size = main
-            label = ("Download Varsto.app (Apple Silicon)" if not name.endswith("-lite.zip") else "Download Varsto.app (interim, Apple Silicon)") if title == "macOS" else ("Download the Windows installer" if name.endswith("-setup.exe") else "Download for Windows (zip)") if title == "Windows" else f"Download for {html.escape(title)}"
+            label = "Download the unsigned .ipa" if title == "iOS" else ("Download Varsto.app (Apple Silicon)" if not name.endswith("-lite.zip") else "Download Varsto.app (interim, Apple Silicon)") if title == "macOS" else "Download the Windows installer" if title == "Windows" else f"Download for {html.escape(title)}"
             button = (f'<a class="dl-primary" href="{pre}downloads/{html.escape(name)}">{label}</a>'
                       f'<p class="dl-meta">{html.escape(name)}<br>{human(size)} · <span class="sum" title="{digest}">SHA-256 {digest[:12]}…</span></p>')
         elif title == "Source":
             button = f'<a class="dl-primary" href="{pre}downloads/">Source</a>'
         else:
             button = f'<a class="dl-primary dl-disabled" href="{pre}docs/">Not available yet</a>'
+            if title == "iOS":  # a release without an .ipa (the live set before this one is published)
+                status = IOS_NOT_YET
         alt_links = []
         for label, matcher in alts:
             hit = next(((n, d, sz) for n, d, sz in files if matcher(n)), None)
@@ -425,7 +504,7 @@ def build_translated_pages() -> None:
             rel = meta.get("output", f"{src.stem}.html")
             out_rel = f"{lang}/{rel}"
             depth = out_rel.count("/")
-            body = fill(body, depth)
+            body = fill(body, depth, lang)
             # {{L}}: this language's root (links between translated pages);
             # {{P}}: the site root (assets, docs, blog).
             body = body.replace("{{L}}", "../" * (depth - 1)).replace("{{P}}", "../" * depth)
@@ -453,9 +532,120 @@ def tree_counts() -> dict[str, str]:
     return {"RUST_LINES": f"{round(rust, -3):,}".replace(",", " "), "TESTS": str(tests), "LAB_SCENARIOS": str(scenarios)}
 
 
-def fill(body: str, depth: int) -> str:
+# The daily build channel. The page is static: the platform rows, the stable
+# links and the known gaps are generated from src/data/daily.json, and the
+# numbers that change with every build (build id, date, version, commit, size
+# and SHA-256 per file, the list of previous builds) are filled in by
+# assets/js/daily.js from /daily/latest.json, which the server writes
+# (ops/site/daily-sync.py), so a new daily build needs no site deploy. The
+# files themselves live on the server under daily/ and are not part of the
+# generated site.
+DAILY_JSON = SRC / "data" / "daily.json"
+DAILY_I18N = {
+    "en": {
+        "build": 'Latest build <strong data-f="id"></strong>, <span data-f="date"></span>; version string <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'The links in the table always point to the newest build. The build id, sizes and checksums are filled in by a small script; without it read <a href="{pre}daily/latest.json">latest.json</a> and <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> directly.',
+        "unavailable": "The build details could not be loaded right now. The links in the table still point to the newest build.",
+        "cols": ("Platform", "Download", "Size", "Built from", "SHA-256"),
+        "main": 'The main line at commit <a data-f="commit"></a>.',
+        "ci": 'CI run: <a data-f="ci_run"></a>',
+        "gaps": {},
+    },
+    "fi": {
+        "build": 'Uusin versio <strong data-f="id"></strong>, <span data-f="date"></span>; versiotunnus <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'Taulukon linkit osoittavat aina uusimpaan versioon. Version tunnuksen, koot ja tarkistussummat täyttää pieni skripti; ilman sitä lue <a href="{pre}daily/latest.json">latest.json</a> ja <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> suoraan.',
+        "unavailable": "Version tietoja ei voitu ladata juuri nyt. Taulukon linkit osoittavat silti uusimpaan versioon.",
+        "cols": ("Alusta", "Lataus", "Koko", "Rakennettu commitista", "SHA-256"),
+        "main": 'Päähaara commitissa <a data-f="commit"></a>.',
+        "ci": 'CI-ajo: <a data-f="ci_run"></a>',
+        "gaps": {
+            "unsigned": "Versioissa ei ole julkaisuallekirjoitusta eikä Applen tai Microsoftin koodinallekirjoitusta. Tarkistussummaluettelo on allekirjoitettu erillisellä päivittäisellä avaimella (varsto update --daily tarkistaa sen), mikä osoittaa version tulleen projektin CI:stä, ei sitä että se olisi testattu.",
+            "os-warnings": "macOS, Windows ja iOS varoittavat allekirjoittamattomasta ohjelmistosta; macOS:ssä avaus onnistuu hiiren oikealla painikkeella ja Avaa, Windowsissa SmartScreen pyytää vahvistusta.",
+            "windows-ci-only": "Windows-asennusohjelma on savutestattu vain CI:ssä (asennus, päivitys, korjaus, vanhempaan versioon palaamisen esto, poisto), ei oikealla koneella.",
+            "ios-untested": "iOS-ipa:a ei ole ajettu oikealla laitteella. Asenna se AltStorella, SideStorella tai Sideloadlyllä.",
+            "ui-strings": "Osa sovelluksen käyttöliittymän teksteistä on vielä kääntämättä; ne kirjataan lokiin.",
+            "windows-ios-previous": "Windows et iOS viennent toujours de la version précédente 20261016-316c579 ; ils n’ont pas été reconstruits cette fois.",
+            "grace-default": "Le délai de grâce avant d’abandonner un stockage en retard (paquet E) est de 30 jours par défaut.",
+            "devices-unverified": "Le code plein écran Kotlin, Swift et Windows et le correctif d’appairage n’ont pas été vérifiés sur de vrais appareils.",
+            "first-daily-update": "La première mise à jour avec --daily exige un binaire qui contient déjà la fonction : installez cette version à la main une fois, ensuite varsto update --daily prend le relais.",
+            "windows-ios-previous": "Windows och iOS kommer fortfarande från det föregående bygget 20261016-316c579; de byggdes inte om den här omgången.",
+            "grace-default": "Respitiden innan en lagringsplats som har halkat efter ges upp (paket E) är som standard 30 dagar.",
+            "devices-unverified": "Kotlin-, Swift- och Windows-helskärmskoden samt parningsrättningen har inte verifierats på riktiga enheter.",
+            "first-daily-update": "Den första uppdateringen med --daily kräver en binär som redan har funktionen, så installera det här bygget för hand en gång; därefter kan varsto update --daily ta över.",
+            "windows-ios-previous": "Windows ja iOS ovat edelleen edellisestä versiosta 20261016-316c579; niitä ei rakennettu tällä kierroksella.",
+            "grace-default": "Määräaika, jonka jälkeen jälkeen jäänyt tallennuspaikka jätetään (paketti E), on oletuksena 30 päivää.",
+            "devices-unverified": "Kotlin-, Swift- ja Windows-kokoruutukoodia sekä pariutuskorjausta ei ole varmistettu oikeilla laitteilla.",
+            "first-daily-update": "Ensimmäinen --daily-päivitys vaatii ohjelman, jossa ominaisuus jo on, joten asenna tämä versio kerran käsin; sen jälkeen varsto update --daily hoitaa loput.",
+        },
+    },
+    "sv": {
+        "build": 'Senaste bygget <strong data-f="id"></strong>, <span data-f="date"></span>; versionssträng <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'Länkarna i tabellen pekar alltid på det nyaste bygget. Bygg-id, storlekar och kontrollsummor fylls i av ett litet skript; utan det kan du läsa <a href="{pre}daily/latest.json">latest.json</a> och <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> direkt.',
+        "unavailable": "Uppgifterna om bygget kunde inte laddas just nu. Länkarna i tabellen pekar ändå på det nyaste bygget.",
+        "cols": ("Plattform", "Nedladdning", "Storlek", "Byggd från", "SHA-256"),
+        "main": 'Huvudgrenen vid commit <a data-f="commit"></a>.',
+        "ci": 'CI-körning: <a data-f="ci_run"></a>',
+        "gaps": {
+            "unsigned": "Byggena har ingen releasesignatur och ingen kodsignering från Apple eller Microsoft. Kontrollsummelistan är signerad med den separata dagliga nyckeln (varsto update --daily kontrollerar den), vilket visar att ett bygge kommer från projektets CI, inte att det har testats.",
+            "os-warnings": "macOS, Windows och iOS varnar för osignerad programvara; på macOS öppnar du med högerklick och Öppna, på Windows ber SmartScreen om bekräftelse.",
+            "windows-ci-only": "Windows-installationsprogrammet har bara röktestats i CI (installation, uppgradering, reparation, nekad nedgradering, avinstallation), inte på en riktig dator.",
+            "ios-untested": "iOS-ipa:n har inte körts på en riktig enhet. Installera den med AltStore, SideStore eller Sideloadly.",
+            "ui-strings": "Vissa texter i appens gränssnitt är ännu inte översatta; de loggas.",
+        },
+    },
+    "fr": {
+        "build": 'Dernière version <strong data-f="id"></strong>, <span data-f="date"></span> ; chaîne de version <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'Les liens du tableau pointent toujours vers la version la plus récente. L’identifiant, les tailles et les sommes de contrôle sont ajoutés par un petit script ; sans lui, lisez directement <a href="{pre}daily/latest.json">latest.json</a> et <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a>.',
+        "unavailable": "Les détails de la version n’ont pas pu être chargés pour le moment. Les liens du tableau pointent toujours vers la version la plus récente.",
+        "cols": ("Plateforme", "Téléchargement", "Taille", "Construit depuis", "SHA-256"),
+        "main": 'La branche principale au commit <a data-f="commit"></a>.',
+        "ci": 'Exécution CI : <a data-f="ci_run"></a>',
+        "gaps": {
+            "unsigned": "Les versions n’ont ni signature de version ni signature de code Apple ou Microsoft. La liste des sommes de contrôle est signée avec la clé quotidienne distincte (vérifiée par varsto update --daily), ce qui montre qu’une version provient de la CI du projet, pas qu’elle a été testée.",
+            "os-warnings": "macOS, Windows et iOS avertissent à propos des logiciels non signés ; sous macOS, ouvrez par clic droit puis Ouvrir, sous Windows SmartScreen demande une confirmation.",
+            "windows-ci-only": "Le programme d’installation Windows n’a subi qu’un test de fumée en CI (installation, mise à jour, réparation, refus de rétrogradation, désinstallation), pas sur une vraie machine.",
+            "ios-untested": "L’ipa iOS n’a pas été exécuté sur un vrai appareil. Installez-le avec AltStore, SideStore ou Sideloadly.",
+            "ui-strings": "Certains textes de l’interface de l’application ne sont pas encore traduits ; ils sont consignés dans les journaux.",
+        },
+    },
+}
+
+
+def daily_blocks(lang: str, depth: int) -> dict[str, str]:
+    """The pieces of the daily page: BUILD, TABLE, INCLUDED, GAPS, HISTORY.
+    Static HTML with the stable links; daily.js fills the data-f cells."""
+    t = DAILY_I18N[lang]
+    pre = "../" * depth
+    data = json.loads(DAILY_JSON.read_text())
+    e = html.escape
+    rows = "\n".join(
+        f'<tr data-file="{e(p["latest"])}"><th scope="row">{e(p["label"])}</th>'
+        f'<td><a href="{pre}daily/latest/{e(p["latest"])}">{e(p["latest"])}</a></td>'
+        '<td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>'
+        for p in data["platforms"]
+    )
+    head = "".join(f"<th>{e(c)}</th>" for c in t["cols"])
+    gaps = [t["gaps"].get(g["id"], g["text"]) for g in data["known_gaps"]]
+    script = f'<script src="{pre}assets/js/daily.js?v={asset_version("assets/js/daily.js")}" defer></script>'
+    return {
+        "BUILD": (
+            f'<p class="lead" id="daily-build" data-pre="{pre}" data-unavailable="{e(t["unavailable"])}" hidden>'
+            + t["build"].format(pre=pre) + "</p>\n    "
+            + f'<noscript><p class="lead">{t["noscript"].format(pre=pre)}</p></noscript>'
+        ),
+        "TABLE": f'<table class="downloads" id="daily-table"><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>',
+        "INCLUDED": f'<ul id="daily-included" hidden><li>{t["main"]}</li><li>{t["ci"]}</li></ul>',
+        "GAPS": "<ul>" + "".join(f"<li>{e(x)}</li>" for x in gaps) + "</ul>",
+        "HISTORY": f'<ul id="daily-history"></ul>\n    {script}',
+    }
+
+
+def fill(body: str, depth: int, lang: str = "en") -> str:
     """The placeholders every page body may use."""
     body = body.replace("{{DOWNLOADS}}", downloads_table(depth)).replace("{{POSTS}}", posts_list(depth))
+    if "{{DAILY_" in body:
+        for key, value in daily_blocks(lang, depth).items():
+            body = body.replace("{{DAILY_" + key + "}}", value)
     body = body.replace("{{VERSION}}", cargo_version()).replace("{{RELEASED}}", RELEASED_VERSION)
     for key, value in COUNTS.items():
         body = body.replace("{{" + key + "}}", value)
@@ -607,6 +797,8 @@ def build_redirects() -> None:
 def copy_data() -> None:
     """Data files pages link to (benchmark results) are published as they are."""
     for src in sorted((SRC / "data").glob("*.json")):
+        if src.name == "daily.json":  # input of the daily page, not published as it is
+            continue
         (OUT / "data").mkdir(parents=True, exist_ok=True)
         (OUT / "data" / src.name).write_bytes(src.read_bytes())
 
@@ -618,6 +810,8 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     if RELEASE_KEY.exists():
         shutil.copyfile(RELEASE_KEY, OUT / "release-key.pub")
+    if DAILY_KEY.exists():
+        shutil.copyfile(DAILY_KEY, OUT / "daily-key.pub")
     slugs = build_docs()
     build_blog(slugs)
     build_pages(slugs)

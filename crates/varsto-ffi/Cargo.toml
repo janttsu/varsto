@@ -15,6 +15,8 @@ crate-type = ["staticlib", "cdylib"]
 default = ["mimalloc"]
 # mimalloc as the global allocator (see varsto-cli).
 mimalloc = ["dep:mimalloc"]
+# Storage format 3 work in progress (varsto-core `format3`).
+format3 = ["varsto-core/format3"]
 
 [dependencies]
 varsto-core = { path = "../varsto-core" }
@@ -35,3 +37,9 @@ blake2 = "0.10"
 base64 = "0.22"
 tempfile.workspace = true
 
+
+[dev-dependencies]
+image.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

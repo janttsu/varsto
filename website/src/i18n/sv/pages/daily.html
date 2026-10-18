@@ -1,0 +1,30 @@
+---
+title: Dagliga byggen
+nav: Downloads
+output: daily/index.html
+description: Utvecklingsbyggen av Varsto från huvudgrenen, med kontrollsummelistan signerad av en separat daglig nyckel. Inga releaser, inte för produktionsdata.
+---
+    <h1>Dagliga byggen</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>Det här är utvecklingsbyggen från huvudgrenen, inte releaser.</strong></p>
+      <ul>
+        <li>De är inte releaser och har inte gått igenom någon releasetestning. De saknar releasesignatur och kodsignering från Apple eller Microsoft. Använd dem inte för produktionsdata.</li>
+        <li>Lagringsformatet kan ändras mellan byggen utan någon migrering. Format 2 kommer att kräva att valv skapas på nytt.</li>
+        <li><code>varsto update --daily</code> installerar det senaste dagliga bygget för din plattform (kommandoradsbyggena för Linux och Windows; macOS-appen och Android-APK:n installeras för hand). Vanliga <code>varsto update</code> håller sig till releaser och installerar aldrig ett dagligt bygge.</li>
+        <li>Behåll egna säkerhetskopior.</li>
+      </ul>
+      <p>Behöver du något att lita på? Använd de <a href="{{L}}downloads/">stabila nedladdningarna</a> i stället.</p>
+    </div>
+    {{DAILY_BUILD}}
+    {{DAILY_TABLE}}
+    <h2>Verifiera</h2>
+    <p>Lägg <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> bredvid filerna du laddade ner (filnamnen i tabellen är de fasta namnen) och kör</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Utelämna <code>--ignore-missing</code> om du laddade ner alla filer. Listan är signerad med den separata dagliga nyckeln (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign-format; nyckeln är <a href="{{P}}daily-key.pub">daily-key.pub</a>), och det är den som <code>varsto update --daily</code> kontrollerar. Förutom att en nedladdning är komplett och oskadd visar signaturen att listan kommer från projektets egen bygglinje.</p>
+    <h2>Vad som ingår</h2>
+    {{DAILY_INCLUDED}}
+    <h2>Kända brister</h2>
+    {{DAILY_GAPS}}
+    <h2>Tidigare byggen</h2>
+    <p>De sju senaste byggena sparas med samma filnamn; varje bygge har sin egen signerade lista.</p>
+    {{DAILY_HISTORY}}

@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fonctionnement: Varsto</title>
+<meta name="description" content="Comment fonctionne Varsto : vos appareils et vos propres stockages, les blocs chiffrés, les clés, le registre signé qui suit chaque copie, la synchronisation, le transfert pair à pair, le partage, Strongroom et le kit de récupération, avec les limites en toute honnêteté.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/how-it-works/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Fonctionnement: Varsto">
+<meta property="og:description" content="Comment fonctionne Varsto : vos appareils et vos propres stockages, les blocs chiffrés, les clés, le registre signé qui suit chaque copie, la synchronisation, le transfert pair à pair, le partage, Strongroom et le kit de récupération, avec les limites en toute honnêteté.">
+<meta property="og:url" content="https://varsto.net/fr/how-it-works/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/how-it-works/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/how-it-works/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/how-it-works/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/how-it-works/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/how-it-works/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=e9308487f1">
+<script src="../../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+    <nav class="langs" aria-label="Language"><a href="../../how-it-works/" hreflang="en" lang="en">English</a> <a href="../../fi/how-it-works/" hreflang="fi" lang="fi">Suomi</a> <a href="../../sv/how-it-works/" hreflang="sv" lang="sv">Svenska</a> <a href="../../fr/how-it-works/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav>
+
+    <nav class="main" aria-label="Main">
+      <a href="../../fr/">Projet</a>
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/use-cases/">Cas d'usage</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../fr/how-it-works/" aria-current="page">Fonctionnement</a>
+      <a href="../../fr/screenshots/">Captures d'écran</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/downloads/">Téléchargements</a>
+      <a href="../../blog/">Blog (en)</a>
+      <a href="../../forum/">Forum (en)</a>
+      <a href="../../fr/contribute/">Contribuer</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <div class="tech">
+    <h1>Comment fonctionne Varsto</h1>
+    <p class="lead">La technologie derrière Varsto, un mécanisme à la fois : comment un fichier devient des blocs chiffrés, quelles clés existent, comment le registre signé suit chaque copie, comment les appareils se synchronisent et se trouvent, et ce qui n’est pas encore fait.</p>
+    <p>Tout ce qui est décrit ici est implémenté dans le cœur à code source disponible (<code>crates/varsto-core</code>) et décrit avec la disposition exacte des champs dans le <a href="../../docs/alpha-0-format.html">format de stockage</a>. C’est un logiciel alpha : les formats peuvent encore changer, et ni la conception ni le code n’ont été audités. Le <a href="../../docs/threat-model.html">modèle de menaces</a> et le <a href="../../docs/failure-model.html">modèle de défaillances</a> disent contre quoi il défend et contre quoi il ne défend pas.</p>
+
+    <nav class="toc" aria-label="Sur cette page">
+      <p class="toc-title">Sur cette page</p>
+      <ol>
+        <li><a href="#overview">Vue d’ensemble</a></li>
+        <li><a href="#blocks">Du fichier aux blocs chiffrés</a></li>
+        <li><a href="#keys">Les clés</a></li>
+        <li><a href="#ledger">Le registre</a></li>
+        <li><a href="#sync">Listes de fichiers et synchronisation</a></li>
+        <li><a href="#p2p">Pair à pair</a></li>
+        <li><a href="#visibility">Ce que voit chaque partie</a></li>
+        <li><a href="#sharing">Partager un dossier</a></li>
+        <li><a href="#strongroom">Strongroom</a></li>
+        <li><a href="#recovery">Phrases secrètes et kit de récupération</a></li>
+        <li><a href="#limits">Ce qui n’est pas fait</a></li>
+      </ol>
+    </nav>
+
+    <section class="feature" id="overview">
+      <h2>Vue d’ensemble</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/encryption/architecture.webp?v=9b5c21b512"><img src="../../assets/img/encryption/architecture.png?v=13f1f46def" alt="Un portable et un téléphone, chacun détenant les clés, échangent des données avec vos stockages, qui contiennent les lots signés du registre, les listes de fichiers et les blocs chiffrés ; les deux appareils échangent aussi des blocs directement, en pair à pair, sur le réseau local ou par internet." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/encryption/architecture-dark.webp?v=ec153bc689"><img src="../../assets/img/encryption/architecture-dark.png?v=a40e068fdb" alt="Un portable et un téléphone, chacun détenant les clés, échangent des données avec vos stockages, qui contiennent les lots signés du registre, les listes de fichiers et les blocs chiffrés ; les deux appareils échangent aussi des blocs directement, en pair à pair, sur le réseau local ou par internet." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Varsto a deux sortes d’éléments, et rien de notre part entre les deux.</p>
+        <ul>
+          <li><strong>Vos appareils</strong> (portables, ordinateurs de bureau, téléphones) détiennent les clés. Ils découpent les fichiers en blocs, chiffrent et déchiffrent, et exécutent la synchronisation dans un service en arrière-plan.</li>
+          <li><strong>Vos stockages</strong> ne contiennent que du texte chiffré : un bucket compatible S3, n’importe quelle destination rclone, un NAS ou un partage réseau, un disque local ou amovible, ou un pool de disques sur une étagère. Varsto n’attend d’eux rien d’autre que put, get, list et delete.</li>
+        </ul>
+        <p>Chaque stockage contient les trois mêmes sortes d’objets : des <strong>blocs</strong> chiffrés de contenu de fichiers, les <strong>listes de fichiers</strong> (manifestes) chiffrées de chaque appareil, et le <strong>registre</strong> signé de chaque appareil, plus quelques petits enregistrements chiffrés pour les appareils, les dossiers et les politiques. Chaque chemin a exactement un seul rédacteur : un appareil n’écrit que sous son propre identifiant, et les blocs sont nommés d’après l’empreinte de leur texte chiffré et ne sont jamais écrasés. Les stockages n’ont donc besoin d’aucun verrou, et chacun sert aussi de boîte aux lettres : des appareils qui ne sont jamais en ligne en même temps finissent par converger, tant qu’ils partagent un stockage. Les appareils peuvent aussi échanger des blocs directement, sur le réseau local ou à travers internet.</p>
+        <p>Il n’y a ni compte Varsto, ni serveur, ni relais. Si le projet s’arrêtait demain, vos appareils installés continueraient à se synchroniser via vos stockages.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="blocks">
+      <h2>Du fichier aux blocs chiffrés</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/encryption/pipeline.webp?v=ec9b790c8c"><img src="../../assets/img/encryption/pipeline.png?v=036c0617fc" alt="Sur l’appareil, un fichier est découpé en morceaux, compressé et chiffré avec une clé par morceau ; seuls les blocs chiffrés, nommés d’après leur empreinte, vont vers le stockage, qui voit des empreintes et des tailles mais ni noms ni contenu." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/encryption/pipeline-dark.webp?v=8c5d0c8562"><img src="../../assets/img/encryption/pipeline-dark.png?v=af588393ba" alt="Sur l’appareil, un fichier est découpé en morceaux, compressé et chiffré avec une clé par morceau ; seuls les blocs chiffrés, nommés d’après leur empreinte, vont vers le stockage, qui voit des empreintes et des tailles mais ni noms ni contenu." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <ol>
+          <li><strong>Découpage.</strong> Le fichier est découpé en morceaux définis par le contenu, dont la taille suit celle du fichier : pour les fichiers de moins de 32 Mio, des morceaux de 64 Kio à 1 Mio, 256 Kio en moyenne ; jusqu’à 1 Gio, de 256 Kio à 4 Mio, 1 Mio en moyenne ; au-delà, de 1 à 16 Mio, 4 Mio en moyenne (une empreinte glissante choisit les points de coupe), de sorte qu’une modification au milieu change quelques morceaux, pas le fichier entier.</li>
+          <li><strong>Identité.</strong> Chaque morceau reçoit un identifiant : une empreinte BLAKE3 à clé de son texte en clair, sous la clé d’empreinte de déduplication du dossier. Le même contenu dans le même dossier a le même identifiant sur chaque appareil, ce qui permet la déduplication hors ligne ; la clé empêche quiconque en est dépourvu de tester si vous détenez un fichier connu.</li>
+          <li><strong>Compression.</strong> Le morceau est compressé avec zstd lorsque cela économise au moins 5 %. Le niveau est une constante du format, de sorte que chaque appareil produit les mêmes octets pour le même morceau.</li>
+          <li><strong>Chiffrement.</strong> XChaCha20-Poly1305 sous une clé et un nonce de morceau dérivés de la clé du dossier et de l’identifiant du morceau, avec des données associées qui nomment le coffre, le dossier, le morceau et sa longueur. Les clés déterministes sont sûres ici parce que chaque clé ne chiffre qu’un seul message, et elles permettent à deux appareils de produire des objets identiques octet pour octet sans se parler.</li>
+          <li><strong>Nommage.</strong> L’objet stocké est nommé d’après l’empreinte BLAKE3 de son texte chiffré. Toute copie, où qu’elle soit, peut être vérifiée d’après son nom sans aucune clé : c’est ainsi que les réplicas, les pairs, <code>fsck --verify</code> et la vérification automatique contrôlent des copies qu’ils ne peuvent pas lire.</li>
+        </ol>
+        <p class="note">Compromis connu : le chiffrement déterministe (convergent) à l’intérieur d’un dossier signifie que deux personnes qui détiennent toutes deux la clé du dossier peuvent savoir si elles ont un fichier identique, et que les tailles des morceaux compressés sont visibles du stockage. Dans un dossier partagé, cela reste vrai pour une époque de clé ; retirer un membre donne au dossier une nouvelle clé aléatoire, de sorte qu’un membre retiré ne peut rien reconnaître de ce qui est écrit ensuite.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="keys">
+      <h2>Les clés</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/encryption/hierarchy.webp?v=c3acd84b0f"><img src="../../assets/img/encryption/hierarchy.png?v=c6c2f06231" alt="Une clé de coffre aléatoire dérive les clés d’usage valables pour tout le coffre (registre, annuaire, enregistrement de dossier et autres) ; la clé d’enregistrement de dossier scelle la clé aléatoire de chaque dossier, dont proviennent la clé de métadonnées et une clé par morceau." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/encryption/hierarchy-dark.webp?v=b8ed2b39a3"><img src="../../assets/img/encryption/hierarchy-dark.png?v=3247a28773" alt="Une clé de coffre aléatoire dérive les clés d’usage valables pour tout le coffre (registre, annuaire, enregistrement de dossier et autres) ; la clé d’enregistrement de dossier scelle la clé aléatoire de chaque dossier, dont proviennent la clé de métadonnées et une clé par morceau." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Tout part d’une seule <strong>clé de coffre</strong> aléatoire de 256 bits, créée sur le premier appareil et jamais dérivée de ce que vous saisissez. C’est l’unique secret à conserver ; le kit de récupération est cette clé sur papier.</p>
+        <ul>
+          <li><strong>Sur chaque appareil</strong>, la clé du coffre et la clé de signature de l’appareil sont stockées dans <code>keys.enc</code>, chiffré sous une clé qu’Argon2id dérive de la phrase secrète de l’appareil. Changer la phrase secrète rechiffre ce fichier et ne touche à rien dans le stockage.</li>
+          <li>Les <strong>clés valables pour tout le coffre</strong> sont dérivées de la clé du coffre selon l’usage : registre, annuaire des appareils, enregistrement de dossier, registre de réplica, authentification des pairs et étiquette de balise. La compromission d’une clé dérivée n’expose pas les autres.</li>
+          <li><strong>Par dossier</strong>, une clé de dossier aléatoire est publiée à vos autres appareils dans un enregistrement de dossier chiffré. C’est d’elle que viennent la clé d’empreinte de déduplication, la clé de métadonnées (listes de fichiers et vignettes) et une clé par morceau. Une clé de dossier ouvre ce dossier et rien d’autre ; c’est ce que remet le partage.</li>
+          <li><strong>Par appareil</strong>, il y a une clé de signature (Ed25519 + ML-DSA-65) dont la moitié publique est l’identité de l’appareil ; l’identifiant de l’appareil en est une empreinte.</li>
+        </ul>
+        <p><strong>Retirer un appareil</strong> ouvre une nouvelle <em>époque</em> de clés : une nouvelle clé de coffre aléatoire, scellée pour chaque appareil restant avec l’échange de clés hybride décrit plus bas. Les nouveaux lots du registre, les enregistrements, les listes de fichiers et les blocs utilisent les nouvelles clés, et une chaîne d’enregistrements d’époque chiffrés permet à la nouvelle clé d’ouvrir tout ce qui est plus ancien. L’appareil retiré trouve une révocation signée la prochaine fois qu’il atteint un stockage, et s’arrête ; avec un ordre d’effacement, il vide aussi ses dossiers et ses clés.</p>
+      </div>
+    </section>
+
+    <h3>Les algorithmes</h3>
+    <table class="downloads">
+      <thead><tr><th>Usage</th><th>Algorithme</th><th>Remarques</th></tr></thead>
+      <tbody>
+        <tr><td>Chiffrement du contenu et des métadonnées</td><td>XChaCha20-Poly1305 (AEAD)</td><td>Clés de 256 bits, nonces de 192 bits. Chaque texte chiffré porte des données associées qui disent ce qu’il est, de sorte qu’un stockage ne peut pas faire passer un objet dans un autre rôle.</td></tr>
+        <tr><td>Empreintes et dérivation de clés</td><td>BLAKE3 (keyed hash et derive_key)</td><td>Les identifiants de morceaux et les empreintes de fichiers sont à clé. Chaque clé dérivée porte une chaîne de contexte (<code>e2ee-sync-format/0/&lt;purpose&gt;</code> ; l’empreinte de partage utilise son propre contexte, indépendant de la version).</td></tr>
+        <tr><td>De la phrase secrète à la clé</td><td>Argon2id</td><td>Au moins 64 Mio, 3 passes ; un sel aléatoire par appareil. La phrase secrète ne quitte jamais l’appareil.</td></tr>
+        <tr><td>Signatures (registre, enregistrements)</td><td>Ed25519 + ML-DSA-65, hybride</td><td>Les deux signatures couvrent les mêmes octets et les deux doivent être valides. Une clé qui a une partie post-quantique n’accepte jamais une signature Ed25519 seule.</td></tr>
+        <tr><td>Échange de clés (partage, nouvelles époques)</td><td>X25519 + ML-KEM-768, hybride</td><td>Les deux secrets partagés et la transcription complète entrent dans une seule clé ; un secret scellé reste privé à moins que les deux algorithmes ne soient cassés.</td></tr>
+        <tr><td>Dossiers à clé de sécurité</td><td>FIDO2 hmac-secret</td><td>La clé de sécurité dérive un secret de 32 octets à partir d’un identifiant et d’un sel propre au dossier, après un contact.</td></tr>
+        <tr><td>Kit de récupération</td><td>Mots BIP-39, Shamir sur GF(256)</td><td>24 mots avec somme de contrôle ; parts 2 sur 3 facultatives.</td></tr>
+      </tbody>
+    </table>
+
+    <section class="feature" id="ledger">
+      <h2>Le registre</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/encryption/ledger-flow.webp?v=4286f1c1d3"><img src="../../assets/img/encryption/ledger-flow.png?v=91538508f9" alt="Le portable écrit le lot 42 du registre sur vos stockages ; l’ordinateur de bureau le lit, le vérifie et le fusionne ; la vue de chaque appareil répond alors à la question de l’emplacement du bloc 7f3a : sur box, stocké par le portable et vérifié par l’ordinateur de bureau, et sur cloud, stocké par le portable mais pas encore vérifié." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/encryption/ledger-flow-dark.webp?v=5ab49dc01d"><img src="../../assets/img/encryption/ledger-flow-dark.png?v=c3f0d869f0" alt="Le portable écrit le lot 42 du registre sur vos stockages ; l’ordinateur de bureau le lit, le vérifie et le fusionne ; la vue de chaque appareil répond alors à la question de l’emplacement du bloc 7f3a : sur box, stocké par le portable et vérifié par l’ordinateur de bureau, et sur cloud, stocké par le portable mais pas encore vérifié." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Le registre est la comptabilité de Varsto. Chaque appareil tient son propre <strong>journal de faits en ajout seul</strong> sur ce qu’il a fait, et aucun appareil n’écrit jamais dans le journal d’un autre. Les faits sont petits et concrets : « j’ai écrit le bloc 7f3a sur le stockage que j’appelle box », « j’ai téléchargé 7f3a depuis box et son empreinte correspondait », « j’ai publié la version 12 de la liste de fichiers de ce dossier ».</p>
+        <p>Chaque appareil lit le journal de chaque autre appareil via les stockages et les rejoue tous pour obtenir la même image : quels blocs existent, où se trouve chaque copie, qui l’a écrite, qui l’a vérifiée et quand. Rien n’y est cru d’après sa provenance : chaque lot est signé par l’appareil qui l’a produit, et une copie ne compte comme vérifiée que lorsqu’un autre appareil l’a contrôlée.</p>
+        <p>Sans registre, un outil de synchronisation ne peut qu’espérer que ses copies existent. Avec lui, Varsto peut dire combien de copies de chaque bloc il y a, en quels lieux, depuis quand chacune a été vérifiée, et lesquelles personne n’a encore vérifiées.</p>
+      </div>
+    </section>
+
+    <h3>Ce qu’il enregistre</h3>
+    <table class="downloads">
+      <thead><tr><th>Événement</th><th>Signification</th></tr></thead>
+      <tbody>
+        <tr><td>Appareil enregistré</td><td>Cet appareil a rejoint le coffre, sous ce nom.</td></tr>
+        <tr><td>Dossier ajouté</td><td>Cet appareil a créé un dossier.</td></tr>
+        <tr><td>Bloc stocké</td><td>Cet appareil a écrit un bloc chiffré sur un stockage : dossier, identifiant du morceau, nom de l’objet, taille et stockage. Une déclaration, attestée par le seul rédacteur.</td></tr>
+        <tr><td>Bloc vérifié</td><td>Cet appareil a téléchargé le bloc depuis un stockage et son empreinte correspondait à son nom. Enregistré par les téléchargements, <code>fsck --verify</code>, la vérification automatique et les contrôles complets de disques.</td></tr>
+        <tr><td>Bloc sur l’appareil</td><td>Cet appareil détient le texte en clair du bloc, au sein d’un fichier.</td></tr>
+        <tr><td>Liste de fichiers publiée</td><td>Cet appareil a publié la version <em>n</em> de la liste de fichiers d’un dossier, avec son empreinte et son nombre de fichiers.</td></tr>
+        <tr><td>Stockage retiré</td><td>Un stockage a été retiré du coffre : les déclarations qui le concernent faites avant cet événement ne comptent plus comme des copies.</td></tr>
+      </tbody>
+    </table>
+    <p>Pas de noms de fichiers et pas de contenu : les blocs sont identifiés par des identifiants de morceaux à clé et des empreintes de texte chiffré, et tout le lot est de toute façon chiffré.</p>
+
+    <section class="feature">
+      <h3>Signé, chaîné et scellé</h3>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/encryption/chain.webp?v=c64e438f0f"><img src="../../assets/img/encryption/chain.png?v=bc7a2a1512" alt="Les lots 40, 41 et 42 du registre, chacun signé avec Ed25519 et ML-DSA-65 et chaîné au précédent ; un second lot 41 venant d’un appareil revenu en arrière fait bifurquer la chaîne, et il est détecté et mis à l’écart par les autres appareils." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/encryption/chain-dark.webp?v=ae0317ce6c"><img src="../../assets/img/encryption/chain-dark.png?v=21e3113ecb" alt="Les lots 40, 41 et 42 du registre, chacun signé avec Ed25519 et ML-DSA-65 et chaîné au précédent ; un second lot 41 venant d’un appareil revenu en arrière fait bifurquer la chaîne, et il est détecté et mis à l’écart par les autres appareils." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>Les événements sont rassemblés en <strong>lots</strong>, typiquement un par synchronisation plutôt qu’un par fichier. Un lot porte l’identifiant de l’appareil, un numéro de séquence (1, 2, 3, ...), l’empreinte du lot précédent de l’appareil, une horloge logique, son heure de création et les événements.</p>
+        <ol>
+          <li>Le corps est chiffré avec XChaCha20-Poly1305 sous la clé du registre, avec l’identifiant de l’appareil et le numéro de séquence comme données associées.</li>
+          <li>L’appareil signe son identifiant, le numéro de séquence et l’empreinte du corps chiffré avec Ed25519 et ML-DSA-65. Signer l’empreinte du texte chiffré permet à n’importe qui de vérifier la chaîne sans la clé.</li>
+          <li>Le lot signé est écrit sur chaque stockage qui conserve des enregistrements sous le nom <code>ledger/&lt;device&gt;/&lt;sequence&gt;</code>, sans jamais être écrasé.</li>
+        </ol>
+        <p>Un lecteur n’accepte un lot que lorsque les deux signatures sont valides au regard de la clé publique de l’appareil dans l’annuaire des appareils et que son empreinte précédente correspond. La signature post-quantique coûte environ 3,3 Ko, c’est pourquoi les événements voyagent par lots : le registre grossit de quelques kilo-octets par synchronisation, pas par fichier.</p>
+      </div>
+    </section>
+
+    <h3>Échangé via vos stockages</h3>
+    <p>Chaque stockage est une boîte aux lettres. Après qu’un appareil a validé un lot, il envoie chacun de ses propres lots qui manquent à un stockage ; à chaque récupération, il liste le registre sur chaque stockage à chaud, prend les lots qu’il n’a pas encore vus, les vérifie, les déchiffre et en garde une copie locale. Comme chaque stockage porte tout le registre, un portable qui se synchronise la nuit et un téléphone qui se synchronise le matin voient la même histoire sans jamais se rencontrer. Personne n’ordonne rien de façon centrale : une horloge logique (de Lamport) ordonne les changements, pas l’horloge murale. Les réplicas non fiables et les personnes avec qui vous partagez un dossier écrivent aussi des registres, scellés sous des clés qui n’ouvrent que leur part : les déclarations d’un réplica nomment des objets, pas des fichiers, et celles d’un membre ne couvrent que le dossier partagé.</p>
+
+    <h3>La vue : où se trouve chaque bloc</h3>
+    <p>Rejouer tous les lots donne à chaque appareil la même <strong>vue</strong> : pour chaque bloc de chaque dossier, le nom et la taille de son objet, les stockages qui déclarent une copie et quel appareil l’a déclarée, quels appareils l’y ont vérifiée et quand, et quels appareils détiennent le texte en clair. Elle connaît aussi la liste de fichiers la plus récente de chaque appareil pour chaque dossier, les appareils et les dossiers qui existent, et quels stockages sont retirés. Les noms de stockage sont locaux à chaque appareil (« box » ici, « primary » là), c’est pourquoi chaque stockage porte une identité aléatoire, par laquelle les appareils font correspondre leurs déclarations.</p>
+
+    <h3>À quoi il sert</h3>
+    <ul>
+      <li><strong>Envoyer une seule fois.</strong> Avant d’envoyer, un appareil ignore chaque stockage qui déclare déjà un bloc, de sorte qu’un fichier ajouté sur deux appareils n’est envoyé qu’une fois.</li>
+      <li><strong>Libérer de l’espace en toute sécurité.</strong> Un fichier ne devient un fichier substitut que lorsque le registre montre chaque bloc sur un stockage qui n’est pas un transporteur, et que les règles de copies du dossier restent respectées.</li>
+      <li><strong>Politiques de durabilité.</strong> « Au moins trois copies, dont une dans le cloud, chacune vérifiée par un autre appareil sous 30 jours » est évalué à partir du seul registre, et le service lève une alerte lorsqu’un dossier se dégrade.</li>
+      <li><strong>Vérification automatique.</strong> Le service en arrière-plan choisit des copies écrites par d’autres appareils et que personne n’a vérifiées récemment, les télécharge, compare l’empreinte du texte chiffré avec le nom et enregistre le résultat, dans la limite d’un budget quotidien.</li>
+      <li><strong>Contrôle de la dégradation silencieuse</strong> (nouveau dans la version 0.0.1-alpha.14). Le service recalculera aussi, selon un calendrier glissant, l’empreinte de chaque copie que le registre place sur les stockages et les disques connectés de cet appareil, quel qu’en soit l’auteur, ainsi que des fichiers synchronisés sur l’appareil. Il n’enregistre rien (un rédacteur qui relit sa propre copie n’est pas une vérification indépendante) ; les copies endommagées partent en réparation, et un fichier local endommagé est mis de côté et restauré depuis le coffre.</li>
+      <li><strong><code>fsck</code>.</strong> Compare le registre avec ce que les stockages listent réellement : déclarations sans objet, blocs sans copie nulle part, blocs vérifiés ailleurs.</li>
+      <li><strong>Disques transporteurs.</strong> Un disque transporteur ne prend que les blocs qu’aucun autre appareil ne détient encore, et rend la place dès que les deux extrémités les ont.</li>
+      <li><strong>Retirer un stockage.</strong> Varsto planifie à partir du registre quels blocs tomberaient sous le minimum du dossier, les copie ailleurs, vérifie de nouveau et n’enregistre le retrait qu’ensuite.</li>
+      <li><strong>Coûts.</strong> Le coût mensuel d’un stockage est le nombre d’octets que le registre y enregistre multiplié par son prix.</li>
+      <li><strong>Retirer un appareil.</strong> Une révocation nomme le dernier lot de l’appareil retiré qui compte ; tout ce qu’il signe ensuite est écarté de chaque vue, et seules les listes de fichiers annoncées par ces lots sont fusionnées.</li>
+    </ul>
+
+    <h3>Bifurcations et appareils restaurés</h3>
+    <p>Comme chaque appareil numérote et chaîne ses propres lots, l’histoire ne peut pas être réécrite discrètement. Deux lots différents portant le même appareil et le même numéro de séquence, ou un lot dont l’empreinte précédente ne correspond pas, constituent une <strong>bifurcation</strong> : chaque appareil qui en voit une marque cet appareil comme bifurqué, et <code>fsck</code> la signale. La cause habituelle est un appareil restauré à partir d’une ancienne sauvegarde ou un disque cloné, qui repartirait d’un numéro de séquence que sa version plus récente a déjà utilisé. Lorsqu’un appareil trouve des lots sous sa propre identité qu’il n’a jamais écrits, il se <strong>met lui-même à l’écart</strong> : il cesse de signer et d’envoyer tant qu’il n’est pas enregistré de nouveau comme nouvel appareil, de sorte que deux copies divergentes d’une même identité n’écrivent jamais toutes deux l’histoire.</p>
+
+    <h3>Limites</h3>
+    <ul>
+      <li>Une signature prouve qu’un appareil a <em>dit</em> avoir stocké un bloc, pas que le bloc s’y trouve toujours. C’est pourquoi une copie ne compte comme vérifiée qu’après contrôle par un autre appareil ; il n’existe pas encore de preuve de stockage par défi-réponse.</li>
+      <li>Un stockage qui sert une partie plus ancienne mais valide du registre n’est pas pris par les signatures ; cela ne se voit que lorsqu’un autre stockage ou appareil a des lots plus récents. La détection de retour en arrière est un objectif de conception, pas une propriété testée.</li>
+      <li>Le registre grossit à chaque synchronisation. Depuis alpha.8, les appareils écrivent des points de contrôle et élaguent les lots acquittés, de sorte que ce qui est stocké reste borné ; les membres de dossiers partagés et les réplicas conservent encore chaque lot.</li>
+      <li>Les heures de vérification proviennent des horloges des appareils : une horloge très fausse peut provoquer de fausses alertes, bien qu’elle ne change pas l’ordre des changements.</li>
+      <li>Les stockages voient le nombre de répertoires de registre (le nombre de vos appareils) ainsi que la taille et le moment des lots.</li>
+    </ul>
+
+    <h2 id="sync">Listes de fichiers et synchronisation</h2>
+    <p>Le registre dit où sont les blocs ; les <strong>manifestes</strong> disent ce que sont les fichiers. Après un changement, un appareil publie sa vue complète d’un dossier sous forme de nouveau manifeste : chaque chemin avec sa taille, sa date de modification, son empreinte de contenu, sa liste de blocs et un vecteur de version (pour chaque appareil, l’horloge de son dernier changement). Il est chiffré sous la clé de métadonnées du dossier et annoncé dans le registre. Les autres appareils récupèrent les manifestes qu’ils n’ont pas encore vus et fusionnent chemin par chemin :</p>
+    <ul>
+      <li>une version qui inclut l’autre l’emporte ; un contenu identique fusionne ;</li>
+      <li>une modification l’emporte sur une suppression concurrente, de sorte qu’une suppression ne détruit jamais le travail de quelqu’un ;</li>
+      <li>deux modifications concurrentes différentes donnent un gagnant déterministe (horloge la plus grande, puis identifiant d’appareil), et l’autre version est conservée sous le nom <code>name.conflict-&lt;device&gt;-&lt;clock&gt;.ext</code>, si bien que les deux appareils convergent sans un tour supplémentaire.</li>
+    </ul>
+    <p>Les fichiers supprimés vont dans une corbeille locale, jamais supprimés d’emblée. Le service en arrière-plan surveille vos dossiers et synchronise dans les secondes qui suivent un changement. Les dossiers sélectifs montrent tous les fichiers mais gardent des fichiers substituts pour ceux que vous n’avez pas récupérés, et récupèrent un fichier lorsque vous l’ouvrez. Les manifestes sont aujourd’hui des vues complètes ; les très gros dossiers auront besoin de manifestes incrémentaux.</p>
+
+    <h2 id="p2p">Pair à pair</h2>
+    <p>Les appareils échangent aussi des blocs directement. Comme le chiffrement est déterministe au sein d’un dossier, un appareil qui détient un fichier peut servir exactement l’objet que détient le stockage, et le destinataire le contrôle d’après son nom comme n’importe quelle copie de stockage. Un appareil qui a besoin d’un bloc le demande d’abord à ses pairs et ensuite aux stockages, et répartit les blocs consécutifs entre les pairs qui répondent.</p>
+    <ul>
+      <li><strong>Se trouver.</strong> Sur le réseau local, une balise multicast qui porte une étiquette à clé, et non l’identifiant du coffre. À travers internet, un enregistrement de rendez-vous chiffré dans vos stockages avec les adresses de chaque appareil.</li>
+      <li><strong>Traverser les NAT.</strong> HTTP sur le réseau local, QUIC sur UDP à travers internet : STUN indique à un appareil son adresse publique, les deux côtés percent des trous, et lorsque cela échoue, l’un de vos propres appareils joignables sert de relais. Il n’y a pas de relais d’un éditeur.</li>
+      <li><strong>Qui peut se connecter.</strong> Chaque appareil a son propre certificat, dont l’empreinte est épinglée dans son enregistrement ; chaque requête porte aussi une preuve de courte durée produite avec la clé d’authentification des pairs du coffre. Un inconnu n’obtient rien, et un appareil retiré est retiré de la liste des pairs.</li>
+    </ul>
+    <p class="note">Testé en local, sur les propres réseaux du mainteneur et sur un banc de trois appareils à travers des NAT. Deux NAT symétriques ne peuvent pas être percés et se rabattent sur un relais, ce qui demande un appareil joignable dans le coffre (un serveur domestique, un VPS, un port redirigé) ; les sockets sont uniquement IPv4.</p>
+    <p><strong>À quelle vitesse.</strong> <a href="../benchmarks/">Benchmarks</a> mesure des téléchargements entre Paris, Amsterdam et Varsovie, en pair à pair face à un bucket S3, avec la méthode, les chiffres et ce qui est encore lent.</p>
+    <p><strong>Transport et interface locale.</strong> Les objets sont du texte chiffré avant de quitter l’appareil, le transport n’ajoute donc pas de seconde couche pour elle-même : S3 se parle en HTTPS avec Signature Version 4, les destinations rclone utilisent la configuration propre à rclone, et le secret S3 est conservé dans un fichier chiffré. L’interface de bureau n’est servie que sur 127.0.0.1, chaque requête porte un jeton propre à la session, l’en-tête Host est vérifié, et la page s’exécute sous une Content Security Policy stricte.</p>
+
+    <h2 id="visibility">Ce que voit chaque partie</h2>
+    <table class="downloads">
+      <thead><tr><th>Partie</th><th>Voit</th><th>Ne peut pas voir</th></tr></thead>
+      <tbody>
+        <tr><td>Un fournisseur de stockage (bucket, NAS, disque, destination rclone)</td><td>Les noms d’objets (empreintes du texte chiffré), les tailles d’objets, la fréquence de vos écritures et lectures, le nombre de vos appareils d’après le nombre de répertoires de registre.</td><td>Les noms de fichiers, les contenus, les noms de dossiers, quels blocs appartiennent à quel fichier, l’empreinte de votre texte en clair.</td></tr>
+        <tr><td>Un réplica non fiable (le NAS d’un ami)</td><td>La même chose qu’un fournisseur de stockage, plus le fait que les objets correspondent à leur nom. Il signe ses propres déclarations sous une clé réservée aux réplicas.</td><td>Tout contenu, nom ou liste de fichiers ; il ne reçoit jamais de clé de dossier ni la clé du coffre.</td></tr>
+        <tr><td>Un pair sur le réseau local ou sur internet</td><td>Qu’un appareil demande des objets par leur nom, après avoir prouvé qu’il détient la clé d’authentification des pairs du coffre.</td><td>Tout ce qui est sans cette clé : un inconnu n’obtient aucun objet, et la balise du réseau local ne nomme pas le coffre.</td></tr>
+        <tr><td>Une personne avec qui vous partagez un dossier</td><td>Ce dossier : chaque fichier qu’il contient, et les déclarations signées de vos appareils à son sujet.</td><td>Tout autre dossier, la clé du coffre, votre annuaire d’appareils.</td></tr>
+        <tr><td>Un assistant IA via le serveur MCP</td><td>Les dossiers que vous avez autorisés, en lecture seule sauf indication contraire.</td><td>Les dossiers que vous n’avez pas autorisés ; les dossiers Strongroom, jamais.</td></tr>
+        <tr><td>Un voleur muni de votre portable déverrouillé</td><td>Tout ce que contient un dossier normal tant que l’appareil est déverrouillé.</td><td>Les dossiers Strongroom sans votre clé de sécurité ; rien de ce qui est écrit après que vous retirez l’appareil depuis un autre, sauf dans les dossiers partagés avec d’autres personnes.</td></tr>
+      </tbody>
+    </table>
+
+    <section class="feature" id="sharing">
+      <h2>Partager un dossier</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/encryption/sealed.webp?v=730d526d3d"><img src="../../assets/img/encryption/sealed.png?v=a2915c47c2" alt="L’appareil du destinataire envoie un code de demande avec ses clés publiques X25519 et ML-KEM-768 ; vous renvoyez, par n’importe quel canal, un jeton scellé contenant une clé de dossier, que seul l’appareil demandeur peut ouvrir." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/encryption/sealed-dark.webp?v=ac9a67c2b4"><img src="../../assets/img/encryption/sealed-dark.png?v=13956789c9" alt="L’appareil du destinataire envoie un code de demande avec ses clés publiques X25519 et ML-KEM-768 ; vous renvoyez, par n’importe quel canal, un jeton scellé contenant une clé de dossier, que seul l’appareil demandeur peut ouvrir." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>L’appareil du destinataire crée une paire de clés hybride (X25519 + ML-KEM-768) et affiche un code de demande contenant la moitié publique. Votre appareil encapsule vers les deux moitiés, dérive une clé à partir des deux secrets partagés et de la transcription, et chiffre la clé du dossier avec elle. Le jeton obtenu peut voyager par n’importe quel canal : seul l’appareil demandeur peut l’ouvrir, et il ouvre un seul dossier.</p>
+        <p>Avant de sceller, vous comparez tous deux une empreinte : six mots dérivés du code de demande et du nom qu’il contient. Vous vous les lisez au téléphone ou en personne ; un code échangé en route affiche d’autres mots, et l’appareil du destinataire refuse un jeton dont les mots confirmés ne sont pas les siens.</p>
+        <p>L’appareil du destinataire écrit ensuite son propre registre pour ce dossier, scellé sous une clé dérivée de la clé du dossier : chaque côté voit les déclarations de l’autre pour ce dossier et rien d’autre. Retirer un membre, ou révoquer un jeton que personne n’a encore accepté, donne au dossier une nouvelle clé aléatoire : vos appareils et les membres qui restent la reçoivent (scellée pour la clé propre de chaque membre), tout ce qui est écrit à partir de là est placé sous elle, et les changements ultérieurs du membre retiré sont ignorés. Ce qu’il a déjà reçu lui reste lisible ; une clé ne peut pas être rappelée.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="strongroom">
+      <h2>Strongroom : cryptographique, pas une boîte de dialogue</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/encryption/strongroom.webp?v=e2d5e5077f"><img src="../../assets/img/encryption/strongroom.png?v=b292562005" alt="Un contact avec la clé de sécurité déverrouille un dossier Strongroom : seuls l’identifiant du credential, le sel et la clé de dossier enveloppée sont stockés, la clé reste en mémoire 15 minutes, et ni la phrase secrète, ni la clé du coffre, ni une sauvegarde volée ne peuvent l’ouvrir." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/encryption/strongroom-dark.webp?v=e9a0d2dc95"><img src="../../assets/img/encryption/strongroom-dark.png?v=45041fccd5" alt="Un contact avec la clé de sécurité déverrouille un dossier Strongroom : seuls l’identifiant du credential, le sel et la clé de dossier enveloppée sont stockés, la clé reste en mémoire 15 minutes, et ni la phrase secrète, ni la clé du coffre, ni une sauvegarde volée ne peuvent l’ouvrir." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>La clé d’un dossier Strongroom n’est jamais stockée. À la création, la clé de sécurité fabrique un credential, puis en tire un secret de 32 octets avec un sel aléatoire propre au dossier (FIDO2 hmac-secret). Varsto enveloppe la clé du dossier sous ce secret et ne stocke que l’identifiant du credential, le sel et la clé enveloppée. Le déverrouillage répète le contact et garde la clé en mémoire pendant une durée (15 minutes par défaut), puis l’oublie. Il n’existe aucun chemin vers la clé du dossier sans la clé physique : ni par la phrase secrète, ni par la clé du coffre, ni par une sauvegarde volée. Les clés de sécurité de secours reçoivent leur propre enveloppe de la même clé de dossier. Convertir un dossier existant lui donne un nouvel identifiant et une nouvelle clé, le rechiffre et supprime l’ancien texte chiffré ; changer la clé d’un Strongroom fait de même avec une nouvelle clé enveloppée pour chaque clé de sécurité enregistrée, au cas où une clé aurait été conservée par quelqu’un.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="recovery">
+      <h2>Phrases secrètes et kit de récupération</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/encryption/recovery.webp?v=7446aa430f"><img src="../../assets/img/encryption/recovery.png?v=0e09060e87" alt="Un kit de récupération de 24 mots, ou trois parts dont deux suffisent à reconstruire la clé du coffre alors qu’une seule ne révèle rien." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/encryption/recovery-dark.webp?v=1c3e761199"><img src="../../assets/img/encryption/recovery-dark.png?v=dab0f11bf0" alt="Un kit de récupération de 24 mots, ou trois parts dont deux suffisent à reconstruire la clé du coffre alors qu’une seule ne révèle rien." width="640" height="320" loading="lazy"></picture>
+      <div>
+        <p>La phrase secrète de l’appareil passe par Argon2id pour déverrouiller <code>keys.enc</code> ; l’application en arrière-plan peut la garder dans le trousseau du système d’exploitation afin que le service se déverrouille de lui-même après l’ouverture de session. Perdre une phrase secrète fait perdre la copie des clés de cet appareil, pas le coffre : un autre appareil, ou le kit de récupération, en enregistre un nouveau.</p>
+        <p>Le kit de récupération imprime la clé du coffre en 24 mots BIP-39 (un mot mal recopié est repéré par la somme de contrôle) et, si vous le demandez, trois parts de Shamir dont deux suffisent à reconstruire la clé alors qu’une seule ne révèle rien. Il n’y a ni compte, ni séquestre, ni réinitialisation : le kit est la façon dont vous portez la responsabilité. Imprimez un nouveau kit après avoir retiré un appareil, car l’ancien contient l’ancienne clé.</p>
+      </div>
+    </section>
+
+    <h2 id="limits">Ce qui n’est pas fait</h2>
+    <ul>
+      <li><strong>Non audité.</strong> Les algorithmes sont standard et les bibliothèques sont des implémentations Rust bien connues, mais la composition n’a pas été relue par un cryptographe extérieur, et le format de stockage peut encore changer.</li>
+      <li><strong>Métadonnées.</strong> Les stockages voient les tailles d’objets, les schémas d’écriture et de lecture, le nombre d’appareils et à peu près le nombre de blocs. Le remplissage (padding) et le trafic de couverture ne sont pas implémentés.</li>
+      <li>Le <strong>chiffrement convergent</strong> à l’intérieur d’un dossier permet aux codétenteurs de la clé du dossier de confirmer des fichiers identiques.</li>
+      <li><strong>Retirer un appareil</strong> protège ce qui est écrit ensuite, pas ce que l’appareil détenait déjà : les données existantes ne sont pas rechiffrées, les dossiers partagés et Strongroom gardent leurs clés, et les identifiants de stockage ne sont pas renouvelés. Tant qu’il n’existe pas de second facteur, n’importe lequel de vos appareils peut en retirer n’importe quel autre (dans un coffre avec une organisation, seuls les administrateurs le peuvent).</li>
+      <li><strong>Retirer un membre</strong> d’un dossier partagé protège ce qui est écrit ensuite ; le stockage que vous atteignez tous deux reste accessible en écriture pour lui tant que vous ne changez pas ses accès.</li>
+      <li><strong>Le registre</strong> n’a pas de preuve de stockage, la détection de retour en arrière n’est pas testée, et les points de contrôle et l’élagage (alpha.8) bornent sa taille pour les appareils du coffre uniquement : les membres de dossiers partagés et les réplicas conservent encore chaque lot.</li>
+      <li><strong>Placement.</strong> Un dossier peut être écrit sur des stockages ou des lieux choisis, et les blocs peuvent être déplacés entre stockages (en ne gardant qu’une copie à froid des fichiers inactifs). Les fichiers dont les blocs ne sont que sur un stockage à froid ne sont pas récupérés tant que vous ne les ramenez pas, et les appareils en 0.0.1-alpha.8 ou plus ancien cessent de se synchroniser dès qu’un déplacement est enregistré.</li>
+      <li><strong>Strongroom</strong> protège la clé du dossier, pas un fichier que vous avez récupéré et laissé sur le disque ; le kit de récupération ne couvre pas les dossiers Strongroom.</li>
+      <li><strong>La clé du coffre</strong> est un secret unique. Conservez le kit de récupération en plus d’un endroit.</li>
+    </ul>
+    <p class="note">Détails au niveau des champs, dispositions des octets et règles de version : <a href="../../docs/alpha-0-format.html">format de stockage</a>, <a href="../../docs/key-hierarchy.html">hiérarchie des clés</a>, <a href="../../docs/ledger-signing-notes.html">notes sur la signature du registre</a>, <a href="../../docs/security-principles.html">principes de sécurité</a>, <a href="../../docs/failure-model.html">modèle de défaillances</a>.</p>
+    </div>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! The mailbox for offline pool disks (`docs/spec/alpha-0-format.md`
-//! section 72): the device with the dock keeps, in a durable outbox, the
+//! section 78): the device with the dock keeps, in a durable outbox, the
 //! ciphertext objects that a disk which is docked now holds and that a disk
 //! (or storage) which is away needs, and writes them there when that one is
 //! docked.

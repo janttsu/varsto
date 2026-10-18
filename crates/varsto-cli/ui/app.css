@@ -897,6 +897,11 @@ body[data-mobile="1"] .sel-count { font-size: 14px; }
 .modal-text .strong { font-weight: 600; }
 
 /* Progress of this device's long tasks, under the top bar. */
+.connnote { flex: none; padding: 6px 32px; font-size: 13px; background: var(--surface-2); color: var(--text-2); border-bottom: 1px solid var(--border); }
+.connnote[data-kind="down"] { color: var(--text); }
+body[data-mobile="1"] .connnote { padding: 6px 16px; font-size: 12px; }
+.files-more td { text-align: center; padding: 12px; }
+.files-more .muted { margin-left: 8px; }
 .taskbar { position: sticky; top: 64px; z-index: 4; flex: none; background: var(--surface); border-bottom: 1px solid var(--border); padding: 6px 32px 0; font-size: 13px; }
 .tb-line { display: flex; gap: 4px 12px; align-items: baseline; min-width: 0; }
 .tb-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1156,3 +1161,11 @@ html[data-density="compact"] body[data-mobile="1"] .folder-card { padding-top: 8
 html[data-density="compact"] body[data-mobile="1"] .folder-card .li-icon { width: 34px; height: 34px; }
 #density-toggle[aria-pressed="true"] { background: var(--selected); color: var(--accent); }
 html[data-density="compact"] body:not([data-mobile="1"]) #files tbody tr, html[data-density="compact"] body:not([data-mobile="1"]) .fo-table tbody tr { height: 36px; }
+
+/* Folder access (storage format 3) */
+.f3-card { margin-bottom: 16px; }
+.f3-folder { margin-top: 12px; }
+.f3-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 0 0 4px; }
+.f3-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.f3-who { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; min-width: 0; }
+.f3-words { background: var(--surface-2, rgba(127, 127, 127, 0.12)); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }

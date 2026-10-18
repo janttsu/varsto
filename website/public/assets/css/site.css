@@ -175,3 +175,8 @@ a.card:hover { border-color: var(--accent, currentColor); }
   .compare-table:not(.compare-overview) th[scope=row] { width: 30%; }
   .compare-table td, .compare-table th { padding: .45rem .35rem; }
 }
+
+/* Daily builds page: the warning at the top. */
+.daily-warn { margin: 1rem 0; padding: .75rem 1rem; border-left: 4px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-text); border-radius: 0 8px 8px 0; }
+.daily-warn p, .daily-warn ul { margin: .4rem 0; }
+.daily-warn a { color: inherit; text-decoration: underline; }

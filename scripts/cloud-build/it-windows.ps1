@@ -5,7 +5,7 @@ param([string]$VaultKey, [string]$S3Endpoint, [string]$S3Region, [string]$S3Buck
 $ErrorActionPreference = "Stop"; $ProgressPreference = "SilentlyContinue"
 Set-Location C:\it
 Expand-Archive -Force varsto-windows.zip -DestinationPath .\unzipped
-$exe = Join-Path (Get-ChildItem .\unzipped | Select-Object -First 1).FullName "varsto.exe"
+$exe = (Get-ChildItem .\unzipped -Recurse -Filter varsto.exe | Select-Object -First 1).FullName
 $env:VARSTO_PASSPHRASE = "integration-test-passphrase"; $env:VARSTO_S3_SECRET = $S3Secret
 $H = "C:\it\home"; New-Item -ItemType Directory -Force C:\it\files | Out-Null
 $env:VARSTO_VAULT_KEY = $VaultKey

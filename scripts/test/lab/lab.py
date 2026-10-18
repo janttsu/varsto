@@ -477,7 +477,7 @@ ssh_pwauth: false
 
 def cmd_release(a):
     """Build the release packages that do not need a Mac in the build VM:
-    the Linux (musl) and Windows (gnu) archives with website/build-release.sh
+    the Linux (musl) archive and the Windows programs (for the installer) with website/build-release.sh
     and the Android APK with apps/android/build.sh (JDK, SDK and NDK are
     installed once). Copies them to <dir>/release/<version>/."""
     cmd_build(a)  # VM up, Rust present, sources synced
@@ -494,7 +494,7 @@ def cmd_release(a):
                       f"&& (yes | {sdk}/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true) "
                       f"&& {sdk}/cmdline-tools/latest/bin/sdkmanager --install platform-tools 'platforms;android-35' 'build-tools;34.0.0' 'build-tools;35.0.0' 'ndk;27.2.12479018' >/dev/null")
     env = f"export PATH=$HOME/.cargo/bin:$PATH ANDROID_HOME={sdk};"
-    log("build VM: Linux and Windows packages")
+    log("build VM: Linux package and Windows programs")
     r = ssh(BUILD_VM, f"{env} cd src && website/build-release.sh x86_64-unknown-linux-musl x86_64-pc-windows-gnu 2>&1 | tail -15", check=False, capture=True)
     print(r.stdout, r.stderr)
     log("build VM: Android APK")
@@ -506,6 +506,7 @@ def cmd_release(a):
     scp = ["scp", "-q", "-i", str(key_path()), "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR"]
     host = f"{USER}@{ip_of(BUILD_VM)}"
     sh(scp + [f"{host}:src/website/public/downloads/varsto-{version}-*", str(out)], check=False)
+    sh(scp + ["-r", f"{host}:src/dist/windows/app", str(out / "windows-app")], check=False)
     sh(scp + [f"{host}:src/apps/android/app/build/outputs/apk/debug/app-debug.apk", str(out / f"varsto-{version}-android-debug.apk")], check=False)
     for f in sorted(out.iterdir()):
         log(f"release: {f.name} {f.stat().st_size // 1024} KiB")

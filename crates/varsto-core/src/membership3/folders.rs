@@ -1,0 +1,287 @@
+// SPDX-License-Identifier: PolyForm-Shield-1.0.0
+//! `folder` records (format 3 design, section 6): `vault/folders/<folder>/
+//! <device>/`, key_id `registry@<e>`. Name, settings, participants with
+//! roles and denied devices; never key material, so a device that holds K3
+//! alone sees names, settings and who takes part, and opens no content.
+//!
+//! The creator's first record (the one with `creation`) makes it the owner;
+//! later entries count only when their writer was an owner just before the
+//! entry's stamp. Participants and denied entries merge per device by the
+//! largest (Lamport, device) stamp, so two owners editing at once converge.
+
+use super::epochs::FolderEpochs;
+use super::{store, Role, Stamp, MAX_NAME, MAX_PARTICIPANTS};
+use crate::crypto;
+use crate::record::{
+    Id16, Kind, Record, RecordBody, RecordKeys, RecordMeta, RecordTrust, RecordsRefused, StreamRef,
+};
+use crate::storage::Storage;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+/// The folder id a creator's nonce gives: BLAKE3("varsto folder id 3" ||
+/// creator || nonce)[..16]. Binding the creator into the id lets exactly
+/// one device make the first record of a folder.
+pub fn folder_id(creator: &Id16, nonce: &[u8; 16]) -> Id16 {
+    let mut b = Vec::with_capacity(64);
+    b.extend_from_slice(b"varsto folder id 3");
+    b.extend_from_slice(creator);
+    b.extend_from_slice(nonce);
+    let mut id = [0u8; 16];
+    id.copy_from_slice(&crypto::hash(&b)[..16]);
+    id
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Participant {
+    pub device: Id16,
+    pub role: Role,
+    pub stamp: Stamp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Denied {
+    pub device: Id16,
+    pub stamp: Stamp,
+}
+
+/// The body of a `folder` record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FolderRecord {
+    pub id: Id16,
+    pub name: String,
+    /// Folder settings by name (trash and history days, kind, ...), as
+    /// the engine defines them; opaque here.
+    pub settings: BTreeMap<String, String>,
+    /// Stamp of `name` and `settings`.
+    pub stamp: Stamp,
+    /// The creator's nonce, in its first record only: `folder_id(writer,
+    /// nonce)` must be `id`.
+    pub creation: Option<[u8; 16]>,
+    pub participants: Vec<Participant>,
+    pub denied: Vec<Denied>,
+}
+
+impl RecordBody for FolderRecord {
+    fn check(&self, meta: &RecordMeta) -> Result<(), String> {
+        if self.id != meta.scope {
+            return Err("folder id differs from the record's scope".into());
+        }
+        if self.name.len() > MAX_NAME {
+            return Err("folder name longer than 128 bytes".into());
+        }
+        if self.participants.len() > MAX_PARTICIPANTS || self.denied.len() > MAX_PARTICIPANTS {
+            return Err("too many entries".into());
+        }
+        if self.settings.len() > 1024
+            || self
+                .settings
+                .iter()
+                .any(|(k, v)| k.len() > MAX_NAME || v.len() > 4096)
+        {
+            return Err("settings too large".into());
+        }
+        let mine = |s: &Stamp| s.device == meta.device;
+        if !mine(&self.stamp)
+            || !self.participants.iter().all(|p| mine(&p.stamp))
+            || !self.denied.iter().all(|d| mine(&d.stamp))
+        {
+            return Err("an entry carries another device's stamp".into());
+        }
+        if let Some(nonce) = &self.creation {
+            if folder_id(&meta.device, nonce) != self.id {
+                return Err("the creation nonce does not give the folder id".into());
+            }
+            if !self
+                .participants
+                .iter()
+                .any(|p| p.device == meta.device && p.role == Role::Owner)
+            {
+                return Err("the creator does not list itself as owner".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One folder as the accepted records describe it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderState {
+    pub id: Id16,
+    pub name: String,
+    pub settings: BTreeMap<String, String>,
+    pub creator: Id16,
+    /// Per device: its role, or `None` when denied (or removed), with the
+    /// stamp of the entry that decided.
+    pub entries: BTreeMap<Id16, (Option<Role>, Stamp)>,
+    /// Entries from writers that were not owners at their stamp.
+    pub entries_refused: u64,
+    /// The largest Lamport time of any accepted entry.
+    pub max_lamport: u64,
+}
+
+/// Ordered so that the replay is the same in any reading order, even for
+/// entries of one writer under one stamp.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum Entry {
+    Name(String, BTreeMap<String, String>),
+    Set(Id16, Option<Role>),
+}
+
+impl FolderState {
+    /// Replay every record of one folder. `None` without a valid creation
+    /// record (nothing of the folder counts then).
+    pub fn build(records: &[Record<FolderRecord>]) -> Option<FolderState> {
+        let genesis = records
+            .iter()
+            .filter(|r| r.body.creation.is_some())
+            .min_by_key(|r| r.body.stamp)?;
+        let creator = genesis.meta.device;
+        let mut st = FolderState {
+            id: genesis.body.id,
+            name: genesis.body.name.clone(),
+            settings: genesis.body.settings.clone(),
+            creator,
+            entries: BTreeMap::from([(creator, (Some(Role::Owner), Stamp::default()))]),
+            entries_refused: 0,
+            max_lamport: 0,
+        };
+        let mut all: Vec<(Stamp, Id16, Entry)> = Vec::new();
+        for r in records {
+            let w = r.meta.device;
+            all.push((
+                r.body.stamp,
+                w,
+                Entry::Name(r.body.name.clone(), r.body.settings.clone()),
+            ));
+            for p in &r.body.participants {
+                all.push((p.stamp, w, Entry::Set(p.device, Some(p.role))));
+            }
+            for d in &r.body.denied {
+                all.push((d.stamp, w, Entry::Set(d.device, None)));
+            }
+        }
+        all.sort();
+        let mut name_stamp = Stamp::default();
+        for (stamp, writer, entry) in all {
+            if st.role(&writer) != Some(Role::Owner) {
+                st.entries_refused += 1;
+                continue;
+            }
+            st.max_lamport = st.max_lamport.max(stamp.lamport);
+            match entry {
+                Entry::Name(n, s) => {
+                    if stamp >= name_stamp {
+                        name_stamp = stamp;
+                        st.name = n;
+                        st.settings = s;
+                    }
+                }
+                Entry::Set(device, role) => {
+                    let newer = st.entries.get(&device).is_none_or(|(_, old)| stamp > *old);
+                    if newer {
+                        st.entries.insert(device, (role, stamp));
+                    }
+                }
+            }
+        }
+        Some(st)
+    }
+
+    /// The device's current role (`None`: not a participant, or denied).
+    pub fn role(&self, device: &Id16) -> Option<Role> {
+        self.entries.get(device).and_then(|(r, _)| *r)
+    }
+
+    pub fn is_denied(&self, device: &Id16) -> bool {
+        matches!(self.entries.get(device), Some((None, _)))
+    }
+
+    pub fn participants(&self) -> Vec<Participant> {
+        self.entries
+            .iter()
+            .filter_map(|(d, (r, s))| {
+                r.map(|role| Participant {
+                    device: *d,
+                    role,
+                    stamp: *s,
+                })
+            })
+            .collect()
+    }
+
+    pub fn owners(&self) -> Vec<Id16> {
+        self.participants()
+            .into_iter()
+            .filter(|p| p.role == Role::Owner)
+            .map(|p| p.device)
+            .collect()
+    }
+}
+
+/// Every folder of the vault, from every device's folder records, with the
+/// folder epochs this device could read.
+#[derive(Clone, Debug, Default)]
+pub struct FolderRegistry {
+    pub folders: BTreeMap<Id16, FolderState>,
+    pub epochs: BTreeMap<Id16, FolderEpochs>,
+}
+
+impl FolderRegistry {
+    /// Read `vault/folders/` on every storage.
+    pub fn read(
+        storages: &[&dyn Storage],
+        vault: Id16,
+        keys: &dyn RecordKeys,
+        trust: &dyn RecordTrust,
+        counter: &mut RecordsRefused,
+    ) -> Result<FolderRegistry> {
+        let recs: Vec<Record<FolderRecord>> = store::read_all(
+            storages,
+            vault,
+            Kind::Folder,
+            "vault/folders/",
+            keys,
+            trust,
+            counter,
+        )?;
+        let mut by_folder: BTreeMap<Id16, Vec<Record<FolderRecord>>> = BTreeMap::new();
+        for r in recs {
+            by_folder.entry(r.meta.scope).or_default().push(r);
+        }
+        let mut out = FolderRegistry::default();
+        for (id, recs) in by_folder {
+            if let Some(st) = FolderState::build(&recs) {
+                out.folders.insert(id, st);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn get(&self, folder: &Id16) -> Option<&FolderState> {
+        self.folders.get(folder)
+    }
+
+    /// The role of `device` in `folder` at folder epoch `epoch`: its role
+    /// in the folder records, unless an accepted folder epoch record at or
+    /// below `epoch` removed it (and no later one up to `epoch` kept it).
+    pub fn role(&self, device: &Id16, folder: &Id16, epoch: u32) -> Option<Role> {
+        let r = self.folders.get(folder)?.role(device)?;
+        if let Some(ep) = self.epochs.get(folder) {
+            if ep.removed_at(device, epoch) {
+                return None;
+            }
+        }
+        Some(r)
+    }
+
+    pub fn is_owner(&self, device: &Id16, folder: &Id16, epoch: u32) -> bool {
+        self.role(device, folder, epoch) == Some(Role::Owner)
+    }
+
+    /// The stream of `device`'s folder records of `folder`.
+    pub fn stream(folder: Id16, device: Id16) -> StreamRef {
+        StreamRef::new(Kind::Folder, folder, device)
+    }
+}

@@ -189,8 +189,10 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
             token: st.token.clone(),
             traffic: st.traffic.clone(),
             state: state.clone(),
+            reads: Arc::default(),
         }
     };
+    let reads = fixed.reads.clone();
     let (tx, rx) = std::sync::mpsc::channel::<Request>();
     let worker = std::thread::Builder::new()
         .name("http-api".into())
@@ -208,6 +210,11 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
                     log::error!(method = method, path = url; "api handler panicked");
                     Err(anyhow::anyhow!("handler panicked"))
                 });
+                let path = url.split('?').next().unwrap_or("");
+                if method != "GET" && crate::readcache::drops_answers(path) {
+                    // Reads computed while it ran may predate the change.
+                    reads.lock().unwrap_or_else(|e| e.into_inner()).invalidate();
+                }
                 let status = STATUS.with(|s| s.get());
                 match result {
                     Ok(()) => log::debug!(method = method, path = url, status = status, ms = t.ms(); "api request"),
@@ -224,11 +231,123 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
         match handle_unlocked(&fixed, request) {
             Ok(None) => {}
             Ok(Some(request)) => {
+                let Some(request) = read_elsewhere(&fixed, request) else {
+                    continue;
+                };
+                // A change is coming: no cached answer from before it (a
+                // sync or a check keeps them until it has been answered).
+                let change = *request.method() != Method::Get
+                    && crate::readcache::drops_answers(
+                        request.url().split('?').next().unwrap_or(""),
+                    );
+                if change {
+                    fixed
+                        .reads
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .invalidate();
+                }
                 if tx.send(request).is_err() {
                     break;
                 }
             }
             Err(e) => log::warn!("request failed: {e:#}"),
+        }
+    }
+}
+
+/// Reads answered on threads of their own, at most this many at a time.
+const MAX_READERS: usize = 32;
+static READERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A GET of a route that only reads (`readcache::ROUTES`), with the session
+/// token: answered on a thread of its own, so that it neither waits behind
+/// the changes queued for the worker nor, while a sync holds the state, for
+/// the sync (the last answer is sent, marked stale). Anything else is handed
+/// back for the worker.
+fn read_elsewhere(fixed: &Fixed, request: Request) -> Option<Request> {
+    use std::sync::atomic::Ordering;
+    let path = request.url().split('?').next().unwrap_or("");
+    if *request.method() != Method::Get
+        || !crate::readcache::cacheable(path)
+        || !header_token_ok(&request, &fixed.token)
+    {
+        return Some(request);
+    }
+    if READERS.fetch_add(1, Ordering::SeqCst) >= MAX_READERS {
+        READERS.fetch_sub(1, Ordering::SeqCst);
+        return Some(request);
+    }
+    let (state, reads) = (fixed.state.clone(), fixed.reads.clone());
+    let spawned = std::thread::Builder::new()
+        .name("http-read".into())
+        .spawn(move || {
+            struct Done;
+            impl Drop for Done {
+                fn drop(&mut self) {
+                    READERS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _done = Done;
+            let url = loggable_url(request.url());
+            let t = varsto_core::logging::Timer::start();
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                serve_read(&state, &reads, request)
+            }));
+            match r {
+                Ok(Ok(how)) => log::debug!(method = "GET", path = url, answer = how, ms = t.ms(); "api request"),
+                Ok(Err(e)) => log::warn!(method = "GET", path = url, ms = t.ms(); "api request failed: {e:#}"),
+                Err(_) => log::error!(method = "GET", path = url; "api read handler panicked"),
+            }
+        });
+    if spawned.is_err() {
+        READERS.fetch_sub(1, Ordering::SeqCst);
+        log::warn!("cannot start a reader thread");
+    }
+    None
+}
+
+/// Answer a read: fresh when the state is free within
+/// `readcache::FRESH_WAIT`, else the last answer of the same address.
+fn serve_read(
+    state: &Shared,
+    reads: &Mutex<crate::readcache::ReadCache>,
+    request: Request,
+) -> Result<&'static str> {
+    use crate::readcache::{self, Got};
+    let url = request.url().to_string();
+    let (path, query) = url.split_once('?').unwrap_or((url.as_str(), ""));
+    // The address without the token parameters (none are accepted anyway).
+    let key = loggable_url(&url);
+    match readcache::lock_or_cached(state, reads, &key, readcache::FRESH_WAIT) {
+        Got::Fresh(mut st) => {
+            let generation = reads.lock().unwrap_or_else(|e| e.into_inner()).generation();
+            let result = api(&mut st, Method::Get, path, query, &json!({}));
+            drop(st);
+            match result {
+                Ok(v) => {
+                    let body = Arc::new(v.to_string());
+                    reads.lock().unwrap_or_else(|e| e.into_inner()).store(
+                        &key,
+                        generation,
+                        body.clone(),
+                        std::time::Instant::now(),
+                    );
+                    request.respond(json_text(200, body.as_str()))?;
+                }
+                Err(e) => {
+                    request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?
+                }
+            }
+            Ok("fresh")
+        }
+        Got::Cached(age, body) => {
+            request.respond(
+                json_text(200, &readcache::mark_stale(&body, age))
+                    .with_header(header("X-Varsto-Stale", "1"))
+                    .with_header(header("X-Varsto-Age-Ms", &age.as_millis().to_string())),
+            )?;
+            Ok("cached")
         }
     }
 }
@@ -266,6 +385,8 @@ struct Fixed {
     token: String,
     traffic: Arc<varsto_core::p2p::Traffic>,
     state: Shared,
+    /// The last answers of the reads (`readcache`), emptied by every change.
+    reads: Arc<Mutex<crate::readcache::ReadCache>>,
 }
 
 /// Answer a request that needs no state, or hand it back for the worker.
@@ -419,8 +540,21 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                     &json!({"error": "missing or wrong token; reopen the start URL"}),
                 ))?;
             } else {
-                let v = crate::viz::snapshot(&fixed.state, &fixed.traffic);
-                request.respond(json_response(200, &v))?;
+                // The ledger passes behind it take a while on a big vault:
+                // not on this thread, which answers the page's assets.
+                let (state, traffic) = (fixed.state.clone(), fixed.traffic.clone());
+                let spawned =
+                    std::thread::Builder::new()
+                        .name("http-viz".into())
+                        .spawn(move || {
+                            let v = crate::viz::snapshot(&state, &traffic);
+                            if let Err(e) = request.respond(json_response(200, &v)) {
+                                log::debug!("viz answer not sent: {e}");
+                            }
+                        });
+                if spawned.is_err() {
+                    log::warn!("cannot start the viz thread");
+                }
             }
         }
         "/api/p2p/traffic" | "/api/progress" | "/api/activity" => {
@@ -523,7 +657,7 @@ fn attachment(name: &str) -> String {
 fn html(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(body)
         .with_header(header("Content-Type", "text/html; charset=utf-8"))
-        .with_header(header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
+        .with_header(header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
         .with_header(header("X-Content-Type-Options", "nosniff"))
         .with_header(header("Referrer-Policy", "no-referrer"))
         .with_header(header("Cache-Control", "no-store"))
@@ -544,8 +678,13 @@ fn api_plain(status: u16, msg: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 fn json_response(status: u16, value: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
+    json_text(status, &value.to_string())
+}
+
+/// A JSON answer already serialized.
+fn json_text(status: u16, body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     STATUS.with(|s| s.set(status));
-    Response::from_string(value.to_string())
+    Response::from_string(body)
         .with_status_code(status)
         .with_header(header("Content-Type", "application/json"))
         .with_header(header("Cache-Control", "no-store"))
@@ -807,10 +946,19 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         // Pairing talks to the other device for up to ~25 seconds; do that
         // without holding the state, then join under it.
         let result = pair_join(state, &input);
+        set_join_step(json!({"active": false}));
         return match result {
             Ok(v) => Ok(request.respond(json_response(200, &v))?),
-            Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+            Err(e) => Ok(request.respond(json_response(400, &pair_join_error(&e)))?),
         };
+    }
+    if method == Method::Get && path == "/api/pair/join-status" {
+        let v = JOIN_STEP
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_else(|| json!({"active": false}));
+        return Ok(request.respond(json_response(200, &v))?);
     }
     if method == Method::Post && path == "/api/quit" {
         request.respond(json_response(200, &json!({"ok": true})))?;
@@ -985,6 +1133,39 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
     Ok(json!({"ok": true, "folder": folder, "path": path, "bytes": body.read, "push": push}))
 }
 
+/// What `pair_join` is doing now, for `GET /api/pair/join-status`.
+static JOIN_STEP: Mutex<Option<Value>> = Mutex::new(None);
+
+fn set_join_step(v: Value) {
+    *JOIN_STEP.lock().unwrap_or_else(|e| e.into_inner()) = Some(v);
+}
+
+/// Nothing answered: the message plus what the page lists in its language.
+#[derive(Debug)]
+struct PairJoinFailed {
+    message: String,
+    tried: Value,
+    found: usize,
+}
+
+impl std::fmt::Display for PairJoinFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PairJoinFailed {}
+
+/// The JSON body of a failed `/api/pair/join`.
+fn pair_join_error(e: &anyhow::Error) -> Value {
+    let mut v = json!({"error": format!("{e:#}")});
+    if let Some(f) = e.downcast_ref::<PairJoinFailed>() {
+        v["tried"] = f.tried.clone();
+        v["found"] = json!(f.found);
+    }
+    v
+}
+
 fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     let (name, passphrase, code) = (
         s(input, "name")?,
@@ -1003,7 +1184,44 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     {
         bail!("this device already holds a vault");
     }
-    let bundle = varsto_core::pair::receive(&code, &name, opt(input, "address").as_deref())?;
+    // The typed address first, then the addresses of the scanned link, then
+    // a search of the network; the page polls /api/pair/join-status.
+    let offered = str_list(input, "addresses");
+    set_join_step(json!({"active": true, "step": "start", "tried": []}));
+    let mut tried: Vec<String> = Vec::new();
+    let result = varsto_core::pair::receive_with_progress(
+        &code,
+        &name,
+        opt(input, "address").as_deref(),
+        &offered,
+        &mut |step| match step {
+            varsto_core::pair::Step::Trying(a) => {
+                tried.push(a.to_string());
+                set_join_step(
+                    json!({"active": true, "step": "trying", "address": a.to_string(), "tried": tried}),
+                );
+            }
+            varsto_core::pair::Step::Looking => {
+                set_join_step(json!({"active": true, "step": "looking", "tried": tried}));
+            }
+        },
+    );
+    set_join_step(json!({"active": false}));
+    let bundle = match result {
+        Ok(b) => b,
+        Err(e) => {
+            // The page lists what was tried in its own language.
+            if let Some(nf) = e.downcast_ref::<varsto_core::pair::NotFound>() {
+                return Err(PairJoinFailed {
+                    message: e.to_string(),
+                    tried: serde_json::to_value(&nf.tried)?,
+                    found: nf.found,
+                }
+                .into());
+            }
+            return Err(e);
+        }
+    };
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle)?;
     st.engine = Some(e);
@@ -1416,6 +1634,8 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             "has_vault": has_vault,
             "unlocked": st.engine.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
+            // Folder membership of storage format 3 is in this build.
+            "format3": cfg!(feature = "format3"),
             "platform": std::env::consts::OS,
             // Mobile shells set these so the interface can pick folder locations itself.
             "mobile": mobile(),
@@ -1574,15 +1794,28 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             if let Some(old) = st.pair.take() {
                 old.stop();
             }
+            #[cfg(feature = "format3")]
+            if input.get("format").and_then(|f| f.as_u64()) == Some(3) {
+                let offer = f3_api::start_offer(e)?;
+                let status = offer.status();
+                st.pair = Some(offer);
+                return pair_status(status);
+            }
             let offer = varsto_core::pair::Offer::start(e.pairing_bundle()?)?;
             let status = offer.status();
             st.pair = Some(offer);
             pair_status(status)
         }
-        (Method::Get, "/api/pair/status") => Ok(match &st.pair {
-            Some(o) => pair_status(o.status())?,
-            None => json!({"open": false}),
-        }),
+        (Method::Get, "/api/pair/status") => {
+            #[allow(unused_mut)]
+            let mut v = match &st.pair {
+                Some(o) => pair_status(o.status())?,
+                None => json!({"open": false}),
+            };
+            #[cfg(feature = "format3")]
+            f3_api::add_pair_ask(&mut v, st.engine.as_mut());
+            Ok(v)
+        }
         // QR invitations (section 51): the QR codes of a request code, a
         // sealed token or a pairing link, and what a scanned text is.
         (Method::Post, "/api/qr") => {
@@ -1907,7 +2140,17 @@ fn api_unlocked(
     input: &Value,
 ) -> Result<Value> {
     match (method, path) {
-        (Method::Get, "/api/status") => Ok(serde_json::to_value(engine.status()?)?),
+        (Method::Get, "/api/status") => {
+            #[allow(unused_mut)]
+            let mut v = serde_json::to_value(engine.status()?)?;
+            #[cfg(feature = "format3")]
+            if let Ok(list) = engine.f3_missing_escrows() {
+                if !list.is_empty() {
+                    v["recovery_warnings"] = json!(list.iter().map(|m| &m.warning).collect::<Vec<_>>());
+                }
+            }
+            Ok(v)
+        }
         (Method::Get, "/api/folders") => Ok(Value::Array(
             engine
                 .folders()
@@ -1995,6 +2238,21 @@ fn api_unlocked(
             service.request_sync();
             Ok(serde_json::to_value(report)?)
         }
+        // Folder membership of storage format 3 (work package 8b). Only a
+        // person at the page reaches these; the background service reads
+        // requests and never answers one.
+        (
+            m,
+            "/api/folder/requests"
+            | "/api/folder/request"
+            | "/api/folder/approve"
+            | "/api/folder/deny"
+            | "/api/folder/members"
+            | "/api/folder/role"
+            | "/api/folder/resolve-epoch"
+            | "/api/recovery/escrow"
+            | "/api/pair/answer",
+        ) => f3_api::route(engine, service, m, path, query, input),
         (Method::Get, "/api/replica/token") => {
             Ok(json!({"token": engine.replica_token()?.encode()}))
         }
@@ -2267,6 +2525,9 @@ fn api_unlocked(
             engine.detach_folder(&s(input, "name")?)?;
             service.folders_changed = true;
             Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/folder/remove") if input.get("device").is_some() => {
+            f3_api::remove_device(engine, service, input)
         }
         (Method::Post, "/api/folder/remove") => {
             let purge = input.get("purge").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -3029,7 +3290,7 @@ fn api_unlocked(
             service.forward = Some(engine.forward_status());
             Ok(serde_json::to_value(r)?)
         }
-        // The mailbox for offline pool disks (section 72).
+        // The mailbox for offline pool disks (section 78).
         (Method::Get, "/api/mailbox") => Ok(serde_json::to_value(engine.mailbox_status())?),
         (Method::Post, "/api/mailbox") => {
             let mut s = engine.mailbox_settings();
@@ -3305,6 +3566,291 @@ fn api_unlocked(
     .with_context(|| path.to_string())
 }
 
+/// Folder membership of storage format 3 in the local API (work package
+/// 8b): requests, approval, roles, removal, recovery copies and the pairing
+/// question. Without the `format3` feature every route answers that it is
+/// not available in this build.
+mod f3_api {
+    use super::*;
+
+    #[cfg(not(feature = "format3"))]
+    pub fn route(
+        _engine: &mut Engine,
+        _service: &mut ServiceState,
+        _method: Method,
+        _path: &str,
+        _query: &str,
+        _input: &Value,
+    ) -> Result<Value> {
+        bail!("folder membership of storage format 3 is not available in this build of Varsto")
+    }
+
+    #[cfg(not(feature = "format3"))]
+    pub fn remove_device(
+        _engine: &mut Engine,
+        _service: &mut ServiceState,
+        _input: &Value,
+    ) -> Result<Value> {
+        bail!("folder membership of storage format 3 is not available in this build of Varsto")
+    }
+
+    #[cfg(feature = "format3")]
+    pub use real::*;
+
+    #[cfg(feature = "format3")]
+    mod real {
+        use super::*;
+        use std::sync::{Condvar, Mutex as StdMutex};
+        use varsto_core::pair::v3::Joiner;
+
+        /// The folders-changed event and a sync request: other devices
+        /// fetch the new records at once.
+        fn changed(service: &mut ServiceState, folder: &str, what: &str) {
+            service.request_sync();
+            varsto_core::events::publish("folder.changed", json!({"folder": folder, "what": what}));
+        }
+
+        pub fn route(
+            engine: &mut Engine,
+            service: &mut ServiceState,
+            method: Method,
+            path: &str,
+            query: &str,
+            input: &Value,
+        ) -> Result<Value> {
+            match (method, path) {
+                (Method::Get, "/api/folder/requests") => {
+                    let folder = query_param(query, "folder");
+                    Ok(json!({ "requests": engine.f3_requests(folder.as_deref())? }))
+                }
+                (Method::Post, "/api/folder/request") => {
+                    let role = opt(input, "role").unwrap_or_else(|| "editor".into());
+                    let r = engine.f3_folder_request(&s(input, "folder")?, &role)?;
+                    changed(service, &r.folder_id, "request");
+                    Ok(serde_json::to_value(r)?)
+                }
+                (Method::Post, "/api/folder/approve") => {
+                    // The person compared the six words with the requesting
+                    // device; a call that does not say so grants nothing.
+                    if input.get("fingerprint_confirmed").and_then(|v| v.as_bool()) != Some(true) {
+                        bail!("approving needs \"fingerprint_confirmed\": true, after the six words were compared with the requesting device");
+                    }
+                    let m = engine.f3_approve(
+                        &s(input, "folder")?,
+                        &s(input, "device")?,
+                        opt(input, "role").as_deref(),
+                        opt(input, "fingerprint").as_deref(),
+                    )?;
+                    changed(service, &m.folder_id, "approve");
+                    Ok(serde_json::to_value(m)?)
+                }
+                (Method::Post, "/api/folder/deny") => {
+                    let m = engine.f3_deny(&s(input, "folder")?, &s(input, "device")?)?;
+                    changed(service, &m.folder_id, "deny");
+                    Ok(serde_json::to_value(m)?)
+                }
+                (Method::Get, "/api/folder/members") => match query_param(query, "folder") {
+                    Some(folder) => Ok(serde_json::to_value(engine.f3_members(&folder)?)?),
+                    // No folder named: every folder of the membership records.
+                    None => Ok(json!({ "folders": engine.f3_folders()? })),
+                },
+                (Method::Post, "/api/folder/role") => {
+                    let m = engine.f3_set_role(
+                        &s(input, "folder")?,
+                        &s(input, "device")?,
+                        &s(input, "role")?,
+                    )?;
+                    changed(service, &m.folder_id, "role");
+                    Ok(serde_json::to_value(m)?)
+                }
+                (Method::Post, "/api/folder/resolve-epoch") => {
+                    let epoch = input
+                        .get("epoch")
+                        .and_then(|e| e.as_u64())
+                        .and_then(|e| u32::try_from(e).ok())
+                        .ok_or_else(|| anyhow!("missing field epoch"))?;
+                    let m =
+                        engine.f3_resolve_epoch(&s(input, "folder")?, epoch, &s(input, "keep")?)?;
+                    changed(service, &m.folder_id, "resolve-epoch");
+                    Ok(serde_json::to_value(m)?)
+                }
+                (Method::Get, "/api/recovery/escrow") => {
+                    Ok(json!({ "missing": engine.f3_missing_escrows()? }))
+                }
+                (Method::Post, "/api/recovery/escrow") => {
+                    let words = s(input, "words")?;
+                    varsto_core::logging::register_secret(&words);
+                    let k1 = varsto_core::membership3::RecoveryKey::from_words(&words)?;
+                    let written = engine.f3_write_escrows(opt(input, "folder").as_deref(), &k1)?;
+                    if !written.is_empty() {
+                        changed(service, "", "escrow");
+                    }
+                    Ok(json!({ "written": written }))
+                }
+                (Method::Post, "/api/pair/answer") => answer_pair(engine, input),
+                _ => bail!("unknown route {path}"),
+            }
+        }
+
+        /// Remove a device from a folder: a new folder epoch. The call must
+        /// say it was confirmed.
+        pub fn remove_device(
+            engine: &mut Engine,
+            service: &mut ServiceState,
+            input: &Value,
+        ) -> Result<Value> {
+            if input.get("confirm").and_then(|v| v.as_bool()) != Some(true) {
+                bail!("removing a device from a folder needs \"confirm\": true; it starts a new folder epoch and the device keeps what it already read");
+            }
+            let name = opt(input, "folder")
+                .or_else(|| opt(input, "name"))
+                .ok_or_else(|| anyhow!("missing field folder"))?;
+            let r = engine.f3_remove(&name, &s(input, "device")?, None)?;
+            changed(service, &r.folder_id, "remove");
+            Ok(serde_json::to_value(r)?)
+        }
+
+        // ----- pairing: the offering device asks its person --------------
+
+        /// The joining device waiting for the person at this device.
+        struct Gate {
+            state: StdMutex<GateState>,
+            cv: Condvar,
+        }
+
+        #[derive(Default)]
+        struct GateState {
+            ask: Option<Joiner>,
+            answer: Option<bool>,
+        }
+
+        static GATE: StdMutex<Option<std::sync::Arc<Gate>>> = StdMutex::new(None);
+
+        /// How long the person has to answer.
+        const ANSWER_WITHIN: std::time::Duration = std::time::Duration::from_secs(300);
+
+        fn gate() -> Option<std::sync::Arc<Gate>> {
+            GATE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+
+        /// Open a format-3 pairing offer: the joining device's name and
+        /// six words are held for the page (`ask` in the status) until the
+        /// person answers with `POST /api/pair/answer`; nothing is sent
+        /// before.
+        pub fn start_offer(e: &Engine) -> Result<varsto_core::pair::Offer> {
+            let mut bundle = e.pairing_bundle()?;
+            let key = varsto_core::crypto::SecretKey::from_hex(&e.export_vault_key()?)?;
+            bundle.vault_key = String::new();
+            let g = std::sync::Arc::new(Gate {
+                state: StdMutex::new(GateState::default()),
+                cv: Condvar::new(),
+            });
+            *GATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(g.clone());
+            let approve: varsto_core::pair::v3::Approve = std::sync::Arc::new(move |j: &Joiner| {
+                let mut st = g.state.lock().unwrap_or_else(|e| e.into_inner());
+                st.ask = Some(j.clone());
+                st.answer = None;
+                varsto_core::events::publish(
+                    "pair.ask",
+                    json!({"name": j.name, "fingerprint": j.fingerprint}),
+                );
+                let deadline = std::time::Instant::now() + ANSWER_WITHIN;
+                let answer = loop {
+                    if let Some(a) = st.answer {
+                        break a;
+                    }
+                    let left = deadline.saturating_duration_since(std::time::Instant::now());
+                    if left.is_zero() {
+                        break false;
+                    }
+                    st =
+                        g.cv.wait_timeout(st, left)
+                            .unwrap_or_else(|e| e.into_inner())
+                            .0;
+                };
+                st.ask = None;
+                answer
+            });
+            varsto_core::pair::Offer::start_v3(bundle, key, approve)
+        }
+
+        /// What the pairing dialog shows: the joining device's name and
+        /// words, and the folders this device owns (to tick).
+        pub fn add_pair_ask(v: &mut Value, engine: Option<&mut Engine>) {
+            let Some(g) = gate() else { return };
+            let ask = g
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .ask
+                .clone();
+            let Some(j) = ask else { return };
+            let folders: Vec<Value> = engine
+                .and_then(|e| e.f3_folders().ok())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|f| f.your_role.as_deref() == Some("owner"))
+                .map(|f| json!({"id": f.folder_id, "name": f.folder}))
+                .collect();
+            v["ask"] = json!({"name": j.name, "fingerprint": j.fingerprint, "folders": folders});
+        }
+
+        /// The person's answer: with `allow`, the grants for the ticked
+        /// folders (by default none) are written first, then the vault key
+        /// is sent; without, the joining device is declined.
+        fn answer_pair(engine: &mut Engine, input: &Value) -> Result<Value> {
+            let g = gate().ok_or_else(|| anyhow!("no pairing offer is open"))?;
+            let ask = g
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .ask
+                .clone()
+                .ok_or_else(|| anyhow!("no device is waiting for an answer"))?;
+            let allow = input.get("allow").and_then(|v| v.as_bool()) == Some(true);
+            let mut granted = Vec::new();
+            if allow {
+                let folders: Vec<String> = input
+                    .get("folders")
+                    .and_then(|f| f.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !folders.is_empty() {
+                    // The words the person saw must still be the joiner's.
+                    if let Some(seen) = opt(input, "fingerprint") {
+                        if seen.split_whitespace().collect::<Vec<_>>()
+                            != ask.fingerprint.split_whitespace().collect::<Vec<_>>()
+                        {
+                            bail!("the words you saw are not the joining device's words; compare again");
+                        }
+                    }
+                    let role = opt(input, "role").unwrap_or_else(|| "editor".into());
+                    engine.f3_pair_grants(
+                        &ask.name,
+                        &ask.signing_pub,
+                        &ask.kem_pub,
+                        &folders,
+                        &role,
+                    )?;
+                    granted = folders;
+                }
+            }
+            let mut st = g.state.lock().unwrap_or_else(|e| e.into_inner());
+            st.answer = Some(allow);
+            g.cv.notify_all();
+            drop(st);
+            if !granted.is_empty() {
+                varsto_core::events::publish("folder.changed", json!({"what": "pair-grant"}));
+            }
+            Ok(json!({"ok": true, "allowed": allow, "granted": granted}))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -3373,6 +3919,12 @@ mod tests {
 
     /// A real server on a free port with a locked (engine-less) state.
     fn test_server() -> (u16, String, tempfile::TempDir) {
+        let (port, token, tmp, _) = test_server_state();
+        (port, token, tmp)
+    }
+
+    /// [`test_server`] and its state, for a test that holds it.
+    fn test_server_state() -> (u16, String, tempfile::TempDir, Shared) {
         let tmp = tempfile::tempdir().unwrap();
         let (server, bound) = bind(0).unwrap();
         let token = random_hex();
@@ -3387,12 +3939,108 @@ mod tests {
             link: None,
         }));
         let server = Arc::new(server);
+        let kept = state.clone();
         std::thread::spawn(move || serve_arc(server, state));
         (
             bound.rsplit(':').next().unwrap().parse().unwrap(),
             token,
             tmp,
+            kept,
         )
+    }
+
+    #[test]
+    fn reads_are_answered_while_a_long_operation_holds_the_state() {
+        let (port, token, _tmp, state) = test_server_state();
+        let h = [("X-Varsto-Token", token.as_str())];
+        // Once answered fresh, the service summary is kept.
+        let (st, head, fresh) = raw(port, "GET", "/api/service", &h, "");
+        assert_eq!(st, 200);
+        assert!(!head.contains("x-varsto-stale"));
+        // A sync (here: the test) holds the state for two seconds.
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let holder = {
+            let state = state.clone();
+            std::thread::spawn(move || {
+                let _g = state.lock().unwrap();
+                held_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            })
+        };
+        held_rx.recv().unwrap();
+        let t = std::time::Instant::now();
+        let (st, head, body) = raw(port, "GET", "/api/service", &h, "");
+        let took = t.elapsed();
+        assert_eq!(st, 200);
+        assert!(
+            took < std::time::Duration::from_millis(1000),
+            "took {took:?}"
+        );
+        assert!(head.contains("x-varsto-stale: 1"), "{head}");
+        assert!(head.contains("x-varsto-age-ms:"));
+        let v: Value = serde_json::from_str(&body).unwrap();
+        let f: Value = serde_json::from_str(&fresh).unwrap();
+        assert_eq!(v["stale"], true);
+        assert!(v["stale_ms"].as_u64().is_some());
+        assert_eq!(v["running"], f["running"]);
+        // Several reads at once do not queue behind each other either.
+        let many: Vec<_> = (0..4)
+            .map(|_| {
+                let token = token.clone();
+                std::thread::spawn(move || {
+                    let t = std::time::Instant::now();
+                    let h = [("X-Varsto-Token", token.as_str())];
+                    let st = raw(port, "GET", "/api/service", &h, "").0;
+                    (st, t.elapsed())
+                })
+            })
+            .collect();
+        for m in many {
+            let (st, took) = m.join().unwrap();
+            assert_eq!(st, 200);
+            assert!(
+                took < std::time::Duration::from_millis(1000),
+                "took {took:?}"
+            );
+        }
+        // The page's assets and the activity are not held up meanwhile.
+        let t = std::time::Instant::now();
+        assert_eq!(raw(port, "GET", "/app.js", &[], "").0, 200);
+        assert_eq!(raw(port, "GET", "/api/activity?mine=1", &h, "").0, 200);
+        assert!(t.elapsed() < std::time::Duration::from_millis(1000));
+        holder.join().unwrap();
+        // Free again: fresh.
+        let (st, head, _) = raw(port, "GET", "/api/service", &h, "");
+        assert_eq!(st, 200);
+        assert!(!head.contains("x-varsto-stale"));
+    }
+
+    #[test]
+    fn a_change_through_the_api_drops_the_cached_reads() {
+        let (port, token, _tmp, state) = test_server_state();
+        let h = [("X-Varsto-Token", token.as_str())];
+        assert_eq!(raw(port, "GET", "/api/state", &h, "").0, 200);
+        // Any request that is not a GET may have changed something (this
+        // one is refused, which does not matter).
+        assert_eq!(raw(port, "POST", "/api/no-such-change", &h, "{}").0, 400);
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let holder = {
+            let state = state.clone();
+            std::thread::spawn(move || {
+                let _g = state.lock().unwrap();
+                held_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(800));
+            })
+        };
+        held_rx.recv().unwrap();
+        // Nothing cached any more: the read waits for the state, and its
+        // answer is fresh.
+        let t = std::time::Instant::now();
+        let (st, head, _) = raw(port, "GET", "/api/state", &h, "");
+        assert_eq!(st, 200);
+        assert!(!head.contains("x-varsto-stale"));
+        assert!(t.elapsed() >= std::time::Duration::from_millis(500));
+        holder.join().unwrap();
     }
 
     /// One raw request; returns (status, lowercase head, body).
@@ -3526,6 +4174,109 @@ mod tests {
         );
         assert_eq!(
             raw(port, "GET", t, &[("X-Varsto-Token", &token)], "").0,
+            404
+        );
+    }
+
+    /// A GET with the token; returns (status, lowercase head, raw body).
+    fn get_bytes(port: u16, token: &str, target: &str) -> (u16, String, Vec<u8>) {
+        use std::io::{Read, Write};
+        let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        c.set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let req = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nX-Varsto-Token: {token}\r\n\r\n");
+        c.write_all(req.as_bytes()).unwrap();
+        let mut out = Vec::new();
+        let _ = c.read_to_end(&mut out);
+        let at = out
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("a complete response");
+        let head = String::from_utf8_lossy(&out[..at]).to_lowercase();
+        let status = head
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        (status, head, out[at + 4..].to_vec())
+    }
+
+    /// The page may show pictures from blob: addresses: thumbnails are fetched
+    /// with the session header and shown from a blob (an `img` cannot send a
+    /// header), so a policy without `blob:` in `img-src` blanks every one.
+    #[test]
+    fn the_page_policy_lets_thumbnail_blobs_load() {
+        let (port, _token, _tmp) = test_server();
+        let (st, head, _) = raw(port, "GET", "/", &[], "");
+        assert_eq!(st, 200);
+        let csp = head
+            .lines()
+            .find(|l| l.starts_with("content-security-policy:"))
+            .expect("a content security policy");
+        let img = csp
+            .split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with("img-src"))
+            .expect("an img-src directive");
+        assert!(img.split(' ').any(|s| s == "blob:"), "{img}");
+        assert!(img.split(' ').any(|s| s == "'self'"), "{img}");
+        // Still no remote pictures.
+        assert!(!img.contains("http"), "{img}");
+    }
+
+    /// `/api/thumb` answers real JPEGs of the right size, again and again
+    /// (every request reads the storage; nothing empty is ever kept).
+    #[test]
+    fn thumb_endpoint_serves_decodable_pictures() {
+        let (port, token, tmp, state) = test_server_state();
+        let root = tmp.path();
+        let (mut engine, _) = Engine::init(&root.join("dev"), "laptop", "pass phrase 123").unwrap();
+        engine
+            .add_storage(StorageSpec::LocalDir {
+                name: "box".into(),
+                path: root.join("box"),
+                cold: false,
+                carrier: false,
+                place: String::new(),
+                min_free: None,
+            })
+            .unwrap();
+        let pics = root.join("pics");
+        std::fs::create_dir_all(&pics).unwrap();
+        engine.add_folder("pics", &pics).unwrap();
+        image::RgbImage::from_fn(640, 480, |x, y| image::Rgb([x as u8, y as u8, 40]))
+            .save(pics.join("a b.png"))
+            .unwrap();
+        image::RgbImage::from_fn(300, 500, |x, y| image::Rgb([y as u8, x as u8, 90]))
+            .save(pics.join("c.jpg"))
+            .unwrap();
+        engine.push("pics").unwrap();
+        state.lock().unwrap().engine = Some(engine);
+        for (path, w, h) in [("a%20b.png", 256, 192), ("c.jpg", 154, 256)] {
+            let target = format!("/api/thumb?folder=pics&path={path}");
+            for round in 0..3 {
+                let (st, head, body) = get_bytes(port, &token, &target);
+                assert_eq!(st, 200, "{path} round {round}");
+                assert!(head.contains("content-type: image/jpeg"), "{head}");
+                assert!(
+                    head.contains(&format!("content-length: {}", body.len())),
+                    "{head}"
+                );
+                assert!(body.len() > 200, "{path}: {} bytes", body.len());
+                assert_eq!(&body[..2], &[0xff, 0xd8]);
+                let img = image::load_from_memory(&body).unwrap().to_rgb8();
+                assert!(
+                    (img.width() as i64 - w).abs() <= 1 && (img.height() as i64 - h).abs() <= 1,
+                    "{path}: {}x{}",
+                    img.width(),
+                    img.height()
+                );
+            }
+        }
+        // Not a picture: no thumbnail, and an honest 404 (the page then
+        // shows its placeholder).
+        assert_eq!(
+            get_bytes(port, &token, "/api/thumb?folder=pics&path=nope.png").0,
             404
         );
     }
@@ -3909,7 +4660,7 @@ mod tests {
         );
     }
 
-    /// `/api/mailbox`: the status and the settings (section 72).
+    /// `/api/mailbox`: the status and the settings (section 78).
     #[test]
     fn the_mailbox_api_shows_the_status_and_changes_the_settings() {
         let tmp = tempfile::tempdir().unwrap();
@@ -4017,6 +4768,215 @@ mod tests {
         }
     }
 
+    /// Double-quoted string literals of a script (escapes resolved for `\"`
+    /// only), leaving out `//` comments.
+    fn js_literals(src: &str) -> Vec<String> {
+        let b: Vec<char> = src.chars().collect();
+        let (mut out, mut i) = (Vec::new(), 0);
+        while i < b.len() {
+            if b[i] == '/' && b.get(i + 1) == Some(&'/') && (i == 0 || b[i - 1] != ':') {
+                while i < b.len() && b[i] != '\n' {
+                    i += 1;
+                }
+            } else if b[i] == '"' {
+                let mut lit = String::new();
+                i += 1;
+                while i < b.len() && b[i] != '"' && b[i] != '\n' {
+                    if b[i] == '\\' && i + 1 < b.len() {
+                        i += 1;
+                    }
+                    lit.push(b[i]);
+                    i += 1;
+                }
+                out.push(lit);
+                i += 1;
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// Visible text and `title`, `placeholder`, `aria-label` and `alt` values
+    /// of the static page.
+    fn html_texts(page: &str) -> Vec<String> {
+        let mut page = page.to_string();
+        for tag in ["script", "style"] {
+            while let Some(a) = page.find(&format!("<{tag}")) {
+                let end = page[a..].find(&format!("</{tag}>")).unwrap() + a + tag.len() + 3;
+                page.replace_range(a..end, "");
+            }
+        }
+        let norm = |t: &str| {
+            t.replace("&amp;", "&")
+                .replace("&middot;", "\u{b7}")
+                .replace("&larr;", "\u{2190}")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let mut out = Vec::new();
+        for chunk in page.split('<').skip(1) {
+            let (tag, text) = chunk.split_once('>').unwrap_or((chunk, ""));
+            out.push(norm(text));
+            for attr in ["title", "placeholder", "aria-label", "alt"] {
+                if let Some(a) = tag.find(&format!(" {attr}=\"")) {
+                    let rest = &tag[a + attr.len() + 3..];
+                    out.push(norm(&rest[..rest.find('"').unwrap_or(rest.len())]));
+                }
+            }
+        }
+        out.retain(|t| t.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 2);
+        out
+    }
+
+    /// A sentence-like literal the interface might show: capitalised words
+    /// with ordinary punctuation, no code or paths.
+    fn looks_like_ui_text(l: &str) -> bool {
+        let mut c = l.chars();
+        let (a, b) = (c.next(), c.next());
+        // A literal ending in a space is the start of a message the script completes.
+        matches!((a, b), (Some(a), Some(b)) if a.is_ascii_uppercase() && b.is_ascii_lowercase())
+            && l.contains(' ')
+            && !l.ends_with(' ')
+            && l.chars()
+                .all(|c| c.is_ascii_alphabetic() || " ',.()-:?!".contains(c))
+    }
+
+    #[test]
+    fn interface_translations_cover_the_page() {
+        // Names, examples and technical terms that stay as they are, and
+        // literals that are not shown (comments, fonts, browser errors) or
+        // that the script completes with a pattern (a prefix before a
+        // number or a name).
+        const SAME: &[&str] = &[
+            "*.tmp",
+            "Android",
+            "DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA",
+            "Documents",
+            "Linux",
+            "OK",
+            "Varsto",
+            "Varsto v",
+            "Windows",
+            "box",
+            "dana",
+            "data-01",
+            "eu-central-1",
+            "fr-par",
+            "hetzner:backup/varsto",
+            "iOS",
+            "laptop",
+            "macOS",
+            "my-laptop",
+            "phone",
+            "reset",
+            "shelf",
+            "varsto",
+            "varsto mcp grant",
+            "varsto org request",
+            "work-laptop",
+            "Archive is almost full",
+            "Attach disk C",
+            "Could not reach the Varsto service (",
+            "Every file in the trash (",
+            "Failed to fetch",
+            "Helvetica Neue",
+            "Home NAS",
+            "Laptop backup",
+            "Load failed",
+            "Segoe UI",
+            "Suggested next",
+            "The camera could not be opened (",
+            "/Volumes/box",
+            "https://s3.fr-par.scw.cloud",
+            "/Users/me/Documents",
+            "/media/me/data-01",
+            "https://s3.eu-central-1.amazonaws.com",
+            "/Users/me/Pictures",
+            "/Volumes/Old drive/Photos",
+            "/Users/me/Varsto/Photos",
+            "stun.example.net:3478",
+            "Documents: a verification is about to age out",
+        ];
+        // Messages put together from parts are translated by patterns (a
+        // whole text) or parts (inside a text); the ones the page builds
+        // from counts and names must stay covered.
+        const COMPOSED: &[&str] = &[
+            r"^1 file$",
+            r"^(\d+) files$",
+            r"^(\d+) blocks$",
+            r"^(\d+) folders$",
+            r"^(\d+) storages$",
+            r"^(\d+) devices$",
+            r"^(\d+) active$",
+            "^via ([^\u{b7}]+)$",
+            r"^(\d+) ledger batches$",
+            r"^added ([\d.\-/: ]+)$",
+            r"next in (\d+) s",
+            "this device is an administrator",
+            r"(\d+) people\b",
+            r"(\d+) administrators\b",
+            "(^|; )not on this device(?=;|$)",
+            "(^|; )on this device(?=;|$)",
+            r"every block of this folder is on storage ([^;]+)",
+        ];
+        let page_texts = html_texts(INDEX_HTML);
+        assert!(page_texts.len() > 400, "{}", page_texts.len());
+        let mut used: Vec<String> = page_texts;
+        for src in [APP_JS, FOLDERS_JS, VIZ_JS] {
+            used.extend(
+                js_literals(src)
+                    .into_iter()
+                    .filter(|l| looks_like_ui_text(l)),
+            );
+        }
+        assert!(used.len() > 800, "{}", used.len());
+        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV)] {
+            let d: Value = serde_json::from_str(dict).unwrap();
+            let top: Vec<&String> = d.as_object().unwrap().keys().collect();
+            // i18n.js reads only these three; a string next to them is never shown.
+            assert_eq!(
+                top,
+                ["parts", "patterns", "strings"],
+                "{lang}: keys outside the known three"
+            );
+            let strings = d["strings"].as_object().unwrap();
+            assert!(
+                strings
+                    .values()
+                    .all(|v| v.as_str().is_some_and(|t| !t.is_empty())),
+                "{lang}"
+            );
+            let pairs: Vec<&str> = ["patterns", "parts"]
+                .iter()
+                .flat_map(|k| d[*k].as_array().unwrap())
+                .map(|p| {
+                    let p = p.as_array().unwrap();
+                    assert!(
+                        p.len() == 2 && p.iter().all(Value::is_string),
+                        "{lang}: {p:?}"
+                    );
+                    p[0].as_str().unwrap()
+                })
+                .collect();
+            let missing: Vec<&String> = used
+                .iter()
+                .filter(|t| !SAME.contains(&t.as_str()) && !strings.contains_key(t.as_str()))
+                // Messages with a number or name in them are matched by a pattern.
+                .filter(|t| {
+                    !pairs
+                        .iter()
+                        .any(|p| p.starts_with('^') && p.contains(t.trim_end_matches(['(', ' '])))
+                })
+                .collect();
+            assert!(missing.is_empty(), "{lang} lacks {missing:?}");
+            for c in COMPOSED {
+                assert!(pairs.contains(c), "{lang} lacks the pattern {c}");
+            }
+        }
+    }
+
     #[test]
     fn providers_list_for_the_storage_form() {
         let now = 1_791_849_600; // 2026-10-13
@@ -4066,5 +5026,666 @@ mod tests {
             .find(|p| p["id"] == "aws-s3")
             .unwrap();
         assert_eq!(aws_later["stale"], true);
+    }
+
+    // ----- folder membership of storage format 3 (work package 8b) ----------
+
+    /// A vault of two devices on one directory storage, and the folder
+    /// `docs` in the membership records of the first.
+    #[cfg(feature = "format3")]
+    fn f3_pair(t: &std::path::Path) -> (Engine, Engine, String) {
+        let storage = StorageSpec::LocalDir {
+            name: "box".into(),
+            path: t.join("box"),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+            min_free: None,
+        };
+        std::fs::create_dir_all(t.join("box")).unwrap();
+        let pass = "correct horse battery staple";
+        let (mut a, key) = Engine::init(&t.join("a"), "alpha", pass).unwrap();
+        a.add_storage(storage.clone()).unwrap();
+        let b = Engine::join(&t.join("b"), "bravo", pass, &key, storage).unwrap();
+        let id = a.f3_folder_create("docs", None).unwrap();
+        (a, b, id)
+    }
+
+    #[cfg(feature = "format3")]
+    fn f3_call(
+        engine: &mut Engine,
+        service: &mut ServiceState,
+        m: Method,
+        path: &str,
+        query: &str,
+        input: Value,
+    ) -> Result<Value> {
+        api_unlocked(engine, service, m, path, query, &input)
+    }
+
+    #[cfg(feature = "format3")]
+    #[test]
+    fn folder_membership_endpoints() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut a, mut b, folder_id) = f3_pair(tmp.path());
+        let (mut sa, mut sb) = (ServiceState::default(), ServiceState::default());
+        let seen = varsto_core::events::bus().last_id();
+
+        // The requesting device asks; the owner lists the request with the words.
+        let asked = f3_call(
+            &mut b,
+            &mut sb,
+            Method::Post,
+            "/api/folder/request",
+            "",
+            json!({"folder": "docs", "role": "viewer"}),
+        )
+        .unwrap();
+        let words = asked["fingerprint"].as_str().unwrap().to_string();
+        let bravo = asked["device_id"].as_str().unwrap().to_string();
+        let listed = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/requests",
+            "",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(listed["requests"].as_array().unwrap().len(), 1);
+        assert_eq!(listed["requests"][0]["device"], "bravo");
+        assert_eq!(listed["requests"][0]["fingerprint"], json!(words));
+        let one = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/requests",
+            "folder=docs",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(one["requests"].as_array().unwrap().len(), 1);
+
+        // Approving needs the confirmation, and the words must be the request's.
+        for body in [
+            json!({"folder": "docs", "device": bravo}),
+            json!({"folder": "docs", "device": bravo, "fingerprint_confirmed": false}),
+            json!({"folder": "docs", "device": bravo, "fingerprint_confirmed": "true"}),
+        ] {
+            let e = f3_call(
+                &mut a,
+                &mut sa,
+                Method::Post,
+                "/api/folder/approve",
+                "",
+                body,
+            )
+            .unwrap_err();
+            assert!(format!("{e:#}").contains("fingerprint_confirmed"), "{e:#}");
+        }
+        let e = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/approve",
+            "",
+            json!({"folder": "docs", "device": bravo, "fingerprint_confirmed": true, "fingerprint": "one two three four five six"}),
+        )
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("request changed"), "{e:#}");
+        // Nothing was granted by the refusals.
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/members",
+            "folder=docs",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(m["participants"].as_array().unwrap().len(), 1);
+
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/approve",
+            "",
+            json!({"folder": "docs", "device": bravo, "role": "viewer", "fingerprint": words, "fingerprint_confirmed": true}),
+        )
+        .unwrap();
+        assert_eq!(m["folder_id"], json!(folder_id));
+        let roles: Vec<(String, String)> = m["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| {
+                (
+                    p["device"].as_str().unwrap().to_string(),
+                    p["role"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert!(
+            roles.contains(&("bravo".into(), "viewer".into())),
+            "{roles:?}"
+        );
+        assert!(sa.sync_requested, "other devices fetch the records at once");
+
+        // Every folder, and the role of the requesting device on its own side.
+        let all = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/members",
+            "",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(all["folders"].as_array().unwrap().len(), 1);
+        let mine = f3_call(
+            &mut b,
+            &mut sb,
+            Method::Get,
+            "/api/folder/members",
+            "folder=docs",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(mine["your_role"], "viewer");
+
+        // A role change, by an owner only.
+        let e = f3_call(
+            &mut b,
+            &mut sb,
+            Method::Post,
+            "/api/folder/role",
+            "",
+            json!({"folder": "docs", "device": bravo, "role": "editor"}),
+        )
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("not an owner"), "{e:#}");
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/role",
+            "",
+            json!({"folder": "docs", "device": bravo, "role": "editor"}),
+        )
+        .unwrap();
+        assert!(m["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["device"] == "bravo" && p["role"] == "editor"));
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/role",
+            "",
+            json!({"folder": "docs", "device": bravo, "role": "boss"})
+        )
+        .is_err());
+
+        // Deny: a second request, answered with a refusal.
+        let key = a.export_vault_key().unwrap();
+        let mut c = Engine::join(
+            &tmp.path().join("c"),
+            "charlie",
+            "correct horse battery staple",
+            &key,
+            a.storages()[0].clone(),
+        )
+        .unwrap();
+        let mut sc = ServiceState::default();
+        let asked = f3_call(
+            &mut c,
+            &mut sc,
+            Method::Post,
+            "/api/folder/request",
+            "",
+            json!({"folder": "docs"}),
+        )
+        .unwrap();
+        let charlie = asked["device_id"].as_str().unwrap().to_string();
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/deny",
+            "",
+            json!({"folder": "docs", "device": charlie}),
+        )
+        .unwrap();
+        assert!(m["denied"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["device"] == "charlie"));
+        assert!(m["pending"].as_array().unwrap().is_empty());
+
+        // Removing needs "confirm"; then a new folder epoch starts.
+        let e = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/remove",
+            "",
+            json!({"folder": "docs", "device": bravo}),
+        )
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("confirm"), "{e:#}");
+        let r = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/remove",
+            "",
+            json!({"folder": "docs", "device": bravo, "confirm": true}),
+        )
+        .unwrap();
+        assert_eq!(r["epoch"], 1);
+        assert_eq!(r["removed"], "bravo");
+        let m = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/folder/members",
+            "folder=docs",
+            json!({}),
+        )
+        .unwrap();
+        assert_eq!(m["epoch"], 1);
+        assert!(!m["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["device"] == "bravo"));
+        // The vault's own folder removal keeps working on the same path.
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/remove",
+            "",
+            json!({"name": "nothing"})
+        )
+        .is_err());
+
+        // Nothing to resolve without two epochs under one number.
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/resolve-epoch",
+            "",
+            json!({"folder": "docs", "epoch": 1, "keep": "alpha"})
+        )
+        .is_err());
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/folder/resolve-epoch",
+            "",
+            json!({"folder": "docs", "keep": "alpha"})
+        )
+        .is_err());
+
+        // Recovery copies: listed, written with the words, then none left.
+        let missing = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/recovery/escrow",
+            "",
+            json!({}),
+        )
+        .unwrap();
+        let n = missing["missing"].as_array().unwrap().len();
+        assert!(n >= 2, "epochs 0 and 1 lack a copy: {missing}");
+        assert_eq!(missing["missing"][0]["folder"], "docs");
+        assert!(missing["missing"][0]["warning"]
+            .as_str()
+            .unwrap()
+            .contains("has no recovery copy: run varsto recovery escrow docs"));
+        let st = f3_call(&mut a, &mut sa, Method::Get, "/api/status", "", json!({})).unwrap();
+        assert_eq!(st["recovery_warnings"].as_array().unwrap().len(), n);
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/recovery/escrow",
+            "",
+            json!({"words": "abandon abandon"})
+        )
+        .is_err());
+        assert!(f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/recovery/escrow",
+            "",
+            json!({})
+        )
+        .is_err());
+        let words = varsto_core::membership3::RecoveryKey::generate()
+            .words()
+            .unwrap()
+            .to_string();
+        let w = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Post,
+            "/api/recovery/escrow",
+            "",
+            json!({"words": words}),
+        )
+        .unwrap();
+        assert_eq!(w["written"].as_array().unwrap().len(), n);
+        let missing = f3_call(
+            &mut a,
+            &mut sa,
+            Method::Get,
+            "/api/recovery/escrow",
+            "",
+            json!({}),
+        )
+        .unwrap();
+        assert!(missing["missing"].as_array().unwrap().is_empty());
+        let st = f3_call(&mut a, &mut sa, Method::Get, "/api/status", "", json!({})).unwrap();
+        assert!(st.get("recovery_warnings").is_none());
+
+        // The page hears about it.
+        let kinds: Vec<String> = match varsto_core::events::bus().since(seen) {
+            varsto_core::events::Since::Events(v) => v.into_iter().map(|e| e.kind).collect(),
+            other => panic!("{other:?}"),
+        };
+        assert!(kinds.iter().any(|k| k == "folder.changed"), "{kinds:?}");
+    }
+
+    /// The service announces requests (`folder.request`) and never answers one.
+    #[cfg(feature = "format3")]
+    #[test]
+    fn the_service_announces_requests_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut a, mut b, _) = f3_pair(tmp.path());
+        let mut sb = ServiceState::default();
+        let mut service = ServiceState::default();
+        let seen = varsto_core::events::bus().last_id();
+        service.watch_folder_requests(&mut a);
+        f3_call(
+            &mut b,
+            &mut sb,
+            Method::Post,
+            "/api/folder/request",
+            "",
+            json!({"folder": "docs"}),
+        )
+        .unwrap();
+        service.watch_folder_requests(&mut a);
+        service.watch_folder_requests(&mut a);
+        let n = match varsto_core::events::bus().since(seen) {
+            varsto_core::events::Since::Events(v) => v
+                .iter()
+                .filter(|e| e.kind == "folder.request" && e.data["device"] == "bravo")
+                .count(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(n, 1, "announced once");
+        // Still pending: the service granted nothing.
+        assert_eq!(a.f3_requests(None).unwrap().len(), 1);
+        assert_eq!(a.f3_members("docs").unwrap().participants.len(), 1);
+    }
+
+    /// A device that joins by pairing, as the offering side sees it.
+    #[cfg(feature = "format3")]
+    fn f3_joiner(
+        name: &'static str,
+        code: String,
+        port: u16,
+    ) -> (std::thread::JoinHandle<Result<(), String>>, String) {
+        use varsto_core::pair::v3;
+        let sk = varsto_core::crypto::SigningKey::generate();
+        let dk = varsto_core::kem::DecapsKey::generate();
+        let sk_pub = sk.public().to_bytes();
+        let device = hex::encode(varsto_core::membership3::device_id(&sk.public()));
+        let h = std::thread::spawn(move || {
+            let keys = v3::JoinKeys {
+                name,
+                signing_pub: sk_pub,
+                kem: &dk,
+            };
+            let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
+            v3::fetch(&code, &keys, addr)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        });
+        (h, device)
+    }
+
+    /// The pairing question on the offering side: the joining device's name
+    /// and words wait for the person; nothing is sent before the answer;
+    /// ticked folders are granted before the vault key goes out.
+    #[cfg(feature = "format3")]
+    #[test]
+    fn pairing_asks_the_person_and_grants_only_ticked_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut a, _b, _) = f3_pair(tmp.path());
+        a.f3_folder_create("photos", None).unwrap();
+        let mut st = State {
+            home: tmp.path().join("a"),
+            engine: Some(a),
+            token: String::new(),
+            bound: "127.0.0.1:0".into(),
+            traffic: Arc::default(),
+            service: ServiceState::default(),
+            pair: None,
+            link: None,
+        };
+        let wait_ask = |st: &mut State| -> Value {
+            for _ in 0..200 {
+                let s = api(st, Method::Get, "/api/pair/status", "", &json!({})).unwrap();
+                if s.get("ask").is_some() {
+                    return s["ask"].clone();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            panic!("no question");
+        };
+        let started = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/start",
+            "",
+            &json!({"format": 3}),
+        )
+        .unwrap();
+        let code = started["code"].as_str().unwrap().to_string();
+        let port = started["port"].as_u64().unwrap() as u16;
+
+        // The joining device waits; the question names it and lists the owned folders.
+        let (h, device) = f3_joiner("phone", code.clone(), port);
+        let ask = wait_ask(&mut st);
+        assert_eq!(ask["name"], "phone");
+        assert_eq!(ask["fingerprint"].as_str().unwrap().split(' ').count(), 6);
+        let mut names: Vec<&str> = ask["folders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["name"].as_str().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["docs", "photos"]);
+        assert!(!h.is_finished(), "nothing is sent before the answer");
+        // Words that are not the joiner's refuse the grants and leave the question open.
+        let e = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/answer",
+            "",
+            &json!({"allow": true, "folders": ["docs"], "fingerprint": "a b c d e f"}),
+        )
+        .unwrap_err();
+        assert!(format!("{e:#}").contains("compare again"), "{e:#}");
+        assert!(!h.is_finished());
+        // Ticking one folder grants it and no other.
+        let done = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/answer",
+            "",
+            &json!({"allow": true, "folders": ["docs"], "fingerprint": ask["fingerprint"]}),
+        )
+        .unwrap();
+        assert_eq!(done["granted"], json!(["docs"]));
+        h.join().unwrap().unwrap();
+        let a = st.engine.as_mut().unwrap();
+        let docs = a.f3_members("docs").unwrap();
+        assert!(
+            docs.participants
+                .iter()
+                .any(|p| p.device_id == device && p.role == "editor"),
+            "{docs:?}"
+        );
+        let photos = a.f3_members("photos").unwrap();
+        assert!(!photos.participants.iter().any(|p| p.device_id == device));
+
+        // A second device is declined: no grants, and it learns so.
+        let started = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/start",
+            "",
+            &json!({"format": 3}),
+        )
+        .unwrap();
+        let code2 = started["code"].as_str().unwrap().to_string();
+        let port2 = started["port"].as_u64().unwrap() as u16;
+        let (h2, device2) = f3_joiner("tablet", code2, port2);
+        wait_ask(&mut st);
+        let done = api(
+            &mut st,
+            Method::Post,
+            "/api/pair/answer",
+            "",
+            &json!({"allow": false, "folders": ["docs"]}),
+        )
+        .unwrap();
+        assert_eq!(done["allowed"], false);
+        assert!(h2.join().unwrap().is_err());
+        let a = st.engine.as_mut().unwrap();
+        assert!(!a
+            .f3_members("docs")
+            .unwrap()
+            .participants
+            .iter()
+            .any(|p| p.device_id == device2));
+        // With no question open there is nothing to answer.
+        assert!(api(
+            &mut st,
+            Method::Post,
+            "/api/pair/answer",
+            "",
+            &json!({"allow": true})
+        )
+        .is_err());
+    }
+
+    /// The folder access card: every element the script reaches exists in
+    /// the page, approving always goes through the confirmation box, and the
+    /// pairing question is answered through the API (no browser needed).
+    #[test]
+    fn folder_access_page_is_wired() {
+        for id in [
+            "f3card",
+            "f3recovery",
+            "f3recovery-names",
+            "f3recovery-go",
+            "f3folders",
+        ] {
+            assert!(
+                INDEX_HTML.contains(&format!("id=\"{id}\"")),
+                "page lacks {id}"
+            );
+            assert!(
+                APP_JS.contains(&format!("$(\"{id}\")")),
+                "script lacks {id}"
+            );
+        }
+        // The card starts hidden: a build or vault without membership shows nothing.
+        let card = &INDEX_HTML[INDEX_HTML.find("id=\"f3card\"").unwrap()..];
+        assert!(card[..card.find('>').unwrap()].contains("hidden"));
+        // Approve: the box must be ticked before the button works, and the
+        // request carries the confirmation the API insists on.
+        assert!(APP_JS.contains("ok.disabled = true; cb.onchange"));
+        assert!(APP_JS.contains("r.values.match !== \"yes\""));
+        assert!(APP_JS.contains("fingerprint_confirmed: true"));
+        // Removal names its consequence and sends the confirmation.
+        assert!(APP_JS.contains("starts a new folder epoch"));
+        assert!(APP_JS.contains("confirm: true"));
+        // The events and the pairing question.
+        for k in [
+            "folder.request",
+            "folder.changed",
+            "pair.ask",
+            "/api/pair/answer",
+        ] {
+            assert!(APP_JS.contains(k), "script lacks {k}");
+        }
+    }
+
+    /// A build without the feature answers every route with the same text.
+    #[cfg(not(feature = "format3"))]
+    #[test]
+    fn folder_membership_routes_say_not_available() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut a, _key) = Engine::init(
+            &tmp.path().join("a"),
+            "alpha",
+            "correct horse battery staple",
+        )
+        .unwrap();
+        let mut service = ServiceState::default();
+        for (m, path) in [
+            (Method::Get, "/api/folder/requests"),
+            (Method::Post, "/api/folder/request"),
+            (Method::Post, "/api/folder/approve"),
+            (Method::Post, "/api/folder/deny"),
+            (Method::Get, "/api/folder/members"),
+            (Method::Post, "/api/folder/role"),
+            (Method::Post, "/api/folder/resolve-epoch"),
+            (Method::Get, "/api/recovery/escrow"),
+            (Method::Post, "/api/recovery/escrow"),
+        ] {
+            let e = api_unlocked(
+                &mut a,
+                &mut service,
+                m,
+                path,
+                "",
+                &json!({"folder": "docs", "device": "x"}),
+            )
+            .unwrap_err();
+            assert!(
+                format!("{e:#}").contains("not available in this build"),
+                "{path}: {e:#}"
+            );
+        }
+        let e = api_unlocked(
+            &mut a,
+            &mut service,
+            Method::Post,
+            "/api/folder/remove",
+            "",
+            &json!({"folder": "docs", "device": "x", "confirm": true}),
+        )
+        .unwrap_err();
+        assert!(
+            format!("{e:#}").contains("not available in this build"),
+            "{e:#}"
+        );
     }
 }

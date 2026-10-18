@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! The mailbox for offline pool disks (`docs/spec/alpha-0-format.md`
-//! section 72).
+//! section 78).
 //!
 //! A pool disk A that is away most of the time may hold the only copy of
 //! blocks that another disk B (of another place, or of another pool) or

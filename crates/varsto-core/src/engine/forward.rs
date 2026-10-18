@@ -246,7 +246,7 @@ fn lease_slot(key: &str) -> Option<i64> {
 
 /// Where a transfer reads a block from. Copying is by ciphertext object,
 /// named by its hash, so any storage can be an endpoint, a pool disk that is
-/// attached only sometimes included (the mailbox, section 72 and
+/// attached only sometimes included (the mailbox, section 78 and
 /// `engine::mailbox`, builds on this: its tasks wait for their source or
 /// their target to be docked).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -270,7 +270,7 @@ impl Endpoint {
 }
 
 /// Where the bytes of a transfer are while it is in flight. Forwarding holds
-/// them in memory only; the durable outbox is the mailbox's (section 72).
+/// them in memory only; the durable outbox is the mailbox's (section 78).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HeldAt {
     Memory,
@@ -785,7 +785,7 @@ impl Engine {
 
     /// Take the lease of the directory `dir` (`.../`) on the storages `on`:
     /// forwarding takes one per folder, the mailbox one for the vault
-    /// (section 72). `None`: this device holds them all now; otherwise the
+    /// (section 78). `None`: this device holds them all now; otherwise the
     /// name of the device holding one (the leases taken in this attempt are
     /// given back).
     pub(super) fn take_leases_in(

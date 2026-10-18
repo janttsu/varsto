@@ -19,12 +19,26 @@ on:
         default: ""
   push:
     tags: ['ios-v*']
+  # The daily build workflow (daily.yml) calls this one for a given commit.
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit, branch or tag to build (default is the caller's ref)
+        type: string
+        required: false
+        default: ""
+      release_tag:
+        description: Tag whose draft pre-release gets the .ipa attached (empty = artifact only)
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
+# github.workflow is the caller's name in a called workflow.
 concurrency:
-  group: ios-ipa-${{ github.ref }}
+  group: ios-ipa-${{ github.workflow }}-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
 jobs:
