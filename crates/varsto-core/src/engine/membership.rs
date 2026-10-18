@@ -737,8 +737,11 @@ impl Engine {
                 m.remove_devices(&list, wipe, k1.as_ref(), unchecked)
             })?
             .ok_or_else(|| anyhow!("this device has no storage to publish the removal to"))?;
-        // Everything this device writes from now on uses the new keys.
+        // Everything this device writes from now on uses the new keys; its
+        // peer record goes out again under them, so the removed device stops
+        // learning its addresses at once.
         self.reset_view3();
+        self.republish_own_peer_record();
         let folder_name = |f: &crate::record::Id16| {
             self.f3
                 .members

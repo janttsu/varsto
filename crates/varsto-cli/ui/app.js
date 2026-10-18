@@ -3609,11 +3609,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     // The service tells which address it is trying while the request runs.
     var shown = ""; var prog = $("pairprogress");
     function showStep(v) {
+      // The other device shows this device's six words to its person before it lets this one join.
+      var words = v.active && v.fingerprint ? "This device's six words: " + v.fingerprint + ". The other device shows the same words before it lets this one join." : "";
+      if ($("pairwords").textContent !== words) { $("pairwords").textContent = words; }
       var msg = !v.active ? "" : v.step === "trying" ? "Trying " + v.address + " …" : v.step === "looking" ? "Looking for the device on the network …" : "";
       if (msg !== shown) { shown = msg; prog.textContent = msg; if (msg) { log(msg.charAt(0).toLowerCase() + msg.slice(1)); } }
     }
     var poll = setInterval(function () { api("GET", "/api/pair/join-status").then(showStep).catch(function () {}); }, 500);
-    api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); pairOffered = []; log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(pairFailed).then(function () { clearInterval(poll); prog.textContent = ""; busy(false); });
+    api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); pairOffered = []; log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(pairFailed).then(function () { clearInterval(poll); prog.textContent = ""; $("pairwords").textContent = ""; busy(false); });
   };
   // Nothing answered: name every address tried and what the user can check.
   function pairFailed(e) {
@@ -3641,7 +3644,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function pollPair() { api("GET", "/api/pair/status").then(function (s) { if (s.code) { renderPair(s); if (s.open && !pairTimer) { pairTimer = setInterval(pollPair, 1500); } } if (s.ask) { f3PairAsk(s); } }).catch(function () {}); }
   if (token) { pollPair(); }
-  $("pairstart").onclick = function () { api("POST", "/api/pair/start", f3Owned > 0 ? { format: 3 } : {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
+  $("pairstart").onclick = function () { api("POST", "/api/pair/start", {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
   $("pairscan").onclick = function () { scanQr("pair").then(function (info) { if (info) { fillPair(info); } }); };
 
   $("pairstop").onclick = function () { api("POST", "/api/pair/stop", {}).then(function () { if (pairTimer) { clearInterval(pairTimer); pairTimer = null; } $("pairbox").classList.add("hidden"); pairButtons(false); }).catch(function (e) { alertBox(e.message); }); };

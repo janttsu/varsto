@@ -891,7 +891,7 @@ impl Engine {
                 }
             }
         }
-        // What a peer says it holds (head statements, section 74).
+        // What a peer proved it holds (`ledger/proofs.json`).
         for (dev, reach) in self.peer_reach(dir) {
             let held = self.ledger.head(&dev).seq;
             if reach > held {

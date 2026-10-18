@@ -584,11 +584,26 @@ enum DeviceCmd {
 
 #[derive(Subcommand)]
 enum PairCmd {
-    /// On a device that holds the vault: show a code and wait for the new device.
+    /// On a device that holds the vault: show a code and wait for the new
+    /// device. When it connects, its name and six words are shown and you
+    /// are asked whether they match the words the new device shows; only
+    /// then does it get the vault, and the folders named with --folders.
     Offer {
         /// Also show a QR code (a varsto://pair link with the code and the addresses).
         #[arg(long)]
         qr: bool,
+        /// Folders the new device may open at once (comma-separated names or
+        /// ids; this device must own them). By default none: it asks for
+        /// folders later with `varsto folder request`.
+        #[arg(long, value_delimiter = ',')]
+        folders: Vec<String>,
+        /// The role in those folders: editor or viewer.
+        #[arg(long, default_value = "editor")]
+        role: String,
+        /// Do not ask whether the six words match (scripts that compared
+        /// them another way).
+        #[arg(long)]
+        yes: bool,
     },
     /// On the new device: join the vault of the device showing the code.
     Join {
@@ -2035,6 +2050,17 @@ fn mcp_key_input(file: Option<&Path>) -> Result<Option<zeroize::Zeroizing<String
 }
 
 /// Ask a yes/no question on the terminal; without one the answer is no.
+/// Ask on standard error and read the answer from standard input, also
+/// when it is not a terminal (a script or a test answers through a pipe).
+fn ask_stdin(question: &str) -> Result<bool> {
+    use std::io::{BufRead, Write};
+    eprint!("{question} [y/N] ");
+    std::io::stderr().flush()?;
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    Ok(matches!(line.trim(), "y" | "Y" | "yes" | "Yes"))
+}
+
 fn confirm(question: &str) -> Result<bool> {
     use std::io::{BufRead, IsTerminal, Write};
     if !std::io::stdin().is_terminal() {
@@ -5135,10 +5161,46 @@ fn run(cli: &Cli) -> Result<()> {
         },
         Cmd::Pair { cmd } => {
             match cmd {
-                PairCmd::Offer { qr } => {
-                    let engine = open_engine(&home)?;
-                    let offer = varsto_core::pair::Offer::start(engine.pairing_bundle()?)?;
+                PairCmd::Offer {
+                    qr,
+                    folders,
+                    role,
+                    yes,
+                } => {
+                    use std::sync::mpsc;
+                    use varsto_core::pair::v3::Joiner;
+                    let mut engine = open_engine(&home)?;
+                    let mut bundle = engine.pairing_bundle()?;
+                    let key =
+                        varsto_core::crypto::SecretKey::from_hex(&engine.export_vault_key()?)?;
+                    bundle.vault_key = String::new();
+                    // The offer's thread asks; this one answers, after the
+                    // person compared the words and the grants are written.
+                    let (ask_tx, ask_rx) = mpsc::channel::<Joiner>();
+                    let (answer_tx, answer_rx) = mpsc::channel::<bool>();
+                    let answer_rx = std::sync::Mutex::new(answer_rx);
+                    let approve: varsto_core::pair::v3::Approve =
+                        std::sync::Arc::new(move |j: &Joiner| {
+                            if ask_tx.send(j.clone()).is_err() {
+                                return false;
+                            }
+                            answer_rx
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .recv_timeout(std::time::Duration::from_secs(300))
+                                .unwrap_or(false)
+                        });
+                    let offer = varsto_core::pair::Offer::start_v3(bundle, key, approve)?;
                     let st = offer.status();
+                    if cli.json {
+                        // One line a script reads before it starts the other side.
+                        println!(
+                            "{}",
+                            serde_json::json!({"code": st.code, "port": st.port, "addresses": st.addresses})
+                        );
+                        use std::io::Write as _;
+                        let _ = std::io::stdout().flush();
+                    }
                     if *qr {
                         let link = varsto_core::qr::Link::Pair {
                             code: st.code.clone(),
@@ -5160,7 +5222,30 @@ fn run(cli: &Cli) -> Result<()> {
                         st.expires_in_secs.div_ceil(60)
                     );
                     loop {
-                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        if let Ok(j) = ask_rx.recv_timeout(std::time::Duration::from_millis(500)) {
+                            eprintln!("{} asks to join. Its six words: {}", j.name, j.fingerprint);
+                            eprintln!("The new device shows its own six words; compare them.");
+                            let mut allow = *yes || ask_stdin("Do the six words match?")?;
+                            if allow && !folders.is_empty() {
+                                match engine.f3_pair_grants(
+                                    &j.name,
+                                    &j.signing_pub,
+                                    &j.kem_pub,
+                                    folders,
+                                    role,
+                                ) {
+                                    Ok(_) => println!("granted {}: {}", role, folders.join(", ")),
+                                    Err(e) => {
+                                        eprintln!("the folders could not be granted: {e:#}");
+                                        allow = false;
+                                    }
+                                }
+                            }
+                            if !allow {
+                                eprintln!("not letting {} join", j.name);
+                            }
+                            let _ = answer_tx.send(allow);
+                        }
                         let st = offer.status();
                         if !st.open {
                             match (st.paired_with, st.closed_reason) {
@@ -5184,9 +5269,16 @@ fn run(cli: &Cli) -> Result<()> {
                         _ => (code.clone(), Vec::new()),
                     };
                     let pass = passphrase()?;
+                    // This device's keys: the other device shows their six
+                    // words before it lets this one join.
+                    let keys = varsto_core::pair::v3::PairingKeys::generate();
+                    eprintln!("This device's six words: {}", keys.fingerprint());
+                    eprintln!(
+                        "The other device shows the same words before it lets this one join."
+                    );
                     let result = varsto_core::pair::receive_with_progress(
                         &code,
-                        name,
+                        &keys.join_keys(name),
                         address.as_deref(),
                         &offered,
                         &mut |step| match step {
@@ -5197,7 +5289,7 @@ fn run(cli: &Cli) -> Result<()> {
                         },
                     );
                     let bundle = result?;
-                    let (engine, notes) = Engine::join_paired(&home, name, &pass, &bundle)?;
+                    let (engine, notes) = Engine::join_paired(&home, name, &pass, &bundle, keys)?;
                     println!(
                         "joined vault {} as {} (paired with {})",
                         engine.vault_id(),
@@ -7690,15 +7782,17 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
         return Ok(());
     }
 
-    let records = engine.peer_record_list()?;
-    let probe = varsto_core::p2p::Peers::build(
-        engine.peer_key(),
-        engine.device_id().clone(),
-        &records,
-        &[],
-        None,
-    )
-    .probe();
+    // The accepted peer records of the other devices, probed over TLS on
+    // TCP with their pinned certificates.
+    let records: Vec<varsto_core::p2p::PeerInfo> = engine
+        .peer_directory()?
+        .bodies()
+        .map(|b| b.info())
+        .collect();
+    let probe = engine
+        .p2p_peers_tcp()
+        .map(|p| p.probe())
+        .unwrap_or_default();
     // A temporary socket: the mapping differs from the service's, but the
     // public IP and the NAT guess are the same.
     let stun = if c.stun.is_empty() {
@@ -7716,7 +7810,18 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
                 "service": serde_json::Value::Null,
                 "nat": stun.as_ref().map(|p| p.nat),
                 "public": stun.as_ref().map(|p| p.public_addrs()),
-                "records": records,
+                "records": records
+                    .iter()
+                    .map(|r| serde_json::json!({
+                        "device": r.device.to_string(),
+                        "name": r.name,
+                        "tcp": r.tcp,
+                        "udp": r.udp,
+                        "nat": r.nat,
+                        "reachable": r.reachable,
+                        "relay_via": r.relay_via.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+                    }))
+                    .collect::<Vec<_>>(),
                 "peers": probe,
             })
         );
@@ -7733,7 +7838,7 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
             c.stun.join(", ")
         }
     );
-    println!("background service not running; probing over TCP from this command");
+    println!("background service not running; probing over TLS on TCP from this command");
     println!(
         "router port mapping: {} (the background service asks the router when it runs)",
         if c.port_mapping { "on" } else { "off" }

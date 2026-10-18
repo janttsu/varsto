@@ -86,6 +86,7 @@ mod membership;
 mod membership3_ops;
 mod notes;
 mod org_ops;
+mod p2p3;
 mod pack_upkeep;
 mod placement;
 mod protection;
@@ -1192,12 +1193,16 @@ impl Engine {
             storage,
             secret,
             None,
+            None,
         )
     }
 
-    /// Like `join_with_secret`, with the signing key the device already made
-    /// (an organization request): its device id is then the one the admin
-    /// approved. Without one a fresh key is generated.
+    /// Like `join_with_secret`, with the signing key (K6) the device already
+    /// made (an organization request, or the hello of a pairing): its device
+    /// id is then the one the other side saw; likewise its KEM key (K8),
+    /// which a pairing sealed the vault key and the folder grants to.
+    /// Without them fresh keys are generated.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn join_with_signer(
         home: &Path,
         device_name: &str,
@@ -1206,6 +1211,7 @@ impl Engine {
         storage: StorageSpec,
         secret: Option<String>,
         signer: Option<crypto::SigningKey>,
+        kem: Option<crate::kem::DecapsKey>,
     ) -> Result<Engine> {
         crypto::check_passphrase(passphrase)?;
         crate::names::check_display_name(device_name)?;
@@ -1224,7 +1230,7 @@ impl Engine {
         }
         let given = SecretKey::from_hex(vault_key_hex)?;
         let signer = signer.unwrap_or_else(crypto::SigningKey::generate);
-        let kem = crate::kem::DecapsKey::generate();
+        let kem = kem.unwrap_or_else(crate::kem::DecapsKey::generate);
         // The vault words are the newest vault key: its epoch is found on
         // the storage and the chain of vault epoch records gives the older
         // keys down to K3₀ (an out-of-date key is refused).
@@ -1273,27 +1279,29 @@ impl Engine {
         Ok(engine)
     }
 
-    /// Join with what a paired device sent (`pair::Bundle`): through the first
-    /// of its storages that this device can reach, then add the other
-    /// reachable ones. Returns the engine and one note per storage.
+    /// Join with what a paired device sent (`pair::Bundle`, with the vault
+    /// key the pairing opened in `vault_key`) and the keys of this device's
+    /// hello (`keys`: the folder grants the other device wrote are sealed
+    /// to its K8): through the first of its storages that this device can
+    /// reach, then add the other reachable ones. Returns the engine and one
+    /// note per storage.
     pub fn join_paired(
         home: &Path,
         device_name: &str,
         passphrase: &str,
         bundle: &crate::pair::Bundle,
+        keys: crate::pair::v3::PairingKeys,
     ) -> Result<(Engine, Vec<String>)> {
         crate::logged_op_plain!("join paired", device_name, {
-            Self::join_paired_inner(home, device_name, passphrase, bundle)
+            Self::join_paired_with(
+                home,
+                device_name,
+                passphrase,
+                bundle,
+                Some(keys.signer),
+                Some(keys.kem),
+            )
         })
-    }
-
-    fn join_paired_inner(
-        home: &Path,
-        device_name: &str,
-        passphrase: &str,
-        bundle: &crate::pair::Bundle,
-    ) -> Result<(Engine, Vec<String>)> {
-        Self::join_paired_with(home, device_name, passphrase, bundle, None)
     }
 
     pub(crate) fn join_paired_with(
@@ -1302,6 +1310,7 @@ impl Engine {
         passphrase: &str,
         bundle: &crate::pair::Bundle,
         signer: Option<crypto::SigningKey>,
+        kem: Option<crate::kem::DecapsKey>,
     ) -> Result<(Engine, Vec<String>)> {
         crate::names::check_display_name(device_name)?;
         let mut notes = Vec::new();
@@ -1331,6 +1340,7 @@ impl Engine {
             chosen.spec.clone(),
             chosen.secret.clone(),
             signer,
+            kem,
         )?;
         if engine.vault.vault_id.to_string() != bundle.vault_id {
             bail!(
@@ -1583,20 +1593,12 @@ impl Engine {
             // A real fork was found earlier: this identity signs nothing more.
             engine.forked_self = true;
         }
-        // Command-line runs use the peers other devices advertised, over TCP
-        // only; the service adds LAN peers and the QUIC node.
+        // Command-line runs use the peers of the directory (accepted peer
+        // records), over TLS on TCP only; the service adds LAN peers and
+        // the QUIC node.
         if engine.config.p2p.enabled {
-            if let Ok(list) = engine.peer_record_list() {
-                if !list.is_empty() {
-                    let p = crate::p2p::Peers::build(
-                        engine.peer_key(),
-                        engine.vault.device_id.clone(),
-                        &list,
-                        &[],
-                        None,
-                    );
-                    engine.set_peers(Some(std::sync::Arc::new(p)));
-                }
+            if let Some(p) = engine.p2p_peers_tcp() {
+                engine.set_peers(Some(std::sync::Arc::new(p)));
             }
         }
         Ok(engine)
@@ -6537,10 +6539,13 @@ impl Engine {
     /// published; on a thread of its own, so a slow peer holds nothing up.
     pub fn notify_peers_changed(&self) {
         if let Some(peers) = self.peers.clone() {
-            // The message carries this device's signed ledger heads (and
-            // the answer the peer's), section 74.
-            let heads = self.head_statement();
-            std::thread::spawn(move || peers.notify_changed_with(heads.as_ref()));
+            // The message carries this device's head list; the answers
+            // carry the peers' lists and proofs, which the next catch-up
+            // asks for again (design section 8).
+            let heads = self.head_list();
+            std::thread::spawn(move || {
+                peers.notify_changed(&heads);
+            });
         }
     }
 
@@ -6553,14 +6558,6 @@ impl Engine {
 
     pub fn set_peers(&mut self, peers: Option<std::sync::Arc<crate::p2p::Peers>>) {
         self.peers = peers;
-    }
-
-    pub fn peer_key(&self) -> SecretKey {
-        crate::p2p::peer_key(self.current_vault_key())
-    }
-
-    pub fn wire_vault_tag(&self) -> String {
-        crate::p2p::wire_vault_tag(self.root_key(), &self.vault.vault_id)
     }
 
     /// What this device can serve to peers right now: every chunk of every
@@ -6654,10 +6651,10 @@ impl Engine {
         if outbox.root().is_dir() {
             local_roots.push(outbox.root().to_path_buf());
         }
+        let (heads, ledger_dir) = self.snapshot_heads3();
         Ok(crate::p2p::Snapshot {
             vault_id: self.vault.vault_id.clone(),
             device_id: self.vault.device_id.clone(),
-            peer_key: self.peer_key(),
             folder_keys,
             pieces,
             local_roots,
@@ -6672,10 +6669,8 @@ impl Engine {
                 .cloned()
                 .collect(),
             activity_audience: self.activity_audience(),
-            heads: self
-                .head_statement()
-                .map(|s| s.encode())
-                .unwrap_or_default(),
+            heads,
+            ledger_dir,
         })
     }
 
@@ -6701,114 +6696,10 @@ impl Engine {
         )
     }
 
-    /// The device's QUIC certificate, created on first use (`p2p enable`).
+    /// The device's certificate (TLS over TCP and QUIC), created on first
+    /// use (`p2p enable`).
     pub fn p2p_identity(&self) -> Result<crate::p2p::quic::Identity> {
         crate::p2p::quic::Identity::load_or_create(&self.home)
-    }
-
-    /// The rendezvous record this device would publish for `port` with the
-    /// reachability facts the service learned; `publish_peer_record` writes it.
-    pub fn peer_record_template(&self, port: u16) -> crate::p2p::PeerRecord {
-        let lan = crate::p2p::local_ipv4_addrs();
-        crate::p2p::PeerRecord {
-            version: crate::p2p::PeerRecord::VERSION,
-            device: self.vault.device_id.clone(),
-            name: self.vault.device_name.clone(),
-            port,
-            udp_local: lan
-                .iter()
-                .map(|ip| std::net::SocketAddr::new(*ip, port))
-                .collect(),
-            lan_addrs: lan,
-            public_addrs: self.config.p2p.public_addrs.clone(),
-            updated_utc: util::now_utc(),
-            udp_public: Vec::new(),
-            cert_sha256: crate::p2p::quic::Identity::load(&self.home)
-                .ok()
-                .flatten()
-                .map(|id| id.sha256)
-                .unwrap_or_default(),
-            nat: crate::p2p::stun::Nat::Unknown,
-            relay_via: Vec::new(),
-            reachable: !self.config.p2p.public_addrs.is_empty(),
-            mapped_tcp: Vec::new(),
-            mapped_udp: Vec::new(),
-            head: self.own_head_statement(),
-        }
-    }
-
-    /// Publish where this device can be reached (rendezvous record).
-    pub fn publish_peer_record(&self, rec: &crate::p2p::PeerRecord) -> Result<()> {
-        self.ensure_active()?;
-        let key = self.registry_key_now();
-        let blob = rec.seal(&self.vault.vault_id, &key)?;
-        let k = crate::p2p::PeerRecord::storage_key(&rec.device);
-        for (_, backend) in self.metadata_storages(false)? {
-            // Records change: delete then write (single writer per path).
-            backend.delete(&k)?;
-            backend.put_if_absent(&k, &blob)?;
-        }
-        Ok(())
-    }
-
-    /// Rendezvous records of the other devices, one per device (the newest
-    /// copy when several storages hold one).
-    pub fn peer_record_list(&self) -> Result<Vec<crate::p2p::PeerRecord>> {
-        let keys = self.registry_keys();
-        let mut out: Vec<crate::p2p::PeerRecord> = Vec::new();
-        for (_, backend) in self.metadata_storages(false)? {
-            for k in backend.list(crate::p2p::PeerRecord::PREFIX)? {
-                let Some(id) = k
-                    .strip_prefix(crate::p2p::PeerRecord::PREFIX)
-                    .and_then(|r| r.strip_suffix(".enc"))
-                else {
-                    continue;
-                };
-                let Ok(dev) = DeviceId::from_hex(id) else {
-                    continue;
-                };
-                // Revoked devices and devices with an out-of-date key are no peers.
-                if dev == self.vault.device_id || !self.trusted(&dev) {
-                    continue;
-                }
-                let Some(blob) = backend.get(&k)? else {
-                    continue;
-                };
-                let Some(rec) = keys.iter().find_map(|(_, key)| {
-                    crate::p2p::PeerRecord::open(&blob, &self.vault.vault_id, &dev, key).ok()
-                }) else {
-                    continue;
-                };
-                // The head it carries is checked at the next ledger pull,
-                // whichever storage's copy is the newest.
-                if let Some(h) = rec.head.clone().filter(|h| h.sender == dev) {
-                    crate::ledger_heads::hear(h);
-                }
-                match out.iter_mut().find(|r| r.device == dev) {
-                    Some(have) if have.updated_utc < rec.updated_utc => *have = rec,
-                    Some(_) => {}
-                    None => out.push(rec),
-                }
-            }
-        }
-        Ok(out)
-    }
-
-    /// Peers other devices advertised through the storages, as TCP addresses.
-    pub fn peer_records(&self) -> Result<Vec<crate::p2p::PeerAddr>> {
-        let mut out: Vec<crate::p2p::PeerAddr> = Vec::new();
-        for rec in self.peer_record_list()? {
-            for addr in rec.addrs() {
-                if !out.iter().any(|p| p.addr == addr) {
-                    out.push(crate::p2p::PeerAddr {
-                        device: rec.device.clone(),
-                        addr,
-                        name: rec.name.clone(),
-                    });
-                }
-            }
-        }
-        Ok(out)
     }
 
     /// Create or overwrite a file inside a folder (relative path), then push.
@@ -7203,8 +7094,7 @@ impl Engine {
         if self.block_cache_root().is_dir() {
             // Blocks no cached file needs any more (a newer version arrived,
             // a file was deleted) leave the block cache once stored elsewhere.
-            let view = self.view()?;
-            self.gc_block_cache(&view)?;
+            self.gc_block_cache()?;
         }
         Ok(out)
     }

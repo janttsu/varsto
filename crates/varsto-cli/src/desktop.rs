@@ -1187,22 +1187,28 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     // The typed address first, then the addresses of the scanned link, then
     // a search of the network; the page polls /api/pair/join-status.
     let offered = str_list(input, "addresses");
-    set_join_step(json!({"active": true, "step": "start", "tried": []}));
+    // This device's keys: the other device shows their six words to its
+    // person before it lets this one join, and the page shows them here.
+    let keys = varsto_core::pair::v3::PairingKeys::generate();
+    let words = keys.fingerprint();
+    set_join_step(json!({"active": true, "step": "start", "tried": [], "fingerprint": words}));
     let mut tried: Vec<String> = Vec::new();
     let result = varsto_core::pair::receive_with_progress(
         &code,
-        &name,
+        &keys.join_keys(&name),
         opt(input, "address").as_deref(),
         &offered,
         &mut |step| match step {
             varsto_core::pair::Step::Trying(a) => {
                 tried.push(a.to_string());
                 set_join_step(
-                    json!({"active": true, "step": "trying", "address": a.to_string(), "tried": tried}),
+                    json!({"active": true, "step": "trying", "address": a.to_string(), "tried": tried, "fingerprint": words}),
                 );
             }
             varsto_core::pair::Step::Looking => {
-                set_join_step(json!({"active": true, "step": "looking", "tried": tried}));
+                set_join_step(
+                    json!({"active": true, "step": "looking", "tried": tried, "fingerprint": words}),
+                );
             }
         },
     );
@@ -1223,7 +1229,7 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
         }
     };
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-    let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle)?;
+    let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle, keys)?;
     st.engine = Some(e);
     st.service.request_sync();
     Ok(json!({"ok": true, "from": bundle.from, "storages": notes}))
@@ -1799,14 +1805,9 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             if let Some(old) = st.pair.take() {
                 old.stop();
             }
-            #[cfg(feature = "format3")]
-            if input.get("format").and_then(|f| f.as_u64()) == Some(3) {
-                let offer = f3_api::start_offer(e)?;
-                let status = offer.status();
-                st.pair = Some(offer);
-                return pair_status(status);
-            }
-            let offer = varsto_core::pair::Offer::start(e.pairing_bundle()?)?;
+            // The joining device's name and six words wait for the person
+            // here (`ask` in the status) before anything is sent.
+            let offer = f3_api::start_offer(e)?;
             let status = offer.status();
             st.pair = Some(offer);
             pair_status(status)
