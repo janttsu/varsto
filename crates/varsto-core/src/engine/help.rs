@@ -308,7 +308,7 @@ impl Engine {
             .partition(|b| b.source == "peer");
         inputs.ledger_withheld = acks_told.iter().map(|b| b.name.clone()).collect();
         inputs.ledger_rolled_back = peer_told.iter().map(|b| b.name.clone()).collect();
-        let view = self.view()?;
+        let view = self.view3()?;
         inputs.forked = self.forked_self || !view.forked.is_empty();
         let repair = observed
             .repair

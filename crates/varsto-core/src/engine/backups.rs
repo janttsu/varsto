@@ -1,33 +1,39 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Backups (`docs/spec/alpha-0-format.md` section 31): read-only snapshots
-//! of a directory on one device, kept on storages only.
+//! Backups (`docs/spec/alpha-0-format.md` section 31 and section 77 for
+//! format 3): read-only snapshots of a directory on one device, kept on
+//! storages only.
 //!
-//! A backup is a folder record with `backup` set. It has its own keys,
-//! placement and ledger chunk records like any folder, but it is never
+//! A backup is a folder record whose settings say `backup` (the JSON of
+//! its `BackupInfo`). It has its own keys (granted to the devices that may
+//! restore it), placement and block map like any folder, but it is never
 //! mounted: only its source device writes it, by taking snapshots of the
-//! directory (scan, upload what the storages lack, then write the snapshot
-//! object and record `Event::SnapshotTaken`). No device records holding its
-//! blocks (`ChunkOnDevice`) and peers never serve them, so the contents stay
-//! on the storages, never on the vault's other devices. Transferrers are
-//! never written.
+//! directory (scan, upload what the storages lack, then write a `snapshot`
+//! record, a base or a differential against a base, and announce it with
+//! `Event::SnapshotTaken` and `record_published`). The backup lists no
+//! block as held by a device, and peers never serve its blocks, so the
+//! contents stay on the storages, never on the vault's other devices.
+//! Transferrers are never written.
 //!
 //! A snapshot fixes its expiry when it is taken (retention in days). Expired
-//! snapshots are deleted with the blocks no live snapshot of the backup uses:
-//! after a grace period, by the source device, or by any device once the
-//! backup is stopped, its source is removed from the vault, or two days have
-//! passed. The expiry and the drops are sealed and pushed before anything is
-//! deleted, and the snapshot listing is read again first, so a snapshot
-//! written meanwhile keeps its blocks. A source device that just wrote a
-//! snapshot checks the ledger again and writes back any of its blocks that
-//! a concurrent expiry dropped.
+//! snapshots are expired by the source device after a grace period, or by
+//! any device once the backup is stopped, its source is removed from the
+//! vault, or two days have passed. The expiry is sealed and pushed before
+//! any record is deleted; a base stays while an unexpired differential
+//! names it. The blocks only expired snapshots used are collected by
+//! garbage collection, which counts the unexpired snapshots of a backup as
+//! references (`backup_gc_references3`).
 //!
 //! A restore writes one snapshot (or some of its paths) into a directory the
 //! user names, which must be empty unless overwriting is asked for.
 
 use super::*;
-use crate::ledger::SnapshotRecord;
+use crate::ledger3::events::{Announcement, Event as Event3};
+use crate::ledger3::view::SnapshotRecord as SnapRec;
+use crate::ledger3::LedgerView as View3;
+use crate::manifest3::FileEntry;
 use crate::placement::Placement;
-use crate::snapshot::Snapshot;
+use crate::record::{Id16, KeyId};
+use crate::snapshot3::{self, BackupSnapshots, SnapshotWriter};
 use crate::vault::{BackupInfo, BackupSchedule, BackupSource, DEFAULT_BACKUP_RETENTION_DAYS};
 
 const DAY: i64 = 86_400;
@@ -195,13 +201,17 @@ fn snap_key(device: &DeviceId, seq: u64) -> String {
     format!("{device}/{seq}")
 }
 
-fn blocks_of(snap: &Snapshot) -> Vec<(ChunkId, ObjectName)> {
+fn blocks_of<'a>(files: impl Iterator<Item = &'a FileEntry>) -> Vec<(ChunkId, ObjectName)> {
     let mut seen = HashSet::new();
-    snap.files
-        .values()
+    files
         .flat_map(|f| f.chunks.iter())
-        .filter(|c| seen.insert(c.object.clone()))
-        .map(|c| (c.chunk.clone(), c.object.clone()))
+        .filter(|c| seen.insert(c.object))
+        .map(|c| {
+            (
+                ChunkId::from_bytes(&c.chunk),
+                ObjectName::from_bytes(&c.object),
+            )
+        })
         .collect()
 }
 
@@ -212,6 +222,30 @@ fn path_wanted(path: &str, wanted: &[String]) -> bool {
             let w = w.trim_matches('/');
             w.is_empty() || path == w || path.strip_prefix(w).is_some_and(|r| r.starts_with('/'))
         })
+}
+
+/// The snapshots of one backup the ledger knows (taken, expired or not),
+/// oldest first.
+fn snapshot_rows(view: &View3, backup: &Id16) -> Vec<((Id16, u64), SnapRec)> {
+    let mut out: Vec<((Id16, u64), SnapRec)> = view
+        .snapshots
+        .range((*backup, [0u8; 16], 0)..=(*backup, [0xff; 16], u64::MAX))
+        .filter(|(_, r)| r.taken)
+        .map(|((_, d, s), r)| ((*d, *s), r.clone()))
+        .collect();
+    out.sort_by_key(|a| (a.1.taken_utc, a.0 .1, a.0 .0));
+    out
+}
+
+/// This device's snapshot writer as it was left: the base it builds on.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct StoredSnapWriter {
+    seq: u64,
+    base_seq: u64,
+    base_bytes: u64,
+    on_base: u32,
+    force_base: bool,
+    base_files: Vec<FileState>,
 }
 
 impl Engine {
@@ -253,12 +287,42 @@ impl Engine {
         self.ensure_unique_folder_name(name)?;
         let now = util::now_utc();
         let me = self.vault.device_id.clone();
+        let info = BackupInfo {
+            source_device: me.clone(),
+            source_path: source.display().to_string(),
+            retention_days: opts.retention_days,
+            created_utc: now,
+        };
+        // A backup is a folder record that says so in its settings; its
+        // keys are granted to this device like any folder's.
+        let mut settings = BTreeMap::new();
+        settings.insert(
+            members3::BACKUP_SETTING.to_string(),
+            serde_json::to_string(&info)?,
+        );
+        let k1 = self.f3.recovery.clone();
+        let created = self
+            .with_enrolled3(|m| m.create_folder(name.trim(), settings, k1.as_ref()))?
+            .ok_or_else(|| {
+                anyhow!("add a storage first: a backup's records live on the vault's storages")
+            })?;
+        let granted = self
+            .f3
+            .members
+            .granted
+            .get(&created)
+            .cloned()
+            .ok_or_else(|| anyhow!("the grant of the new backup did not open here"))?;
+        let k9_0 = granted
+            .epochs
+            .get(&0)
+            .ok_or_else(|| anyhow!("the grant of the new backup has no first epoch"))?;
         let rec = FolderRecord {
-            folder_id: FolderId::random(),
+            folder_id: FolderId::from_bytes(&created),
             name: name.trim().to_string(),
-            key_hex: SecretKey::random().to_hex(),
-            k11_hex: String::new(),
-            created_by: me.clone(),
+            key_hex: k9_0.to_hex(),
+            k11_hex: granted.k11.to_hex(),
+            created_by: me,
             created_utc: now,
             shared: false,
             policy: None,
@@ -268,12 +332,7 @@ impl Engine {
             strongroom: None,
             removed_utc: 0,
             epoch_keys: BTreeMap::new(),
-            backup: Some(BackupInfo {
-                source_device: me,
-                source_path: source.display().to_string(),
-                retention_days: opts.retention_days,
-                created_utc: now,
-            }),
+            backup: Some(info),
         };
         let id = rec.folder_id.clone();
         self.keyring.folders.insert(id.clone(), rec);
@@ -295,7 +354,6 @@ impl Engine {
         });
         self.config.save(&self.home)?;
         self.pending.push(Event::FolderAdded { folder: id.clone() });
-        self.publish_registry()?;
         self.commit_batch()?;
         Ok(id)
     }
@@ -337,26 +395,11 @@ impl Engine {
         self.config.save(&self.home)
     }
 
-    /// The snapshots of one backup the ledger knows, in order.
-    fn snapshot_records(
-        view: &LedgerView,
-        backup: &FolderId,
-    ) -> Vec<((DeviceId, u64), SnapshotRecord)> {
-        let mut out: Vec<((DeviceId, u64), SnapshotRecord)> = view
-            .snapshots
-            .iter()
-            .filter(|((b, _, _), _)| b == backup)
-            .map(|((_, d, s), r)| ((d.clone(), *s), r.clone()))
-            .collect();
-        out.sort_by(|a, b| (a.1.taken_utc, a.0 .1, &a.0 .0).cmp(&(b.1.taken_utc, b.0 .1, &b.0 .0)));
-        out
-    }
-
     // ----- listing -------------------------------------------------------------
 
     /// The vault's backups.
     pub fn backups(&self) -> Result<Vec<BackupSummary>> {
-        let view = self.view()?;
+        let view = self.view3()?;
         let now = util::now_utc();
         let mut out = Vec::new();
         for rec in self
@@ -366,24 +409,17 @@ impl Engine {
             .filter(|r| r.is_backup() && !r.is_removed())
         {
             let info = rec.backup.as_ref().expect("a backup");
+            let fb = members3::bin(&rec.folder_id)?;
             let local = self
                 .config
                 .backups
                 .iter()
                 .find(|b| b.folder_id == rec.folder_id);
-            let live: Vec<SnapshotRecord> = Self::snapshot_records(&view, &rec.folder_id)
-                .into_iter()
-                .map(|(_, r)| r)
-                .filter(|r| r.is_live())
-                .collect();
-            let latest_seq = Self::snapshot_records(&view, &rec.folder_id)
-                .into_iter()
-                .filter(|(_, r)| r.is_live())
-                .map(|(k, _)| k.1)
-                .next_back();
+            let rows = snapshot_rows(&view, &fb);
+            let live: Vec<&((Id16, u64), SnapRec)> =
+                rows.iter().filter(|(_, r)| r.is_live()).collect();
             let latest = live.last();
-            let stopped =
-                view.backups_stopped.contains(&rec.folder_id) || local.is_some_and(|l| l.stopped);
+            let stopped = view.backups_stopped.contains(&fb) || local.is_some_and(|l| l.stopped);
             let storages = self
                 .placement(rec.folder_id.as_str())
                 .map(|p| p.targets)
@@ -401,10 +437,10 @@ impl Engine {
                 schedule: local.map(|l| l.schedule.describe()),
                 stopped,
                 snapshots: live.len() as u64,
-                latest_seq,
-                latest_utc: latest.map(|r| r.taken_utc),
-                latest_files: latest.map(|r| r.files).unwrap_or(0),
-                latest_bytes: latest.map(|r| r.bytes).unwrap_or(0),
+                latest_seq: latest.map(|((_, s), _)| *s),
+                latest_utc: latest.map(|(_, r)| r.taken_utc),
+                latest_files: latest.map(|(_, r)| r.files).unwrap_or(0),
+                latest_bytes: latest.map(|(_, r)| r.bytes).unwrap_or(0),
                 storages,
                 next_due_utc: local.filter(|_| !stopped).and_then(|l| match l.schedule {
                     BackupSchedule::Manual => None,
@@ -421,13 +457,14 @@ impl Engine {
     /// The live snapshots of a backup, oldest first.
     pub fn backup_snapshots(&self, backup: &str) -> Result<Vec<SnapshotInfo>> {
         let rec = self.resolve_backup(backup)?;
-        let view = self.view()?;
-        Ok(Self::snapshot_records(&view, &rec.folder_id)
+        let view = self.view3()?;
+        let fb = members3::bin(&rec.folder_id)?;
+        Ok(snapshot_rows(&view, &fb)
             .into_iter()
             .filter(|(_, r)| r.is_live())
             .map(|((d, seq), r)| SnapshotInfo {
                 seq,
-                device: self.device_name(&d),
+                device: self.device_name(&DeviceId::from_bytes(&d)),
                 taken_utc: r.taken_utc,
                 expires_utc: r.expires_utc,
                 files: r.files,
@@ -438,11 +475,19 @@ impl Engine {
 
     /// Names of the backups of this device whose scheduled snapshot is due.
     pub fn backups_due(&self, now: i64) -> Vec<String> {
-        let stopped = self.view().map(|v| v.backups_stopped).unwrap_or_default();
+        let stopped = self
+            .view3()
+            .map(|v| v.backups_stopped.clone())
+            .unwrap_or_default();
         self.config
             .backups
             .iter()
-            .filter(|b| !b.stopped && !stopped.contains(&b.folder_id))
+            .filter(|b| {
+                !b.stopped
+                    && !members3::bin(&b.folder_id)
+                        .map(|f| stopped.contains(&f))
+                        .unwrap_or(false)
+            })
             .filter(|b| {
                 b.take_now
                     || match b.schedule {
@@ -508,7 +553,8 @@ impl Engine {
             bail!("a member device cannot change the owner's backups");
         }
         let rec = self.resolve_backup(backup)?;
-        if !self.view()?.backups_stopped.contains(&rec.folder_id) {
+        let fb = members3::bin(&rec.folder_id)?;
+        if !self.view3()?.backups_stopped.contains(&fb) {
             self.pending.push(Event::BackupStopped {
                 backup: rec.folder_id.clone(),
             });
@@ -537,7 +583,8 @@ impl Engine {
         self.ensure_ledger_writable()?;
         let rec = self.resolve_backup(backup)?;
         let mut src = self.backup_source(&rec)?;
-        if src.stopped || self.view()?.backups_stopped.contains(&rec.folder_id) {
+        let fb = members3::bin(&rec.folder_id)?;
+        if src.stopped || self.view3()?.backups_stopped.contains(&fb) {
             bail!("{} is stopped: it takes no more snapshots", rec.name);
         }
         if !src.path.is_dir() {
@@ -564,7 +611,10 @@ impl Engine {
             crate::activity::Unit::Items,
         );
 
-        // 1. Read the directory and store what the storages lack.
+        // 1. Read the directory and store what the storages lack: the
+        // packs, the map record of their members and the batch that
+        // claims them.
+        let epoch = self.folder_keys(&rec)?.epoch;
         let mut state = self.load_state(&rec.folder_id)?;
         let mut push = PushReport::default();
         let (_, changed) = self.scan(&rec, &src.path, &mut state)?;
@@ -573,7 +623,7 @@ impl Engine {
             files_changed: changed,
             ..Default::default()
         };
-        self.upload_missing(&rec, &src.path, &state, &mut push)?;
+        self.store_missing3(&rec, &fb, epoch, &src.path, &state, &mut push)?;
 
         // 2. Every file in the snapshot must be on a storage; a file that
         // changed while it was read gets one more try.
@@ -581,97 +631,128 @@ impl Engine {
         if !incomplete.is_empty() {
             let (_, changed) = self.scan(&rec, &src.path, &mut state)?;
             report.files_changed += changed;
-            self.upload_missing(&rec, &src.path, &state, &mut push)?;
+            self.store_missing3(&rec, &fb, epoch, &src.path, &state, &mut push)?;
             incomplete = self.incomplete_files(&rec, &state)?;
         }
         let mut skipped: BTreeSet<String> = incomplete;
         skipped.extend(state.unreadable.iter().cloned());
 
         // 3. The snapshot itself, written once to every storage.
-        let files: BTreeMap<String, FileState> = state
+        let mut current: BTreeMap<String, FileEntry> = BTreeMap::new();
+        for f in state
             .files
             .values()
             .filter(|f| !f.deleted && !skipped.contains(&f.path))
-            .map(|f| (f.path.clone(), f.clone()))
-            .collect();
-        let view = self.view()?;
-        let mut seq = view
-            .snapshots
-            .keys()
-            .filter(|(b, d, _)| b == &rec.folder_id && d == &me)
-            .map(|(_, _, s)| *s)
-            .max()
-            .unwrap_or(0)
-            .max(src.last_seq)
-            + 1;
-        // A number an interrupted earlier attempt wrote is not reused.
-        while metadata.iter().any(|(_, b)| {
-            b.exists(&Snapshot::storage_key(&rec.folder_id, &me, seq))
-                .unwrap_or(false)
-        }) {
-            seq += 1;
+        {
+            let e = FileEntry::from_state(f, false)?;
+            current.insert(e.path.clone(), e);
         }
         let now = util::now_utc();
-        let snap = Snapshot {
-            format_version: crate::FORMAT_VERSION,
-            backup: rec.folder_id.clone(),
-            device: me.clone(),
+        let expires = now + src.retention_days as i64 * DAY;
+        let stream = snapshot3::stream(fb, self.me3());
+        let key = KeyId::Meta { folder: fb, epoch };
+        let mut writer = self.load_snap_writer(&fb);
+        let highest = self.highest_seq3(&metadata, &stream)?;
+        writer.resume(highest.max(src.last_seq));
+        let lamport = self.tick()?;
+        let published = self.with_writer3(|rw| {
+            for _ in 0..8 {
+                let p = writer.seal(rw, &key, &current, lamport, now, expires)?;
+                // A number an interrupted earlier attempt wrote is not
+                // reused.
+                let mut taken = false;
+                for (name, bytes) in &p.sealed.parts {
+                    if !metadata[0].1.put_if_absent(name, bytes)? {
+                        taken = true;
+                        break;
+                    }
+                }
+                if taken {
+                    writer.abandon(p);
+                    continue;
+                }
+                for (_, b) in &metadata[1..] {
+                    for (name, bytes) in &p.sealed.parts {
+                        b.put_if_absent(name, bytes)?;
+                    }
+                }
+                let out = p.sealed.published.clone();
+                writer.commit(p);
+                return Ok(out);
+            }
+            bail!("no free sequence number for the next snapshot")
+        })?;
+        let seq = published.seq;
+        let bytes: u64 = current.values().map(|f| f.size).sum();
+        self.f3.pending.push(Event3::RecordPublished(Announcement {
+            kind: published.kind,
+            scope: published.scope,
             seq,
-            taken_utc: now,
-            expires_utc: now + src.retention_days as i64 * DAY,
-            retention_days: src.retention_days,
-            files,
-            skipped: skipped.into_iter().collect(),
-        };
-        let blob = snap.seal(&self.vault.vault_id, &self.folder_keys(&rec)?.meta)?;
-        let key = Snapshot::storage_key(&rec.folder_id, &me, seq);
-        for (_, backend) in &metadata {
-            backend.put_if_absent(&key, &blob)?;
-        }
+            base: published.base,
+            parts: published.parts,
+            body_hash: published.body_hash,
+            size: published.size,
+        }));
         self.pending.push(Event::SnapshotTaken {
             backup: rec.folder_id.clone(),
             seq,
-            taken_utc: snap.taken_utc,
-            expires_utc: snap.expires_utc,
-            files: snap.files.len() as u64,
-            bytes: snap.bytes(),
-            snapshot_hash: hex::encode(crypto::hash(&blob)),
+            taken_utc: now,
+            expires_utc: expires,
+            files: current.len() as u64,
+            bytes,
+            snapshot_hash: hex::encode(published.body_hash),
         });
+        self.save_snap_writer(&writer);
         self.save_state(&rec.folder_id, &state)?;
         src.last_taken_utc = now;
         src.last_seq = seq;
         src.take_now = false;
         self.save_backup_source(src.clone())?;
         let mut cache = self.load_backup_cache(&rec.folder_id);
-        cache.snapshots.insert(snap_key(&me, seq), blocks_of(&snap));
+        cache
+            .snapshots
+            .insert(snap_key(&me, seq), blocks_of(current.values()));
         self.save_backup_cache(&rec.folder_id, &cache)?;
         self.commit_batch()?;
 
-        // 4. An expiry elsewhere may have dropped a block this snapshot
-        // uses before it saw the snapshot: write such blocks back.
-        self.pull_ledger()?;
-        self.upload_missing(&rec, &src.path, &state, &mut push)?;
-        self.commit_batch()?;
-
         report.seq = seq;
-        report.taken_utc = snap.taken_utc;
-        report.expires_utc = snap.expires_utc;
-        report.files = snap.files.len() as u64;
-        report.bytes = snap.bytes();
+        report.taken_utc = now;
+        report.expires_utc = expires;
+        report.files = current.len() as u64;
+        report.bytes = bytes;
         report.chunks_uploaded = push.chunks_uploaded;
         report.bytes_uploaded = push.bytes_uploaded;
-        report.skipped = snap.skipped;
+        report.skipped = skipped.into_iter().collect();
         report.storages_unavailable = push.storages_unavailable;
         Ok(report)
     }
 
-    /// Live files of `state` with a block that no storage holds.
+    /// Write the blocks of `state` the storages lack into packs, publish
+    /// the map record of their members and claim them in a batch.
+    fn store_missing3(
+        &mut self,
+        rec: &FolderRecord,
+        folder: &Id16,
+        epoch: u32,
+        root: &Path,
+        state: &FolderState,
+        push: &mut PushReport,
+    ) -> Result<()> {
+        let written = self.upload_missing(rec, root, state, push)?;
+        let view = self.view3()?;
+        self.publish_map3(folder, epoch, &written, &view)?;
+        self.commit_batch()?;
+        Ok(())
+    }
+
+    /// Live files of `state` with a block that no storage holds (a place of
+    /// a pack claimed on a storage that is not a transferrer).
     fn incomplete_files(
         &self,
         rec: &FolderRecord,
         state: &FolderState,
     ) -> Result<BTreeSet<String>> {
-        let view = self.view()?;
+        let view = self.view3()?;
         let carriers: BTreeSet<&str> = self
             .config
             .storages
@@ -685,13 +766,56 @@ impl Engine {
             .filter(|f| !f.deleted)
             .filter(|f| {
                 !f.chunks.iter().all(|c| {
-                    view.locate(&rec.folder_id, &c.chunk)
-                        .filter(|r| r.object == c.object)
-                        .is_some_and(|r| r.storages.keys().any(|s| !carriers.contains(s.as_str())))
+                    self.block_copies3(&view, &rec.folder_id, &c.object)
+                        .iter()
+                        .any(|s| !carriers.contains(s.as_str()))
                 })
             })
             .map(|f| f.path.clone())
             .collect())
+    }
+
+    fn snap_writer_path(&self, backup: &Id16) -> PathBuf {
+        self.home
+            .join("state")
+            .join("backups")
+            .join(format!("{}-writer.json", hex::encode(backup)))
+    }
+
+    /// This device's snapshot stream of `backup` as it left it.
+    fn load_snap_writer(&self, backup: &Id16) -> SnapshotWriter {
+        let mut w = SnapshotWriter::new(*backup, self.me3());
+        let stored: StoredSnapWriter =
+            util::read_json_or_default(&self.snap_writer_path(backup)).unwrap_or_default();
+        w.seq = stored.seq;
+        w.base_seq = stored.base_seq;
+        w.base_bytes = stored.base_bytes;
+        w.on_base = stored.on_base;
+        w.force_base = stored.force_base;
+        for f in &stored.base_files {
+            if let Ok(e) = FileEntry::from_state(f, false) {
+                w.base_files.insert(e.path.clone(), e);
+            }
+        }
+        w
+    }
+
+    fn save_snap_writer(&self, w: &SnapshotWriter) {
+        let stored = StoredSnapWriter {
+            seq: w.seq,
+            base_seq: w.base_seq,
+            base_bytes: w.base_bytes,
+            on_base: w.on_base,
+            force_base: w.force_base,
+            base_files: w.base_files.values().map(FileEntry::to_state).collect(),
+        };
+        let path = self.snap_writer_path(&w.backup);
+        if let Some(p) = path.parent() {
+            let _ = fs::create_dir_all(p);
+        }
+        if let Err(e) = util::write_json(&path, &stored) {
+            log::warn!("snapshot writer state not saved: {e:#}");
+        }
     }
 
     fn backup_cache_path(&self, backup: &FolderId) -> PathBuf {
@@ -713,81 +837,41 @@ impl Engine {
         util::write_json(&path, cache)
     }
 
-    /// Read a snapshot from the first storage whose copy matches the hash
-    /// the ledger recorded.
-    fn fetch_snapshot(
+    /// Read the unexpired snapshots of a backup (and the bases they name)
+    /// from the metadata storages, each record through the acceptance rule.
+    /// Cold storages only with `include_cold`. A record that is not
+    /// accepted anywhere (altered, or not what the ledger announced) is
+    /// counted in the second result.
+    pub(super) fn load_snapshots3(
         &self,
         rec: &FolderRecord,
-        device: &DeviceId,
-        seq: u64,
-        record: &SnapshotRecord,
+        view: &View3,
         include_cold: bool,
-    ) -> Result<Snapshot> {
-        let key = Snapshot::storage_key(&rec.folder_id, device, seq);
-        let metas = self.folder_keys(rec)?.meta_keys();
-        let mut altered = false;
-        for (spec, backend) in self.metadata_storages(include_cold)? {
-            if spec.is_carrier() {
-                continue;
+        now: i64,
+    ) -> Result<(BackupSnapshots, Vec<(Id16, u64)>)> {
+        let fb = members3::bin(&rec.folder_id)?;
+        let mut snaps = BackupSnapshots::new(fb);
+        let storages: OpenStorages = self
+            .metadata_storages(include_cold)?
+            .into_iter()
+            .filter(|(s, _)| !s.is_carrier())
+            .collect();
+        let mut refused: Vec<(Id16, u64)> = Vec::new();
+        self.each_store3(&storages, view, |_, store, counter| {
+            if snaps.wanted(view, now).is_empty() {
+                return Ok(());
             }
-            let Ok(Some(blob)) = backend.get(&key) else {
-                continue;
-            };
-            if hex::encode(crypto::hash(&blob)) != record.hash {
-                altered = true;
-                continue;
+            let r = snaps.pull(store, view, now, counter)?;
+            for x in r.refused {
+                if let (Some(d), true) = (x.device, x.seq > 0) {
+                    refused.push((d, x.seq));
+                }
             }
-            return Snapshot::open(
-                &blob,
-                &self.vault.vault_id,
-                &rec.folder_id,
-                device,
-                seq,
-                &metas,
-            );
-        }
-        if altered {
-            bail!(
-                "snapshot {seq} of {} was altered on the storages: no copy matches the one recorded when it was taken",
-                rec.name
-            );
-        }
-        bail!(
-            "snapshot {seq} of {} is on no readable storage{}",
-            rec.name,
-            if include_cold {
-                ""
-            } else {
-                " (cold storages are read only when confirmed)"
-            }
-        )
-    }
-
-    /// Objects of the live snapshots of a backup in `view` (read from the
-    /// storages where this device has not seen them yet). `None` when one
-    /// of them cannot be read.
-    fn live_backup_objects(
-        &self,
-        rec: &FolderRecord,
-        view: &LedgerView,
-        cache: &mut BackupCache,
-    ) -> Option<HashSet<ObjectName>> {
-        let mut live = HashSet::new();
-        let records = Self::snapshot_records(view, &rec.folder_id);
-        for ((device, seq), r) in records.iter().filter(|(_, r)| r.is_live()) {
-            let k = snap_key(device, *seq);
-            if !cache.snapshots.contains_key(&k) {
-                let snap = self.fetch_snapshot(rec, device, *seq, r, false).ok()?;
-                cache.snapshots.insert(k.clone(), blocks_of(&snap));
-            }
-            live.extend(cache.snapshots[&k].iter().map(|(_, o)| o.clone()));
-        }
-        cache.snapshots.retain(|k, _| {
-            records
-                .iter()
-                .any(|((d, s), r)| r.is_live() && snap_key(d, *s) == *k)
-        });
-        Some(live)
+            Ok(())
+        })?;
+        // What was loaded later from another storage is not refused.
+        refused.retain(|(d, s)| !snaps.is_loaded(d, *s));
+        Ok((snaps, refused))
     }
 
     /// Blocks of the live snapshots this device has read or written, for
@@ -843,12 +927,9 @@ impl Engine {
         confirm_cold_read: bool,
     ) -> Result<RestoreReport> {
         self.pull_ledger_once()?;
-        let view = self.view()?;
-        let live: Vec<((DeviceId, u64), SnapshotRecord)> =
-            Self::snapshot_records(&view, &rec.folder_id)
-                .into_iter()
-                .filter(|(_, r)| r.taken)
-                .collect();
+        let view = self.view3()?;
+        let fb = members3::bin(&rec.folder_id)?;
+        let live: Vec<((Id16, u64), SnapRec)> = snapshot_rows(&view, &fb);
         let chosen = match pick {
             SnapshotPick::Latest => live.iter().rfind(|(_, r)| !r.expired),
             SnapshotPick::Seq(n) => {
@@ -869,12 +950,34 @@ impl Engine {
                 SnapshotPick::OnOrBefore(_) => format!("{} has no snapshot that old", rec.name),
             });
         };
-        let snap = self.fetch_snapshot(rec, &device, seq, &record, confirm_cold_read)?;
-        let wanted: Vec<FileState> = snap
-            .files
+        // The keys first: a device without the backup's grant says so.
+        let fk = self.folder_keys(rec)?;
+        let now = util::now_utc();
+        let (snaps, refused) = self.load_snapshots3(rec, &view, confirm_cold_read, now)?;
+        if !snaps.is_loaded(&device, seq) {
+            if refused.iter().any(|(d, s)| *d == device && *s == seq) {
+                bail!(
+                    "snapshot {seq} of {} was altered on the storages: no copy matches the one recorded when it was taken",
+                    rec.name
+                );
+            }
+            bail!(
+                "snapshot {seq} of {} is on no readable storage{}",
+                rec.name,
+                if confirm_cold_read {
+                    ""
+                } else {
+                    " (cold storages are read only when confirmed)"
+                }
+            );
+        }
+        let listing = snaps
+            .reconstruct(&device, seq)
+            .map_err(|e| anyhow!("snapshot {seq} of {}: {e}", rec.name))?;
+        let wanted: Vec<FileState> = listing
             .values()
+            .map(FileEntry::to_state)
             .filter(|f| path_wanted(&f.path, paths))
-            .cloned()
             .collect();
         if !paths.is_empty() && wanted.is_empty() {
             bail!(
@@ -895,7 +998,8 @@ impl Engine {
         }
         fs::create_dir_all(to)?;
         let root = canonical(to)?;
-        let fk = self.folder_keys(rec)?;
+        // The places of the blocks: the map records of the backup.
+        self.pull_folder_records3(&fb, &view)?;
         let storages: OpenStorages = self
             .open_storages(confirm_cold_read)?
             .into_iter()
@@ -904,7 +1008,7 @@ impl Engine {
         let mut report = RestoreReport {
             backup: rec.name.clone(),
             seq,
-            taken_utc: snap.taken_utc,
+            taken_utc: record.taken_utc,
             to: root.clone(),
             ..Default::default()
         };
@@ -965,20 +1069,34 @@ impl Engine {
                 Err(e) => report.unavailable.push(format!("{}: {e:#}", f.path)),
             }
         }
+        // What this device now knows of the backup's blocks.
+        let mut cache = self.load_backup_cache(&rec.folder_id);
+        for info in snaps.list(&view, now) {
+            if let Ok(l) = snaps.reconstruct(&info.device, info.seq) {
+                cache.snapshots.insert(
+                    snap_key(&DeviceId::from_bytes(&info.device), info.seq),
+                    blocks_of(l.values()),
+                );
+            }
+        }
+        let _ = self.save_backup_cache(&rec.folder_id, &cache);
         Ok(report)
     }
 
     // ----- expiry ---------------------------------------------------------------------
 
-    /// Expire the snapshots due now and delete what only they used.
+    /// Expire the snapshots due now and delete the records nothing needs.
     pub fn backup_upkeep(&mut self) -> Result<ExpireReport> {
         self.expire_backups_at(util::now_utc())
     }
 
     /// Expire every snapshot whose time (plus the grace period) is past at
-    /// `now` and that this device may expire, delete the blocks no live
-    /// snapshot of its backup uses and the snapshot objects, and remove
-    /// stopped backups that have no snapshot left.
+    /// `now` and that this device may expire, delete the snapshot records
+    /// no unexpired snapshot needs, and remove stopped backups that have no
+    /// snapshot left. The blocks only expired snapshots used are garbage
+    /// collection's: the snapshots stop referencing them (`snapshots3`
+    /// references), and the collector marks and drops them as it does for
+    /// any folder.
     pub fn expire_backups_at(&mut self, now: i64) -> Result<ExpireReport> {
         crate::logged_op!("expire backups at", "", {
             self.expire_backups_at_inner(now)
@@ -1005,7 +1123,6 @@ impl Engine {
         for rec in backups {
             self.expire_backup(&rec, now, &mut report)?;
         }
-        self.flush_pack_deletions();
         Ok(report)
     }
 
@@ -1018,14 +1135,15 @@ impl Engine {
         let Some(info) = rec.backup.clone() else {
             return Ok(());
         };
+        let fb = members3::bin(&rec.folder_id)?;
         let me = self.vault.device_id.clone();
-        let view = self.view()?;
-        let stopped = view.backups_stopped.contains(&rec.folder_id);
+        let view = self.view3()?;
+        let stopped = view.backups_stopped.contains(&fb);
         let ours = info.source_device == me;
         // The source was removed from the vault: nobody else would expire.
         let source_gone = !ours && self.is_revoked(&info.source_device);
-        let records = Self::snapshot_records(&view, &rec.folder_id);
-        let may_expire = |r: &SnapshotRecord| {
+        let rows = snapshot_rows(&view, &fb);
+        let may_expire = |r: &SnapRec| {
             r.is_live()
                 && now >= r.expires_utc + EXPIRY_GRACE_SECS
                 && (ours
@@ -1033,168 +1151,121 @@ impl Engine {
                     || source_gone
                     || now >= r.expires_utc + OTHERS_EXPIRE_AFTER_SECS)
         };
-        let due: Vec<(DeviceId, u64)> = records
+        let due: Vec<(Id16, u64)> = rows
             .iter()
             .filter(|(_, r)| may_expire(r))
-            .map(|(k, _)| k.clone())
+            .map(|(k, _)| *k)
             .collect();
         let mut cache = self.load_backup_cache(&rec.folder_id);
-        let unclean = records
-            .iter()
-            .any(|((d, s), r)| r.expired && !cache.cleaned.contains(&snap_key(d, *s)));
+        // Expired snapshots whose records are still on a storage.
         let may_clean = ours || stopped || source_gone || !due.is_empty();
-        if due.is_empty() && !(unclean && may_clean) {
-            return self.remove_backup_if_done(rec, &view, stopped, report);
-        }
 
         // 1. The expiries go into the ledger first.
         for (device, seq) in &due {
             self.pending.push(Event::SnapshotExpired {
                 backup: rec.folder_id.clone(),
-                device: device.clone(),
+                device: DeviceId::from_bytes(device),
                 seq: *seq,
             });
             report.snapshots_expired += 1;
         }
-        let view = self.view()?;
-        let Some(mut live) = self.live_backup_objects(rec, &view, &mut cache) else {
-            report.waiting.push(rec.name.clone());
-            return self.commit_batch().map(|_| ());
-        };
-
-        // 2. Blocks of the backup that no live snapshot uses, and that no
-        // other folder names (objects are per folder; this is a safeguard).
-        let others: HashSet<&ObjectName> = view
-            .chunks
-            .iter()
-            .filter(|((f, _), _)| f != &rec.folder_id)
-            .map(|(_, r)| &r.object)
-            .collect();
-        let local: BTreeSet<&str> = self
-            .config
-            .storages
-            .iter()
-            .filter(|s| !s.is_carrier())
-            .map(|s| s.name())
-            .collect();
-        let mut candidates: Vec<(ChunkId, ObjectName)> = Vec::new();
-        for ((f, chunk), r) in &view.chunks {
-            if f != &rec.folder_id || live.contains(&r.object) || others.contains(&r.object) {
-                continue;
-            }
-            for storage in r.storages.keys().filter(|s| local.contains(s.as_str())) {
-                self.pending.push(Event::ChunkDropped {
-                    folder: rec.folder_id.clone(),
-                    chunk: chunk.clone(),
-                    object: r.object.clone(),
-                    storage: storage.clone(),
-                });
-            }
-            if !r.storages.is_empty() || !r.dropped.is_empty() {
-                candidates.push((chunk.clone(), r.object.clone()));
-            }
+        if !due.is_empty() {
+            self.commit_batch()?;
         }
-        // Sealed and pushed before anything is deleted.
-        self.commit_batch()?;
+        let view = self.view3()?;
 
-        // 3. A snapshot written meanwhile keeps its blocks: list the
-        // snapshots again and read the ones the ledger did not know.
-        let metadata: OpenStorages = self
-            .metadata_storages(true)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
-        let mut listed: BTreeMap<String, (DeviceId, u64)> = BTreeMap::new();
-        for (_, backend) in &metadata {
-            for key in backend.list(&Snapshot::backup_prefix(&rec.folder_id))? {
-                if let Some(id) = Snapshot::parse_key(&rec.folder_id, &key) {
-                    listed.insert(key, id);
-                }
-            }
-        }
-        let known = |v: &LedgerView, d: &DeviceId, s: u64| {
-            v.snapshots
-                .get(&(rec.folder_id.clone(), d.clone(), s))
-                .is_some_and(|r| r.taken)
-        };
-        let mut view = view;
-        if listed.values().any(|(d, s)| !known(&view, d, *s)) {
-            self.pull_ledger()?;
-            view = self.view()?;
-            match self.live_backup_objects(rec, &view, &mut cache) {
-                Some(l) => live = l,
-                None => {
-                    report.waiting.push(rec.name.clone());
-                    return Ok(());
-                }
-            }
-            let metas = self.folder_keys(rec)?.meta_keys();
-            for (key, (d, s)) in &listed {
-                if known(&view, d, *s) {
+        // 2. The records of expired snapshots no unexpired one builds on.
+        if may_clean {
+            let devices: BTreeSet<Id16> = rows.iter().map(|((d, _), _)| *d).collect();
+            let storages: OpenStorages = self
+                .metadata_storages(true)?
+                .into_iter()
+                .filter(|(s, _)| !s.is_carrier())
+                .collect();
+            for d in devices {
+                let seqs = snapshot3::reader::deletable(&view, &fb, &d, now);
+                if seqs.is_empty() {
                     continue;
                 }
-                // Not in the ledger yet: its blocks stay.
-                let opened = metadata.iter().find_map(|(_, b)| {
-                    let blob = b.get(key).ok()??;
-                    Snapshot::open(&blob, &self.vault.vault_id, &rec.folder_id, d, *s, &metas).ok()
-                });
-                match opened {
-                    Some(snap) => live.extend(blocks_of(&snap).into_iter().map(|(_, o)| o)),
-                    None => {
-                        report.waiting.push(rec.name.clone());
-                        return Ok(());
-                    }
+                for (_, backend) in &storages {
+                    snapshot3::reader::delete_records(backend.as_ref(), &fb, &d, &seqs)?;
+                }
+                report.snapshots_deleted += seqs.len() as u64;
+                for s in &seqs {
+                    cache
+                        .snapshots
+                        .remove(&snap_key(&DeviceId::from_bytes(&d), *s));
                 }
             }
+            self.save_backup_cache(&rec.folder_id, &cache)?;
         }
+        self.remove_backup_if_done(rec, &view, stopped, report)
+    }
 
-        // 4. Delete the blocks, then the expired snapshot objects.
-        for (spec, backend) in self.open_storages(true)? {
-            if spec.is_carrier() {
+    /// What references the blocks of a backup for garbage collection: the
+    /// objects of its unexpired snapshots (and of the bases they build on),
+    /// read from the hot storages, with how far each source's snapshot
+    /// stream was read. Collection waits for a source whose announced
+    /// snapshots are not all loaded here (`gc3::References::behind`).
+    pub(super) fn backup_gc_references3(
+        &self,
+        rec: &FolderRecord,
+        now: i64,
+    ) -> Result<crate::gc3::ReferenceSet> {
+        let view = self.view3()?;
+        let fb = members3::bin(&rec.folder_id)?;
+        let (snaps, _) = self.load_snapshots3(rec, &view, false, now)?;
+        let complete = snaps.wanted(&view, now).is_empty();
+        let mut refs = crate::gc3::ReferenceSet {
+            objects: snaps.reference_set(&view, now),
+            kinds: [crate::record::Kind::Snapshot].into_iter().collect(),
+            ..Default::default()
+        };
+        for ((kind, scope, device), stream) in &view.streams {
+            if *kind != crate::record::Kind::Snapshot.code() || *scope != fb {
                 continue;
             }
-            for (_, object) in candidates.iter().filter(|(_, o)| !live.contains(o)) {
-                let key = chunk_storage_key(object);
-                if backend.exists(&key)? {
-                    backend.delete(&key)?;
-                    report.objects_deleted += 1;
-                }
-            }
+            // Every unexpired snapshot is loaded: the stream is read as far
+            // as it is announced (expired ones need no reading).
+            let applied = if complete {
+                stream.newest().unwrap_or(0)
+            } else {
+                stream
+                    .records
+                    .keys()
+                    .copied()
+                    .filter(|q| snaps.is_loaded(device, *q))
+                    .max()
+                    .unwrap_or(0)
+            };
+            refs.applied
+                .insert((crate::record::Kind::Snapshot, *device), applied);
         }
-        let expired: Vec<String> = Self::snapshot_records(&view, &rec.folder_id)
-            .into_iter()
-            .filter(|(_, r)| r.expired)
-            .map(|((d, s), _)| snap_key(&d, s))
-            .collect();
-        for (_, backend) in &metadata {
-            for (key, (d, s)) in &listed {
-                if expired.contains(&snap_key(d, *s)) {
-                    backend.delete(key)?;
-                    report.snapshots_deleted += 1;
-                }
-            }
-        }
-        cache.cleaned.extend(expired);
-        self.save_backup_cache(&rec.folder_id, &cache)?;
-        self.remove_backup_if_done(rec, &view, stopped, report)
+        Ok(refs)
     }
 
     /// A stopped backup goes once its last snapshot has expired.
     fn remove_backup_if_done(
         &mut self,
         rec: &FolderRecord,
-        view: &LedgerView,
+        view: &View3,
         stopped: bool,
         report: &mut ExpireReport,
     ) -> Result<()> {
-        let live = Self::snapshot_records(view, &rec.folder_id)
-            .iter()
-            .any(|(_, r)| r.is_live());
+        let fb = members3::bin(&rec.folder_id)?;
+        let live = snapshot_rows(view, &fb).iter().any(|(_, r)| r.is_live());
         if !stopped || live {
             return Ok(());
         }
-        report.objects_deleted += self.remove_record(rec, true)?;
+        // The folder record goes; its blocks and records are collected
+        // with the folder.
+        let removed = self.with_enrolled3(|m| m.remove_folder(&fb))?;
+        if removed.is_none() {
+            return Ok(());
+        }
+        self.forget_folder(&rec.folder_id, util::now_utc())?;
         let _ = fs::remove_file(self.backup_cache_path(&rec.folder_id));
+        let _ = fs::remove_file(self.snap_writer_path(&fb));
         report.backups_removed.push(rec.name.clone());
         Ok(())
     }

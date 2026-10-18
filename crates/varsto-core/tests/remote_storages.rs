@@ -3,6 +3,8 @@
 //! backend against `rclone serve s3` (a local S3 server), the rclone backend
 //! against a local-path remote. Both tests skip when rclone is not installed.
 
+mod common;
+
 use std::fs;
 use std::net::TcpListener;
 use std::path::Path;
@@ -138,7 +140,7 @@ fn two_devices_through(spec_a: StorageSpec, secret: Option<String>, spec_b: Stor
         );
         std::env::set_var(var, s);
     }
-    let mut b = Engine::join(&b_home, "desk", PASS, &key, spec_b).unwrap();
+    let mut b = common::join_approved(&b_home, "desk", PASS, &key, spec_b, &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.pull("docs").unwrap();
@@ -151,7 +153,6 @@ fn two_devices_through(spec_a: StorageSpec, secret: Option<String>, spec_b: Stor
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (remote storages)"]
 fn s3_backend_against_local_s3_server() {
     if !have_rclone_s3_server() {
         eprintln!("rclone 1.65+ with `serve s3` not installed; skipping");
@@ -184,7 +185,6 @@ fn s3_backend_against_local_s3_server() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (remote storages)"]
 fn rclone_backend_against_local_remote() {
     if !have_rclone() {
         eprintln!("rclone not installed; skipping");

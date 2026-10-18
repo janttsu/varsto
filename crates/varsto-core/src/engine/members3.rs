@@ -19,6 +19,9 @@ use crate::membership3::{
 };
 use crate::record::{Announced, Id16, KeyId, Kind, RecordTrust, RecordsRefused};
 
+/// The folder setting that marks a backup: the JSON of its `BackupInfo`.
+pub(super) const BACKUP_SETTING: &str = "backup";
+
 /// What the engine knows of the vault's membership (a copy of what
 /// `Membership` read last).
 #[derive(Clone, Default)]
@@ -614,7 +617,7 @@ impl Engine {
     /// folders are forgotten.
     fn sync_keyring3(&mut self) -> Result<()> {
         let mut changed = false;
-        let folders: Vec<(Id16, String, Id16, bool, bool)> = self
+        let folders: Vec<(Id16, String, Id16, bool, bool, Option<String>)> = self
             .f3
             .members
             .registry
@@ -627,11 +630,12 @@ impl Engine {
                     st.creator,
                     st.is_removed(),
                     !st.members.is_empty(),
+                    st.settings.get(BACKUP_SETTING).cloned(),
                 )
             })
             .collect();
         let mut removed = Vec::new();
-        for (id, name, creator, is_removed, shared) in folders {
+        for (id, name, creator, is_removed, shared, backup) in folders {
             let fid = FolderId::from_bytes(&id);
             if is_removed {
                 if self
@@ -684,6 +688,13 @@ impl Engine {
             {
                 if rec.strongroom.as_ref() != Some(&info) {
                     rec.strongroom = Some(info);
+                    changed = true;
+                }
+            }
+            // A backup is a folder whose record says so (`backups`).
+            if rec.backup.is_none() {
+                if let Some(info) = backup.as_deref().and_then(|s| serde_json::from_str(s).ok()) {
+                    rec.backup = Some(info);
                     changed = true;
                 }
             }

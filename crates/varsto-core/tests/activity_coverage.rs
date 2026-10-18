@@ -5,6 +5,8 @@
 //! so that it outlives the quiet period, and a watcher thread records what
 //! `activity::tasks` lists meanwhile.
 
+mod common;
+
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -47,7 +49,8 @@ fn watch<T>(op: impl FnOnce() -> T) -> (T, Vec<TaskView>) {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (activity log)"]
+#[ignore = "f3-switch: port in part B (membership)"]
+// Waits for remove_folder with purge in format 3.
 fn fetching_a_file_and_purging_a_folder_are_tasks() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -69,7 +72,7 @@ fn fetching_a_file_and_purging_a_folder_are_tasks() {
     a.add_folder("docs", &docs).unwrap();
     a.push("docs").unwrap();
 
-    let mut b = Engine::join(&root.join("b"), "b", PASS, &key, storage).unwrap();
+    let mut b = common::join_approved(&root.join("b"), "b", PASS, &key, storage, &mut a);
     b.attach_folder("docs", &root.join("docs-b"), true).unwrap();
     b.sync(Some("docs")).unwrap();
     assert!(!root.join("docs-b/big.bin").exists(), "a placeholder first");

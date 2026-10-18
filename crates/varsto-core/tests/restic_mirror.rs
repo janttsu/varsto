@@ -6,6 +6,8 @@
 //! keeps Varsto out of the mirror folders. restic itself is not needed
 //! here (`crates/varsto-cli/tests/restic_cli.rs` runs it).
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -77,14 +79,14 @@ fn two_devices() -> (Lab, Engine, Engine) {
     fs::write(lab.p("a-docs/sub/b.txt"), vec![7u8; 200_000]).unwrap();
     fs::write(lab.p("a-photos/p.jpg"), b"not really a photo").unwrap();
     a.sync(None).unwrap();
-    let b = Engine::join(
+    let b = common::join_approved(
         &lab.p("b-home"),
         "nas",
         PASS,
         &key,
         store(&lab.p("storage")),
-    )
-    .unwrap();
+        &mut a,
+    );
     fs::write(lab.p("pw"), b"secret").unwrap();
     (lab, a, b)
 }
@@ -106,7 +108,6 @@ fn kinds(c: &varsto_core::restic::Completeness) -> Vec<(String, ProblemKind)> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn mirror_setup_completeness_cache_and_fixes() {
     let (lab, mut a, mut b) = two_devices();
     let root = lab.p("mirror");
@@ -211,6 +212,11 @@ fn mirror_setup_completeness_cache_and_fixes() {
     a.add_folder("music", &lab.p("a-music")).unwrap();
     fs::write(lab.p("a-music/song.ogg"), b"la la").unwrap();
     a.sync(None).unwrap();
+    // The mirror device is approved for the new folder, then it attaches.
+    let req = b.f3_folder_request("music", "editor").unwrap();
+    a.f3_approve("music", "nas", None, Some(&req.fingerprint))
+        .unwrap();
+    b.refresh_devices().unwrap();
     b.sync(None).unwrap();
     assert_eq!(fs::read(root.join("music/song.ogg")).unwrap(), b"la la");
     let c = b.restic_check(&opts(false, false)).unwrap();
@@ -251,7 +257,6 @@ fn listing(dir: &Path) -> std::collections::BTreeSet<String> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn setup_refuses_folders_attached_elsewhere_unless_moved() {
     let (lab, _a, mut b) = two_devices();
     b.sync(None).unwrap();
@@ -290,7 +295,6 @@ fn setup_refuses_folders_attached_elsewhere_unless_moved() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (backups and snapshots)"]
 fn hold_keeps_varsto_out_of_the_mirror_folders() {
     let (lab, mut a, mut b) = two_devices();
     b.restic_setup(config(&lab.p("mirror"), &lab.p("pw")), None, false)

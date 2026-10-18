@@ -3,78 +3,14 @@
 //! work package 8b): `folder request | requests | approve | deny | members |
 //! role | remove <folder> <device> | resolve-epoch`, `recovery escrow`,
 //! `recovery kit --recovery-words`, the recovery warning of `varsto status`
-//! and the stub of `join --recovery-words`.
+//! and `join --recovery-words`.
 //!
-//! The operations are the engine's (`Engine::f3_*`, behind the `format3`
-//! feature of varsto-core). A build without the feature has the same
-//! commands, and each answers that it is not available in this build.
+//! The operations are the engine's (`Engine::f3_*`).
 
 use super::{Cli, FolderCmd};
 use anyhow::{bail, Result};
 use std::path::Path;
 
-#[cfg(not(feature = "format3"))]
-mod imp {
-    use super::*;
-
-    pub const UNAVAILABLE: &str = "folder membership of storage format 3 is not available in this build of Varsto (it is built without the format3 feature)";
-
-    pub fn folder(_cli: &Cli, _home: &Path, cmd: &FolderCmd) -> Result<bool> {
-        match cmd {
-            FolderCmd::Request { .. }
-            | FolderCmd::Requests { .. }
-            | FolderCmd::Approve { .. }
-            | FolderCmd::Deny { .. }
-            | FolderCmd::Members { .. }
-            | FolderCmd::Role { .. }
-            | FolderCmd::ResolveEpoch { .. }
-            | FolderCmd::CreateF3 { .. }
-            | FolderCmd::Remove {
-                device: Some(_), ..
-            } => bail!("{UNAVAILABLE}"),
-            _ => Ok(false),
-        }
-    }
-
-    pub fn recovery_escrow(
-        _cli: &Cli,
-        _home: &Path,
-        _folder: Option<&str>,
-        _with_recovery_key: bool,
-        _file: Option<&Path>,
-    ) -> Result<()> {
-        bail!("{UNAVAILABLE}")
-    }
-
-    pub fn recovery_kit(_home: &Path, _new: bool) -> Result<()> {
-        bail!("{UNAVAILABLE}")
-    }
-
-    pub fn join_recovery_words(_engine: &mut varsto_core::engine::Engine) -> Result<Vec<String>> {
-        bail!("{UNAVAILABLE}")
-    }
-
-    pub fn status_warnings(_engine: &mut varsto_core::engine::Engine) {}
-
-    pub fn folder_add_recovery_key(
-        _file: Option<&Path>,
-        _prompt: bool,
-    ) -> Result<Option<varsto_core::membership3::RecoveryKey>> {
-        Ok(None)
-    }
-
-    pub fn recovery_words_given(
-        _file: Option<&Path>,
-    ) -> Result<Option<zeroize::Zeroizing<String>>> {
-        Ok(None)
-    }
-
-    pub fn recovery_words_text(_file: Option<&Path>) -> Result<zeroize::Zeroizing<String>> {
-        bail!("{UNAVAILABLE}")
-    }
-}
-
-#[cfg(feature = "format3")]
 mod imp {
     use super::*;
     use varsto_core::engine::{

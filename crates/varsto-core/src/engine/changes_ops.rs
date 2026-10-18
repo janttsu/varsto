@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Change history of files on the engine (`crate::changes`): recording the
-//! versions of every manifest a pull takes and of every manifest this device
-//! publishes, starting the history from what a device already holds, and
-//! answering `varsto changes` / `GET /api/changes`.
+//! versions of every manifest view a pull takes (`manifest3`: the paths a
+//! writer's records changed) and of every manifest this device publishes,
+//! starting the history from what a device already holds, and answering
+//! `varsto changes` / `GET /api/changes`. The history is derived from the
+//! manifests and stays local; it is not a record (design section 7).
 
 use super::*;
 use crate::changes::{Candidate, ChangeEvent, ChangeLimits, ChangeLog};
+use crate::manifest3::{FolderManifests, WriterView};
+use crate::record::Id16;
 
 /// What `Engine::changes` looks for.
 #[derive(Clone, Debug, Default)]
@@ -66,38 +70,30 @@ impl Engine {
         ChangeLog::open(&self.home, folder.as_str(), self.config.changes)
     }
 
-    /// Whether a signed ledger batch announced exactly this manifest.
-    fn manifest_announced(&self, folder: &FolderId, dev: &DeviceId, seq: u64, blob: &[u8]) -> bool {
-        if dev == &self.vault.device_id {
-            return true;
-        }
-        let Ok(view) = self.view() else {
-            return false;
-        };
-        view.manifest_hashes
-            .get(&(folder.clone(), dev.clone()))
-            .is_some_and(|(s, h)| *s == seq && *h == hex::encode(crypto::hash(blob)))
-    }
-
-    /// Record the versions a manifest a pull took names, except those
-    /// `refused` (made by read-only members).
-    pub(super) fn history_from_manifest(
+    /// Record the versions of `view`, a writer's manifest as read (only the
+    /// paths in `only` when given). Every record read was accepted against
+    /// its announcement, so its versions count as verified.
+    pub(super) fn history_from_view3(
         &self,
         hist: &mut ChangeLog,
-        m: &Manifest,
-        blob: &[u8],
-        refused: &dyn Fn(&FileState) -> bool,
+        device: &Id16,
+        view: &WriterView,
+        only: Option<&BTreeSet<String>>,
     ) -> Result<()> {
-        let verified = self.manifest_announced(&m.folder, &m.device, m.seq, blob);
-        let cands: Vec<Candidate> = m
+        let source = DeviceId::from_bytes(device);
+        let states: Vec<FileState> = view
             .files
             .values()
-            .filter(|f| !refused(f))
+            .filter(|e| only.is_none_or(|o| o.contains(&e.path)))
+            .map(|e| e.to_state())
+            .collect();
+        let cands: Vec<Candidate> = states
+            .iter()
             .map(|f| Candidate {
                 state: f,
-                source: &m.device,
-                time_utc: m.created_utc,
-                verified,
+                source: &source,
+                time_utc: view.created_utc,
+                verified: true,
                 backfilled: false,
             })
             .collect();
@@ -130,68 +126,26 @@ impl Engine {
     }
 
     /// Start the history of a folder on this device: the newest manifest of
-    /// every device the storages hold (whose writes this device takes),
-    /// then the other devices' versions this device holds that none of them
-    /// named, at the file's modification time. Runs once per folder.
-    pub(super) fn history_backfill(
+    /// every writer this device took records from, then the other devices'
+    /// versions this device holds that none of them named, at the file's
+    /// modification time. Runs once per folder.
+    pub(super) fn history_backfill3(
         &self,
         hist: &mut ChangeLog,
-        rec: &FolderRecord,
         state: &FolderState,
-        storages: &OpenStorages,
+        manifests: &FolderManifests,
     ) -> Result<()> {
         if hist.index.backfilled {
             return Ok(());
         }
-        let metas = self.folder_keys(rec)?.meta_keys();
-        let prefix = format!("manifests/{}/", rec.folder_id);
-        let mut newest: BTreeMap<DeviceId, (u64, usize)> = BTreeMap::new();
-        for (idx, (spec, backend)) in storages.iter().enumerate() {
-            if spec.is_data_only() {
-                continue;
-            }
-            for key in backend.list(&prefix)? {
-                let Some((dev, seq)) = super::manifest_upkeep::parse_key(&prefix, &key) else {
-                    continue;
-                };
-                let e = newest.entry(dev).or_insert((0, idx));
-                if seq > e.0 {
-                    *e = (seq, idx);
-                }
-            }
-        }
-        let viewer_clocks = self.share_viewer_clocks(rec);
-        let refused = |f: &FileState| {
-            viewer_clocks
-                .get(&f.modified_by)
-                .is_some_and(|c| f.modified_clock > *c)
-        };
-        for (dev, (seq, idx)) in newest {
-            let mine = dev == self.vault.device_id;
-            if !mine
-                && (!self.share_writer_ok(rec, &dev)
-                    || (self.devices.devices.contains_key(&dev)
-                        && !self.is_revoked(&dev)
-                        && !self.trusted(&dev)))
-            {
-                continue;
-            }
-            let key = Manifest::storage_key(&rec.folder_id, &dev, seq);
-            let Some(blob) = storages[idx].1.get(&key)? else {
-                continue;
-            };
-            let Some(m) = metas.iter().find_map(|k| {
-                Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, k).ok()
-            }) else {
-                continue;
-            };
-            self.history_from_manifest(hist, &m, &blob, &refused)?;
+        for (dev, view) in &manifests.views {
+            self.history_from_view3(hist, dev, view, None)?;
         }
         let me = self.vault.device_id.clone();
         let now = util::now_utc();
-        // Other devices' versions this device holds that no manifest on the
-        // storages names any more. Its own come from its manifest above, or
-        // when it publishes them.
+        // Other devices' versions this device holds that no manifest names
+        // any more. Its own come from its manifest above, or when it
+        // publishes them.
         let cands: Vec<Candidate> = state
             .files
             .values()
@@ -227,14 +181,14 @@ impl Engine {
         }
         let rec = self.with_key(&rec)?;
         let state = self.load_state(&rec.folder_id)?;
-        let storages = self.open_storages(false)?;
-        self.history_backfill(&mut hist, &rec, &state, &storages)?;
+        let manifests = self.load_manifests3(&members3::bin(&rec.folder_id)?);
+        self.history_backfill3(&mut hist, &state, &manifests)?;
         hist.save()
     }
 
     /// The name of any device this one knows: its own, the vault's, a
     /// member of a shared folder.
-    fn any_device_name(&self, d: &DeviceId) -> String {
+    pub(super) fn any_device_name(&self, d: &DeviceId) -> String {
         if d == &self.vault.device_id {
             return self.vault.device_name.clone();
         }
