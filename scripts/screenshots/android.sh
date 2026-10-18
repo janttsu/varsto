@@ -35,16 +35,32 @@ port="$(echo "$sj" | python3 -c 'import json,sys; print(json.load(sys.stdin)["po
 token="$(echo "$sj" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
 adb forward tcp:18790 "tcp:$port" >/dev/null
 api() {
-  local r
-  r="$(curl -fsS -X POST "http://127.0.0.1:18790$1" -H "Host: 127.0.0.1:$port" -H "X-Varsto-Token: $token" -H "Content-Type: application/json" -d "$2")" || { echo "!! $1 failed" >&2; return 1; }
+  local r code
+  # The body is printed on failure (the service answers {"error": ...}).
+  r="$(curl -sS -w '\n%{http_code}' -X POST "http://127.0.0.1:18790$1" -H "Host: 127.0.0.1:$port" -H "X-Varsto-Token: $token" -H "Content-Type: application/json" -d "$2")" || { echo "!! $1: no answer" >&2; return 1; }
+  code="${r##*$'\n'}"; r="${r%$'\n'*}"
+  [ "$code" = 200 ] || { echo "!! $1: HTTP $code: $r" >&2; return 1; }
+  LAST="$r"
   echo "   $1: $(echo "$r" | cut -c1-100)"
 }
+# Storage format 3 keeps a folder's records on the vault's storages, so the
+# folder needs one. A phone refuses local-directory storages (only S3 and
+# rclone are allowed, see storage_kind_allowed): `rclone serve s3` on the host
+# is the bucket, reached from the emulator through `adb reverse`.
+command -v rclone >/dev/null || { echo "!! rclone is needed on the host (curl https://rclone.org/install.sh | sudo bash)" >&2; exit 1; }
+s3dir="$(mktemp -d)"; mkdir -p "$s3dir/phone"
+rclone serve s3 --auth-key ci-access,ci-secret-key --addr 127.0.0.1:9000 "$s3dir" > "$s3dir/rclone.log" 2>&1 &
+s3pid=$!
+trap 'kill "$s3pid" 2>/dev/null || true' EXIT
+for i in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:9000/ && break; sleep 0.2; done
+adb reverse tcp:9000 tcp:9000 >/dev/null
 echo "== vault through the service API"
 api /api/init '{"name":"phone","passphrase":"correct horse battery staple"}'
-# A phone refuses local-directory storages (only S3 and rclone are allowed,
-# see storage_kind_allowed), and CI has no bucket to reach, so this vault
-# lives on the phone alone: no storage is added and nothing is synced.
-api /api/folder '{"name":"Notes"}'
+# The recovery words are in the kit /api/init returns; the folder's recovery
+# copy is made from them, so the vault has no "no recovery copy" warning.
+recovery="$(echo "$LAST" | python3 -c 'import json,re,sys; k=json.load(sys.stdin)["kit"].split("RECOVERY WORDS")[1]; print(" ".join(re.findall(r"\d+\.\s+([a-z]+)", k)))')"
+api /api/storage '{"kind":"s3","name":"cloud","endpoint":"http://127.0.0.1:9000","bucket":"phone","access_key_id":"ci-access","secret_access_key":"ci-secret-key","insecure_http":true}'
+api /api/folder "{\"name\":\"Notes\",\"recovery_words\":\"$recovery\"}"
 api /api/write '{"folder":"Notes","path":"shopping.md","text":"- oat milk\n- rye bread\n- coffee\n"}'
 api /api/write '{"folder":"Notes","path":"ideas.md","text":"# Ideas\n\nA walk along the river on Saturday.\n"}'
 api /api/write '{"folder":"Notes","path":"travel/lyon.md","text":"Train 08:12, hotel near Bellecour.\n"}'

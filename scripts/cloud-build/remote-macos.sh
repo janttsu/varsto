@@ -32,10 +32,11 @@ echo "== smoke test of the bundled command line"
 export VARSTO_PASSPHRASE=cloud-test-passphrase-123
 bin="$HOME/build/app/Varsto.app/Contents/Helpers/varsto"
 "$bin" --version
-"$bin" --home "$HOME/build/home" init --name mac-a >/dev/null
+init="$("$bin" --home "$HOME/build/home" init --name mac-a --json)"
+rw="$(echo "$init" | python3 -c 'import json,re,sys; k=json.load(sys.stdin)["kit"].split("RECOVERY WORDS")[1]; print(" ".join(re.findall(r"\d+\.\s+([a-z]+)", k)))')"
 mkdir -p "$HOME/build/storage" "$HOME/build/files"
 "$bin" --home "$HOME/build/home" storage add-local box "$HOME/build/storage" >/dev/null
-"$bin" --home "$HOME/build/home" folder add docs "$HOME/build/files" >/dev/null
+VARSTO_RECOVERY_WORDS="$rw" "$bin" --home "$HOME/build/home" folder add docs "$HOME/build/files" >/dev/null
 echo "hello from macos" > "$HOME/build/files/note.txt"
 "$bin" --home "$HOME/build/home" sync
 echo "== launching the app in the desktop session (screenshot after 8 s)"

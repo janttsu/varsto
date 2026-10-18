@@ -345,7 +345,13 @@ def integration(args):
         run_ssh("Administrator", wip, "powershell -Command \"New-Item -ItemType Directory -Force C:\\it | Out-Null\"")
         scp(str(win_zip), f"Administrator@{wip}:C:/it/varsto-windows.zip")
         scp(str(ROOT / "scripts/cloud-build/it-windows.ps1"), f"Administrator@{wip}:C:/it/it.ps1")
-        run_ssh("Administrator", wip, f"powershell -ExecutionPolicy Bypass -File C:\\it\\it.ps1 -VaultKey {vault_key} -S3Endpoint {s3['S3_ENDPOINT']} -S3Region fr-par -S3Bucket {bucket} -S3Key {access} -S3Secret {secret} -PublicIp {wip}")
+        win_args = f"-VaultKey {vault_key} -S3Endpoint {s3['S3_ENDPOINT']} -S3Region fr-par -S3Bucket {bucket} -S3Key {access} -S3Secret {secret} -PublicIp {wip}"
+        # Format 3: the Windows device joins and asks for the folder, the Linux
+        # owner approves it, then Windows reads its grant and carries on.
+        run_ssh("Administrator", wip, f"powershell -ExecutionPolicy Bypass -File C:\\it\\it.ps1 -Phase request {win_args}")
+        owner = "cd /it && b=$(ls -d /it/varsto-*/ | head -1)varsto && export VARSTO_PASSPHRASE=integration-test-passphrase VARSTO_S3_SECRET='" + secret + "'"
+        run_ssh("root", lip, f"{owner} && $b --home /it/home sync && $b --home /it/home folder approve shared windows --yes")
+        run_ssh("Administrator", wip, f"powershell -ExecutionPolicy Bypass -File C:\\it\\it.ps1 -Phase finish {win_args}")
         result["windows_join_and_sync_via_s3"] = "ok"
 
         # Linux pulls the Windows file through S3.
@@ -359,9 +365,12 @@ def integration(args):
         result["windows_to_linux_via_s3"] = "ok" if ok_w else "MISMATCH"
 
         # Peer-to-peer across the internet: both services advertise public addresses;
-        # a second Linux device joins after the bucket's chunks are gone.
-        subprocess.run(["rclone", "purge", f"scw:{bucket}/chunks"], env=env, check=False)
-        run_ssh("root", lip, "cd /it && b=$(ls -d /it/varsto-*/ | head -1)varsto && export VARSTO_PASSPHRASE=integration-test-passphrase VARSTO_S3_SECRET='" + secret + "' VARSTO_VAULT_KEY=" + vault_key + f" && $b --home /it/home2 join --name linux-2 --storage-name cloud --s3-endpoint {s3['S3_ENDPOINT']} --s3-region fr-par --s3-bucket {bucket} --s3-access-key-id {access} && mkdir -p /it/files2 && $b --home /it/home2 folder attach shared /it/files2 && $b --home /it/home2 p2p enable --port 17894 && $b --home /it/home2 p2p status && $b --home /it/home2 pull shared --json > /it/pull2.json; cat /it/pull2.json")
+        # a second Linux device joins after the bucket's packs are gone (format 3
+        # keeps the blocks in packs/).
+        # The approval comes first: it needs the whole vault in the bucket.
+        run_ssh("root", lip, "cd /it && b=$(ls -d /it/varsto-*/ | head -1)varsto && export VARSTO_PASSPHRASE=integration-test-passphrase VARSTO_S3_SECRET='" + secret + "' VARSTO_VAULT_KEY=" + vault_key + f" && $b --home /it/home2 join --name linux-2 --storage-name cloud --s3-endpoint {s3['S3_ENDPOINT']} --s3-region fr-par --s3-bucket {bucket} --s3-access-key-id {access} && $b --home /it/home2 folder request shared && $b --home /it/home sync && $b --home /it/home folder approve shared linux-2 --yes && $b --home /it/home2 sync")
+        subprocess.run(["rclone", "purge", f"scw:{bucket}/packs"], env=env, check=False)
+        run_ssh("root", lip, "cd /it && b=$(ls -d /it/varsto-*/ | head -1)varsto && export VARSTO_PASSPHRASE=integration-test-passphrase VARSTO_S3_SECRET='" + secret + "'" + f" && mkdir -p /it/files2 && $b --home /it/home2 folder attach shared /it/files2 && $b --home /it/home2 p2p enable --port 17894 && $b --home /it/home2 p2p status && $b --home /it/home2 pull shared --json > /it/pull2.json; cat /it/pull2.json")
         pull2 = subprocess.run(ssh_base("root", lip) + ["cat /it/pull2.json"], capture_output=True, text=True).stdout
         try:
             pj = json.loads(pull2)
