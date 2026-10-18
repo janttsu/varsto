@@ -415,6 +415,12 @@ impl Engine {
     /// hot metadata storage. Returns the devices found forked.
     pub(crate) fn pull_ledger3(&mut self) -> Result<Vec<DeviceId>> {
         self.refresh_members3()?;
+        // Head exchange first (design section 8): what peers prove, and the
+        // batches every storage withholds, fetched from the peers.
+        let pull_utc = util::now_utc();
+        if let Err(e) = self.p2p_catch_up() {
+            log::debug!("head exchange with peers failed: {e:#}");
+        }
         let me = self.me3();
         let mut keys: BTreeMap<Id16, crypto::VerifyingKey> = BTreeMap::new();
         for (d, (rec, _)) in &self.f3.members.devices.devices {
@@ -523,6 +529,12 @@ impl Engine {
         }
         let view = self.view3()?;
         self.observe_clock(view.max_lamport)?;
+        // A storage that shows less than a writer confirmed and a peer
+        // proved, two pulls in a row: the rollback warning.
+        match self.p2p_judge_rollback(pull_utc, None) {
+            Ok(w) => self.ledger_alarm.watch.rollback = w.into_iter().map(|w| w.text).collect(),
+            Err(e) => log::debug!("rollback check failed: {e:#}"),
+        }
         self.watch_freshness3(&view, malformed, refused);
         Ok(forks.into_iter().collect())
     }

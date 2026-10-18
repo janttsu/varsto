@@ -4,14 +4,14 @@
 //! hook), and the desktop, watching, sees that task with its progress over
 //! `/p2p/activity`.
 
+mod common;
+
 use std::fs;
-use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use varsto_core::activity::{self, PeerCache};
 use varsto_core::chunking::ChunkerParams;
-use varsto_core::p2p::{self, PeerAddr, Peers};
 use varsto_core::storage::StorageSpec;
 use varsto_core::Engine;
 
@@ -45,28 +45,16 @@ fn a_device_sees_another_devices_long_task_with_its_progress() {
     laptop.add_folder("docs", &docs).unwrap();
     laptop.push("docs").unwrap();
     activity::set_identity(laptop.device_id(), laptop.own_device_name());
-    let desktop = Engine::join(&root.join("desktop-home"), "desktop", PASS, &key, storage).unwrap();
+    let mut desktop =
+        Engine::join(&root.join("desktop-home"), "desktop", PASS, &key, storage).unwrap();
 
-    // The laptop serves its snapshot over TCP.
-    let server = p2p::Server::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap()).unwrap();
-    let addr = server.addr;
-    let snap: Arc<Mutex<Option<Arc<p2p::Snapshot>>>> =
-        Arc::new(Mutex::new(Some(Arc::new(laptop.peer_snapshot().unwrap()))));
-    let stop = Arc::new(AtomicBool::new(false));
-    let (s2, st2) = (snap.clone(), stop.clone());
-    let serving = std::thread::spawn(move || server.run(s2, st2));
+    // The laptop serves its snapshot over TLS on TCP.
+    let serving = common::p2p::Serving::start(&mut laptop);
+    common::p2p::connect(&mut laptop, &serving, &mut [&mut desktop]);
 
     // The desktop watches.
     let laptop_id = laptop.device_id().clone();
-    let peers = Arc::new(Peers::new(
-        desktop.peer_key(),
-        desktop.device_id().clone(),
-        vec![PeerAddr {
-            device: laptop_id.clone(),
-            addr,
-            name: "laptop".into(),
-        }],
-    ));
+    let peers = Arc::new(desktop.p2p_peers_tcp().unwrap());
     let cache: &'static PeerCache = Box::leak(Box::default());
     cache.set_peers(Some(peers), None);
     let done = Arc::new(AtomicBool::new(false));
@@ -96,8 +84,7 @@ fn a_device_sees_another_devices_long_task_with_its_progress() {
     activity::set_test_delay_ms(0);
     done.store(true, Ordering::Relaxed);
     let seen = watcher.join().unwrap();
-    stop.store(true, Ordering::Relaxed);
-    serving.join().unwrap();
+    drop(serving);
 
     assert!(report.objects_verified_now > 150, "{report:?}");
     let verify: Vec<_> = seen
