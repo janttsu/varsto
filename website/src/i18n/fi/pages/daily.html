@@ -9,7 +9,7 @@ description: Varston kehitysversiot päähaarasta, tarkistussummaluettelo alleki
       <p><strong>Nämä ovat kehitysversioita päähaarasta, eivät julkaisuja.</strong></p>
       <ul>
         <li>Ne eivät ole julkaisuja, eikä niille ole tehty julkaisutestausta. Niillä ei ole julkaisuallekirjoitusta eikä Applen tai Microsoftin koodinallekirjoitusta. Älä käytä niitä tuotantodataan.</li>
-        <li>Tallennusmuoto voi muuttua versiosta toiseen ilman siirtotyökalua. Muoto 2 edellyttää, että holvit luodaan uudelleen.</li>
+        <li>Tallennusmuoto voi muuttua versiosta toiseen ilman siirtotyökalua. Nämä versiot kirjoittavat tallennusmuotoa 3: version 0.0.1-alpha.15 tai sitä vanhemman tekemä holvi hylätään ja se on luotava uudelleen (<code>varsto reset --yes</code>, <code>varsto init</code>, sitten tiedostot synkronoidaan uudelleen), ja 0.0.1-alpha.15 hylkää muodon 3 holvin. Liittyvä laite pyytää jokaista kansiota erikseen ja omistaja hyväksyy pyynnön; <code>varsto init</code> tulostaa toisen 24 palautussanan joukon, jota <code>varsto folder add</code> kysyy.</li>
         <li><code>varsto update --daily</code> asentaa alustasi uusimman päivittäisen version (Linuxin ja Windowsin komentorivi-versiot; macOS-sovellus ja Android-APK asennetaan käsin). Pelkkä <code>varsto update</code> pysyy julkaisuissa eikä koskaan asenna päivittäistä versiota.</li>
         <li>Pidä omat varmuuskopiosi.</li>
       </ul>

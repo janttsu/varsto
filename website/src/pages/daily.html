@@ -9,7 +9,7 @@ description: Development builds of Varsto from the main line, with a checksum li
       <p><strong>These are development builds from the main line, not releases.</strong></p>
       <ul>
         <li>They are not releases and have not been through release testing. They carry no release signature and no Apple or Microsoft code signing. Do not use them for production data.</li>
-        <li>The storage format can change from one build to the next without any migration. Format 2 will require vaults to be recreated.</li>
+        <li>The storage format can change from one build to the next without any migration. These builds write storage format 3: a vault made by 0.0.1-alpha.15 or earlier is refused and has to be recreated (<code>varsto reset --yes</code>, <code>varsto init</code>, then sync the files again), and 0.0.1-alpha.15 refuses a format 3 vault. A device that joins asks for each folder and an owner approves it; <code>varsto init</code> prints a second set of 24 recovery words that <code>varsto folder add</code> asks for.</li>
         <li><code>varsto update --daily</code> installs the latest daily build for your platform (the Linux and Windows command-line builds; the macOS app and the Android APK are installed by hand). Plain <code>varsto update</code> stays on releases and never installs a daily build.</li>
         <li>Keep your own backups.</li>
       </ul>
