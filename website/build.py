@@ -564,6 +564,7 @@ DAILY_I18N = {
             "windows-ci-only": "Windows-asennusohjelma on savutestattu vain CI:ssä (asennus, päivitys, korjaus, vanhempaan versioon palaamisen esto, poisto), ei oikealla koneella.",
             "ios-untested": "iOS-ipa:a ei ole ajettu oikealla laitteella. Asenna se AltStorella, SideStorella tai Sideloadlyllä.",
             "ui-strings": "Osa sovelluksen käyttöliittymän teksteistä on vielä kääntämättä; ne kirjataan lokiin.",
+            "format3": "Nämä versiot kirjoittavat tallennusmuotoa 3. Version 0.0.1-alpha.15 tai sitä vanhemman tekemä holvi hylätään ja se on luotava uudelleen (varsto reset --yes, varsto init, tiedostot synkronoidaan uudelleen); päivitystä ei ole. Liittyvällä laitteella ei ole yhtään kansiota, ennen kuin omistaja hyväksyy sen pyynnön.",
             "windows-ios-previous": "Windows et iOS viennent toujours de la version précédente 20261016-316c579 ; ils n’ont pas été reconstruits cette fois.",
             "grace-default": "Le délai de grâce avant d’abandonner un stockage en retard (paquet E) est de 30 jours par défaut.",
             "devices-unverified": "Le code plein écran Kotlin, Swift et Windows et le correctif d’appairage n’ont pas été vérifiés sur de vrais appareils.",
@@ -591,6 +592,7 @@ DAILY_I18N = {
             "windows-ci-only": "Windows-installationsprogrammet har bara röktestats i CI (installation, uppgradering, reparation, nekad nedgradering, avinstallation), inte på en riktig dator.",
             "ios-untested": "iOS-ipa:n har inte körts på en riktig enhet. Installera den med AltStore, SideStore eller Sideloadly.",
             "ui-strings": "Vissa texter i appens gränssnitt är ännu inte översatta; de loggas.",
+            "format3": "De här byggena skriver lagringsformat 3. Ett valv som skapats av 0.0.1-alpha.15 eller äldre avvisas och måste skapas på nytt (varsto reset --yes, varsto init, synka filerna igen); det finns ingen uppgradering. En enhet som ansluter har ingen mapp förrän en ägare godkänner dess förfrågan.",
         },
     },
     "fr": {
@@ -606,6 +608,7 @@ DAILY_I18N = {
             "windows-ci-only": "Le programme d’installation Windows n’a subi qu’un test de fumée en CI (installation, mise à jour, réparation, refus de rétrogradation, désinstallation), pas sur une vraie machine.",
             "ios-untested": "L’ipa iOS n’a pas été exécuté sur un vrai appareil. Installez-le avec AltStore, SideStore ou Sideloadly.",
             "ui-strings": "Certains textes de l’interface de l’application ne sont pas encore traduits ; ils sont consignés dans les journaux.",
+            "format3": "Ces versions écrivent le format de stockage 3. Un coffre créé par 0.0.1-alpha.15 ou plus ancien est refusé et doit être recréé (varsto reset --yes, varsto init, resynchroniser les fichiers) ; il n’y a pas de mise à niveau. Un appareil qui rejoint ne détient aucun dossier tant qu’un propriétaire n’a pas approuvé sa demande.",
         },
     },
 }

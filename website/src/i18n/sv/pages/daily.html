@@ -9,7 +9,7 @@ description: Utvecklingsbyggen av Varsto från huvudgrenen, med kontrollsummelis
       <p><strong>Det här är utvecklingsbyggen från huvudgrenen, inte releaser.</strong></p>
       <ul>
         <li>De är inte releaser och har inte gått igenom någon releasetestning. De saknar releasesignatur och kodsignering från Apple eller Microsoft. Använd dem inte för produktionsdata.</li>
-        <li>Lagringsformatet kan ändras mellan byggen utan någon migrering. Format 2 kommer att kräva att valv skapas på nytt.</li>
+        <li>Lagringsformatet kan ändras mellan byggen utan någon migrering. De här byggena skriver lagringsformat 3: ett valv som skapats av 0.0.1-alpha.15 eller äldre avvisas och måste skapas på nytt (<code>varsto reset --yes</code>, <code>varsto init</code>, synka sedan filerna igen), och 0.0.1-alpha.15 avvisar ett valv i format 3. En enhet som ansluter ber om varje mapp och en ägare godkänner det; <code>varsto init</code> skriver ut en andra uppsättning på 24 återställningsord som <code>varsto folder add</code> frågar efter.</li>
         <li><code>varsto update --daily</code> installerar det senaste dagliga bygget för din plattform (kommandoradsbyggena för Linux och Windows; macOS-appen och Android-APK:n installeras för hand). Vanliga <code>varsto update</code> håller sig till releaser och installerar aldrig ett dagligt bygge.</li>
         <li>Behåll egna säkerhetskopior.</li>
       </ul>

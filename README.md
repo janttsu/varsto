@@ -32,17 +32,19 @@ Alpha (0.0.1-alpha.13): the core works on Linux, macOS and Windows (since alpha.
 
 **Released in 0.0.1-alpha.15** (spec sections 62 to 71): storage format 2 (nonces from the packed bytes, zstd level 3, a chunker keyed per folder, and every block in packs, so a storage sees pack sizes only; vaults of alpha.14 and earlier must be recreated), a folder overview with a safety indicator, a live visualization with real full screen, the Windows setup program with a native window and automatic updates, an unsigned iOS `.ipa`, `varsto update --daily` with a separately signed daily channel, pairing that offers every local address and falls back across them, forwarding of other devices' blocks to this device's storages, a grace period for new data before a verification violation, an interface that stays responsive while the service is busy, modern GPT partitioning for disk init, and a French website.
 
+**On main and in the daily builds, not released yet** (spec section 77, [docs/spec/format-3-design.md](docs/spec/format-3-design.md)): storage format 3. The ledger claims packs of a few fixed sizes instead of every block, each folder keeps a signed block map, every record is signed and names its key, manifests and trash lists are a base plus small deltas, and a storage sees opaque objects of a few sizes and nothing else. A folder key reaches a device only as a grant an owner approved by hand, so a device that joins with the vault words sees folder names and no content until it asks (`varsto folder request`) and an owner answers (`varsto folder approve`); `varsto folder add` asks for a second set of 24 recovery words, which give every folder a recovery copy, and pairing shows six words on both devices. Peers talk TLS only and compare ledger heads, so a storage that withholds or rolls back batches shows a warning. **Vaults from alpha.15 and earlier must be recreated; there is no upgrade path** (a format 3 build refuses them and says how; the alpha.15 binary stays the tool to read an old vault; [docs/spec/format-versions.md](docs/spec/format-versions.md)).
+
 ### Quick start
 
 ```bash
 cargo build --release                      # produces target/release/varsto
 varsto desktop                             # local graphical interface in your browser (127.0.0.1 only)
 export VARSTO_PASSPHRASE='a long passphrase'
-varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once
+varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key and a kit with two word sets (vault words, recovery words) once
 varsto --home ~/.varsto-laptop storage add-local box /mnt/box
 varsto --home ~/.varsto-laptop storage add-s3 cloud --endpoint https://s3.fr-par.scw.cloud --region fr-par --bucket my-bucket --access-key-id AK...   # asks for the secret key; VARSTO_S3_SECRET or --secret-file in scripts
 varsto --home ~/.varsto-laptop storage add-rclone hetzner storagebox:varsto   # any rclone remote
-varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
+varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced   # asks for the 24 recovery words (or VARSTO_RECOVERY_WORDS): the folder's recovery copy
 varsto --home ~/.varsto-laptop sync
 varsto install                             # Linux: varsto on PATH, tray at login, menu entry. Background sync (systemd user unit / macOS launch agent) is set up by any command once a vault exists; varsto uninstall turns it off
 varsto tray                                # Linux/Windows: tray icon + background service (macOS: Varsto.app; Windows: use the installer, docs/windows.md)
@@ -52,13 +54,17 @@ varsto update --daily                      # the newest daily (test) build inste
 varsto transfers --watch                   # uploads, downloads and peer traffic running now
 
 # on another device that can reach the same storage:
-varsto --home ~/.varsto-desk join --name desk --storage-path /mnt/box   # asks for the vault key (hex or the 24 words)
+varsto --home ~/.varsto-desk join --name desk --storage-path /mnt/box   # asks for the vault key (hex or the 24 vault words); --recovery-words also opens every folder that has a recovery copy
+varsto --home ~/.varsto-desk folder request docs        # no content yet: ask the owners; prints six words to compare
+varsto --home ~/.varsto-laptop sync && varsto --home ~/.varsto-laptop folder approve docs desk   # on an owner device: shows the same six words, asks "Do the six words match?"
+varsto --home ~/.varsto-desk sync                        # reads the grant
 varsto --home ~/.varsto-desk folder attach docs ~/synced
 varsto --home ~/.varsto-desk sync
 varsto --home ~/.varsto-desk status --json
 varsto --home ~/.varsto-desk fsck --verify
 
-# recovery kit: the vault key as 24 words (and 2-of-3 shares) for paper or metal
+# recovery kit: the vault key as 24 words (and 2-of-3 shares) for paper or metal; `init` printed the
+# recovery words too (they never change; `recovery escrow` writes the copies a folder lacks)
 varsto --home ~/.varsto-laptop recovery kit --shares
 # what else to keep if every device is lost (storage keys, disks, security keys) and the restore steps
 varsto --home ~/.varsto-laptop recovery guide --format html --output recovery-guide.html   # new in 0.0.1-alpha.14
@@ -121,8 +127,9 @@ varsto verify-release varsto-<version>-x86_64-unknown-linux-musl.tar.gz --github
 varsto storage add-local stick /media/usb --carrier       # a transferrer: carries only what the other device lacks
 varsto replica token                                      # give to an untrusted backup device
 varsto --home ~/.varsto-replica replica init --name nas --token <t> --source /mnt/shared --target /mnt/nas/varsto
-varsto share create docs                                  # token for another Varsto user
-varsto --home ~/.varsto-shared share accept --name laptop --token <t> --storage-path /mnt/shared
+varsto --home ~/.varsto-shared share request --name ville   # another Varsto user: a request code and six words, sent to you by any channel
+varsto share create docs --to <request code> --fingerprint "<their six words>"   # a grant on the storage; prints your six words
+varsto --home ~/.varsto-shared share accept --name laptop --owner-words "<your six words>" --storage-path /mnt/shared
 ```
 
 Test data only. Keep your own backups.
