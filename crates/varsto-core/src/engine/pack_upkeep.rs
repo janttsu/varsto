@@ -375,8 +375,16 @@ impl Engine {
         let epoch = self.folder_keys(rec)?.epoch;
         let writers = self.folder_writers3(&folder);
         // 1. Every record up to date, then the references.
-        let view = self.view3()?;
+        let mut view = self.view3()?;
         let (manifests, _) = self.pull_folder_records(&folder, &view)?;
+        // Other writers' marks just read wait for this device's
+        // acknowledgement as much as after a sync: signed now, before this
+        // device's own marks go into a batch of their own.
+        match self.sign_due_acks3() {
+            Ok(true) => view = self.view3()?,
+            Ok(false) => {}
+            Err(e) => log::warn!("acknowledgement not signed: {e:#}"),
+        }
         // A backup's blocks are referenced by its unexpired snapshots.
         let refs = if rec.is_backup() {
             self.backup_gc_references3(rec, now)?

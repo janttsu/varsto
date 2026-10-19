@@ -922,19 +922,24 @@ impl Engine {
     /// checkpoint delete the batches it covers (on the hot storages for
     /// this device's own, locally for everyone's). Cold storages are left
     /// as they are.
-    pub(crate) fn ledger_upkeep3(&mut self) -> Result<()> {
+    /// Acknowledge, in an empty batch of this device's own, what waits for
+    /// it: other devices' checkpoints and other writers' dead marks (they
+    /// settle only once every current writer did). Run by the ledger
+    /// upkeep after a sync and by the trash upkeep before it collects, so
+    /// that a device whose last action was a trash upkeep (its own marks
+    /// in a new batch) does not leave the other writers' marks waiting.
+    /// Returns whether a batch was signed.
+    pub(crate) fn sign_due_acks3(&mut self) -> Result<bool> {
         if self.vault.member
             || self.forked_self
             || self.removal.is_some()
             || self.ledger_alarm.needs_rebuild()
+            || self.cycle.is_some()
         {
-            return Ok(());
+            return Ok(false);
         }
         let me = self.me3();
         let view = self.view3()?;
-        // 1. Acknowledge other devices' checkpoints, and other writers'
-        // dead marks (they settle only once every writer did), in a batch
-        // of our own.
         let ack_due = self.f3.ledger.devices().iter().any(|d| {
             *d != me
                 && self
@@ -944,22 +949,39 @@ impl Engine {
                     .base
                     .is_some_and(|b| view.acked(&me, d, None) < b.seq)
         }) || self.acks_due3(&view);
-        if ack_due && self.cycle.is_none() {
-            let (key_id, key) = self.ledger_key3()?;
-            let lamport = self.tick()?;
-            let seen = self.f3.ledger.vault_seen(&me);
-            self.f3.ledger.append_own(
-                &me,
-                Vec::new(),
-                seen,
-                lamport,
-                &key,
-                &key_id,
-                ledger3::NO_FOLDER,
-                &self.keys.signer,
-            )?;
-            self.push_own_batches3()?;
+        if !ack_due {
+            return Ok(false);
         }
+        let (key_id, key) = self.ledger_key3()?;
+        let lamport = self.tick()?;
+        let seen = self.f3.ledger.vault_seen(&me);
+        self.f3.ledger.append_own(
+            &me,
+            Vec::new(),
+            seen,
+            lamport,
+            &key,
+            &key_id,
+            ledger3::NO_FOLDER,
+            &self.keys.signer,
+        )?;
+        self.push_own_batches3()?;
+        Ok(true)
+    }
+
+    pub(crate) fn ledger_upkeep3(&mut self) -> Result<()> {
+        if self.vault.member
+            || self.forked_self
+            || self.removal.is_some()
+            || self.ledger_alarm.needs_rebuild()
+        {
+            return Ok(());
+        }
+        let me = self.me3();
+        // 1. Acknowledge other devices' checkpoints, and other writers'
+        // dead marks (they settle only once every writer did), in a batch
+        // of our own.
+        self.sign_due_acks3()?;
         // 2. A checkpoint of our own batches.
         let head = self.f3.ledger.head(&me);
         let base = head.base.as_ref().map_or(0, |b| b.seq);

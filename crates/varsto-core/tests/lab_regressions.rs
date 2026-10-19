@@ -253,3 +253,113 @@ fn a_lost_pack_is_rebuilt_from_a_conflict_copy() {
 fn a_lost_pack_is_rebuilt_from_the_side_of_a_conflict_kept_here() {
     rebuild_after_conflict(false);
 }
+
+/// The lab's gc-settling: ten files in one pack, seven deleted, their trash
+/// day passes. The owner's upkeep marks them dead and waits for the other
+/// writers; each of them runs `sync` and then `trash upkeep` (the service's
+/// order), or (`sync_first` false) only `trash upkeep`, which reads the
+/// marks too and so must acknowledge them as a sync would. The seven blocks
+/// are collected (by whichever writer gets there first) and no upkeep keeps
+/// waiting for a writer that has read the marks.
+fn gc_settles_with_helpers_running_upkeep(helpers: &[&str], sync_first: bool) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let store = root.join("storage");
+    let storage = local("box", store.clone());
+    let (mut a, words) = Engine::init(&root.join("a"), "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(storage.clone()).unwrap();
+    let a_dir = root.join("a-docs");
+    a.add_folder("docs", &a_dir).unwrap();
+    a.trash_set(Some(1), None, None).unwrap();
+    fs::write(a_dir.join("keep.txt"), b"keep").unwrap();
+    a.sync(None).unwrap();
+    let mut others = Vec::new();
+    for name in helpers {
+        let mut e =
+            common::join_approved(&root.join(name), name, PASS, &words, storage.clone(), &mut a);
+        e.chunker = ChunkerParams::SMALL;
+        e.attach_folder("docs", &root.join(format!("{name}-docs")), false)
+            .unwrap();
+        e.sync(None).unwrap();
+        others.push(e);
+    }
+    let gc = a_dir.join("gc");
+    fs::create_dir_all(&gc).unwrap();
+    for i in 0..10u64 {
+        fs::write(gc.join(format!("f{i}.bin")), data(30_000, 60 + i)).unwrap();
+    }
+    a.sync(None).unwrap();
+    for e in &mut others {
+        e.sync(None).unwrap();
+    }
+    let with_ten = packs_in(&store);
+    for i in 0..7 {
+        fs::remove_file(gc.join(format!("f{i}.bin"))).unwrap();
+    }
+    a.sync(None).unwrap();
+    for e in &mut others {
+        e.sync(None).unwrap();
+    }
+    let later = varsto_core::util::now_utc() + 2 * 86_400;
+    let first = a.trash_upkeep_at(later).unwrap();
+    assert_eq!(first.blocks_dropped, 0, "{first:?}");
+    assert!(
+        first.notes.iter().any(|n| n.contains("freed once")),
+        "{first:?}"
+    );
+    let collected = |now: &std::collections::BTreeMap<String, PathBuf>| {
+        with_ten.keys().any(|k| !now.contains_key(k))
+    };
+    let mut last = Vec::new();
+    for _ in 0..3 {
+        last.clear();
+        for e in &mut others {
+            if sync_first {
+                e.sync(None).unwrap();
+            }
+            last.push(e.trash_upkeep_at(later).unwrap());
+        }
+        last.push(a.trash_upkeep_at(later).unwrap());
+        if collected(&packs_in(&store)) {
+            break;
+        }
+    }
+    assert!(collected(&packs_in(&store)), "no pack was collected: {last:?}");
+    // One more round: nobody waits for anybody.
+    for e in &mut others {
+        e.sync(None).unwrap();
+        let r = e.trash_upkeep_at(later).unwrap();
+        assert!(!r.notes.iter().any(|n| n.contains("freed once")), "{r:?}");
+    }
+    let r = a.trash_upkeep_at(later).unwrap();
+    assert!(!r.notes.iter().any(|n| n.contains("freed once")), "{r:?}");
+    // The three files left read on a device that joins afterwards.
+    let mut late = common::join_approved(&root.join("late"), "late", PASS, &words, storage, &mut a);
+    late.chunker = ChunkerParams::SMALL;
+    let late_dir = root.join("late-docs");
+    late.attach_folder("docs", &late_dir, false).unwrap();
+    late.sync(None).unwrap();
+    for i in 7..10 {
+        assert_eq!(
+            fs::read(late_dir.join(format!("gc/f{i}.bin"))).unwrap(),
+            fs::read(gc.join(format!("f{i}.bin"))).unwrap()
+        );
+    }
+    assert!(!late_dir.join("gc/f0.bin").exists());
+}
+
+#[test]
+fn gc_settles_when_the_other_writer_runs_upkeep_after_sync() {
+    gc_settles_with_helpers_running_upkeep(&["desktop"], true);
+}
+
+#[test]
+fn gc_settles_when_two_other_writers_run_upkeep_after_sync() {
+    gc_settles_with_helpers_running_upkeep(&["desktop", "pub"], true);
+}
+
+#[test]
+fn gc_settles_when_the_other_writers_run_only_upkeep() {
+    gc_settles_with_helpers_running_upkeep(&["desktop", "pub"], false);
+}
