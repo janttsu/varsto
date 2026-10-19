@@ -771,17 +771,25 @@ def p2p_pull(vm, label):
     api("vl-laptop", "POST", "/api/service/pause", {"paused": True})
     api(vm, "POST", "/api/service/pause", {"paused": True})
     drop_bucket_chunks()
+    time.sleep(6)  # rclone serve s3 lists from a 5 s directory cache: let it notice that the packs are gone
+    check(not bucket_packs(), "the bucket still holds packs")
     run(vm, "rm -rf ~/data/media")
     api(vm, "POST", "/api/folder/attach", {"name_or_id": "media", "path": "/home/varsto/data/media", "plain": True})
     before = api(vm, "GET", "/api/p2p").get("chunks_from_peers") or 0
     t0 = time.time()
-    api(vm, "POST", "/api/sync", {"folder": "media"})
+    reports = api(vm, "POST", "/api/sync", {"folder": "media"})
     secs = time.time() - t0
     got = run(vm, "sha256sum ~/data/media/big.bin 2>/dev/null || true").stdout.split()
     p = api(vm, "GET", "/api/p2p")
-    peers = (p.get("chunks_from_peers") or 0) - before
+    # The service's counter and the pull's own report: blocks fetched from peers.
+    pulls = [r.get("pull") or {} for r in reports] if isinstance(reports, list) else []
+    from_pulls = sum(x.get("chunks_from_peers", 0) for x in pulls)
+    peers = max((p.get("chunks_from_peers") or 0) - before, from_pulls)
     paths = {x.get("name"): x.get("path") for x in (p.get("paths") or [])}
-    CTX[f"p2p_{label}"] = {"seconds": round(secs, 1), "mb_s": round(P2P_MB / secs, 1), "chunks_from_peers": peers, "paths": paths}
+    CTX[f"p2p_{label}"] = {"seconds": round(secs, 1), "mb_s": round(P2P_MB / secs, 1), "chunks_from_peers": peers, "paths": paths,
+                           "downloaded": sum(x.get("chunks_downloaded", 0) for x in pulls),
+                           "bytes_from_peers": sum(x.get("bytes_from_peers", 0) for x in pulls),
+                           "packs_in_bucket_after": len(bucket_packs())}
     check(got and got[0] == CTX["p2p_sha"], f"{vm}: file missing or different after pull ({CTX[f'p2p_{label}']})")
     check(peers > 0, f"{vm}: nothing came from peers ({CTX[f'p2p_{label}']})")
     api(vm, "POST", "/api/folder/detach", {"name": "media"})
@@ -832,6 +840,7 @@ def s_share():
     # The p2p scenarios emptied the bucket: the owner's repair puts every
     # block back from its own files (the member reads from the bucket).
     v("vl-laptop", "repair", check_rc=False)
+    v("vl-laptop", "sync", check_rc=False)  # an fsck right after a repair still shows the rebuilt blocks as missing
     fsck_clean("vl-laptop", "after the owner's repair", verify=False)
     req = v("vl-work", f"{home} share request --name ville")
     check(len(req["fingerprint"].split()) == 6, f"request: {req}")
