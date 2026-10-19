@@ -12,15 +12,14 @@
 //! in one map record and one batch before the damaged pack is deleted.
 
 use super::*;
-use crate::blockmap::{MapRow, MapWriter};
+use crate::blockmap::MapRow;
 use crate::fsck3::{
-    AcceptorProbe, FixOptions, FolderInput, Fsck3Input, Fsck3Options, Fsck3Report, PackVerdict,
-    StorageDesc,
+    AcceptorProbe, FolderInput, Fsck3Input, Fsck3Options, Fsck3Report, PackVerdict, StorageDesc,
 };
-use crate::gc3::{Commit, MapOut, Standing, StorageInfo, StorageSet};
+use crate::gc3::{Commit, StorageInfo, StorageSet};
 use crate::ledger3::events::Event as Event3;
 use crate::ledger3::{self, LedgerView as View3};
-use crate::record::{DeviceSigner, Id16, RecordWriter};
+use crate::record::Id16;
 use std::sync::Arc;
 
 /// Seals the events of a garbage collection or repair step as one batch of
@@ -98,6 +97,8 @@ impl Engine {
     /// `fsck` of format 3 over the hot storages (cold ones are left
     /// unchecked: reading them costs a retrieval).
     pub fn fsck3(&mut self, verify: bool) -> Result<Fsck3Report> {
+        let task = activity::start(activity::FSCK, "", 0, activity::Unit::Items);
+        task.set_phase("scan");
         self.pull_ledger_once()?;
         let view = self.view3()?;
         let storages = self.open_storages(false)?;
@@ -138,22 +139,38 @@ impl Engine {
             keys: &keys,
             trust: &trust,
         };
-        // Packs read back whole and hashed right: `pack_verified` (a
-        // verification another device's policy counts, spec 77.9).
-        let verified: std::sync::Mutex<Vec<(String, [u8; 32])>> = Default::default();
-        let verify_pack = |c: &crate::fsck3::PackCheck| -> PackVerdict {
+        // With `--verify` every claimed pack is read whole: the task counts
+        // the blocks the folders' maps place in each (a pack nobody here
+        // can open counts as one), and good packs are recorded with
+        // `pack_verified` (another device's check of a copy is what counts
+        // as independent verification).
+        let mut members: HashMap<[u8; 32], u64> = HashMap::new();
+        if verify {
+            for (_, _, t, _) in &folders {
+                let t = t.read().unwrap_or_else(|e| e.into_inner());
+                let mut seen: HashSet<([u8; 32], u32)> = HashSet::new();
+                for r in t.scan().flatten() {
+                    if seen.insert((r.place.pack, r.place.offset)) {
+                        *members.entry(r.place.pack).or_default() += 1;
+                    }
+                }
+            }
+            let total: u64 = view
+                .packs
+                .keys()
+                .map(|id| {
+                    members.get(id).copied().unwrap_or(1) * view.holders(id).len().max(1) as u64
+                })
+                .sum();
+            task.step("verify", total, activity::Unit::Items);
+        }
+        let verify_one = |c: &crate::fsck3::PackCheck| -> PackVerdict {
             match crate::blockmap::class_of_len(c.class_len)
                 .map(|class| crate::gc3::verify_pack(c.backend, &c.pack, class))
             {
                 None => PackVerdict::Corrupt(format!("{} bytes is no size class", c.class_len)),
                 Some(Ok(v)) => match v.check {
-                    crate::gc3::PackCheck::Good => {
-                        verified
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .push((c.storage.to_string(), c.pack));
-                        PackVerdict::Ok
-                    }
+                    crate::gc3::PackCheck::Good => PackVerdict::Ok,
                     crate::gc3::PackCheck::Missing => PackVerdict::Missing,
                     crate::gc3::PackCheck::WrongLength(n) => {
                         PackVerdict::Corrupt(format!("it is {n} bytes long"))
@@ -165,6 +182,24 @@ impl Engine {
                 Some(Err(e)) => PackVerdict::Unreadable(format!("{e:#}")),
             }
         };
+        let verified: std::sync::Mutex<Vec<Event3>> = Default::default();
+        let counter = task.counter();
+        let verify_pack = |c: &crate::fsck3::PackCheck| -> PackVerdict {
+            for _ in 0..members.get(&c.pack).copied().unwrap_or(1) {
+                counter.advance(1);
+            }
+            let verdict = verify_one(c);
+            if verdict == PackVerdict::Ok {
+                verified
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(Event3::PackVerified(crate::ledger3::events::PackOn {
+                        storage: c.storage.to_string(),
+                        pack: c.pack,
+                    }));
+            }
+            verdict
+        };
         let input = Fsck3Input {
             view: &view,
             storages: &descs,
@@ -175,21 +210,14 @@ impl Engine {
             verify_pack: if verify { Some(&verify_pack) } else { None },
             now_utc: util::now_utc(),
         };
-        let report = crate::fsck3::fsck(&input, &Fsck3Options { verify });
-        drop(inputs);
+        let out = crate::fsck3::fsck(&input, &Fsck3Options { verify });
         drop(guards);
-        let verified = verified.into_inner().unwrap_or_else(|e| e.into_inner());
-        if !verified.is_empty() && !self.vault.member {
-            for (storage, pack) in verified {
-                self.f3
-                    .pending
-                    .push(crate::ledger3::events::Event::PackVerified(
-                        crate::ledger3::events::PackOn { storage, pack },
-                    ));
-            }
+        let events = verified.into_inner().unwrap_or_else(|e| e.into_inner());
+        if !events.is_empty() && !self.vault.member {
+            self.f3.pending.extend(events);
             self.commit_batch()?;
         }
-        report
+        out
     }
 
     /// The ciphertext of `row`'s block from this device: the block cache,
@@ -233,9 +261,41 @@ impl Engine {
         None
     }
 
-    /// One repair run of format 3: `fsck` (with `--verify` when scanning),
-    /// then whole-pack copies for missing copies and member repairs for
-    /// damaged ones. Returns the report and the queue to keep.
+    /// The damaged pack copies an `fsck` found, as repair queue items (one
+    /// per pack and storage).
+    pub(super) fn fsck3_damage(view: &View3, f: &Fsck3Report, now: i64) -> Vec<Damage> {
+        let mut out = Vec::new();
+        for (i, kind) in f
+            .missing_copies
+            .iter()
+            .map(|i| (i, DamageKind::Missing))
+            .chain(
+                f.corrupt_copies
+                    .iter()
+                    .chain(&f.wrong_length)
+                    .map(|i| (i, DamageKind::Corrupt)),
+            )
+        {
+            let pack = hash32(&i.pack);
+            out.push(repair::pack_damage(
+                view, &pack, &i.storage, kind, "fsck", now,
+            ));
+        }
+        out
+    }
+
+    /// One repair run of format 3 over the repair queue (with `scan`, after
+    /// an `fsck --verify` that queues what it finds). For each damaged copy
+    /// of a pack on a storage of this device: a copy that reads intact by
+    /// now leaves the queue; a missing copy is copied whole from another
+    /// storage that holds the pack intact (no key needed); otherwise the
+    /// pack's members are taken from the damaged copy, the same place on
+    /// another storage, the block cache, another pack, this device's file,
+    /// a peer, or (with `from_cold`) a cold storage, and written into a new
+    /// pack there (`gc3::repair_pack`, which marks members no copy gives
+    /// `lost`). A missing pack nothing can be rebuilt from stays queued with
+    /// the reason and is tried again a day later. Returns the report and
+    /// the queue to keep.
     pub(super) fn run_repair3(
         &mut self,
         opts: &RepairOptions,
@@ -246,226 +306,376 @@ impl Engine {
             dry_run: opts.dry_run,
             ..Default::default()
         };
-        let mut f = self.fsck3(true)?;
-        // Transferrers empty themselves on purpose: never repaired.
-        let carriers: BTreeSet<String> = self
+        let mut queue = self.load_repair_queue();
+        if opts.scan {
+            let mut f = self.fsck3(true)?;
+            // Transferrers empty themselves on purpose: never repaired.
+            let carriers: BTreeSet<String> = self
+                .config
+                .storages
+                .iter()
+                .filter(|s| s.is_carrier())
+                .map(|s| s.name().to_string())
+                .collect();
+            f.missing_copies.retain(|i| !carriers.contains(&i.storage));
+            f.corrupt_copies.retain(|i| !carriers.contains(&i.storage));
+            f.wrong_length.retain(|i| !carriers.contains(&i.storage));
+            let view = self.view3()?;
+            repair::merge_damage(&mut queue, Self::fsck3_damage(&view, &f, now));
+        } else {
+            self.pull_ledger_once()?;
+        }
+        let view = self.view3()?;
+        let folders = self.fsck_folders3(&view)?;
+        let specs: BTreeMap<String, StorageSpec> = self
             .config
             .storages
             .iter()
-            .filter(|s| s.is_carrier())
+            .map(|s| (s.name().to_string(), s.clone()))
+            .collect();
+        // Sources: every storage but cold ones (read only when asked).
+        let mut readable = StorageSet::default();
+        let mut all = StorageSet::default();
+        for spec in specs.values() {
+            let Ok(b) = self.open_spec(spec) else {
+                continue;
+            };
+            let b: Arc<dyn Storage> = Arc::from(b);
+            let info = if spec.is_cold() {
+                StorageInfo::cold(self.storage_price(spec.name()).as_ref())
+            } else {
+                StorageInfo::HOT
+            };
+            all.add(b.clone(), info);
+            if (!spec.is_cold() || opts.from_cold) && !spec.is_carrier() {
+                readable.add(b, info);
+            }
+        }
+        let cold_names: BTreeSet<String> = specs
+            .values()
+            .filter(|s| s.is_cold())
             .map(|s| s.name().to_string())
             .collect();
-        f.missing_copies.retain(|i| !carriers.contains(&i.storage));
-        f.corrupt_copies.retain(|i| !carriers.contains(&i.storage));
-        f.wrong_length.retain(|i| !carriers.contains(&i.storage));
-        let view = self.view3()?;
-        let folders = self.fsck_folders3(&view)?;
-        let storages = self.open_storages(opts.from_cold)?;
-        // Which folder's table lists a pack's members.
-        let folder_of = |pack: &[u8; 32]| -> Option<(Id16, String)> {
-            let f = view.pack_folder(pack)?;
-            folders
-                .iter()
-                .find(|(id, _, _, _)| *id == f)
-                .map(|(id, n, _, _)| (*id, n.clone()))
-        };
-        let members_of = |folder: &Id16, pack: &[u8; 32]| -> Vec<MapRow> {
-            folders
-                .iter()
-                .find(|(id, _, _, _)| id == folder)
-                .map(|(_, _, t, _)| {
+        let mut keep: Vec<Damage> = Vec::new();
+        let (mut packs_done, mut bytes_done) = (0u64, 0u64);
+        for mut d in queue {
+            if d.retry_utc > now && !opts.retry_all {
+                report.left_for_next_run += 1;
+                keep.push(d);
+                continue;
+            }
+            let pack: [u8; 32] = match d.object.as_bytes().try_into() {
+                Ok(p) => p,
+                Err(_) => {
+                    report.not_needed += 1;
+                    continue;
+                }
+            };
+            // A storage that is gone, a transferrer, or a copy the ledger
+            // no longer holds there (dropped on purpose): nothing to do.
+            let Some(spec) = specs.get(&d.storage) else {
+                report.not_needed += 1;
+                continue;
+            };
+            let class = match view.pack(&pack) {
+                Some(p) if !spec.is_carrier() && view.is_held(&pack, &d.storage) => p.class,
+                _ => {
+                    report.not_needed += 1;
+                    continue;
+                }
+            };
+            let size = crate::ledger3::events::class_bytes(class).unwrap_or(0);
+            if packs_done >= opts.max_blocks
+                || (packs_done > 0 && bytes_done.saturating_add(size) > opts.max_bytes)
+            {
+                report.left_for_next_run += 1;
+                keep.push(d);
+                continue;
+            }
+            packs_done += 1;
+            bytes_done += size;
+            report.found += 1;
+            let Some(target) = all.storages.get(&d.storage).map(|(s, _)| s.clone()) else {
+                report.unreachable.push(d.storage.clone());
+                d.retry_utc = now + 3600;
+                keep.push(d);
+                continue;
+            };
+            let v = match crate::gc3::verify_pack(target.as_ref(), &pack, class) {
+                Ok(v) => v,
+                Err(e) => {
+                    report.unreachable.push(format!("{} ({e:#})", d.storage));
+                    d.retry_utc = now + 3600;
+                    keep.push(d);
+                    continue;
+                }
+            };
+            let (damaged, missing) = match v.check {
+                crate::gc3::PackCheck::Good => {
+                    report.already_intact += 1;
+                    continue;
+                }
+                crate::gc3::PackCheck::Missing => (Vec::new(), true),
+                _ => (v.damaged.unwrap_or_default(), false),
+            };
+            d.kind = if missing {
+                DamageKind::Missing
+            } else {
+                DamageKind::Corrupt
+            };
+            let held_folder = view.pack_folder(&pack).and_then(|f| {
+                folders
+                    .iter()
+                    .find(|(id, _, _, _)| *id == f)
+                    .map(|(id, n, t, _)| (*id, n.clone(), t.clone()))
+            });
+            let rows: Vec<MapRow> = held_folder
+                .as_ref()
+                .map(|(_, _, t)| {
                     let t = t.read().unwrap_or_else(|e| e.into_inner());
                     let mut rows: BTreeMap<u32, MapRow> = BTreeMap::new();
                     for r in t.scan().flatten() {
-                        if r.place.pack == *pack {
+                        if r.place.pack == pack {
                             rows.entry(r.place.offset).or_insert(r);
                         }
                     }
                     rows.into_values().collect()
                 })
-                .unwrap_or_default()
-        };
-        // 1. Copies missing on a storage: copied whole from another.
-        if !opts.dry_run {
-            let descs: Vec<StorageDesc> = storages
-                .iter()
-                .map(|(spec, b)| StorageDesc {
-                    name: spec.name().to_string(),
-                    storage: b.as_ref(),
-                    cold: spec.is_cold(),
-                    meta: !spec.is_data_only() && !spec.is_carrier(),
-                    media: crate::media::Media::Unknown,
-                })
-                .collect();
-            let input = Fsck3Input {
-                view: &view,
-                storages: &descs,
-                folders: &[],
-                records: None,
-                refused: None,
-                modified_utc: None,
-                verify_pack: None,
-                now_utc: now,
+                .unwrap_or_default();
+            let folder_name = held_folder
+                .as_ref()
+                .map(|(_, n, _)| n.clone())
+                .unwrap_or_default();
+            let copy = |object: &[u8; 32], source: String, bytes: u64| RepairedCopy {
+                folder: folder_name.clone(),
+                storage: d.storage.clone(),
+                object: hex::encode(object),
+                kind: d.kind,
+                source,
+                bytes,
             };
-            crate::fsck3::fix(&input, &mut f, &FixOptions::default())?;
-        } else {
-            for i in &f.missing_copies {
+            // 1. A missing copy: whole from another storage holding it.
+            if missing {
+                let mut with_target = readable.clone();
+                with_target.add(target.clone(), crate::gc3::Storages::info(&all, &d.storage));
                 let src = view
-                    .holders(&hash32(&i.pack))
+                    .holders(&pack)
                     .into_iter()
-                    .find(|h| *h != i.storage)
-                    .map(|h| format!("storage {h}"))
-                    .unwrap_or_default();
-                f.fixed.push(crate::fsck3::FixAction {
-                    pack: i.pack.clone(),
-                    from: src.strip_prefix("storage ").unwrap_or("").to_string(),
-                    to: i.storage.clone(),
-                    bytes: 0,
-                });
-            }
-        }
-        for a in &f.fixed {
-            let pack = hash32(&a.pack);
-            let Some((folder, name)) = folder_of(&pack) else {
-                continue;
-            };
-            for r in members_of(&folder, &pack) {
-                report.repaired.push(RepairedCopy {
-                    folder: name.clone(),
-                    storage: a.to.clone(),
-                    object: hex::encode(r.object),
-                    kind: DamageKind::Missing,
-                    source: format!("storage {}", a.from),
-                    bytes: u64::from(r.place.len),
-                });
-            }
-        }
-        for i in &f.fix_failed {
-            report.unrepairable.push(Unrepairable {
-                folder: String::new(),
-                storage: i.storage.clone(),
-                object: i.pack.clone(),
-                kind: DamageKind::Missing,
-                reason: i.detail.clone(),
-            });
-        }
-        // 2. Damaged copies: the good members into a new pack there.
-        let damaged: Vec<crate::fsck3::PackIssue> = f
-            .corrupt_copies
-            .iter()
-            .chain(&f.wrong_length)
-            .cloned()
-            .collect();
-        report.found = (f.fixed.len() + f.fix_failed.len() + damaged.len()) as u64;
-        for issue in damaged {
-            let pack = hash32(&issue.pack);
-            let Some((folder, name)) = folder_of(&pack) else {
-                report.unrepairable.push(Unrepairable {
-                    folder: String::new(),
-                    storage: issue.storage.clone(),
-                    object: issue.pack.clone(),
-                    kind: DamageKind::Corrupt,
-                    reason: "no folder this device holds lists the pack".into(),
-                });
-                continue;
-            };
-            let Some((_, backend)) = storages.iter().find(|(s, _)| s.name() == issue.storage)
-            else {
-                continue;
-            };
-            let class = view.pack(&pack).map_or(0, |p| p.class);
-            let v = crate::gc3::verify_pack(backend.as_ref(), &pack, class)?;
-            let Some(bytes) = v.damaged else {
-                continue;
-            };
-            let rows = members_of(&folder, &pack);
-            let fid = FolderId::from_bytes(&folder);
-            // Members to take from this device, read before the repair.
-            let mut here: HashMap<[u8; 32], Vec<u8>> = HashMap::new();
-            for r in &rows {
-                let (o, l) = (r.place.offset as usize, r.place.len as usize);
-                let good = bytes
-                    .get(o..o + l)
-                    .is_some_and(|b| crypto::hash(b) == r.object);
-                if !good {
-                    if let Some(ct) = self.block_from_here3(&fid, r) {
-                        here.insert(r.object, ct);
+                    .filter(|h| *h != d.storage)
+                    .find(|h| {
+                        with_target.storages.get(*h).is_some_and(|(s, _)| {
+                            s.exists(&crate::packs::pack_key(&hex::encode(pack)))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .map(str::to_string);
+                if let Some(src) = &src {
+                    let done = if opts.dry_run {
+                        true
+                    } else {
+                        match crate::gc3::copy_missing_pack(
+                            &view,
+                            &pack,
+                            &d.storage,
+                            &with_target,
+                            false,
+                        )? {
+                            Some(ev) => {
+                                self.f3.pending.push(ev);
+                                report.bytes_written += size;
+                                true
+                            }
+                            None => false,
+                        }
+                    };
+                    if done {
+                        if rows.is_empty() {
+                            report
+                                .repaired
+                                .push(copy(&pack, format!("storage {src}"), size));
+                        }
+                        for r in &rows {
+                            report.repaired.push(copy(
+                                &r.object,
+                                format!("storage {src}"),
+                                u64::from(r.place.len),
+                            ));
+                        }
+                        continue;
                     }
                 }
+            }
+            // 2. Member by member: needs the folder's map and the writer role.
+            let Some((folder, _, _)) = held_folder.as_ref().filter(|_| !rows.is_empty()) else {
+                let reason = if missing {
+                    "no storage holds an intact copy of the pack, and no folder this device holds lists its blocks".to_string()
+                } else {
+                    "no folder this device holds lists the blocks of the pack".to_string()
+                };
+                self.keep_unrepairable(&mut report, &mut keep, d, &folder_name, reason, now);
+                continue;
+            };
+            let folder = *folder;
+            if !self.standing3(&folder).may_repair() {
+                let reason =
+                    "this device may not write the folder's block map (viewer role)".to_string();
+                self.keep_unrepairable(&mut report, &mut keep, d, &folder_name, reason, now);
+                continue;
+            }
+            // Members the damaged copy does not give intact, and where else
+            // they are; read before the repair writes anything.
+            let fid = FolderId::from_bytes(&folder);
+            let mut here: HashMap<[u8; 32], (Vec<u8>, String)> = HashMap::new();
+            let mut cold_hint: BTreeSet<String> = BTreeSet::new();
+            let mut same_place = 0u64;
+            {
+                let table = self.table3(&folder)?;
+                let t = table.read().unwrap_or_else(|e| e.into_inner());
+                let key = crate::packs::pack_key(&hex::encode(pack));
+                for r in &rows {
+                    let (o, l) = (r.place.offset as usize, r.place.len as usize);
+                    if damaged
+                        .get(o..o + l)
+                        .is_some_and(|b| crypto::hash(b) == r.object)
+                    {
+                        continue;
+                    }
+                    let same = view.holders(&pack).into_iter().any(|h| {
+                        h != d.storage
+                            && readable.storages.get(h).is_some_and(|(s, _)| {
+                                s.get_range(&key, o as u64, l as u64)
+                                    .ok()
+                                    .flatten()
+                                    .is_some_and(|b| crypto::hash(&b) == r.object)
+                            })
+                    });
+                    if same {
+                        same_place += 1;
+                        continue;
+                    }
+                    let object = ObjectName::from_bytes(&r.object);
+                    if let Some(b) = self.cached_object(&object) {
+                        here.insert(r.object, (b, "block cache".into()));
+                        continue;
+                    }
+                    let hot = crate::gc3::other_places(&t, &view, &readable, pack);
+                    if let Some(b) = hot(r) {
+                        let from = t
+                            .rows_of(&r.object)
+                            .ok()
+                            .into_iter()
+                            .flatten()
+                            .filter(|x| x.place.pack != pack)
+                            .flat_map(|x| {
+                                view.holders(&x.place.pack)
+                                    .into_iter()
+                                    .map(str::to_string)
+                                    .collect::<Vec<_>>()
+                            })
+                            .find(|h| readable.storages.contains_key(h))
+                            .unwrap_or_default();
+                        let label = if cold_names.contains(&from) {
+                            format!("cold storage {from}")
+                        } else {
+                            format!("storage {from}")
+                        };
+                        here.insert(r.object, (b, label));
+                        continue;
+                    }
+                    if let Some(b) = self.block_from_here3(&fid, r) {
+                        here.insert(r.object, (b, "local file".into()));
+                        continue;
+                    }
+                    if let Some((dev, b)) = self.peers.as_ref().and_then(|p| p.get(&object)) {
+                        if crypto::hash(&b) == r.object {
+                            here.insert(r.object, (b, format!("peer {}", dev.short())));
+                            continue;
+                        }
+                    }
+                    // Where a copy would be if cold storages were read.
+                    for x in t.rows_of(&r.object).ok().into_iter().flatten() {
+                        for h in view.holders(&x.place.pack) {
+                            if cold_names.contains(h) && h != d.storage {
+                                cold_hint.insert(h.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            if missing && here.is_empty() && same_place == 0 {
+                let reason = if !cold_hint.is_empty() && !opts.from_cold {
+                    format!(
+                        "a copy is on cold storage {}; run `varsto repair --from-cold` to read it (retrieval fees may apply)",
+                        cold_hint.into_iter().collect::<Vec<_>>().join(", ")
+                    )
+                } else {
+                    "no storage holds an intact copy, and no device here or nearby has the blocks"
+                        .to_string()
+                };
+                self.keep_unrepairable(&mut report, &mut keep, d, &folder_name, reason, now);
+                continue;
             }
             if opts.dry_run {
-                for r in &rows {
-                    if here.contains_key(&r.object) {
-                        report.repaired.push(RepairedCopy {
-                            folder: name.clone(),
-                            storage: issue.storage.clone(),
-                            object: hex::encode(r.object),
-                            kind: DamageKind::Corrupt,
-                            source: "local file".into(),
-                            bytes: u64::from(r.place.len),
-                        });
-                    }
+                for (o, (b, src)) in &here {
+                    report.repaired.push(copy(o, src.clone(), b.len() as u64));
                 }
                 continue;
             }
-            let r = self.repair_pack3(
-                &folder,
-                &issue.storage,
-                &pack,
-                &bytes,
-                &here,
-                &storages,
-                &view,
-            )?;
+            let fetched: HashMap<[u8; 32], Vec<u8>> =
+                here.iter().map(|(o, (b, _))| (*o, b.clone())).collect();
+            let r =
+                self.repair_pack3(&folder, &d.storage, &pack, &damaged, &fetched, &all, &view)?;
             for o in &r.from_same_place {
-                report.repaired.push(RepairedCopy {
-                    folder: name.clone(),
-                    storage: issue.storage.clone(),
-                    object: hex::encode(o),
-                    kind: DamageKind::Corrupt,
-                    source: "another storage".into(),
-                    bytes: 0,
-                });
+                report.repaired.push(copy(o, "another storage".into(), 0));
             }
             for o in &r.from_elsewhere {
-                report.repaired.push(RepairedCopy {
-                    folder: name.clone(),
-                    storage: issue.storage.clone(),
-                    object: hex::encode(o),
-                    kind: DamageKind::Corrupt,
-                    source: "local file".into(),
-                    bytes: here.get(o).map_or(0, |b| b.len() as u64),
-                });
+                let (b, src) = here
+                    .get(o)
+                    .map(|(b, s)| (b.len() as u64, s.clone()))
+                    .unwrap_or_default();
+                report.repaired.push(copy(o, src, b));
             }
+            report.bytes_written += r.new_packs.len() as u64 * size;
             for o in &r.lost {
                 report.unrepairable.push(Unrepairable {
-                    folder: name.clone(),
-                    storage: issue.storage.clone(),
-                    object: hex::encode(o),
-                    kind: DamageKind::Corrupt,
-                    reason: "no good copy of the block is left anywhere".into(),
+                    folder: folder_name.clone(),
+                    storage: d.storage.clone(),
+                    object: hex::encode(&o[..6]),
+                    kind: d.kind,
+                    reason: "no good copy of the block is left anywhere; the file using it is damaged until a device that holds it writes it again".into(),
                 });
             }
         }
         report.finished_utc = util::now_utc();
-        // What could not be repaired stays queued, with its reason, and is
-        // tried again a day later (the losses notified once).
-        let queue = report
-            .unrepairable
-            .iter()
-            .map(|u| Damage {
-                folder: FolderId::default(),
-                chunk: ChunkId::from_hex(&u.object).unwrap_or_default(),
-                object: ObjectName::from_hex(&u.object).unwrap_or_default(),
-                storage: u.storage.clone(),
-                kind: u.kind,
-                found_by: "fsck".into(),
-                found_utc: now,
-                retry_utc: now + 24 * 3600,
-                reason: Some(u.reason.clone()),
-            })
-            .collect();
-        Ok((report, queue))
+        Ok((report, keep))
+    }
+
+    /// Note a copy that could not be repaired: reported, and kept in the
+    /// queue for a retry a day later (a peer may come online, a disk may be
+    /// attached).
+    fn keep_unrepairable(
+        &self,
+        report: &mut RepairReport,
+        keep: &mut Vec<Damage>,
+        mut d: Damage,
+        folder: &str,
+        reason: String,
+        now: i64,
+    ) {
+        report.unrepairable.push(Unrepairable {
+            folder: if folder.is_empty() {
+                self.folder_label3(&d.folder)
+            } else {
+                folder.to_string()
+            },
+            storage: d.storage.clone(),
+            object: d.object.short().to_string(),
+            kind: d.kind,
+            reason: reason.clone(),
+        });
+        d.reason = Some(reason);
+        d.retry_utc = now + 24 * 3600;
+        keep.push(d);
     }
 
     /// `gc3::repair_pack` for one damaged pack of `folder` on `storage`.
@@ -477,99 +687,26 @@ impl Engine {
         pack: &[u8; 32],
         damaged: &[u8],
         here: &HashMap<[u8; 32], Vec<u8>>,
-        storages: &OpenStorages,
+        storages: &StorageSet,
         view: &View3,
     ) -> Result<crate::gc3::RepairReport> {
         let me = self.me3();
-        let vault = members3::bin(&self.vault.vault_id)?;
-        let fid = FolderId::from_bytes(folder);
         let rec = self
             .keyring
             .folders
-            .get(&fid)
+            .get(&FolderId::from_bytes(folder))
             .cloned()
             .ok_or_else(|| anyhow!("no folder {}", hex::encode(folder)))?;
         let epoch = self.folder_keys(&rec)?.epoch;
-        let table = self.table3(folder)?;
-        let (key_id, key) = {
-            let keys = self.vault_keys3();
-            let e = keys.newest_epoch();
-            (
-                ledger3::scope::ledger_key_id(e),
-                keys.ledger(e).ok_or_else(|| anyhow!("no vault key"))?,
+        let standing = self.standing3(folder);
+        let _ = me;
+        self.with_map_writer3(folder, epoch, view, |writer, t, out, sink| {
+            let fetch = |row: &MapRow| here.get(&row.object).cloned();
+            crate::gc3::repair_pack(
+                &standing, writer, t, view, out, storages, storage, pack, damaged, &fetch, sink,
             )
-        };
-        let mut lamports = std::collections::VecDeque::new();
-        for _ in 0..4 {
-            lamports.push_back(self.tick()?);
-        }
-        let set = self.storage_set3(storages)?;
-        let standing = Standing {
-            device: me,
-            role: self.f3.members.role(&me, folder),
-            member: false,
-            holds_k10: true,
-        };
-        let meta: Vec<&dyn Storage> = storages
-            .iter()
-            .filter(|(s, _)| !s.is_carrier() && !s.is_data_only() && !s.is_cold())
-            .map(|(_, b)| &**b)
-            .collect();
-        let vault_keys = self.vault_keys3();
-        let mut writer = MapWriter::from_view(*folder, me, epoch, view, 0);
-        let Engine {
-            f3, keys, epochs, ..
-        } = self;
-        let ring = crate::membership3::KeyRing {
-            me,
-            vault: &vault_keys,
-            kem: epochs.kem.as_ref(),
-            devices: Some(&f3.members.devices),
-            folders: Some(&f3.members.granted),
-            recovery: None,
-            extra: Vec::new(),
-            members: Some(&f3.members.members),
-        };
-        let signer = DeviceSigner {
-            device: me,
-            key: &keys.signer,
-        };
-        let rw = RecordWriter {
-            vault,
-            signer: &signer,
-            keys: &ring,
-        };
-        let out = MapOut {
-            writer: &rw,
-            meta: &meta,
-        };
-        let mut sink = Sink3 {
-            ledger: &mut f3.ledger,
-            me,
-            key,
-            key_id,
-            signer: &keys.signer,
-            storages,
-            last: lamports.back().copied().unwrap_or(0),
-            lamports,
-        };
-        let mut t = table.write().unwrap_or_else(|e| e.into_inner());
-        let fetch = |row: &MapRow| here.get(&row.object).cloned();
-        crate::gc3::repair_pack(
-            &standing,
-            &mut writer,
-            &mut t,
-            view,
-            &out,
-            &set,
-            storage,
-            pack,
-            damaged,
-            &fetch,
-            &mut sink,
-        )
+        })
     }
-
     /// The opened storages as the set garbage collection and repair use.
     pub(super) fn storage_set3(&self, storages: &OpenStorages) -> Result<StorageSet> {
         let mut set = StorageSet::default();

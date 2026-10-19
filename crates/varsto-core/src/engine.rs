@@ -29,8 +29,7 @@ use crate::fsmeta;
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
 use crate::ignore_rules::{self, Matcher as IgnoreMatcher};
 use crate::ledger::{
-    self, Event, Ingest, KeyDirectory, LedgerStore, LedgerView, SignedBatch, KEY_LEDGER,
-    KEY_REPLICA,
+    self, Event, Ingest, KeyDirectory, LedgerStore, LedgerView, KEY_LEDGER, KEY_REPLICA,
 };
 use crate::manifest::{self, ChunkRef, FileState, Manifest, Merge};
 use crate::policy::{Policy, PolicyReport};
@@ -1779,8 +1778,6 @@ impl Engine {
         if self.cycle.is_some() {
             return;
         }
-        // Deletions of the operation go out as tombstone lists now.
-        self.flush_pack_deletions();
         self.learn_conditional_writes();
         self.forget_storages();
     }
@@ -1827,20 +1824,12 @@ impl Engine {
         // Reads find blocks at the places the folders' block maps give
         // (format 3: no pack indexes, no tombstone lists).
         self.ensure_tables3();
-        if let StorageSpec::LocalDir { name, path, .. } = spec {
-            crate::packs::debug_registry::root(name, path);
-        }
         let target = if spec.is_cold() {
             crate::packs::COLD_TARGET
         } else {
             crate::packs::HOT_TARGET
         };
-        let packed = crate::packs::PackStore::new(inner, &self.pack_caches, target);
-        if spec.is_data_only() {
-            packed.blocks_only()
-        } else {
-            packed
-        }
+        crate::packs::PackStore::new(inner, &self.pack_caches, target)
     }
 
     fn open_spec_fresh(&self, spec: &StorageSpec) -> Result<Box<dyn Storage>> {
@@ -1865,21 +1854,6 @@ impl Engine {
             Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
             None => backend,
         })
-    }
-
-    /// The tombstone lists of packs are written and read under a key of
-    /// the vault (any full device deletes blocks and reads what the others
-    /// deleted, `crate::packs`).
-    fn ensure_pack_keys(&self) {
-        if !self.pack_caches.has_tombstone_keys() {
-            self.pack_caches.set_tombstone_keys(
-                crate::record_shim::Records::new(
-                    self.vault.vault_id.clone(),
-                    self.vault.device_id.clone(),
-                ),
-                self.root_key().derive("pack-tombstones", &[]),
-            );
-        }
     }
 
     /// Count every call this engine makes to its storages from now on
@@ -3020,9 +2994,6 @@ impl Engine {
     /// The format-2 batch of the events recorded (f3-switch: part B
     /// deletes it).
     fn commit_batch2(&mut self) -> Result<Option<u64>> {
-        // Blocks written since: their places into the claims, pack indexes
-        // and tombstone lists out (`pack_upkeep`).
-        self.settle_packs();
         if self.pending.is_empty() {
             return Ok(None);
         }
@@ -4193,9 +4164,6 @@ impl Engine {
         }
         let fk = self.folder_keys(&rec)?;
         let storages = self.open_storages(false)?;
-        if self.vault.member {
-            self.learn_folder_pack_indexes(&rec, &storages);
-        }
         // Counted by the files' downloads (`progress`); the total is not known.
         let _task = activity::start(activity::DOWNLOAD, &rec.name, 0, activity::Unit::Bytes);
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
@@ -6739,308 +6707,6 @@ impl Engine {
         Ok(report)
     }
 
-    /// The format-2 fsck (f3-switch: part B deletes it).
-    fn fsck_inner2(&mut self, verify_content: bool) -> Result<FsckReport> {
-        let (mut report, found) = self.fsck_scan(verify_content)?;
-        let mut damage = Vec::new();
-        repair::merge_damage(&mut damage, found);
-        report.repairs_queued = damage.len() as u64;
-        self.queue_damage(damage)?;
-        let _ = self.ledger_lost_everywhere(false);
-        report.ledger_health = self.ledger_health();
-        Ok(report)
-    }
-
-    /// `fsck` without touching the repair queue: the report and every
-    /// damaged copy on a storage of this device that repair could rewrite.
-    fn fsck_scan(&mut self, verify_content: bool) -> Result<(FsckReport, Vec<Damage>)> {
-        let task = activity::start(activity::FSCK, "", 0, activity::Unit::Items);
-        task.set_phase("scan");
-        let _ = self.pull_ledger()?;
-        let view = self.view()?;
-        let mut report = FsckReport {
-            forked_devices: view.forked.iter().map(|d| d.to_string()).collect(),
-            ..Default::default()
-        };
-        let now = util::now_utc();
-        let mut damage: Vec<Damage> = Vec::new();
-        let damaged = |folder: &FolderId,
-                       chunk: &ChunkId,
-                       object: &ObjectName,
-                       storage: &str,
-                       kind: DamageKind| Damage {
-            folder: folder.clone(),
-            chunk: chunk.clone(),
-            object: object.clone(),
-            storage: storage.to_string(),
-            kind,
-            found_by: "fsck".to_string(),
-            found_utc: now,
-            retry_utc: 0,
-            reason: None,
-        };
-        // Objects per hot storage.
-        let mut listings: BTreeMap<String, HashSet<String>> = BTreeMap::new();
-        let storages = self.open_storages(false)?;
-        for spec in &self.config.storages {
-            if spec.is_cold() {
-                report.storages_skipped_cold.push(spec.name().to_string());
-            }
-        }
-        for (spec, backend) in &storages {
-            listings.insert(
-                spec.name().to_string(),
-                backend.list("chunks/")?.into_iter().collect(),
-            );
-        }
-        // Referenced chunks from every attached folder's current files and
-        // its trash.
-        let mut referenced: BTreeMap<(FolderId, ChunkId), ObjectName> = BTreeMap::new();
-        for (rec, _) in self.folders() {
-            let state = self.load_state(&rec.folder_id)?;
-            for f in state.files.values().filter(|f| !f.deleted) {
-                for c in &f.chunks {
-                    referenced.insert((rec.folder_id.clone(), c.chunk.clone()), c.object.clone());
-                }
-            }
-            for c in self.trash_chunks(&rec.folder_id) {
-                referenced.insert((rec.folder_id.clone(), c.chunk), c.object);
-            }
-        }
-        // Storages not listed (cold ones): a claim there counts as a copy.
-        let unlisted: BTreeSet<&str> = self
-            .config
-            .storages
-            .iter()
-            .filter(|s| s.is_cold())
-            .map(|s| s.name())
-            .collect();
-        // Blocks of backup snapshots this device has read or written.
-        let backups: Vec<FolderId> = self
-            .keyring
-            .folders
-            .values()
-            .filter(|r| r.is_backup() && !r.is_removed())
-            .map(|r| r.folder_id.clone())
-            .collect();
-        for b in backups {
-            for (chunk, object) in self.backup_blocks_known(&b) {
-                referenced.insert((b.clone(), chunk), object);
-            }
-        }
-        report.chunks_referenced = referenced.len() as u64;
-        let mut referenced_objects = HashSet::new();
-        for ((folder, chunk), object) in &referenced {
-            let key = chunk_storage_key(object);
-            referenced_objects.insert(key.clone());
-            let present_somewhere = listings.values().any(|l| l.contains(&key))
-                || view.locate(folder, chunk).is_some_and(|r| {
-                    r.object == *object
-                        && r.storages
-                            .iter()
-                            .any(|(n, l)| unlisted.contains(n.as_str()) && !l.claimed_by.is_empty())
-                });
-            if present_somewhere {
-                report.chunks_with_storage_copy += 1;
-            } else {
-                report
-                    .chunks_missing
-                    .push(format!("{}/{}", folder.short(), chunk.short()));
-                // On no storage at all: every hot storage that takes every
-                // block should get it back.
-                for (spec, _) in &storages {
-                    if !spec.is_carrier() && !spec.is_data_only() {
-                        damage.push(damaged(
-                            folder,
-                            chunk,
-                            object,
-                            spec.name(),
-                            DamageKind::Missing,
-                        ));
-                    }
-                }
-            }
-            match view.locate(folder, chunk) {
-                Some(r) if r.verified_storages() > 0 => report.chunks_verified_elsewhere += 1,
-                Some(r) if r.claimed_storages() > 0 => report.chunks_claimed_only += 1,
-                _ => {}
-            }
-        }
-        for ((folder, chunk), rec) in view.chunks.iter() {
-            if !self.keyring.folders.contains_key(folder) {
-                continue; // a folder converted into a Strongroom: its old objects are gone
-            }
-            let key = chunk_storage_key(&rec.object);
-            for storage in rec.storages.keys() {
-                if self
-                    .config
-                    .storages
-                    .iter()
-                    .any(|s| s.name() == storage && s.is_carrier())
-                {
-                    continue; // carriers are pruned on purpose
-                }
-                if let Some(l) = listings.get(storage) {
-                    if !l.contains(&key) {
-                        report.claims_without_object += 1;
-                        // Storage names are local: another device's "box"
-                        // may be another place. Rewrite our own claims and
-                        // blocks of current files (every storage takes those).
-                        let ours = rec.storages[storage]
-                            .claimed_by
-                            .contains(&self.vault.device_id);
-                        if !ours && !referenced.contains_key(&(folder.clone(), chunk.clone())) {
-                            continue;
-                        }
-                        damage.push(damaged(
-                            folder,
-                            chunk,
-                            &rec.object,
-                            storage,
-                            DamageKind::Missing,
-                        ));
-                    }
-                }
-            }
-        }
-        for l in listings.values() {
-            report.objects_unreferenced += l
-                .iter()
-                .filter(|k| !referenced_objects.contains(*k))
-                .count() as u64;
-        }
-        if verify_content {
-            let mut corrupt_pools: BTreeSet<String> = BTreeSet::new();
-            task.step("verify", referenced.len() as u64, activity::Unit::Items);
-            // Every referenced object on every storage, read ahead on each
-            // storage's own readers (parallel where its medium allows); the
-            // results come back here in the order of the plain loop.
-            let refs: Vec<(&(FolderId, ChunkId), &ObjectName)> = referenced.iter().collect();
-            let plans: Vec<crate::parverify::LanePlan> = storages
-                .iter()
-                .map(|(spec, _)| self.storage_lane(spec))
-                .collect();
-            let mut jobs: Vec<crate::parverify::Job<(usize, usize)>> = Vec::new();
-            for (r, ((folder, chunk), _)) in refs.iter().enumerate() {
-                let size = view.locate(folder, chunk).map_or(0, |c| c.size);
-                for s in 0..storages.len() {
-                    jobs.push(crate::parverify::Job {
-                        item: (r, s),
-                        lane: s,
-                        size,
-                    });
-                }
-            }
-            if storages.is_empty() {
-                task.advance(refs.len() as u64);
-            }
-            let mut failed: Option<anyhow::Error> = None;
-            let storages_ref = &storages;
-            let refs_ref = &refs;
-            crate::parverify::run_ordered(
-                &jobs,
-                &plans,
-                |&(r, s)| storages_ref[s].1.get(&chunk_storage_key(refs_ref[r].1)),
-                |_, got| got.map(|ct| ct.map(|ct| crypto::hash(&ct))),
-                |_, &(r, s), got| {
-                    if s == 0 {
-                        task.advance(1);
-                    }
-                    let ((folder, chunk), object) = refs[r];
-                    let spec = &storages[s].0;
-                    let hash = match got {
-                        Ok(h) => h,
-                        Err(e)
-                            if matches!(
-                                pool::pool_error(&e),
-                                Some(PoolError::NeedsDisk { .. })
-                            ) =>
-                        {
-                            report.objects_offline += 1;
-                            return true;
-                        }
-                        Err(e) => {
-                            failed = Some(e);
-                            return false;
-                        }
-                    };
-                    if let Some(hash) = hash {
-                        if ObjectName::from_bytes(&hash) == *object {
-                            report.objects_verified_now += 1;
-                            self.pending.push(Event::ChunkVerified {
-                                folder: folder.clone(),
-                                chunk: chunk.clone(),
-                                object: object.clone(),
-                                storage: spec.name().to_string(),
-                            });
-                        } else {
-                            if spec.is_data_only() {
-                                corrupt_pools.insert(spec.name().to_string());
-                            }
-                            report.objects_corrupt.push(format!(
-                                "{}:{}",
-                                spec.name(),
-                                object.short()
-                            ));
-                            if !spec.is_carrier() {
-                                damage.push(damaged(
-                                    folder,
-                                    chunk,
-                                    object,
-                                    spec.name(),
-                                    DamageKind::Corrupt,
-                                ));
-                            }
-                        }
-                    }
-                    true
-                },
-            );
-            if let Some(e) = failed {
-                return Err(e);
-            }
-            self.commit_batch()?;
-            // The attached disks of every pool were read in full: record the check.
-            drop(storages);
-            for spec in self.config.storages.clone() {
-                if !spec.is_data_only() || corrupt_pools.contains(spec.name()) {
-                    continue;
-                }
-                let pool = self.open_pool(&spec)?;
-                let attached: Vec<String> = pool
-                    .statuses()
-                    .into_iter()
-                    .filter(|d| d.attached)
-                    .map(|d| d.disk_id)
-                    .collect();
-                pool.mark_verified(&attached)?;
-                let disks = pool.disks();
-                drop(pool);
-                self.save_pool_disks(spec.name(), disks)?;
-            }
-        }
-        for spec in &self.config.storages {
-            if !spec.is_data_only() {
-                continue;
-            }
-            for d in self.open_pool(spec)?.statuses() {
-                if !d.attached && d.objects > 0 {
-                    report.disks_offline.push(format!(
-                        "{} ({}), last verified {}",
-                        d.label,
-                        d.place,
-                        if d.last_verified_utc > 0 {
-                            util::format_date(d.last_verified_utc)
-                        } else {
-                            "never".to_string()
-                        }
-                    ));
-                }
-            }
-        }
-        Ok((report, damage))
-    }
-
     // ----- disk pool ----------------------------------------------------------
 
     /// Mirror the disk registry a pool learned (adopted disks, mounts, checks)
@@ -7290,6 +6956,8 @@ impl Engine {
             .collect())
     }
 
+    /// Every batch held here that opens under a key this device holds
+    /// (`varsto ledger`, `/api/ledger`).
     pub fn ledger_entries(&self) -> Result<Vec<LedgerEntry>> {
         let mut out = Vec::new();
         for s in self.f3.ledger.all()? {

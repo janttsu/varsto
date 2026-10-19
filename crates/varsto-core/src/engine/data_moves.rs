@@ -1448,22 +1448,6 @@ impl Engine {
         report.summary = Self::move_summary(&report, &rec.name);
         Ok(report)
     }
-    /// Objects some ledger record still counts as a copy on `storage` (an
-    /// object shared with another record must stay).
-    pub(super) fn objects_claimed_on(&self, storage: &str) -> Result<HashSet<ObjectName>> {
-        let view = self.view()?;
-        Ok(view
-            .chunks
-            .values()
-            .filter(|r| {
-                r.storages
-                    .get(storage)
-                    .is_some_and(|l| !l.claimed_by.is_empty())
-            })
-            .map(|r| r.object.clone())
-            .collect())
-    }
-
     /// The blocks of `items` re-encrypted from the files on this device
     /// (chunking and encryption are deterministic), each file read once.
     /// Reading for a move does not count as using a file: its access time

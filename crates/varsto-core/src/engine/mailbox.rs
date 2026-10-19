@@ -619,7 +619,6 @@ impl Engine {
     /// and publish what this device holds.
     pub fn mailbox_run(&mut self, opts: &MailboxOptions) -> Result<MailboxReport> {
         let out = crate::logged_op!("mailbox", "", { self.mailbox_run_inner(opts) });
-        self.flush_pack_deletions();
         self.finish_storages();
         let mut st = MailboxState::load(&self.home);
         match &out {

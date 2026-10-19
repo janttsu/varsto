@@ -44,8 +44,56 @@ fn ok(home: &Path, args: &[&str]) -> serde_json::Value {
     serde_json::from_str(&stdout).unwrap_or(serde_json::Value::String(stdout))
 }
 
+/// `varsto verify` on another device, which names the storage "primary"
+/// and joined with the vault words alone: it verifies whole packs without
+/// a folder key (storage format 3).
 #[test]
-#[ignore = "f3-switch: port in part B (verification)"]
+fn verify_commands() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let (a, b) = (root.join("a"), root.join("b"));
+    let storage = root.join("storage");
+    let docs = root.join("docs");
+    let init = ok(&a, &["init", "--name", "laptop"]);
+    let key = init["vault_key"].as_str().unwrap().to_string();
+    ok(
+        &a,
+        &["storage", "add-local", "box", storage.to_str().unwrap()],
+    );
+    ok(&a, &["folder", "add", "docs", docs.to_str().unwrap()]);
+    fs::write(docs.join("old.txt"), b"an idle file").unwrap();
+    ok(&a, &["push", "docs"]);
+    let run = ok(&a, &["verify", "run"]);
+    assert_eq!(
+        run["blocks_verified"], 0,
+        "the writer does not verify itself"
+    );
+    ok_with_key(
+        &b,
+        &key,
+        &[
+            "join",
+            "--name",
+            "nas",
+            "--storage-path",
+            storage.to_str().unwrap(),
+        ],
+    );
+    let st = ok(
+        &b,
+        &["verify", "set", "--interval-hours", "12", "--max-mib", "64"],
+    );
+    assert_eq!(st["schedule"]["interval_hours"], 12);
+    assert_eq!(st["schedule"]["max_bytes"], 64 * 1024 * 1024);
+    let run = ok(&b, &["verify", "run"]);
+    assert_eq!(run["blocks_verified"], 1, "one pack: {run}");
+    let st = ok(&b, &["verify"]);
+    assert!(st["last_run_utc"].as_i64().is_some());
+    assert!(st["next_run_utc"].as_i64().is_some());
+    assert_eq!(st["total_verified"], 1);
+}
+
+#[test]
 fn verify_price_and_advice_commands() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -153,7 +201,6 @@ fn verify_price_and_advice_commands() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (verification)"]
 fn scrub_commands() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

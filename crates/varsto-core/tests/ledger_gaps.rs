@@ -39,7 +39,7 @@ impl Lab {
         self.storage()
             .join("ledger")
             .join(dev.as_str())
-            .join(format!("{seq:016}.json"))
+            .join(format!("{seq:016}-0000.rec"))
     }
     /// Hide a batch from the storage (a storage withholding it).
     fn withhold(&self, dev: &DeviceId, seq: u64) {
@@ -80,6 +80,10 @@ fn head_of(e: &mut Engine, dev: &DeviceId) -> u64 {
         .unwrap_or(0)
 }
 
+fn bin(f: &FolderId) -> [u8; 16] {
+    varsto_core::record::id16(f).unwrap()
+}
+
 fn folder_event() -> (FolderId, Event) {
     let f = FolderId::random();
     (f.clone(), Event::FolderAdded { folder: f })
@@ -88,7 +92,6 @@ fn folder_event() -> (FolderId, Event) {
 /// The storage withholds batch N of A and offers N + 1: B's head for A
 /// stays at N - 1 and N + 1 waits; once N appears, both count.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn a_withheld_batch_holds_back_the_ones_after_it() {
     let (lab, mut devs) = devices(2);
     let a_id = devs[0].device_id().clone();
@@ -101,8 +104,8 @@ fn a_withheld_batch_holds_back_the_ones_after_it() {
     let b = &mut devs[1];
     b.sync(None).unwrap();
     assert_eq!(head_of(b, &a_id), n - 1, "the head does not pass the gap");
-    let view = b.view().unwrap();
-    assert!(!view.folders.contains(&f1) && !view.folders.contains(&f2));
+    let view = b.ledger_view3().unwrap();
+    assert!(!view.folders.contains(&bin(&f1)) && !view.folders.contains(&bin(&f2)));
     let health = b.ledger_health();
     let behind = health
         .behind
@@ -114,10 +117,13 @@ fn a_withheld_batch_holds_back_the_ones_after_it() {
     lab.release(&a_id, n);
     b.sync(None).unwrap();
     assert_eq!(head_of(b, &a_id), n + 1);
-    let view = b.view().unwrap();
-    assert!(view.folders.contains(&f1) && view.folders.contains(&f2));
+    let view = b.ledger_view3().unwrap();
+    assert!(view.folders.contains(&bin(&f1)) && view.folders.contains(&bin(&f2)));
     assert!(b.ledger_health().behind.is_empty());
-    assert_eq!(b.view().unwrap(), b.view_replayed().unwrap());
+    assert_eq!(
+        b.ledger_view3().unwrap().canonical(),
+        b.view3_replayed().unwrap().canonical()
+    );
 }
 
 /// C says (in its signed `seen`) that it holds A's batches up to N + 1
@@ -125,7 +131,6 @@ fn a_withheld_batch_holds_back_the_ones_after_it() {
 /// every pull, and after three pulls warns that a storage may be
 /// withholding A's batches. The warning goes once the batches arrive.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn acknowledgements_reveal_withheld_batches() {
     let (lab, mut devs) = devices(3);
     let a_id = devs[0].device_id().clone();
@@ -175,7 +180,6 @@ fn acknowledgements_reveal_withheld_batches() {
 /// stop the pull: the batch comes from the other storage and the skipped
 /// object is counted.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn a_malformed_batch_on_one_storage_does_not_stop_the_pull() {
     let (lab, mut devs) = devices(2);
     let second = lab.root.join("second");
@@ -189,14 +193,13 @@ fn a_malformed_batch_on_one_storage_does_not_stop_the_pull() {
     fs::write(lab.batch(&a_id, n), b"{\"not\": \"a batch\"}").unwrap();
     let b = &mut devs[1];
     b.sync(None).expect("one bad object does not stop the pull");
-    assert!(b.view().unwrap().folders.contains(&f));
+    assert!(b.ledger_view3().unwrap().folders.contains(&bin(&f)));
     assert!(b.ledger_health().batches_malformed >= 1);
 }
 
 /// A batch whose Lamport time is beyond anything a device can have reached
 /// is refused and not applied: it would win every later ordering.
 #[test]
-#[ignore = "f3-switch: port in part B (ledger gaps)"]
 fn a_batch_with_an_absurd_lamport_time_is_refused() {
     let (_lab, mut devs) = devices(2);
     let a_id = devs[0].device_id().clone();
@@ -206,7 +209,7 @@ fn a_batch_with_an_absurd_lamport_time_is_refused() {
         .unwrap();
     let b = &mut devs[1];
     b.sync(None).unwrap();
-    assert!(!b.view().unwrap().folders.contains(&f));
+    assert!(!b.ledger_view3().unwrap().folders.contains(&bin(&f)));
     assert_eq!(head_of(b, &a_id), n - 1);
     let st = b.status().unwrap();
     assert!(st.lamport < 1 << 41, "the clock jumped to {}", st.lamport);

@@ -351,6 +351,7 @@ impl Engine {
         let (vault, me, vault_keys) = self.record_writer_parts();
         let view = self.view3()?;
         let mut writer = ManifestWriter::new(*folder, me);
+
         if let Some(own) = manifests.views.get(&me) {
             // Nothing changed since the last record: no storage is asked.
             if own.files == current {
@@ -360,6 +361,10 @@ impl Engine {
             writer.base_seq = own.base;
             writer.hash = own.hash;
             writer.published = own.files.clone();
+            if own.files == current {
+                // Nothing changed: no listing, no record.
+                return Ok(None);
+            }
         }
         if let Some(st) = view.stream(Kind::Manifest.code(), folder, &me) {
             if let Some((b, _, _)) = st.base() {

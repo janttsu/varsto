@@ -43,7 +43,6 @@ fn own_head(st: &serde_json::Value) -> u64 {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (ledger rebuild)"]
 fn lost_local_ledger_is_reported_and_rebuilt() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
