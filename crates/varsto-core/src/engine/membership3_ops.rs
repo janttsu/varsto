@@ -104,7 +104,7 @@ fn request_view(m: &Membership<'_>, r: &PendingRequest) -> FolderRequest {
         folder: m
             .registry
             .get(&r.folder)
-            .map(|s| s.name.clone())
+            .map(|s| s.shown.clone())
             .unwrap_or_default(),
         device_id: hex::encode(r.device),
         device: r.name.clone(),
@@ -251,7 +251,7 @@ impl Engine {
                 folder: m
                     .registry
                     .get(&id)
-                    .map(|s| s.name.clone())
+                    .map(|s| s.shown.clone())
                     .unwrap_or_default(),
                 device_id: hex::encode(m.me),
                 device: me.name.clone(),
@@ -427,7 +427,7 @@ impl Engine {
                 folder: m
                     .registry
                     .get(&id)
-                    .map(|s| s.name.clone())
+                    .map(|s| s.shown.clone())
                     .unwrap_or_default(),
                 removed: m.devices.name(&dev),
                 epoch: started.epoch,
@@ -581,7 +581,7 @@ fn members_of(m: &mut Membership<'_>, id: &Id16) -> Result<FolderMembers> {
         .collect();
     Ok(FolderMembers {
         folder_id: hex::encode(id),
-        folder: st.name.clone(),
+        folder: st.shown.clone(),
         epoch,
         your_role: m.registry.role(&m.me, id, epoch).map(role_text),
         participants,

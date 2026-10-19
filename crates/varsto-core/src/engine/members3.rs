@@ -614,7 +614,7 @@ impl Engine {
             .map(|st| {
                 (
                     st.id,
-                    st.name.clone(),
+                    st.shown.clone(),
                     st.creator,
                     st.is_removed(),
                     !st.members.is_empty(),

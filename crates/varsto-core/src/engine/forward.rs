@@ -518,10 +518,18 @@ impl Engine {
                     let t = table.read().unwrap_or_else(|e| e.into_inner());
                     super::data_moves::BlockStanding::of(&view, &t, &c.chunk.object)
                 };
+                // Room taken for a block that is not written gives way to
+                // the next one.
+                let give_back = |c: &Transfer| {
+                    for t in &c.targets {
+                        gate.give_back(opened[*t].0.name(), size);
+                    }
+                };
                 let Some((source, ct)) =
                     self.forward_source(&c.chunk, &standing, &opened, &mut peer_misses)
                 else {
                     debug_assert_eq!(c.state, TransferState::WaitingForSource);
+                    give_back(&c);
                     folder.unavailable += 1;
                     continue;
                 };
@@ -545,6 +553,7 @@ impl Engine {
                         source = label.as_str();
                         "forward: refused an object that does not check"
                     );
+                    give_back(&c);
                     folder.rejected += 1;
                     continue;
                 }
@@ -564,11 +573,20 @@ impl Engine {
                         &mut failed,
                         &mut folder,
                         &mut report,
+                        &gate,
                     )?;
                     held_bytes = 0;
                 }
             }
-            self.write_forwarded(&rec, &opened, held, &mut failed, &mut folder, &mut report)?;
+            self.write_forwarded(
+                &rec,
+                &opened,
+                held,
+                &mut failed,
+                &mut folder,
+                &mut report,
+                &gate,
+            )?;
             drop(task);
             folder.left = stopped + folder.unavailable + folder.waiting_for_target;
             if stopped > 0 {
@@ -710,6 +728,7 @@ impl Engine {
         failed: &mut BTreeSet<usize>,
         folder: &mut ForwardFolder,
         report: &mut ForwardReport,
+        gate: &super::quotas::QuotaGate,
     ) -> Result<()> {
         if held.is_empty() {
             return Ok(());
@@ -749,13 +768,29 @@ impl Engine {
             // Packs written earlier in this process by anything else stay
             // out of this record.
             let _ = backend.take_new_packs();
+            // The room taken for the blocks this storage did not take now
+            // (a failed write, a pack that did not read back, a block that
+            // was there already) is given back (`QuotaGate::give_back`).
+            let taken: Vec<(usize, u64)> = mine
+                .iter()
+                .map(|k| (*k, held[*k].chunk.size + 64))
+                .collect();
+            let give_back = |recorded: &BTreeSet<usize>| {
+                for (k, size) in &taken {
+                    if !recorded.contains(k) {
+                        gate.give_back(spec.name(), *size);
+                    }
+                }
+            };
             if let Err(e) = backend.put_pack(&members) {
                 report
                     .storages_failed
                     .push(format!("{} ({e:#})", spec.name()));
                 failed.insert(i);
+                give_back(&BTreeSet::new());
                 continue;
             }
+            let mut recorded: BTreeSet<usize> = BTreeSet::new();
             // Each new pack read back whole and checked against its id
             // before it is claimed.
             let mut good = Vec::new();
@@ -787,6 +822,7 @@ impl Engine {
                         .to_storages
                         .entry(spec.name().to_string())
                         .or_default() += 1;
+                    recorded.insert(k);
                     let t = &mut held[k];
                     if t.state != TransferState::Recorded {
                         t.state = TransferState::Recorded;
@@ -796,6 +832,7 @@ impl Engine {
                 }
                 good.push(p);
             }
+            give_back(&recorded);
             if !good.is_empty() {
                 per_storage.push((spec.name().to_string(), good));
             }

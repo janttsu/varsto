@@ -13,6 +13,10 @@ During alpha development, storage formats may change without migration paths. On
 | 2 (blocks, packs and keyed chunker, alpha-0-format.md section 62) | 0.0.1-alpha.15 | 0.0.1-alpha.15 and later. Vaults of format 1 (0.0.1-alpha.14 and earlier) are not read: alpha.15 refuses them and says to recreate the vault | none yet (`varsto pull` and `varsto fsck` of the same version) | `v0.0.1-alpha.15` |
 | 3 (pack-level ledger, folder block maps, signed records, alpha-0-format.md section 77) | not yet assigned | read by nothing older; vaults recreated; `FORMAT_VERSION` 3 set by the integration package. Not enabled: until then every build reads and writes format 2 | none yet | none yet |
 
+## Folder creation time in format 3 folder records (format version 3 unchanged)
+
+Alpha-0-format.md section 77.23. The creator's first `folder` record carries the setting `created_utc` (Unix seconds, decimal) in its opaque `settings` map; readers use it to decide which of two folders created under one name keeps the name. No field of the record changes; a record without the setting reads as created at 0. Format 3 is not released yet, so no released reader is affected.
+
 ## Format version 2 (0.0.1-alpha.15)
 
 `FORMAT_VERSION` is 2. There is no migration from format 1: block objects of their own (`chunks/`) are not read, so an alpha.14 vault opens without its data. Checked in the lab (`upgrade-from-alpha-14`) with the format number left at 1: `status` worked and `fsck --verify` reported every block of the vault missing. With the bump an alpha.15 build refuses a format 1 vault when it opens it or joins through its storage and says to recreate it (`varsto reset --yes`, `varsto init`, then sync the files into the new vault). Alpha.14 refuses a format 2 vault with "vault format version 2 is not readable by this version (1)". Release rule 3 (a reader for the previous format) is met by the alpha.14 binary, which stays downloadable and is the tool to read an alpha.14 vault.

@@ -661,6 +661,16 @@ mod tests {
         SocketAddr::from(([127, 0, 0, 1], o.status().port))
     }
 
+    /// Every offer binds the discovery port (UDP `PAIR_PORT`, shared with
+    /// SO_REUSEPORT, which hands each unicast query to one of the sockets
+    /// by the sender's address): an offer of a test running alongside
+    /// would get the queries meant for another and ignore them. The tests
+    /// that start an offer here and in `v3` take turns.
+    pub(super) fn port_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// An offer whose person lets every device join.
     fn open_offer() -> Offer {
         Offer::start_v3(
@@ -700,6 +710,7 @@ mod tests {
 
     #[test]
     fn right_code_delivers_and_closes_the_offer() {
+        let _port = port_lock();
         let o = open_offer();
         let code = o.status().code;
         let b = fetch(&code, "phone", addr(&o)).unwrap();
@@ -717,6 +728,7 @@ mod tests {
 
     #[test]
     fn wrong_codes_fail_and_burn_the_offer() {
+        let _port = port_lock();
         let o = open_offer();
         let code = o.status().code;
         let wrong = if code.starts_with('0') {
@@ -737,6 +749,7 @@ mod tests {
 
     #[test]
     fn discovery_finds_the_offer_on_this_host() {
+        let _port = port_lock();
         let o = open_offer();
         let code = o.status().code;
         let found = discover(&code, Duration::from_secs(5)).unwrap();
@@ -946,6 +959,7 @@ mod tests {
 
     #[test]
     fn a_refused_address_is_skipped_for_the_next_one() {
+        let _port = port_lock();
         // A real port nobody listens on: connection refused is not fatal.
         let gone = {
             let l = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -970,6 +984,7 @@ mod tests {
 
     #[test]
     fn the_offer_lists_usable_addresses_only() {
+        let _port = port_lock();
         let o = open_offer();
         for a in o.status().addresses {
             let ip: Ipv4Addr = a.rsplit_once(':').unwrap().0.parse().unwrap();
