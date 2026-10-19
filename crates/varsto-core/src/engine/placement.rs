@@ -194,7 +194,7 @@ impl Engine {
     pub(super) fn copies3(&self, rec: &FolderRecord) -> Result<Copies3> {
         Ok(Copies3 {
             view: self.view3()?,
-            table: self.folder_table3(rec)?,
+            table: self.folder_table(rec)?,
         })
     }
 

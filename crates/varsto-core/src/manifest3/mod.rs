@@ -2,8 +2,7 @@
 //! Folder manifests of storage format 3 as base + delta records
 //! (`docs/spec/format-3-design.md`, section 7; work package 6), and the
 //! per-file `held` flag that replaces the `chunk_on_device` event
-//! (section 4). Built behind the `format3` feature; nothing in the
-//! format-2 code path calls it yet (the switch is WP12).
+//! (section 4).
 //!
 //! - [`record`]: the body of a `manifest` record (`ManifestBody`), its
 //!   in-memory entry (`FileEntry`), limits and the kind-specific checks.

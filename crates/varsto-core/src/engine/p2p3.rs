@@ -33,7 +33,7 @@ impl Engine {
 
     /// The trusted full devices of the vault other than this one: whose
     /// peer records count and whose beacons are heard.
-    fn peer_devices3(&self) -> Vec<Id16> {
+    fn peer_devices(&self) -> Vec<Id16> {
         let me = self.me3();
         self.f3
             .members
@@ -57,7 +57,7 @@ impl Engine {
         if self.vault.member {
             return Ok(dir);
         }
-        let devices = self.peer_devices3();
+        let devices = self.peer_devices();
         if devices.is_empty() {
             return Ok(dir);
         }
@@ -66,7 +66,7 @@ impl Engine {
         let keys = self.keys3(&vault_keys);
         let trust = self.f3.members.trust();
         let mut refused = RecordsRefused::default();
-        for (_, backend) in self.record_storages3()? {
+        for (_, backend) in self.record_storages()? {
             let store = RecordStore {
                 storage: backend.as_ref(),
                 acceptor: Acceptor {
@@ -125,7 +125,7 @@ impl Engine {
     /// storage, by storage identity.
     fn pushed3(&self) -> Vec<Pushed> {
         let mut out = Vec::new();
-        let Ok(storages) = self.record_storages3() else {
+        let Ok(storages) = self.record_storages() else {
             return out;
         };
         for (spec, backend) in storages {
@@ -212,7 +212,7 @@ impl Engine {
             keys: &keys,
         };
         let mut last = 0;
-        for (_, backend) in self.record_storages3()? {
+        for (_, backend) in self.record_storages()? {
             last = peer::publish(backend.as_ref(), &writer, body, epoch)?;
         }
         Ok(last)
@@ -229,7 +229,7 @@ impl Engine {
         let vault_keys = self.vault_keys3();
         let keys = self.keys3(&vault_keys);
         let trust = self.f3.members.trust();
-        let Ok(storages) = self.record_storages3() else {
+        let Ok(storages) = self.record_storages() else {
             return;
         };
         for (_, backend) in &storages {
@@ -260,7 +260,7 @@ impl Engine {
     /// beacon and a head proof are checked against.
     pub fn full_device_keys(&self) -> BTreeMap<Id16, crate::crypto::VerifyingKey> {
         let mut out = BTreeMap::new();
-        for d in self.peer_devices3() {
+        for d in self.peer_devices() {
             if let Some(k) = self.f3.members.devices.signing_key(&d) {
                 out.insert(d, k);
             }
@@ -321,7 +321,7 @@ impl Engine {
 
     /// Where this device's peer-to-peer snapshot finds batches for heads
     /// and `/p2p/ledger/`: its head list and its ledger directory.
-    pub(super) fn snapshot_heads3(&self) -> (Vec<HeadRef>, Option<PathBuf>) {
+    pub(super) fn snapshot_heads(&self) -> (Vec<HeadRef>, Option<PathBuf>) {
         if self.vault.member || self.removal.is_some() {
             return (Vec::new(), None);
         }

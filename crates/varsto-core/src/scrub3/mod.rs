@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! The bit-rot check on packs (`docs/spec/alpha-0-format.md` section 33
 //! adapted to `docs/spec/format-3-design.md` section 3, "Verification and
-//! repair"; work package 10b). Built behind the `format3` feature.
+//! repair"; work package 10b).
 //!
 //! What changes from format 2 is the unit. A target (a storage, a pool
 //! disk) is swept pack by pack: the items are the packs the ledger view

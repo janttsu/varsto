@@ -12,11 +12,9 @@ name = "varsto_ffi"
 crate-type = ["staticlib", "cdylib"]
 
 [features]
-default = ["mimalloc", "format3"]
+default = ["mimalloc"]
 # mimalloc as the global allocator (see varsto-cli).
 mimalloc = ["dep:mimalloc"]
-# Storage format 3 work in progress (varsto-core `format3`).
-format3 = ["varsto-core/format3"]
 
 [dependencies]
 varsto-core = { path = "../varsto-core" }

@@ -46,16 +46,13 @@ fn pseudo_random(len: usize, seed: u64) -> Vec<u8> {
 
 /// Objects of every block the ledger counts on `storage`.
 fn claimed(e: &Engine, storage: &str) -> Vec<String> {
-    e.objects_on_storage3(storage)
-        .unwrap()
-        .into_iter()
-        .collect()
+    e.objects_on_storage(storage).unwrap().into_iter().collect()
 }
 
 /// Bytes the ledger counts on `storage`: the size classes of the packs
 /// claimed there (what a quota counts).
 fn block_bytes(e: &Engine, storage: &str) -> u64 {
-    e.packs_on_storage3(storage)
+    e.packs_on_storage(storage)
         .unwrap()
         .values()
         .map(|c| 256u64 << 10 << (2 * u64::from(*c)))
@@ -565,7 +562,7 @@ fn after_a_drain_no_file_and_no_status_lists_the_storage() {
     }
     // Neither the ledger view ...
     assert!(claimed(&a, "old").is_empty());
-    assert!(a.packs_on_storage3("old").unwrap().is_empty());
+    assert!(a.packs_on_storage("old").unwrap().is_empty());
     // ... nor the "where your data is" status lists it.
     let loc = a.data_locations().unwrap();
     let old = loc.storages.iter().find(|s| s.name == "old").unwrap();
@@ -573,5 +570,5 @@ fn after_a_drain_no_file_and_no_status_lists_the_storage() {
     assert!(loc.folders.iter().all(|f| !f.storages.contains_key("old")));
     // A later sync does not bring it back.
     a.sync(None).unwrap();
-    assert!(a.packs_on_storage3("old").unwrap().is_empty());
+    assert!(a.packs_on_storage("old").unwrap().is_empty());
 }

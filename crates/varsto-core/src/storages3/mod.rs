@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Storages on the pack-level ledger of storage format 3
 //! (`docs/spec/format-3-design.md` sections 3, 4, 10 and 13, work package
-//! 10a). Built behind the `format3` feature; the format-2 engine does not
-//! call it. Work package 12 wires these engine-independent functions into
-//! the engine in place of the per-block code they stand for.
+//! 10a). The engine calls these engine-independent functions in
+//! place of the per-block code of format 2.
 //!
 //! Everything here decides from three inputs: the ledger view
 //! ([`crate::ledger3::LedgerView`], packs and their holders), the folder's

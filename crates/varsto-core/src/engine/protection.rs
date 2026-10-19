@@ -176,7 +176,7 @@ impl Engine {
             } else {
                 None
             };
-            let held = self.load_manifests3(&folder).held_index();
+            let held = self.load_manifests(&folder).held_index();
             let mut chunks: BTreeMap<&ObjectName, u64> = BTreeMap::new();
             for f in state.files.values().filter(|f| !f.deleted) {
                 for c in &f.chunks {

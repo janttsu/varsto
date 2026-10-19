@@ -302,7 +302,7 @@ impl Engine {
         );
         let k1 = self.f3.recovery.clone();
         let created = self
-            .with_enrolled3(|m| m.create_folder(name.trim(), settings, k1.as_ref()))?
+            .with_enrolled(|m| m.create_folder(name.trim(), settings, k1.as_ref()))?
             .ok_or_else(|| {
                 anyhow!("add a storage first: a backup's records live on the vault's storages")
             })?;
@@ -623,7 +623,7 @@ impl Engine {
             files_changed: changed,
             ..Default::default()
         };
-        self.store_missing3(&rec, &fb, epoch, &src.path, &state, &mut push)?;
+        self.store_missing(&rec, &fb, epoch, &src.path, &state, &mut push)?;
 
         // 2. Every file in the snapshot must be on a storage; a file that
         // changed while it was read gets one more try.
@@ -631,7 +631,7 @@ impl Engine {
         if !incomplete.is_empty() {
             let (_, changed) = self.scan(&rec, &src.path, &mut state)?;
             report.files_changed += changed;
-            self.store_missing3(&rec, &fb, epoch, &src.path, &state, &mut push)?;
+            self.store_missing(&rec, &fb, epoch, &src.path, &state, &mut push)?;
             incomplete = self.incomplete_files(&rec, &state)?;
         }
         let mut skipped: BTreeSet<String> = incomplete;
@@ -729,7 +729,7 @@ impl Engine {
 
     /// Write the blocks of `state` the storages lack into packs, publish
     /// the map record of their members and claim them in a batch.
-    fn store_missing3(
+    fn store_missing(
         &mut self,
         rec: &FolderRecord,
         folder: &Id16,
@@ -842,7 +842,7 @@ impl Engine {
     /// Cold storages only with `include_cold`. A record that is not
     /// accepted anywhere (altered, or not what the ledger announced) is
     /// counted in the second result.
-    pub(super) fn load_snapshots3(
+    pub(super) fn load_snapshots(
         &self,
         rec: &FolderRecord,
         view: &View3,
@@ -857,7 +857,7 @@ impl Engine {
             .filter(|(s, _)| !s.is_carrier())
             .collect();
         let mut refused: Vec<(Id16, u64)> = Vec::new();
-        self.each_store3(&storages, view, |_, store, counter| {
+        self.each_store(&storages, view, |_, store, counter| {
             if snaps.wanted(view, now).is_empty() {
                 return Ok(());
             }
@@ -953,7 +953,7 @@ impl Engine {
         // The keys first: a device without the backup's grant says so.
         let fk = self.folder_keys(rec)?;
         let now = util::now_utc();
-        let (snaps, refused) = self.load_snapshots3(rec, &view, confirm_cold_read, now)?;
+        let (snaps, refused) = self.load_snapshots(rec, &view, confirm_cold_read, now)?;
         if !snaps.is_loaded(&device, seq) {
             if refused.iter().any(|(d, s)| *d == device && *s == seq) {
                 bail!(
@@ -999,7 +999,7 @@ impl Engine {
         fs::create_dir_all(to)?;
         let root = canonical(to)?;
         // The places of the blocks: the map records of the backup.
-        self.pull_folder_records3(&fb, &view)?;
+        self.pull_folder_records(&fb, &view)?;
         let storages: OpenStorages = self
             .open_storages(confirm_cold_read)?
             .into_iter()
@@ -1214,7 +1214,7 @@ impl Engine {
     ) -> Result<crate::gc3::ReferenceSet> {
         let view = self.view3()?;
         let fb = members3::bin(&rec.folder_id)?;
-        let (snaps, _) = self.load_snapshots3(rec, &view, false, now)?;
+        let (snaps, _) = self.load_snapshots(rec, &view, false, now)?;
         let complete = snaps.wanted(&view, now).is_empty();
         let mut refs = crate::gc3::ReferenceSet {
             objects: snaps.reference_set(&view, now),
@@ -1259,7 +1259,7 @@ impl Engine {
         }
         // The folder record goes; its blocks and records are collected
         // with the folder.
-        let removed = self.with_enrolled3(|m| m.remove_folder(&fb))?;
+        let removed = self.with_enrolled(|m| m.remove_folder(&fb))?;
         if removed.is_none() {
             return Ok(());
         }

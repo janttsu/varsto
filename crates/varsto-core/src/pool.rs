@@ -704,7 +704,7 @@ pub struct VerifyOutcome {
     pub missing: Vec<String>,
     /// Objects found on the disk that the index did not know; adopted.
     pub adopted: u64,
-    /// Keys whose copy hashed right (for `chunk_verified` events).
+    /// Keys whose copy hashed right.
     #[serde(skip)]
     pub verified_keys: Vec<String>,
 }

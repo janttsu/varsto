@@ -241,10 +241,7 @@ fn manifest_listing_benchmark() {
     let mut devs = devices(&lab, &["b", "c"]);
     let folder = folder_id(&devs[0]);
     let a_id = devs[0].device_id().to_string();
-    let keep_all = ManifestPolicy {
-        sweep_secs: i64::MAX,
-        prune: false,
-    };
+    let keep_all = ManifestPolicy { prune: false };
     for e in devs.iter_mut() {
         e.set_manifest_policy(keep_all);
     }
@@ -267,10 +264,7 @@ fn manifest_listing_benchmark() {
     };
     let c = &mut devs[2];
     c.sync(None).unwrap();
-    c.set_manifest_policy(ManifestPolicy {
-        sweep_secs: 0,
-        prune: false,
-    });
+    c.set_manifest_policy(ManifestPolicy { prune: false });
     let (_, calls, ms) = measure(c, |e| e.sync(None).unwrap());
     report("before: sync, nothing new (full listing)", calls, ms);
     c.set_manifest_policy(keep_all);
@@ -303,10 +297,7 @@ fn manifest_listing_benchmark() {
         stored(&lab, &folder, &a_id)
     );
     let c = &mut devs[2];
-    c.set_manifest_policy(ManifestPolicy {
-        sweep_secs: 0,
-        prune: true,
-    });
+    c.set_manifest_policy(ManifestPolicy { prune: true });
     let (_, calls, ms) = measure(c, |e| e.sync(None).unwrap());
     report("after pruning: sync, full listing", calls, ms);
     let usage: u64 = walkdir::WalkDir::new(lab.root.join("storage/manifests"))

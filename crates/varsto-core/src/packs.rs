@@ -59,7 +59,7 @@ impl PackLoc {
             && self.len > 0
             && self.len <= MAX_OBJECT
             && self.pack_len <= crate::storage::MAX_PACK
-            && (cfg!(not(feature = "format3")) || is_class(self.pack_len))
+            && is_class(self.pack_len)
             && self
                 .offset
                 .checked_add(self.len)

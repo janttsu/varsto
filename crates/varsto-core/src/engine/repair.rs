@@ -34,11 +34,6 @@ use super::*;
 
 const REPAIR_FILE: &str = "state/repair.json";
 
-/// Retry an unrepairable copy after this long.
-const RETRY_UNREPAIRABLE_SECS: i64 = 24 * 3600;
-/// Retry a copy whose storage could not be reached after this long.
-const RETRY_UNREACHABLE_SECS: i64 = 3600;
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
 pub enum DamageKind {
@@ -331,7 +326,7 @@ impl Engine {
     fn repair_inner(&mut self, opts: &RepairOptions) -> Result<RepairReport> {
         self.ensure_active()?;
         self.ensure_ledger_writable()?;
-        let result = self.one_batch(|e| e.run_repair3(opts));
+        let result = self.one_batch(|e| e.run_repair(opts));
         if opts.dry_run {
             return result.map(|(r, _)| r);
         }

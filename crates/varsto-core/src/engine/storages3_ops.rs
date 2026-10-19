@@ -26,10 +26,7 @@ pub(super) type TheirNames = BTreeMap<Id16, BTreeMap<String, String>>;
 impl Engine {
     /// The map table of a folder whose keys this device holds (`None`
     /// without them: no block of it can be placed here).
-    pub(super) fn folder_table3(
-        &self,
-        rec: &FolderRecord,
-    ) -> Result<Option<Arc<RwLock<MapTable>>>> {
+    pub(super) fn folder_table(&self, rec: &FolderRecord) -> Result<Option<Arc<RwLock<MapTable>>>> {
         if rec.key_hex.is_empty() && rec.epoch_keys.is_empty() {
             return Ok(None);
         }
@@ -42,11 +39,11 @@ impl Engine {
     /// Objects with a live place on `storage` (its pack held there, the
     /// place not marked dead or lost), over every folder whose map is held
     /// here. Hex object names.
-    pub fn objects_on_storage3(&self, storage: &str) -> Result<BTreeSet<String>> {
+    pub fn objects_on_storage(&self, storage: &str) -> Result<BTreeSet<String>> {
         let view = self.view3()?;
         let mut out = BTreeSet::new();
         for rec in self.keyring.folders.values().filter(|r| !r.is_removed()) {
-            let Some(t) = self.folder_table3(rec)? else {
+            let Some(t) = self.folder_table(rec)? else {
                 continue;
             };
             let t = t.read().unwrap_or_else(|e| e.into_inner());
@@ -64,12 +61,12 @@ impl Engine {
 
     /// The bytes of the live blocks on `storage` (each object once), as the
     /// map lists their lengths.
-    pub fn block_bytes_on_storage3(&self, storage: &str) -> Result<u64> {
+    pub fn block_bytes_on_storage(&self, storage: &str) -> Result<u64> {
         let view = self.view3()?;
         let mut seen = HashSet::new();
         let mut bytes = 0u64;
         for rec in self.keyring.folders.values().filter(|r| !r.is_removed()) {
-            let Some(t) = self.folder_table3(rec)? else {
+            let Some(t) = self.folder_table(rec)? else {
                 continue;
             };
             let t = t.read().unwrap_or_else(|e| e.into_inner());
@@ -87,7 +84,7 @@ impl Engine {
     }
 
     /// Packs the view shows held on `storage`, with their classes.
-    pub fn packs_on_storage3(&self, storage: &str) -> Result<BTreeMap<String, u8>> {
+    pub fn packs_on_storage(&self, storage: &str) -> Result<BTreeMap<String, u8>> {
         let view = self.view3()?;
         Ok(view
             .packs_on(storage)
@@ -99,7 +96,7 @@ impl Engine {
     /// inside an action that seals one batch at its end (`one_batch`): a
     /// move, a drain or a transferrer deletes a pack only after the batch
     /// with its drop is on the storages.
-    pub(super) fn commit_now3(&mut self) -> Result<()> {
+    pub(super) fn commit_now(&mut self) -> Result<()> {
         let cycle = self.cycle.take();
         let r = self.commit_batch();
         self.cycle = cycle;
@@ -108,15 +105,12 @@ impl Engine {
 
     /// Run `f` with a record store over every hot metadata storage, judging
     /// records with this device's keys and trust.
-    pub(super) fn with_records3(
-        &self,
-        mut f: impl FnMut(&RecordStore) -> Result<()>,
-    ) -> Result<()> {
+    pub(super) fn with_records(&self, mut f: impl FnMut(&RecordStore) -> Result<()>) -> Result<()> {
         let vault = members3::bin(&self.vault.vault_id)?;
         let vault_keys = self.vault_keys3();
         let keys = self.keys3(&vault_keys);
         let trust = self.f3.members.trust();
-        for (_, backend) in self.record_storages3()? {
+        for (_, backend) in self.record_storages()? {
             let store = RecordStore {
                 storage: backend.as_ref(),
                 acceptor: Acceptor {
@@ -134,12 +128,12 @@ impl Engine {
     /// vault-wide streams (newest seq wins) under the registry key of the
     /// newest vault epoch, on every hot metadata storage. `body` makes the
     /// body for the seq.
-    pub(super) fn publish_newest3<T: crate::record::RecordBody>(
+    pub(super) fn publish_newest<T: crate::record::RecordBody>(
         &self,
         stream: &crate::record::StreamRef,
         body: impl Fn(u64) -> T,
     ) -> Result<()> {
-        let storages = self.record_storages3()?;
+        let storages = self.record_storages()?;
         if storages.is_empty() {
             return Ok(());
         }
@@ -189,7 +183,7 @@ impl Engine {
     /// away, and the disks away that hold any ("<label> (<place>), last
     /// verified <date>"). With `verified` every attached disk was read in
     /// full and its check is recorded.
-    pub(super) fn pools_offline3(
+    pub(super) fn pools_offline(
         &mut self,
         view: &View3,
         verified: bool,
@@ -282,7 +276,7 @@ impl Engine {
     /// Publish this device's `policy` record: the policy of every folder
     /// it knows one of (set here or adopted), each with the time it was
     /// set; per folder the newest entry of any device wins.
-    pub(super) fn publish_policies3(&self) -> Result<()> {
+    pub(super) fn publish_policies(&self) -> Result<()> {
         let me = self.me3();
         let mut folders: Vec<(Id16, crate::records3::PolicyEntry)> = self
             .keyring
@@ -309,7 +303,7 @@ impl Engine {
             })
             .collect();
         folders.sort_by_key(|(f, _)| *f);
-        self.publish_newest3(&crate::records3::policy_stream(me), |seq| {
+        self.publish_newest(&crate::records3::policy_stream(me), |seq| {
             crate::records3::PolicyBody {
                 device: me,
                 seq,
@@ -319,7 +313,7 @@ impl Engine {
     }
 
     /// Publish this device's `placement` record of a folder.
-    pub(super) fn publish_placement3(
+    pub(super) fn publish_placement(
         &self,
         rec: &FolderRecord,
         placement: Option<&crate::placement::Placement>,
@@ -330,7 +324,7 @@ impl Engine {
         let lamport = self.clock.lamport;
         let empty = crate::placement::Placement::default();
         let p = placement.unwrap_or(&empty);
-        self.publish_newest3(&crate::records3::placement_stream(folder, me), |seq| {
+        self.publish_newest(&crate::records3::placement_stream(folder, me), |seq| {
             crate::records3::PlacementBody {
                 folder,
                 device: me,
@@ -351,7 +345,7 @@ impl Engine {
     /// Adopt the newest policy and placement of every folder from the full
     /// devices' records (in an organization only from devices its policy
     /// lets set them). Returns whether a folder changed.
-    pub(super) fn refresh_folder_rules3(&mut self) -> Result<bool> {
+    pub(super) fn refresh_folder_rules(&mut self) -> Result<bool> {
         if self.vault.member {
             return Ok(false);
         }
@@ -373,7 +367,7 @@ impl Engine {
             .collect();
         let mut policies: Vec<crate::records3::PolicyBody> = Vec::new();
         let mut placements: BTreeMap<Id16, Vec<crate::records3::PlacementBody>> = BTreeMap::new();
-        self.with_records3(|store| {
+        self.with_records(|store| {
             let mut refused = crate::record::RecordsRefused::default();
             let streams: Vec<_> = devices
                 .iter()
@@ -458,7 +452,7 @@ impl Engine {
     /// (kind 23), and the enrolment requests replicas left on the storages,
     /// which this device enrols by writing its own record (a request opens
     /// only under the replica key, which only the owner's token carries).
-    pub(super) fn refresh_replicas3(&mut self) {
+    pub(super) fn refresh_replicas(&mut self) {
         if self.vault.member {
             return;
         }
@@ -478,7 +472,7 @@ impl Engine {
         let mut known: BTreeMap<Id16, (String, crate::crypto::VerifyingKey)> = BTreeMap::new();
         let mut mine: Vec<crate::replica::ReplicaEntry> = Vec::new();
         let mut mine_seq = 0u64;
-        let read = self.with_records3(|store| {
+        let read = self.with_records(|store| {
             let streams: Vec<_> = devices
                 .iter()
                 .map(|d| crate::replica::replica_stream(*d))
@@ -507,7 +501,7 @@ impl Engine {
         // Requests not enrolled yet.
         let key = crate::replica::replica_key(self.root_key(), &self.vault.vault_id);
         let mut fresh: Vec<crate::replica::ReplicaEntry> = Vec::new();
-        if let Ok(storages) = self.record_storages3() {
+        if let Ok(storages) = self.record_storages() {
             for (_, backend) in &storages {
                 let Ok(names) = backend.list(crate::replica::REPLICA_PREFIX) else {
                     continue;
@@ -552,7 +546,7 @@ impl Engine {
                 seq,
                 replicas: mine.clone(),
             };
-            match self.publish_newest3(&crate::replica::replica_stream(me), body) {
+            match self.publish_newest(&crate::replica::replica_stream(me), body) {
                 Ok(()) => {
                     for e in fresh {
                         if let Ok(k) = crate::crypto::VerifyingKey::from_bytes(&e.k6) {
@@ -568,7 +562,7 @@ impl Engine {
         let after: BTreeSet<Id16> = known.keys().copied().collect();
         self.f3.replicas = known;
         if before != after {
-            self.reset_view3();
+            self.reset_view();
         }
     }
 
@@ -629,7 +623,7 @@ impl Engine {
     /// it knows (when they changed) as a `storage-names` record on every
     /// hot metadata storage, and read the newest record of every other full
     /// device.
-    pub(super) fn exchange_storage_names3(
+    pub(super) fn exchange_storage_names(
         &self,
         mine: &BTreeMap<String, String>,
     ) -> Vec<StorageNamesBody> {
@@ -641,7 +635,7 @@ impl Engine {
         let devices: Vec<Id16> = self.f3.members.devices.devices.keys().copied().collect();
         let mut own: Option<StorageNamesBody> = None;
         let mut newest: BTreeMap<Id16, StorageNamesBody> = BTreeMap::new();
-        let read = self.with_records3(|store| {
+        let read = self.with_records(|store| {
             let streams: Vec<_> = devices.iter().map(|d| storage_names_stream(*d)).collect();
             let mut refused = crate::record::RecordsRefused::default();
             for b in
@@ -670,7 +664,7 @@ impl Engine {
             .is_some_and(|o| o.names == names && o.settings == settings);
         if !same && (!names.is_empty() || !settings.is_empty()) {
             let published =
-                self.publish_newest3(&storage_names_stream(me), |seq| StorageNamesBody {
+                self.publish_newest(&storage_names_stream(me), |seq| StorageNamesBody {
                     device: me,
                     seq,
                     updated_utc: util::now_utc(),
@@ -686,7 +680,7 @@ impl Engine {
     }
 
     /// Other devices' storage names, by device: (their name -> identity).
-    pub(super) fn their_names3(bodies: &[StorageNamesBody]) -> TheirNames {
+    pub(super) fn their_names(bodies: &[StorageNamesBody]) -> TheirNames {
         bodies
             .iter()
             .map(|b| (b.device, b.names.iter().cloned().collect()))
@@ -695,7 +689,7 @@ impl Engine {
 
     /// Other devices' storage names that are one of this device's storages
     /// by identity: device -> (their name -> local name).
-    pub(super) fn storage_aliases3(&self) -> BTreeMap<Id16, BTreeMap<String, String>> {
+    pub(super) fn storage_aliases(&self) -> BTreeMap<Id16, BTreeMap<String, String>> {
         util::read_json_or_default::<StoredAliases>(&self.aliases3_path())
             .unwrap_or_default()
             .into_map()
@@ -709,7 +703,7 @@ impl Engine {
     /// publish this device's names and settings, read the others', keep
     /// (their name -> local name) for the storages that are configured here
     /// and adopt newer settings of storages this device has.
-    pub(super) fn refresh_storage_aliases3(&mut self) {
+    pub(super) fn refresh_storage_aliases(&mut self) {
         let mut readable: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
         for spec in &self.config.storages {
             if spec.is_data_only() || spec.is_cold() {
@@ -721,8 +715,8 @@ impl Engine {
         }
         let mine = self.own_storage_ids(&readable);
         drop(readable);
-        let bodies = self.exchange_storage_names3(&mine);
-        let theirs = Self::their_names3(&bodies);
+        let bodies = self.exchange_storage_names(&mine);
+        let theirs = Self::their_names(&bodies);
         let by_id: BTreeMap<&String, &String> = mine.iter().map(|(n, i)| (i, n)).collect();
         let mut map: BTreeMap<Id16, BTreeMap<String, String>> = BTreeMap::new();
         for (d, names) in &theirs {
@@ -746,9 +740,9 @@ impl Engine {
         let path = self.aliases3_path();
         if util::read_json_or_default::<StoredAliases>(&path).ok() != Some(stored.clone()) {
             let _ = util::write_json(&path, &stored);
-            self.reset_view3();
+            self.reset_view();
         }
-        if let Err(e) = self.adopt_storage_settings3(&bodies) {
+        if let Err(e) = self.adopt_storage_settings(&bodies) {
             log::warn!("storage settings not adopted: {e:#}");
         }
     }
@@ -756,7 +750,7 @@ impl Engine {
     /// Take the newest shared settings of each storage this device has from
     /// other devices' records. In an organization only an administrator's
     /// count, unless members may add storages.
-    fn adopt_storage_settings3(&mut self, bodies: &[StorageNamesBody]) -> Result<()> {
+    fn adopt_storage_settings(&mut self, bodies: &[StorageNamesBody]) -> Result<()> {
         let keys = self.storage_keys();
         let by_key: BTreeMap<String, String> = keys
             .iter()

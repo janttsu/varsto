@@ -41,7 +41,7 @@ fn objects(path: &Path) -> usize {
 /// Blocks the ledger shows on a storage: a live place of each in a pack
 /// held there.
 fn on_storage(e: &Engine, storage: &str) -> usize {
-    e.objects_on_storage3(storage).unwrap().len()
+    e.objects_on_storage(storage).unwrap().len()
 }
 
 fn pseudo_random(len: usize, seed: u64) -> Vec<u8> {
@@ -126,17 +126,17 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
                 .append_own(&da, vec![stored("hot"), stored("cold")], 1, &key, &a)
                 .unwrap(),
         ),
-        // b verifies the hot copy before it is dropped (Lamport 2) ...
+        // b holds the plaintext (Lamport 5): no storage copy ...
         (
             1,
             own_b
                 .append_own(
                     &db,
-                    vec![Event::ChunkVerified {
+                    vec![Event::ChunkOnDevice {
                         folder: folder.clone(),
                         chunk: chunk.clone(),
                         object: object.clone(),
-                        storage: "hot".into(),
+                        size: 10,
                     }],
                     5,
                     &key,
@@ -144,7 +144,7 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
                 )
                 .unwrap(),
         ),
-        // ... a drops it at Lamport 3 (b's verification at 5 does not bring it back).
+        // ... a drops the hot copy at Lamport 3 (b's later event does not bring it back).
         (
             0,
             own_a
@@ -321,7 +321,7 @@ fn placement_writes_only_to_the_chosen_storages_on_every_device() {
     a.sync(None).unwrap();
     assert_eq!(objects(&p("s2")), objects(&p("s3")));
     assert_eq!(
-        a.ledger_view3().unwrap().canonical(),
+        a.ledger_view().unwrap().canonical(),
         a.view3_replayed().unwrap().canonical()
     );
 }
@@ -496,7 +496,7 @@ fn moving_keeps_the_policy_and_lowers_the_bill() {
     assert!(lab.p("docs-b").join("new.bin").exists());
     assert_eq!(objects(&lab.p("h1")), blocks - plan.blocks as usize);
     assert_eq!(
-        b.ledger_view3().unwrap().canonical(),
+        b.ledger_view().unwrap().canonical(),
         b.view3_replayed().unwrap().canonical()
     );
     assert_eq!(on_storage(&b, "hot1"), blocks - plan.blocks as usize);
@@ -589,7 +589,7 @@ fn moving_a_whole_folder_changes_its_placement_and_never_drops_the_last_copy() {
     assert!(objects(&lab.p("h1")) > 0);
     assert_eq!(objects(&lab.p("c")), 0);
     assert_eq!(
-        lab.a.ledger_view3().unwrap().canonical(),
+        lab.a.ledger_view().unwrap().canonical(),
         lab.a.view3_replayed().unwrap().canonical()
     );
 }

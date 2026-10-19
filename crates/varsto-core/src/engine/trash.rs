@@ -21,13 +21,13 @@
 //! moves of a whole folder take them along, a storage is not removed while
 //! they would lose their last copy, and `fsck` counts them as referenced.
 //! Once an entry has gone, its blocks that no current file, no other entry
-//! and no other folder (backups included) uses are dropped
-//! (`Event::ChunkDropped`, sealed and pushed before anything is deleted)
-//! from this device's storages, except from a cold storage before its
-//! minimum storage duration has passed; those wait in a local queue.
+//! and no other folder (backups included) uses are marked dead and
+//! collected by garbage collection in the trash upkeep (`pack_upkeep`,
+//! `crate::gc3`); a cold storage keeps its packs until its minimum storage
+//! duration has passed.
 //!
 //! A vault may name a *trash storage* (vault-wide setting, published as
-//! `vault/trash-settings/<device>/<utc>.enc` under the folder-record key):
+//! the `settings` record `vault/settings/<device>/`, `crate::trash3::settings`):
 //! blocks only trash entries use are copied there, checked, and dropped from
 //! this device's other warm storages, so warm storage is not paid for
 //! deleted data. The trash storage takes no other blocks. Restoring from a
@@ -41,8 +41,6 @@ const DAY: i64 = 86_400;
 pub const DEFAULT_TRASH_DAYS: u32 = 30;
 /// Longest retention that can be set (ten years).
 pub const MAX_TRASH_DAYS: u32 = 3650;
-const RECORD_PREFIX: &str = "vault/trash/";
-const SETTINGS_PREFIX: &str = "vault/trash-settings/";
 /// A record keeps an entry (and a removal) this long after the entry
 /// expired, so every device sees it go and drops its blocks.
 const KEEP_LISTED_SECS: i64 = 7 * DAY;
@@ -83,19 +81,6 @@ pub struct TrashRemoval {
     /// Lamport time of the removal (format 3: orders concurrent removals).
     #[serde(default)]
     pub lamport: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-struct TrashBody {
-    device: DeviceId,
-    folder: FolderId,
-    written_utc: i64,
-    entries: Vec<TrashEntry>,
-    #[serde(default)]
-    removed: BTreeMap<String, TrashRemoval>,
-    /// Replaced versions (the version history, `history`).
-    #[serde(default)]
-    versions: Vec<TrashEntry>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -172,6 +157,65 @@ pub struct TrashSettings {
 
 fn default_history_days() -> u32 {
     super::history::DEFAULT_HISTORY_DAYS
+}
+
+impl TrashSettings {
+    /// From the body of a `settings` record (`crate::trash3::settings`).
+    fn from_record(b: &crate::trash3::SettingsBody) -> TrashSettings {
+        let folders = |list: &[(crate::record::Id16, u32)]| {
+            list.iter()
+                .map(|(f, d)| (FolderId::from_bytes(f), *d))
+                .collect()
+        };
+        TrashSettings {
+            days: b.trash_days,
+            folder_days: folders(&b.folder_trash_days),
+            storage: b.trash_storage.clone(),
+            storage_id: b.storage_id.clone(),
+            updated_utc: b.updated_utc,
+            device: Some(DeviceId::from_bytes(&b.device)),
+            history_days: b.history_days,
+            folder_history: folders(&b.folder_history_days),
+        }
+    }
+
+    /// The body of this device's next `settings` record (its `seq` is set
+    /// by the writer). A folder at 0 trash days follows the vault and is
+    /// not written.
+    fn to_record(
+        &self,
+        device: crate::record::Id16,
+        lamport: u64,
+        updated_utc: i64,
+    ) -> Result<crate::trash3::SettingsBody> {
+        let folders = |m: &BTreeMap<FolderId, u32>, keep_zero: bool| -> Result<Vec<_>> {
+            let mut out: Vec<(crate::record::Id16, u32)> = Vec::new();
+            for (f, d) in m {
+                if *d == 0 && !keep_zero {
+                    continue;
+                }
+                out.push((members3::bin(f)?, (*d).min(MAX_TRASH_DAYS)));
+            }
+            out.sort();
+            out.dedup_by_key(|(f, _)| *f);
+            Ok(out)
+        };
+        let body = crate::trash3::SettingsBody {
+            device,
+            seq: 1,
+            lamport,
+            updated_utc,
+            trash_days: self.days.clamp(1, MAX_TRASH_DAYS),
+            history_days: self.history_days.min(MAX_TRASH_DAYS),
+            trash_storage: self.storage.clone(),
+            storage_id: self.storage_id.clone(),
+            folder_trash_days: folders(&self.folder_days, false)?,
+            folder_history_days: folders(&self.folder_history, true)?,
+        };
+        body.validate()
+            .map_err(|e| anyhow!("trash settings: {e}"))?;
+        Ok(body)
+    }
 }
 
 impl Default for TrashSettings {
@@ -304,46 +348,6 @@ pub struct TrashUpkeepReport {
     /// Live blocks moved out of packs that were mostly dead (`pack_upkeep`).
     pub blocks_repacked: u64,
     pub notes: Vec<String>,
-}
-
-fn record_key(meta: &SecretKey, folder: &FolderId) -> SecretKey {
-    meta.derive("trash-record", &[folder.as_str().as_bytes()])
-}
-
-fn record_aad(vault: &VaultId, folder: &FolderId, device: &DeviceId, written: i64) -> Vec<u8> {
-    crypto::aad(
-        "trash-record",
-        &[
-            vault.as_str().as_bytes(),
-            folder.as_str().as_bytes(),
-            device.as_str().as_bytes(),
-            &written.to_le_bytes(),
-        ],
-    )
-}
-
-fn record_storage_key(folder: &FolderId, device: &DeviceId, written: i64) -> String {
-    format!("{RECORD_PREFIX}{folder}/{device}/{written:020}.enc")
-}
-
-/// Every trash record of a folder (removing a folder deletes them).
-pub(super) fn record_prefix(folder: &FolderId) -> String {
-    format!("{RECORD_PREFIX}{folder}/")
-}
-
-fn settings_key(base: &SecretKey) -> SecretKey {
-    base.derive("trash-settings", &[])
-}
-
-fn settings_aad(vault: &VaultId, device: &DeviceId, written: i64) -> Vec<u8> {
-    crypto::aad(
-        "trash-settings",
-        &[
-            vault.as_str().as_bytes(),
-            device.as_str().as_bytes(),
-            &written.to_le_bytes(),
-        ],
-    )
 }
 
 pub(super) fn entry_id(folder: &FolderId, path: &str, device: &DeviceId, clock: u64) -> String {
@@ -680,7 +684,7 @@ impl Engine {
             self.save_trash_cache(&rec.folder_id, &cache)?;
             return Ok(false);
         }
-        let storages = self.record_storages3()?;
+        let storages = self.record_storages()?;
         if storages.is_empty() {
             self.save_trash_cache(&rec.folder_id, &cache)?;
             return Ok(false);
@@ -844,7 +848,7 @@ impl Engine {
                 .state
                 .removals
                 .values()
-                .map(|r| trash3_io::removal_from3(r, &did))
+                .map(|r| trash3_io::removal_from(r, &did))
                 .collect();
             cache.remote.insert(
                 did.clone(),
@@ -856,87 +860,6 @@ impl Engine {
                 },
             );
             cache.remote3.insert(did, trash3_io::Applied3::of(dt));
-        }
-        Ok(read)
-    }
-
-    /// The format-2 trash records (f3-switch: part B deletes it).
-    fn trash_read2(
-        &self,
-        storages: &OpenStorages,
-        fk: &FolderKeys,
-        cache: &mut TrashCache,
-    ) -> Result<usize> {
-        let prefix = record_prefix(&fk.folder);
-        let mut newest: BTreeMap<DeviceId, (i64, usize, String)> = BTreeMap::new();
-        for (i, (_, b)) in storages.iter().enumerate() {
-            for key in b.list(&prefix)? {
-                let Some((dev, file)) = key.strip_prefix(&prefix).and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let (Ok(dev), Some(t)) = (
-                    DeviceId::from_hex(dev),
-                    file.strip_suffix(".enc")
-                        .and_then(|t| t.parse::<i64>().ok()),
-                ) else {
-                    continue;
-                };
-                if newest.get(&dev).is_none_or(|(n, _, _)| t > *n) {
-                    newest.insert(dev, (t, i, key));
-                }
-            }
-        }
-        let metas = fk.meta_keys();
-        let mut read = 0;
-        for (dev, (t, i, key)) in newest {
-            let known =
-                self.devices.devices.contains_key(&dev) || self.devices.members.contains_key(&dev);
-            if dev == self.vault.device_id || !known || self.is_revoked(&dev) {
-                continue;
-            }
-            if cache.remote.get(&dev).is_some_and(|r| r.written_utc >= t) {
-                continue;
-            }
-            let Some(blob) = storages[i].1.get(&key)? else {
-                continue;
-            };
-            let a = record_aad(&self.vault.vault_id, &fk.folder, &dev, t);
-            let Some(packed) = metas
-                .iter()
-                .find_map(|m| crypto::decrypt(&record_key(m, &fk.folder), &a, &blob).ok())
-            else {
-                continue;
-            };
-            let Ok(json) = zstd::bulk::decompress(&packed, 256 << 20) else {
-                continue;
-            };
-            let Ok(body) = serde_json::from_slice::<TrashBody>(&json) else {
-                continue;
-            };
-            if body.device != dev || body.folder != fk.folder || body.written_utc != t {
-                continue;
-            }
-            let entries = body
-                .entries
-                .into_iter()
-                .filter(|e| entry_valid(e, &fk.folder, &dev))
-                .collect();
-            let versions = body
-                .versions
-                .into_iter()
-                .filter(|e| entry_valid(e, &fk.folder, &dev))
-                .collect();
-            cache.remote.insert(
-                dev,
-                RemoteTrash {
-                    written_utc: t,
-                    entries,
-                    removed: body.removed,
-                    versions,
-                },
-            );
-            read += 1;
         }
         Ok(read)
     }
@@ -993,45 +916,41 @@ impl Engine {
             return Ok(());
         }
         let known = cache.settings.as_ref().map(|s| s.updated_utc).unwrap_or(0);
-        let mut best: Option<(i64, DeviceId, usize, String)> = None;
-        for (i, (_, b)) in storages.iter().enumerate() {
-            for key in b.list(SETTINGS_PREFIX)? {
-                let Some((dev, file)) = key
-                    .strip_prefix(SETTINGS_PREFIX)
-                    .and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let (Ok(dev), Some(t)) = (
-                    DeviceId::from_hex(dev),
-                    file.strip_suffix(".enc")
-                        .and_then(|t| t.parse::<i64>().ok()),
-                ) else {
-                    continue;
-                };
-                if t <= known || !self.trusted(&dev) {
-                    continue;
-                }
-                if best.as_ref().is_none_or(|(n, d, _, _)| (t, &dev) > (*n, d)) {
-                    best = Some((t, dev, i, key));
-                }
-            }
-        }
-        if let Some((t, dev, i, key)) = best {
-            if let Some(blob) = storages[i].1.get(&key)? {
-                let a = settings_aad(&self.vault.vault_id, &dev, t);
-                let opened = self
-                    .folder_record_keys()
-                    .iter()
-                    .find_map(|k| crypto::decrypt(&settings_key(k), &a, &blob).ok())
-                    .and_then(|j| serde_json::from_slice::<TrashSettings>(&j).ok())
-                    .filter(|s| s.updated_utc == t && s.device.as_ref() == Some(&dev));
-                if let Some(mut s) = opened {
-                    s.days = s.days.clamp(1, MAX_TRASH_DAYS);
-                    cache.local_storage = self.resolve_trash_storage(&s);
-                    cache.settings = Some(s);
+        // The newest `settings` record of every trusted device of the vault.
+        let streams: Vec<crate::record::StreamRef> = self
+            .f3
+            .members
+            .devices
+            .devices
+            .keys()
+            .copied()
+            .chain([self.me3()])
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter(|d| self.trusted(&DeviceId::from_bytes(d)))
+            .map(crate::trash3::settings::settings_stream)
+            .collect();
+        let view = self.view3()?;
+        let mut newest: BTreeMap<crate::record::Id16, crate::trash3::SettingsBody> =
+            BTreeMap::new();
+        self.each_store(storages, &view, |_, store, counter| {
+            for b in crate::records3::read_newest::<crate::trash3::SettingsBody>(
+                store, &streams, counter,
+            )? {
+                if newest.get(&b.device).is_none_or(|n| n.seq < b.seq) {
+                    newest.insert(b.device, b);
                 }
             }
+            Ok(())
+        })?;
+        let best = newest
+            .into_values()
+            .max_by_key(|b| (b.updated_utc, b.lamport, b.device, b.seq));
+        if let Some(b) = best.filter(|b| b.updated_utc > known) {
+            let mut s = TrashSettings::from_record(&b);
+            s.days = s.days.clamp(1, MAX_TRASH_DAYS);
+            cache.local_storage = self.resolve_trash_storage(&s);
+            cache.settings = Some(s);
         }
         cache.read_utc = now;
         self.save_settings_cache(&cache)
@@ -1131,7 +1050,7 @@ impl Engine {
     /// How far each device's trash stream of `folder` was applied here
     /// (this device's own: as far as it published): garbage collection
     /// waits for a writer whose announced trash records are not applied.
-    pub(super) fn trash_applied3(&self, folder: &FolderId) -> Vec<(crate::record::Id16, u64)> {
+    pub(super) fn trash_applied(&self, folder: &FolderId) -> Vec<(crate::record::Id16, u64)> {
         let cache = self.load_trash_cache(folder);
         let mut out: Vec<(crate::record::Id16, u64)> = cache
             .remote3
@@ -1182,9 +1101,9 @@ impl Engine {
             return Ok(());
         }
         let epoch = self.folder_keys(rec)?.epoch;
-        self.flush_pending3()?;
+        self.flush_pending()?;
         let view = self.view3()?;
-        let (manifests, _) = self.pull_folder_records3(&folder, &view)?;
+        let (manifests, _) = self.pull_folder_records(&folder, &view)?;
         let live: HashSet<[u8; 32]> = manifests.references().copied().collect();
         // Blocks only the trash or the version history uses.
         let mut trashed: HashSet<[u8; 32]> = HashSet::new();
@@ -1253,7 +1172,7 @@ impl Engine {
             }
             // The copies and drops are sealed and pushed before anything
             // is deleted.
-            self.with_map_writer3(&folder, epoch, &view, |w, t, out, sink| {
+            self.with_map_writer(&folder, epoch, &view, |w, t, out, sink| {
                 let mut events = Vec::new();
                 let mut publish = None;
                 if !run.new_packs.is_empty() {
@@ -1376,7 +1295,7 @@ impl Engine {
         let mut cold_only = false;
         for c in &e.chunks {
             let held = self.block_copies3(&view, folder, &c.object);
-            if self.needs_cold_read3(&held, c) {
+            if self.needs_cold_read(&held, c) {
                 cold_only = true;
             }
             names.extend(held);
@@ -1386,27 +1305,12 @@ impl Engine {
 
     /// A block that no warm storage of this device and no cache holds, but
     /// a cold one does (format 3: `held` are the storages with a copy).
-    pub(super) fn needs_cold_read3(&self, held: &BTreeSet<String>, c: &ChunkRef) -> bool {
+    pub(super) fn needs_cold_read(&self, held: &BTreeSet<String>, c: &ChunkRef) -> bool {
         let spec = |n: &str| self.config.storages.iter().find(|s| s.name() == n);
         let warm = held
             .iter()
             .any(|n| spec(n).is_some_and(|s| !s.is_cold() && !s.is_carrier()));
         let cold = held.iter().any(|n| spec(n).is_some_and(|s| s.is_cold()));
-        !warm && cold && self.cached_object(&c.object).is_none()
-    }
-
-    /// A block that no warm storage of this device and no cache holds, but a
-    /// cold one does.
-    pub(super) fn needs_cold_read(&self, r: &crate::ledger::ChunkRecord, c: &ChunkRef) -> bool {
-        let spec = |n: &str| self.config.storages.iter().find(|s| s.name() == n);
-        let warm = r
-            .storages
-            .keys()
-            .any(|n| spec(n).is_some_and(|s| !s.is_cold() && !s.is_carrier()));
-        let cold = r
-            .storages
-            .keys()
-            .any(|n| spec(n).is_some_and(|s| s.is_cold()));
         !warm && cold && self.cached_object(&c.object).is_none()
     }
 
@@ -1476,7 +1380,7 @@ impl Engine {
                 st.local_copy_bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
             }
         }
-        st.drops_waiting = self.gc_drops_waiting3();
+        st.drops_waiting = self.gc_drops_waiting();
         Ok(st)
     }
 
@@ -1579,22 +1483,17 @@ impl Engine {
         let now = util::now_utc().max(s.updated_utc + 1);
         s.updated_utc = now;
         s.device = Some(me.clone());
-        let json = serde_json::to_vec(&s)?;
-        let blob = crypto::encrypt(
-            &settings_key(&self.folder_record_key_now()),
-            &settings_aad(&self.vault.vault_id, &me, now),
-            &json,
-        )?;
-        let key = format!("{SETTINGS_PREFIX}{me}/{now:020}.enc");
-        let own = format!("{SETTINGS_PREFIX}{me}/");
-        for (_, b) in self.metadata_storages(true)? {
-            b.put_if_absent(&key, &blob)?;
-            for old in b.list(&own)? {
-                if old != key {
-                    b.delete(&old)?;
-                }
-            }
-        }
+        let me3 = self.me3();
+        let lamport = self.clock.lamport + 1;
+        let storages = self.metadata_storages(true)?;
+        let stream = crate::trash3::settings::settings_stream(me3);
+        let key = crate::record::KeyId::Registry(self.vault_keys3().newest_epoch());
+        let body = s.to_record(me3, lamport, now)?;
+        self.write_record3(&storages, &stream, &key, |seq| {
+            let mut b = body.clone();
+            b.seq = seq;
+            b
+        })?;
         let mut cache = self.load_settings_cache();
         cache.local_storage = self.resolve_trash_storage(&s);
         cache.settings = Some(s);
@@ -1761,7 +1660,7 @@ impl Engine {
         };
         for c in &e.chunks {
             let held = self.block_copies3(&view, folder, &c.object);
-            if self.needs_cold_read3(&held, c) {
+            if self.needs_cold_read(&held, c) {
                 plan.cold_bytes += c.size;
                 cold.extend(
                     held.iter()
@@ -1854,7 +1753,7 @@ impl Engine {
             let tmp = tmp_dir.join(format!("{}-{}", std::process::id(), e.id));
             let got = match &local {
                 Some(p) => fs::copy(p, &tmp).map(|_| true).map_err(anyhow::Error::from),
-                None => self.restore_from_blocks(&rec, &fk, &e, &tmp, &storages),
+                None => self.restore_from_blocks(&fk, &e, &tmp, &storages),
             };
             match got {
                 Ok(from_local) => {
@@ -1957,7 +1856,6 @@ impl Engine {
     /// (not from a local copy).
     pub(super) fn restore_from_blocks(
         &mut self,
-        rec: &FolderRecord,
         fk: &FolderKeys,
         e: &TrashEntry,
         out: &Path,
@@ -1966,15 +1864,15 @@ impl Engine {
         let mut file = fs::File::create(out)?;
         for c in &e.chunks {
             let good = |ct: &Vec<u8>| ObjectName::from_bytes(&crypto::hash(ct)) == c.object;
-            let (ct, source) = match self.cached_object(&c.object) {
-                Some(ct) => (ct, None),
+            let ct = match self.cached_object(&c.object) {
+                Some(ct) => ct,
                 None => match fetch::fetch_object(
                     self.peers.as_deref(),
                     &c.object,
                     storages,
                     &self.fetch_stats,
                 ) {
-                    Fetched::Got { bytes, source, .. } if good(&bytes) => (bytes, Some(source)),
+                    Fetched::Got { bytes, .. } if good(&bytes) => bytes,
                     Fetched::Got { .. } => bail!("block {} failed its check", c.chunk.short()),
                     Fetched::Failed(err) => return Err(err),
                     Fetched::Missing(Some(nd)) => return Err(anyhow::Error::new(nd)),
@@ -1993,14 +1891,6 @@ impl Engine {
                 &ct,
             )?;
             file.write_all(&plain)?;
-            if let Some(s) = source.filter(|s| !s.starts_with("peer:")) {
-                self.pending.push(Event::ChunkVerified {
-                    folder: rec.folder_id.clone(),
-                    chunk: c.chunk.clone(),
-                    object: c.object.clone(),
-                    storage: s,
-                });
-            }
         }
         file.sync_all()?;
         Ok(false)

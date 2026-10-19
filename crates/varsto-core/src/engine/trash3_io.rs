@@ -50,7 +50,7 @@ fn h16(s: &str) -> [u8; 16] {
 }
 
 /// A trash or history entry as the record lists it.
-pub(super) fn entry_to3(e: &TrashEntry) -> Result<Entry> {
+pub(super) fn entry_to(e: &TrashEntry) -> Result<Entry> {
     Ok(Entry {
         id: h16(&e.id),
         path: e.path.clone(),
@@ -102,7 +102,7 @@ pub(super) fn entry_from3(e: &Entry) -> TrashEntry {
     }
 }
 
-pub(super) fn removal_to3(id: &str, r: &TrashRemoval) -> Removal {
+pub(super) fn removal_to(id: &str, r: &TrashRemoval) -> Removal {
     Removal {
         id: h16(id),
         utc: r.utc,
@@ -112,7 +112,7 @@ pub(super) fn removal_to3(id: &str, r: &TrashRemoval) -> Removal {
     }
 }
 
-pub(super) fn removal_from3(r: &Removal, by: &DeviceId) -> (String, TrashRemoval) {
+pub(super) fn removal_from(r: &Removal, by: &DeviceId) -> (String, TrashRemoval) {
     (
         hex::encode(r.id),
         TrashRemoval {
@@ -133,15 +133,15 @@ pub(super) fn snapshot_of(
 ) -> Result<TrashSnapshot> {
     let mut s = TrashSnapshot::default();
     for e in own {
-        let x = entry_to3(e)?;
+        let x = entry_to(e)?;
         s.entries.insert(x.id, x);
     }
     for (id, r) in removed {
-        let x = removal_to3(id, r);
+        let x = removal_to(id, r);
         s.removals.insert(x.id, x);
     }
     for e in versions {
-        let x = entry_to3(e)?;
+        let x = entry_to(e)?;
         s.versions.insert(x.id, x);
     }
     Ok(s)
@@ -194,11 +194,11 @@ impl Applied3 {
         d.lamport = self.lamport;
         d.created_utc = self.created_utc;
         for e in entries {
-            let x = entry_to3(e)?;
+            let x = entry_to(e)?;
             d.state.entries.insert(x.id, x);
         }
         for e in versions {
-            let x = entry_to3(e)?;
+            let x = entry_to(e)?;
             d.state.versions.insert(x.id, x);
         }
         for r in &self.removals {

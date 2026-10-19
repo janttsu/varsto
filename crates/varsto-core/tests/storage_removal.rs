@@ -28,7 +28,7 @@ fn objects(path: &Path) -> usize {
 }
 
 fn on_storage(e: &Engine, storage: &str) -> usize {
-    e.objects_on_storage3(storage).unwrap().len()
+    e.objects_on_storage(storage).unwrap().len()
 }
 #[test]
 fn storages_are_removed_only_with_enough_copies_elsewhere() {
@@ -74,7 +74,7 @@ fn storages_are_removed_only_with_enough_copies_elsewhere() {
     assert!(plan.blocked.is_none(), "{:?}", plan.blocked);
     assert_eq!(plan.blocks as usize, blocks);
     // One whole-pack copy per pack on "one".
-    assert_eq!(plan.copies.len(), a.packs_on_storage3("one").unwrap().len());
+    assert_eq!(plan.copies.len(), a.packs_on_storage("one").unwrap().len());
 
     assert_eq!(plan.targets, vec!["three".to_string()]);
 
@@ -104,7 +104,7 @@ fn storages_are_removed_only_with_enough_copies_elsewhere() {
     a.sync(None).unwrap();
     assert_eq!(on_storage(&a, "two"), 0);
     assert_eq!(
-        a.ledger_view3().unwrap().canonical(),
+        a.ledger_view().unwrap().canonical(),
         a.view3_replayed().unwrap().canonical()
     );
 }

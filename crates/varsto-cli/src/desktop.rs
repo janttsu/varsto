@@ -1637,8 +1637,6 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             "has_vault": has_vault,
             "unlocked": st.engine.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
-            // Folder membership of storage format 3 is in this build.
-            "format3": cfg!(feature = "format3"),
             "platform": std::env::consts::OS,
             // Mobile shells set these so the interface can pick folder locations itself.
             "mobile": mobile(),
@@ -1813,12 +1811,10 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             pair_status(status)
         }
         (Method::Get, "/api/pair/status") => {
-            #[allow(unused_mut)]
             let mut v = match &st.pair {
                 Some(o) => pair_status(o.status())?,
                 None => json!({"open": false}),
             };
-            #[cfg(feature = "format3")]
             f3_api::add_pair_ask(&mut v, st.engine.as_mut());
             Ok(v)
         }
@@ -2152,9 +2148,7 @@ fn api_unlocked(
 ) -> Result<Value> {
     match (method, path) {
         (Method::Get, "/api/status") => {
-            #[allow(unused_mut)]
             let mut v = serde_json::to_value(engine.status()?)?;
-            #[cfg(feature = "format3")]
             if let Ok(list) = engine.f3_missing_escrows() {
                 if !list.is_empty() {
                     v["recovery_warnings"] = json!(list.iter().map(|m| &m.warning).collect::<Vec<_>>());
@@ -5029,7 +5023,6 @@ mod tests {
 
     /// A vault of two devices on one directory storage, and the folder
     /// `docs` in the membership records of the first.
-    #[cfg(feature = "format3")]
     fn f3_pair(t: &std::path::Path) -> (Engine, Engine, String) {
         let storage = StorageSpec::LocalDir {
             name: "box".into(),
@@ -5048,7 +5041,6 @@ mod tests {
         (a, b, id)
     }
 
-    #[cfg(feature = "format3")]
     fn f3_call(
         engine: &mut Engine,
         service: &mut ServiceState,
@@ -5060,7 +5052,6 @@ mod tests {
         api_unlocked(engine, service, m, path, query, &input)
     }
 
-    #[cfg(feature = "format3")]
     #[test]
     fn folder_membership_endpoints() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5404,7 +5395,6 @@ mod tests {
     }
 
     /// The service announces requests (`folder.request`) and never answers one.
-    #[cfg(feature = "format3")]
     #[test]
     fn the_service_announces_requests_once() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5438,7 +5428,6 @@ mod tests {
     }
 
     /// A device that joins by pairing, as the offering side sees it.
-    #[cfg(feature = "format3")]
     fn f3_joiner(
         name: &'static str,
         code: String,
@@ -5466,7 +5455,6 @@ mod tests {
     /// The pairing question on the offering side: the joining device's name
     /// and words wait for the person; nothing is sent before the answer;
     /// ticked folders are granted before the vault key goes out.
-    #[cfg(feature = "format3")]
     #[test]
     fn pairing_asks_the_person_and_grants_only_ticked_folders() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5492,14 +5480,7 @@ mod tests {
             }
             panic!("no question");
         };
-        let started = api(
-            &mut st,
-            Method::Post,
-            "/api/pair/start",
-            "",
-            &json!({"format": 3}),
-        )
-        .unwrap();
+        let started = api(&mut st, Method::Post, "/api/pair/start", "", &json!({})).unwrap();
         let code = started["code"].as_str().unwrap().to_string();
         let port = started["port"].as_u64().unwrap() as u16;
 
@@ -5551,14 +5532,7 @@ mod tests {
         assert!(!photos.participants.iter().any(|p| p.device_id == device));
 
         // A second device is declined: no grants, and it learns so.
-        let started = api(
-            &mut st,
-            Method::Post,
-            "/api/pair/start",
-            "",
-            &json!({"format": 3}),
-        )
-        .unwrap();
+        let started = api(&mut st, Method::Post, "/api/pair/start", "", &json!({})).unwrap();
         let code2 = started["code"].as_str().unwrap().to_string();
         let port2 = started["port"].as_u64().unwrap() as u16;
         let (h2, device2) = f3_joiner("tablet", code2, port2);

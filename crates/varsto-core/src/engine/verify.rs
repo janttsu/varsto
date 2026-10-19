@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Automatic verification by another device (see `crate::autoverify`): pick
 //! copies that other devices wrote, download them within the budget, check
-//! the content hash and record `ChunkVerified` in the ledger, the same event
+//! the content hash and record `pack_verified` in the ledger, the same event
 //! `fsck --verify` records.
 //!
 //! The ledger names a storage by the writer's local name, and two devices may
@@ -88,50 +88,6 @@ impl NameResolver {
             .iter()
             .map(|(id, n)| (n.clone(), id.clone()))
             .collect()
-    }
-
-    /// Other devices' storage names that match a storage here by
-    /// identity: device -> (their name -> local name).
-    pub(super) fn aliases(&self) -> BTreeMap<DeviceId, BTreeMap<String, String>> {
-        self.theirs
-            .iter()
-            .map(|(d, names)| {
-                (
-                    d.clone(),
-                    names
-                        .iter()
-                        .filter_map(|(n, id)| {
-                            self.local_by_id.get(id).map(|l| (n.clone(), l.clone()))
-                        })
-                        .collect::<BTreeMap<_, _>>(),
-                )
-            })
-            .filter(|(_, m)| !m.is_empty())
-            .collect()
-    }
-
-    /// Like `resolve`, with every configured storage (`configured`) as a
-    /// candidate for an equal name, readable now or not; replicas are
-    /// their own storages.
-    pub(super) fn resolve_any(
-        &self,
-        name: &str,
-        claimers: &BTreeSet<DeviceId>,
-        configured: &BTreeSet<String>,
-    ) -> Option<String> {
-        if name.starts_with("replica:") {
-            return Some(name.to_string());
-        }
-        let mut known = false;
-        for d in claimers {
-            if let Some(id) = self.theirs.get(d).and_then(|n| n.get(name)) {
-                known = true;
-                if let Some(local) = self.local_by_id.get(id) {
-                    return Some(local.clone());
-                }
-            }
-        }
-        (!known && configured.contains(name)).then(|| name.to_string())
     }
 }
 
@@ -229,7 +185,7 @@ impl Engine {
         }
         // Kind 19 records (`storages3_ops`): ours published when they
         // changed, the other devices' newest read back.
-        let theirs = Engine::their_names3(&self.exchange_storage_names3(&mine))
+        let theirs = Engine::their_names(&self.exchange_storage_names(&mine))
             .into_iter()
             .map(|(d, names)| (DeviceId::from_bytes(&d), names))
             .collect();

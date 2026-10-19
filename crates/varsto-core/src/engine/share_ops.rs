@@ -173,7 +173,7 @@ impl Engine {
         };
         let k8 = req.key.to_bytes();
         let (device, owner_fingerprint) = self
-            .with_enrolled3(|m| {
+            .with_enrolled(|m| {
                 let d = m.add_member(&id, &name, &req.k6, &k8, role.role3())?;
                 let me = m.devices.get(&m.me).cloned().expect("enrolled");
                 Ok((
@@ -258,9 +258,9 @@ impl Engine {
         let id = members3::bin(&rec.folder_id)?;
         let k1 = self.f3.recovery.clone();
         let start = self
-            .with_enrolled3(|m| m.start_folder_epoch(&id, &removed, k1.as_ref()))?
+            .with_enrolled(|m| m.start_folder_epoch(&id, &removed, k1.as_ref()))?
             .ok_or_else(|| anyhow!("this device has no storage to write to"))?;
-        self.reset_view3();
+        self.reset_view();
         Ok(ShareRevokeReport {
             folder: rec.name.clone(),
             share_epoch: start.epoch,
@@ -521,10 +521,10 @@ impl Engine {
         epochs.kem = Some(kem);
         let mut engine = Self::write_new(home, vault, keys, passphrase, epochs)?;
         engine.save_epochs()?;
-        engine.save_member_state3(&folder, &anchor)?;
+        engine.save_member_state(&folder, &anchor)?;
         ShareRequest::clear(home);
         engine.add_storage_internal(storage, secret)?;
-        engine.refresh_members3()?;
+        engine.refresh_members()?;
         engine.pending.push(Event::DeviceEnrolled {
             name: engine.vault.device_name.clone(),
         });

@@ -351,40 +351,9 @@ impl Engine {
             .unwrap_or(&self.keys.master)
     }
 
-    // The format-2 key derivations below are still read by format-2 code
-    // of other areas (mailbox board, verification, quotas, data moves,
-    // trash, the format-2 ledger); they go when those parts are ported
-    // (f3-switch: part B).
-
-    /// Format-2 device-registry keys of every epoch, newest first.
-    pub(super) fn registry_keys(&self) -> Vec<(u32, SecretKey)> {
-        self.epochs
-            .keys
-            .iter()
-            .rev()
-            .map(|(e, k)| (*e, k.derive("device-registry", &[])))
-            .collect()
-    }
-
-    pub(super) fn registry_key_now(&self) -> SecretKey {
-        self.current_vault_key().derive("device-registry", &[])
-    }
-
-    /// Format-2 folder-record keys of every epoch, newest first.
-    pub(super) fn folder_record_keys(&self) -> Vec<SecretKey> {
-        self.epochs
-            .keys
-            .values()
-            .rev()
-            .map(|k| k.derive("folder-record", &[]))
-            .collect()
-    }
-
-    pub(super) fn folder_record_key_now(&self) -> SecretKey {
-        self.current_vault_key().derive("folder-record", &[])
-    }
-
-    /// Format-2 ledger key for a batch key id `ledger` or `ledger@<epoch>`.
+    /// The key of the in-memory location view's batches (`ledger` or
+    /// `ledger@<epoch>`, `Engine::view`). Format 3 stores no such batch, so
+    /// the view holds only this device's events not sealed yet.
     pub(super) fn ledger_key_for(&self, id: &str) -> Option<SecretKey> {
         let epoch = if id == KEY_LEDGER {
             0
@@ -394,17 +363,6 @@ impl Engine {
                 .ok()?
         };
         Some(self.epochs.keys.get(&epoch)?.derive("ledger", &[]))
-    }
-
-    /// Format-2 key id and key new batches were sealed with.
-    pub(super) fn ledger_key_now(&self) -> (String, SecretKey) {
-        let e = self.key_epoch();
-        let id = if e == 0 {
-            KEY_LEDGER.to_string()
-        } else {
-            format!("{}{e}", ledger::KEY_LEDGER_EPOCH_PREFIX)
-        };
-        (id, self.current_vault_key().derive("ledger", &[]))
     }
 
     /// The keys of a folder this device holds: only what grants (or
@@ -466,8 +424,7 @@ impl Engine {
         true
     }
 
-    /// Format 2: whether a ledger batch counts (the format-2 ledger of
-    /// other areas still asks; f3-switch: part B).
+    /// Whether a batch of the location view's store counts (`Engine::view`).
     pub(super) fn batch_accepted(&self, device: &DeviceId, seq: u64) -> bool {
         self.devices
             .revoked
@@ -475,8 +432,7 @@ impl Engine {
             .is_none_or(|r| seq <= r.cutoff_seq)
     }
 
-    /// Format 2: the scope of a format-2 batch (the format-2 ledger of
-    /// other areas still asks; f3-switch: part B).
+    /// The scope of a batch of the location view's store (`Engine::view`).
     pub(super) fn event_scope(&self, device: &DeviceId, key_id: &str) -> Option<EventScope> {
         let scope = EventScope::of_key_id(key_id)?;
         let me = device == &self.vault.device_id;
@@ -737,7 +693,7 @@ impl Engine {
         let k1 = self.f3.recovery.clone();
         // A device the organization's policy locks out stays a member of the
         // new epoch; it gets the key once it is allowed again.
-        let held = self.org_held3();
+        let held = self.org_held();
         let report = self
             .with_members3_as(!unchecked, |m| {
                 m.hold_grants = held;
@@ -747,7 +703,7 @@ impl Engine {
         // Everything this device writes from now on uses the new keys; its
         // peer record goes out again under them, so the removed device stops
         // learning its addresses at once.
-        self.reset_view3();
+        self.reset_view();
         self.republish_own_peer_record();
         let folder_name = |f: &crate::record::Id16| {
             self.f3
@@ -786,14 +742,14 @@ impl Engine {
     /// Format-2 name of reading the membership (the format-2 ledger of
     /// other areas still calls it): format 3 reads it with every pull.
     pub(super) fn sync_membership(&mut self) -> Result<()> {
-        self.refresh_members3()
+        self.refresh_members()
     }
 
     /// After every read of the membership: act on a revocation of this
     /// device (with a wipe order, wipe it), record vault epochs two devices
     /// wrote under one number, and refuse to go on while one waits for the
     /// user's choice.
-    pub(super) fn after_members3(
+    pub(super) fn after_members(
         &mut self,
         own: Option<crate::membership3::RevocationRecord>,
         forks: BTreeMap<u32, BTreeSet<crate::record::Id16>>,
@@ -886,7 +842,7 @@ impl Engine {
         }
         self.epochs.forks.kept.insert(epoch, issuer.clone());
         util::write_json(&self.home.join(EPOCH_FORK_FILE), &self.epochs.forks)?;
-        self.reset_view3();
+        self.reset_view();
         Ok(())
     }
 
