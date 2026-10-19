@@ -94,10 +94,12 @@ struct Need {
     /// The pool holds no copy at all (not just too few places).
     first_copy: bool,
     /// The pack the pool holds the block in (a further copy copies it).
-    pack: Option<crate::packs::PackLoc>,
-    /// Storages claiming a copy, from the ledger.
+    pack: Option<crate::ledger3::PackId>,
+    /// Storages holding a live place of it, from the ledger.
     copies: usize,
 }
+/// Blocks of one folder collected for a pack, and their bytes.
+type FolderBatch = (Vec<(ObjectName, Vec<u8>)>, usize);
 
 /// Ciphertext is a little larger than the chunk.
 fn estimate(size: u64) -> u64 {
@@ -127,7 +129,7 @@ impl Engine {
         progress: &mut dyn FnMut(&DiskProgress),
     ) -> Result<FillOutcome> {
         let have = pool.objects();
-        let view = self.view()?;
+        let view = self.view3()?;
         let mut needed: BTreeMap<ObjectName, Need> = BTreeMap::new();
         // (folder, path) -> (mtime, objects the file still needs on the pool).
         let mut files: Vec<(i64, String, Vec<ObjectName>)> = Vec::new();
@@ -136,23 +138,35 @@ impl Engine {
             let Ok(rec) = self.with_key(&rec) else {
                 continue; // a locked Strongroom is skipped
             };
+            let Some(table) = self.folder_table3(&rec)? else {
+                continue;
+            };
+            let t = table.read().unwrap_or_else(|e| e.into_inner());
             let targets = self.write_targets(&rec);
             let state = self.load_state(&rec.folder_id)?;
             for f in state.files.values().filter(|f| !f.deleted) {
                 let mut objs: Vec<ObjectName> = Vec::new();
                 for c in &f.chunks {
-                    let record = view.locate(&rec.folder_id, &c.chunk);
+                    let standing = super::data_moves::BlockStanding::of(&view, &t, &c.object);
                     // The pool holds blocks in packs: the pack's key when
                     // the pool has it, else the block is not there at all.
-                    let pack = record
-                        .and_then(|r| r.storages.get(spec.name()))
-                        .and_then(|l| l.pack.clone())
-                        .filter(|p| have.contains_key(&crate::packs::pack_key(&p.pack)));
+                    let pack = crate::storages3::object_bin(&c.object)
+                        .ok()
+                        .and_then(|o| {
+                            view.block_places(&o, &*t)
+                                .into_iter()
+                                .filter(|p| !p.marked)
+                                .find(|p| p.storages.iter().any(|s| s == spec.name()))
+                                .map(|p| p.place.pack)
+                        })
+                        .filter(|p| have.contains_key(&crate::packs::pack_key(&hex::encode(p))));
                     let key = match &pack {
-                        Some(p) => crate::packs::pack_key(&p.pack),
+                        Some(p) => crate::packs::pack_key(&hex::encode(p)),
                         None => chunk_storage_key(&c.object),
                     };
-                    if !pool.wants_copy(disk_id, &key) || !targets.wants(spec.name(), record) {
+                    if !pool.wants_copy(disk_id, &key)
+                        || !targets.wants(spec.name(), Some(&standing))
+                    {
                         continue;
                     }
                     let n = needed.entry(c.object.clone()).or_insert_with(|| Need {
@@ -163,7 +177,7 @@ impl Engine {
                         files: Vec::new(),
                         first_copy: pack.is_none(),
                         pack,
-                        copies: record.map(|r| r.storages.len()).unwrap_or(0),
+                        copies: standing.copies.len(),
                     });
                     if let Some(m) = &mount {
                         n.files.push(self.disk_of(m, &state, &f.path));
@@ -273,25 +287,26 @@ impl Engine {
         // The task of the caller (disk add, check or insert) counts the bytes.
         crate::activity::set_current_total(p.bytes_total);
         // Further copies (disk groups) copy whole packs the pool holds;
-        // blocks the pool lacks go into new packs of up to 64 MiB, written
-        // to this disk.
+        // blocks the pool lacks go into new packs of up to 64 MiB (one
+        // folder per pack), written to this disk, listed in a map record of
+        // their folder and claimed in the batch.
         // Pack -> whether this fill copied it (its blocks count as written).
-        let mut copied_packs: HashMap<String, bool> = HashMap::new();
-        let mut batch: Vec<(ObjectName, Vec<u8>)> = Vec::new();
-        let mut batch_bytes = 0usize;
+        let mut copied_packs: HashMap<crate::ledger3::PackId, bool> = HashMap::new();
+        let mut batches: BTreeMap<FolderId, FolderBatch> = BTreeMap::new();
+        let mut written: BTreeMap<FolderId, Vec<crate::blockmap::WrittenPack>> = BTreeMap::new();
         for object in chosen {
             let need = &needed[&object];
             p.objects_done += 1;
             p.bytes_done += estimate(need.size);
             crate::activity::advance_current(estimate(need.size));
-            if let Some(loc) = need.pack.clone() {
-                if let Some(copied) = copied_packs.get(&loc.pack) {
+            if let Some(pack) = need.pack {
+                if let Some(copied) = copied_packs.get(&pack) {
                     out.objects += u64::from(*copied);
                     progress(&p);
                     continue;
                 }
-                copied_packs.insert(loc.pack.clone(), false);
-                let key = crate::packs::pack_key(&loc.pack);
+                copied_packs.insert(pack, false);
+                let key = crate::packs::pack_key(&hex::encode(pack));
                 // From a docked disk of the pool, else staged by the
                 // mailbox while one was docked (section 78).
                 let Some(bytes) = pool
@@ -299,7 +314,7 @@ impl Engine {
                     .ok()
                     .flatten()
                     .or_else(|| self.mailbox_object(&key))
-                    .filter(|b| hex::encode(crypto::hash(b)) == loc.pack)
+                    .filter(|b| crypto::hash(b) == pack)
                 else {
                     out.unavailable += 1;
                     progress(&p);
@@ -310,7 +325,7 @@ impl Engine {
                         // Counted in blocks, like a new pack.
                         out.objects += 1;
                         out.bytes += bytes.len() as u64;
-                        copied_packs.insert(loc.pack.clone(), true);
+                        copied_packs.insert(pack, true);
                     }
                     Ok(false) => {}
                     Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NoRoom { .. })) => {}
@@ -324,7 +339,7 @@ impl Engine {
                         break;
                     }
                     Err(e) => {
-                        self.commit_batch()?;
+                        self.publish_fill_maps(written)?;
                         return Err(e);
                     }
                 }
@@ -342,9 +357,7 @@ impl Engine {
                 }
             }
             if ct.is_none() {
-                ct = self
-                    .cached_object(&object)
-                    .or_else(|| self.mailbox_object(&key));
+                ct = self.cached_object(&object);
             }
             if ct.is_none() {
                 if let Some(fk) = folder_keys.get(&need.folder) {
@@ -365,26 +378,56 @@ impl Engine {
             };
             // A pack never passes the top size class: the next block starts
             // a new one when it would not fit.
-            if !batch.is_empty() && batch_bytes + ct.len() > crate::packs::HOT_TARGET {
-                let full = std::mem::take(&mut batch);
-                batch_bytes = 0;
-                if !self.fill_pack(spec, pool, disk_id, &needed, full, &mut out)? {
-                    break;
+            let (batch, batch_bytes) = batches.entry(need.folder.clone()).or_default();
+            if !batch.is_empty() && *batch_bytes + ct.len() > crate::packs::HOT_TARGET {
+                let full = std::mem::take(batch);
+                *batch_bytes = 0;
+                match self.fill_pack(spec, pool, disk_id, &needed, full, &mut out)? {
+                    Some(Some(w)) => written.entry(need.folder.clone()).or_default().push(w),
+                    Some(None) => {}
+                    None => break,
                 }
             }
-            batch_bytes += ct.len();
+            let (batch, batch_bytes) = batches.entry(need.folder.clone()).or_default();
+            *batch_bytes += ct.len();
             batch.push((object.clone(), ct));
             progress(&p);
         }
-        if !batch.is_empty() && out.failed.is_none() {
-            self.fill_pack(spec, pool, disk_id, &needed, batch, &mut out)?;
+        for (folder, (batch, _)) in batches {
+            if batch.is_empty() || out.failed.is_some() {
+                continue;
+            }
+            match self.fill_pack(spec, pool, disk_id, &needed, batch, &mut out)? {
+                Some(Some(w)) => written.entry(folder).or_default().push(w),
+                Some(None) => {}
+                None => break,
+            }
         }
-        self.commit_batch()?;
+        self.publish_fill_maps(written)?;
         Ok(out)
     }
 
-    /// Write blocks the pool lacks to one disk as a pack and claim them.
-    /// False when the disk read back wrong (the fill stops).
+    /// The map records of the packs a fill wrote, and the batch that claims
+    /// them.
+    fn publish_fill_maps(
+        &mut self,
+        written: BTreeMap<FolderId, Vec<crate::blockmap::WrittenPack>>,
+    ) -> Result<()> {
+        let view = self.view3()?;
+        for (folder, packs) in written {
+            let Some(rec) = self.keyring.folders.get(&folder).cloned() else {
+                continue;
+            };
+            let epoch = self.folder_keys(&rec)?.epoch;
+            self.publish_map3(&members3::bin(&folder)?, epoch, &packs, &view)?;
+        }
+        self.commit_batch()?;
+        Ok(())
+    }
+
+    /// Write blocks the pool lacks (of one folder) to one disk as a pack.
+    /// `None` when the disk read back wrong (the fill stops); `Some(None)`
+    /// when the disk had no room; else the pack written, for the map record.
     fn fill_pack(
         &mut self,
         spec: &StorageSpec,
@@ -393,7 +436,7 @@ impl Engine {
         needed: &BTreeMap<ObjectName, Need>,
         blocks: Vec<(ObjectName, Vec<u8>)>,
         out: &mut FillOutcome,
-    ) -> Result<bool> {
+    ) -> Result<Option<Option<crate::blockmap::WrittenPack>>> {
         let members: Vec<(String, &[u8])> = blocks
             .iter()
             .map(|(o, b)| (o.as_str().to_string(), b.as_slice()))
@@ -402,7 +445,7 @@ impl Engine {
         match pool.add_copy_on_disk(disk_id, &crate::packs::pack_key(&id), &bytes) {
             Ok(_) => {}
             Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NoRoom { .. })) => {
-                return Ok(true);
+                return Ok(Some(None));
             }
             Err(e)
                 if matches!(
@@ -411,39 +454,42 @@ impl Engine {
                 ) =>
             {
                 out.failed = Some(format!("{e:#}"));
-                return Ok(false);
+                return Ok(None);
             }
-            Err(e) => {
-                self.commit_batch()?;
-                return Err(e);
-            }
+            Err(e) => return Err(e),
         }
+        crate::packs::debug_registry::written(&locs);
         out.objects += locs.len() as u64;
         out.bytes += bytes.len() as u64;
+        let mut pack = [0u8; 32];
+        hex::decode_to_slice(&id, &mut pack)?;
+        let class = crate::blockmap::class_of_len(bytes.len() as u64)
+            .ok_or_else(|| anyhow!("a built pack is not a size class"))?;
+        let mut wmembers = Vec::new();
         for (object, loc) in &locs {
-            let Some(need) = ObjectName::from_hex(object)
-                .ok()
-                .and_then(|o| needed.get(&o))
-            else {
+            let o = ObjectName::from_hex(object)?;
+            let Some(need) = needed.get(&o) else {
                 continue;
             };
-            self.pending.push(Event::ChunkStored {
-                folder: need.folder.clone(),
-                chunk: need.chunk.clone(),
-                object: ObjectName::from_hex(object)?,
-                storage: spec.name().to_string(),
-                size: loc.len,
-                pack: Some(loc.clone()),
+            wmembers.push(crate::blockmap::WrittenMember {
+                object: crate::storages3::object_bin(&o)?,
+                chunk: need
+                    .chunk
+                    .as_bytes()
+                    .try_into()
+                    .map_err(|_| anyhow!("a chunk id is not 32 bytes"))?,
+                offset: loc.offset as u32,
+                len: loc.len as u32,
+                plain_len: need.size as u32,
+                epoch: need.epoch,
             });
         }
-        self.pack_caches.record_pack(
-            spec.name(),
-            crate::packs::NewPack {
-                pack: id,
-                members: locs,
-            },
-        );
-        Ok(true)
+        Ok(Some(Some(crate::blockmap::WrittenPack {
+            id: pack,
+            class,
+            storages: vec![spec.name().to_string()],
+            members: wmembers,
+        })))
     }
 
     /// `fill_disk_with` without progress; a disk that read back wrong is an error.
@@ -499,20 +545,17 @@ impl Engine {
             .pull_ledger()
             .err()
             .map(|e| format!("the ledger could not be brought up to date ({e:#})"));
-        let view = self.view()?;
-        let mut known: HashSet<String> = HashSet::new();
-        for r in view.chunks.values() {
-            known.insert(r.object.as_str().to_string());
-        }
-        // A disk holds packs: one is known when a block in it is.
-        super::pack_upkeep::with_pack_ids(&view, spec.name(), &mut known, false);
+        let view = self.view3()?;
         progress(&DiskProgress {
             phase: "tidy",
             ..Default::default()
         });
         task.step("tidy", 0, crate::activity::Unit::Items);
         let offline = ledger_note.is_some();
-        let tidy = pool.tidy_disk(&disk.id, &|name: &str| offline || known.contains(name))?;
+        // What the disk may keep follows the ledger: a pack no live claim on
+        // the pool names is junk (offline: kept unless the ledger dropped it).
+        let (tidy, lost) = crate::storages3::tidy_disk_packs(&pool, &disk.id, &view, !offline)?;
+        self.f3.pending.extend(lost);
         let mut report = DiskInsertReport {
             pool: spec.name().to_string(),
             label: disk.label.clone(),
@@ -545,21 +588,10 @@ impl Engine {
                 progress(&p);
             })?;
             // Re-hashed on the disk: a verification other devices can rely
-            // on, for every block in each pack checked.
-            let by_pack = super::pack_upkeep::blocks_by_pack(&view, spec.name());
-            for key in &v.verified_keys {
-                let Some(pack) = crate::packs::pack_of_key(key) else {
-                    continue;
-                };
-                for (folder, chunk, object) in by_pack.get(pack).into_iter().flatten() {
-                    self.pending.push(Event::ChunkVerified {
-                        folder: folder.clone(),
-                        chunk: chunk.clone(),
-                        object: object.clone(),
-                        storage: spec.name().to_string(),
-                    });
-                }
-            }
+            // on; packs bad or gone that the pool holds nowhere else drop.
+            let gone: Vec<String> = v.bad.iter().chain(&v.missing).cloned().collect();
+            let events = crate::storages3::disk_check_events(&pool, &view, &v.verified_keys, &gone);
+            self.f3.pending.extend(events);
             report.verified_objects = v.objects_checked;
             report.verified_bytes = v.bytes_checked;
             report.bad = v.bad;

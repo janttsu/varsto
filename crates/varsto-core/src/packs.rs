@@ -849,7 +849,7 @@ pub mod debug_registry {
         R.get_or_init(Default::default)
     }
 
-    pub(super) fn written(_members: &[(String, PackLoc)]) {
+    pub(crate) fn written(_members: &[(String, PackLoc)]) {
         #[cfg(debug_assertions)]
         if let Some((_, l)) = _members.first() {
             registry()

@@ -1006,6 +1006,7 @@ fn needs(targets: &[&str], rules: Option<Policy>) -> HashMap<FolderBin, DrainNee
             rules,
             targets: targets.iter().map(|s| s.to_string()).collect(),
             referenced: None,
+            replace: false,
         },
     )]
     .into()
@@ -1337,4 +1338,49 @@ fn gone_from_usb(
     dests: Option<&[DeviceBin]>,
 ) -> Vec<PackId> {
     delivered_packs(&env.view, &env.table, &FOLDER, "usb", held, &ME, dests).unwrap()
+}
+
+// ---- storage aliases ----------------------------------------------------------
+
+#[test]
+fn another_devices_name_for_a_storage_becomes_this_devices_name() {
+    let mut env = Env::new();
+    // ME calls the storage "nas"; OTHER calls the same one "home-nas" and
+    // has a storage "s3" of its own that is not this device's "s3".
+    let p = env.make_pack(&[2000]);
+    env.claim(OTHER, "home-nas", &p, 1);
+    env.verify(ME, "nas", &p);
+    let q = env.make_pack(&[3000]);
+    env.claim(OTHER, "s3", &q, 2);
+    let r = env.make_pack(&[4000]);
+    env.claim(ME, "s3", &r, 1);
+    let aliases: BTreeMap<DeviceBin, BTreeMap<String, String>> = [(
+        OTHER,
+        [
+            ("home-nas".to_string(), "nas".to_string()),
+            ("s3".to_string(), format!("s3@{}", &hex::encode(OTHER)[..8])),
+        ]
+        .into_iter()
+        .collect(),
+    )]
+    .into_iter()
+    .collect();
+    let before = env.view.clone();
+    assert!(before.is_held(&p.id, "home-nas") && !before.is_held(&p.id, "nas"));
+    let v = localize(before, &aliases);
+    // OTHER's claim on its "home-nas" is a copy on this device's "nas",
+    // merged with ME's verification there.
+    assert!(v.is_held(&p.id, "nas"));
+    assert!(!v.is_held(&p.id, "home-nas"));
+    let c = v.copies(&p.id);
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].storage, "nas");
+    assert!(c[0].independently_verified, "ME verified OTHER's copy");
+    // OTHER's "s3" is kept apart from this device's "s3".
+    assert!(!v.is_held(&q.id, "s3"));
+    assert!(v.is_held(&q.id, &format!("s3@{}", &hex::encode(OTHER)[..8])));
+    assert!(v.is_held(&r.id, "s3"));
+    // Without aliases nothing changes.
+    let same = localize(env.view.clone(), &BTreeMap::new());
+    assert_eq!(same, env.view);
 }

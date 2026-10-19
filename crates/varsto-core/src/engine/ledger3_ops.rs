@@ -34,6 +34,9 @@ pub(crate) struct Core3 {
     pub recovery: Option<crate::membership3::RecoveryKey>,
     /// Events of the next batch.
     pub pending: Vec<Event3>,
+    /// Replicas the vault's `replica` records name (`storages3_ops`):
+    /// their batches count in the replica scope.
+    pub replicas: BTreeMap<Id16, (String, crypto::VerifyingKey)>,
     /// Folder records (manifests, maps, trash) refused in this process,
     /// by kind.
     pub records_refused: std::sync::Mutex<crate::record::RecordsRefused>,
@@ -54,6 +57,7 @@ impl Core3 {
             tables: Default::default(),
             recovery: None,
             pending: Vec::new(),
+            replicas: BTreeMap::new(),
             records_refused: Default::default(),
         })
     }
@@ -78,7 +82,7 @@ pub(crate) fn key_for3_in(
             &[],
         )),
         KeyId::ShareLedger { folder, epoch } => members.granted.get(&folder)?.share_ledger(epoch),
-        // Replicas' batches: part B (f3-switch).
+        // Replicas: `Engine::key_for3` (it holds the replica key).
         _ => None,
     }
 }
@@ -102,7 +106,7 @@ pub(crate) fn scope3_in(m: &members3::Members3, device: &Id16, key_id: &str) -> 
                 Some(EventScope::Viewer(f))
             }
         }
-        // Replicas: part B (f3-switch).
+        // Replicas: `Engine::scope3` (it knows the enrolled ones).
         _ => None,
     }
 }
@@ -182,6 +186,13 @@ impl Engine {
 
     /// The key that opens a batch or checkpoint with `key_id`, if held.
     pub(crate) fn key_for3(&self, key_id: &str) -> Option<SecretKey> {
+        // Replicas' batches (`storages3_ops`).
+        if !self.vault.member && matches!(KeyId::parse(key_id), Some(KeyId::Replica)) {
+            return Some(crate::replica::replica_key(
+                self.root_key(),
+                &self.vault.vault_id,
+            ));
+        }
         key_for3_in(&self.epochs, &self.f3.members, self.vault.member, key_id)
     }
 
@@ -206,6 +217,14 @@ impl Engine {
         // platform its policy refuses) writes nothing that counts.
         if self.org_untrusted3(device) {
             return None;
+        }
+        // Replicas a `replica` record of a full device names.
+        if matches!(EventScope::of_key_id(key_id), Some(EventScope::Replica)) {
+            return self
+                .f3
+                .replicas
+                .contains_key(device)
+                .then_some(EventScope::Replica);
         }
         scope3_in(&self.f3.members, device, key_id)
     }
@@ -236,6 +255,10 @@ impl Engine {
         }
         for (f, d) in m.members.members.keys() {
             parts.push(f.to_vec());
+            parts.push(d.to_vec());
+        }
+        for d in self.f3.replicas.keys() {
+            parts.push(b"replica".to_vec());
             parts.push(d.to_vec());
         }
         for (f, st) in &m.registry.folders {
@@ -282,7 +305,9 @@ impl Engine {
                 log::debug!("ledger view not saved: {e:#}");
             }
         }
-        Ok(self.f3.ledger.finish(&cache.raw))
+        // Other devices' names for this device's storages become its own.
+        let view = self.f3.ledger.finish(&cache.raw);
+        Ok(storages3_ops::localized(view, &self.storage_aliases3()))
     }
 
     pub(crate) fn view3_path(&self) -> PathBuf {
@@ -322,12 +347,13 @@ impl Engine {
     /// The view replayed from every local batch, without the one kept in
     /// memory (tests: the kept view must equal it).
     pub fn view3_replayed(&self) -> Result<View3> {
-        self.f3.ledger.view_with_roles(
+        let view = self.f3.ledger.view_with_roles(
             |id| self.key_for3(id),
             |d, seq| self.keep3(d, seq),
             |d, id| self.scope3(d, id),
             &self.f3.members.registry,
-        )
+        )?;
+        Ok(storages3_ops::localized(view, &self.storage_aliases3()))
     }
 
     /// The pack-level view (`view3`), for tests and tools.
@@ -601,10 +627,8 @@ impl Engine {
     pub(crate) fn push_own_batches3(&mut self) -> Result<()> {
         let me = self.me3();
         let head = self.f3.ledger.head(&me);
+        // Transferrers carry the ledger too (F-048).
         for (spec, backend) in self.metadata_storages(false)? {
-            if spec.is_carrier() {
-                continue;
-            }
             let mut done = self.f3.ledger.pushed(spec.name()).min(head.seq);
             // A storage that lost the newest batch it was known to hold (or
             // a new storage under a known name) is filled from the start.
@@ -642,6 +666,14 @@ impl Engine {
     /// hot metadata storage. Returns the devices found forked.
     pub(crate) fn pull_ledger3(&mut self) -> Result<Vec<DeviceId>> {
         self.refresh_members3()?;
+        // Replicas the vault enrolled, and other devices' names for this
+        // device's storages (`storages3_ops`).
+        self.refresh_replicas3();
+        self.refresh_storage_aliases3();
+        // Folders' policies and placements (kinds 11 and 12).
+        if let Err(e) = self.refresh_folder_rules3() {
+            log::warn!("policies and placements not read: {e:#}");
+        }
         // Head exchange first (design section 8): what peers prove, and the
         // batches every storage withholds, fetched from the peers.
         let pull_utc = util::now_utc();
@@ -660,6 +692,9 @@ impl Engine {
                 keys.entry(m.device).or_insert(k);
             }
         }
+        for (d, (_, k)) in &self.f3.replicas {
+            keys.entry(*d).or_insert_with(|| k.clone());
+        }
         let mut forks = BTreeSet::new();
         let (mut malformed, mut refused) = (0u64, 0u64);
         let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
@@ -667,10 +702,9 @@ impl Engine {
         // listing starts after the head held here, so a storage that lists
         // nothing newer counts as showing that head.
         let mut views: Vec<crate::p2p::v3::heads::StorageView> = Vec::new();
+        // Transferrers carry the ledger too (F-048), but are no
+        // storage view for the rollback judge (they may lag).
         for (spec, backend) in self.metadata_storages(false)? {
-            if spec.is_carrier() {
-                continue;
-            }
             let mut shown: BTreeMap<Id16, u64> = BTreeMap::new();
             for (dev, pk) in &keys {
                 let head = self.f3.ledger.head(dev);
@@ -772,6 +806,7 @@ impl Engine {
             if let Some(storage) = super::verify::storage_identity(backend.as_ref())
                 .ok()
                 .and_then(|id| crate::record::kinds::parse_id16(&id))
+                .filter(|_| !spec.is_carrier())
             {
                 views.push(crate::p2p::v3::heads::StorageView {
                     storage,
@@ -935,10 +970,7 @@ impl Engine {
                 &key_id,
                 &self.keys.signer,
             )?;
-            for (spec, backend) in self.metadata_storages(false)? {
-                if spec.is_carrier() {
-                    continue;
-                }
+            for (_, backend) in self.metadata_storages(false)? {
                 for p in &parts {
                     backend.put_if_absent(
                         &ledger3::checkpoint::checkpoint_key(&me, p.seq, p.part),
@@ -960,8 +992,7 @@ impl Engine {
                 let upto = b.seq.saturating_sub(keep);
                 let prefix = format!("ledger/{}/", hex::encode(me));
                 for (spec, backend) in self.metadata_storages(false)? {
-                    if spec.is_carrier()
-                        || self.f3.ledger.pruned(spec.name()) >= upto
+                    if self.f3.ledger.pruned(spec.name()) >= upto
                         || !backend.exists(&ledger3::checkpoint::checkpoint_key(&me, b.seq, 0))?
                     {
                         continue;

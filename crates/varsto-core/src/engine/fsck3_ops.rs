@@ -308,7 +308,18 @@ impl Engine {
         };
         let mut queue = self.load_repair_queue();
         if opts.scan {
-            let f = self.fsck3(true)?;
+            let mut f = self.fsck3(true)?;
+            // Transferrers empty themselves on purpose: never repaired.
+            let carriers: BTreeSet<String> = self
+                .config
+                .storages
+                .iter()
+                .filter(|s| s.is_carrier())
+                .map(|s| s.name().to_string())
+                .collect();
+            f.missing_copies.retain(|i| !carriers.contains(&i.storage));
+            f.corrupt_copies.retain(|i| !carriers.contains(&i.storage));
+            f.wrong_length.retain(|i| !carriers.contains(&i.storage));
             let view = self.view3()?;
             repair::merge_damage(&mut queue, Self::fsck3_damage(&view, &f, now));
         } else {

@@ -43,6 +43,7 @@
 //!   between a step's writes and its deletions ([`moves::MoveRun::delete_dropped`]):
 //!   a pack is deleted only after its drop is in a pushed batch.
 
+pub mod aliases;
 pub mod carriers;
 pub mod copies;
 pub mod drain;
@@ -53,6 +54,7 @@ pub mod replica;
 #[cfg(test)]
 mod tests;
 
+pub use aliases::localize;
 pub use carriers::{
     carrier_delivered, carrier_destinations, carrier_destinations_held, carrier_targets,
     carrier_wants, delivered_packs, drop_events, ObjectHolders,
@@ -63,11 +65,12 @@ pub use copies::{
 };
 pub use drain::{drain_plan, shortfall, storage_usage, DrainItem, DrainNeeds, DrainPlan, Usage};
 pub use moves::{
-    leftovers, members_of_packs, objects_moving, plan_move, run_drain, run_move, Endpoint,
-    MoveOptions, MovePlan, MoveReport, MoveRun, PackAction, PackMember,
+    leftovers, members_of_packs, objects_moving, plan_move, run_drain, run_drain_with, run_move,
+    run_move_with, Endpoint, MoveOptions, MovePlan, MoveReport, MoveRun, PackAction, PackMember,
+    Sources,
 };
 pub use pools::{
-    book_sets, check_disk_packs, group_rule_met, pack_referenced, pool_pack_copies,
-    tidy_disk_packs, BookSets,
+    book_sets, check_disk_packs, disk_check_events, group_rule_met, pack_referenced,
+    pool_pack_copies, tidy_disk_packs, BookSets,
 };
 pub use replica::{check_replica_events, replicate, ReplicaReport, ReplicaRound};

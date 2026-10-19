@@ -12,14 +12,14 @@
 //! (`Engine::free_file`). A block whose readable copies nobody has verified
 //! yet is downloaded and hash-checked first.
 
-use super::{chunk_storage_key, Engine, FileEntry, FolderState};
+use super::{Engine, FileEntry, FolderState};
 use crate::advice::{
     self, add_cost, Advice, ApplyReport, Costs, FolderCost, StorageEstimate, Suggestion,
     COLD_IDLE_PREFIX, FREE_IDLE_PREFIX,
 };
 use crate::crypto;
 use crate::ids::ObjectName;
-use crate::ledger::{Event, LedgerView};
+use crate::ledger3::LedgerView as View3;
 use crate::manifest::FileState;
 use crate::policy::{self, ChunkFacts, Policy, PolicyState};
 use crate::price::{self, StoragePrice};
@@ -28,6 +28,40 @@ use crate::util;
 use crate::vault::FolderRecord;
 use anyhow::{bail, Result};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+/// The copies of one folder's blocks on the pack-level view (design
+/// section 4): the live places of a block and the storages holding each
+/// one's pack.
+pub(super) struct Copies3 {
+    view: View3,
+    table: Option<std::sync::Arc<std::sync::RwLock<crate::blockmap::MapTable>>>,
+}
+
+impl Copies3 {
+    /// (storage, the pack there was read back by some device, pack) of
+    /// every storage holding a live place of `object`.
+    fn of(&self, object: &ObjectName) -> Vec<(String, bool, crate::ledger3::PackId)> {
+        let (Some(t), Ok(obj)) = (&self.table, crate::storages3::object_bin(object)) else {
+            return Vec::new();
+        };
+        let t = t.read().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<(String, bool, crate::ledger3::PackId)> = Vec::new();
+        for p in self
+            .view
+            .block_places(&obj, &*t)
+            .into_iter()
+            .filter(|p| !p.marked)
+        {
+            for c in self.view.copies(&p.place.pack) {
+                match out.iter_mut().find(|(n, _, _)| *n == c.storage) {
+                    Some(e) => e.1 |= !c.verified_by.is_empty(),
+                    None => out.push((c.storage.clone(), !c.verified_by.is_empty(), p.place.pack)),
+                }
+            }
+        }
+        out
+    }
+}
 
 /// Decimal sizes for messages ("3.2 GB").
 pub(super) fn fmt_size(n: u64) -> String {
@@ -152,30 +186,31 @@ impl Engine {
     /// Every configured storage with its price and the monthly cost of what
     /// the ledger records on it.
     pub fn storage_estimates(&self) -> Result<Vec<StorageEstimate>> {
-        let view = self.view()?;
+        let view = self.view3()?;
         Ok(self.estimates_from(&view, &BTreeMap::new()))
     }
 
+    /// The copies of `rec`'s blocks as of now.
+    pub(super) fn copies3(&self, rec: &FolderRecord) -> Result<Copies3> {
+        Ok(Copies3 {
+            view: self.view3()?,
+            table: self.folder_table3(rec)?,
+        })
+    }
+
+    /// What each storage holds: the size classes of the packs claimed there.
     fn estimates_from(
         &self,
-        view: &LedgerView,
+        view: &View3,
         idle_on: &BTreeMap<String, u64>,
     ) -> Vec<StorageEstimate> {
-        let mut bytes: BTreeMap<&str, u64> = BTreeMap::new();
-        for rec in view.chunks.values() {
-            for (name, loc) in &rec.storages {
-                if !loc.claimed_by.is_empty() {
-                    *bytes.entry(name.as_str()).or_default() += rec.size;
-                }
-            }
-        }
         self.config
             .storages
             .iter()
             .map(|spec| {
                 let name = spec.name();
                 let price = self.storage_price(name);
-                let b = bytes.get(name).copied().unwrap_or(0);
+                let b = crate::storages3::storage_usage(view, name).bytes;
                 StorageEstimate {
                     name: name.to_string(),
                     kind: spec.kind().to_string(),
@@ -195,7 +230,6 @@ impl Engine {
             })
             .collect()
     }
-
     /// The placement advice for every attached folder: idle files, the
     /// built-in class estimates, the configured storages with their prices,
     /// the monthly cost per folder, and the suggestions that can be applied.
@@ -219,11 +253,12 @@ impl Engine {
             entries.push((rec, list));
         }
         let mut advice = advice::storage_advice(&files, idle_days, now_utc);
-        let view = self.view()?;
+        let view = self.view3()?;
         let places = self.places();
         let mut idle_on_total: BTreeMap<String, u64> = BTreeMap::new();
         for (rec, list) in &entries {
             let state = self.load_state(&rec.folder_id)?;
+            let copies = self.copies3(rec)?;
             let idle: HashSet<&str> = list
                 .iter()
                 .filter(|e| is_idle(e, idle_days, now_utc))
@@ -240,19 +275,16 @@ impl Engine {
                     idle_bytes += f.size;
                 }
                 for c in &f.chunks {
-                    if !seen.insert(&c.chunk) {
+                    if !seen.insert(&c.object) {
                         continue;
                     }
-                    let Some(r) = view.locate(&rec.folder_id, &c.chunk) else {
-                        continue;
-                    };
-                    for (name, loc) in &r.storages {
-                        if loc.claimed_by.is_empty() || !places.durable(name) {
+                    for (name, _, _) in copies.of(&c.object) {
+                        if !places.durable(&name) {
                             continue;
                         }
                         *on.entry(name.clone()).or_default() += c.size;
                         if f_idle {
-                            *idle_on.entry(name.clone()).or_default() += c.size;
+                            *idle_on.entry(name).or_default() += c.size;
                         }
                     }
                 }
@@ -289,7 +321,7 @@ impl Engine {
                 unpriced_storages: unpriced,
             });
             if let Some(s) =
-                self.free_idle_suggestion(rec, list, &state, &view, &places, idle_days, now_utc)
+                self.free_idle_suggestion(rec, list, &state, &copies, &places, idle_days, now_utc)
             {
                 advice.suggestions.push(s);
             }
@@ -311,33 +343,32 @@ impl Engine {
         &self,
         rec: &FolderRecord,
         file: &FileState,
-        view: &LedgerView,
+        copies: &Copies3,
         places: &Places,
         now_utc: i64,
     ) -> std::result::Result<u64, String> {
         let mut unverified = 0u64;
         let mut facts = Vec::new();
         for c in &file.chunks {
-            let Some(r) = view.locate(&rec.folder_id, &c.chunk) else {
+            let held = copies.of(&c.object);
+            if held.is_empty() {
                 return Err("not on any storage yet; sync first".to_string());
-            };
-            let readable: Vec<_> = r
-                .storages
+            }
+            let readable: Vec<_> = held
                 .iter()
-                .filter(|(n, l)| places.readable.contains(*n) && !l.claimed_by.is_empty())
+                .filter(|(n, _, _)| places.readable.contains(n))
                 .collect();
             if readable.is_empty() {
                 return Err("no copy on a storage this device reads without confirmation (cold storages and transferrers do not count); sync first".to_string());
             }
-            if readable.iter().all(|(_, l)| l.verified_by.is_empty()) {
+            if readable.iter().all(|(_, v, _)| !v) {
                 unverified += c.size;
             }
             facts.push(ChunkFacts {
-                copies: r
-                    .storages
+                copies: held
                     .iter()
-                    .filter(|(n, l)| !l.claimed_by.is_empty() && !places.carriers.contains(*n))
-                    .map(|(n, _)| {
+                    .filter(|(n, _, _)| !places.carriers.contains(n))
+                    .map(|(n, _, _)| {
                         let place = if n.starts_with("replica:") {
                             "replica".to_string()
                         } else {
@@ -392,9 +423,10 @@ impl Engine {
         rec: &FolderRecord,
         list: &[FileEntry],
         state: &FolderState,
-        view: &LedgerView,
+        copies: &Copies3,
         places: &Places,
         idle_days: i64,
+
         now_utc: i64,
     ) -> Option<Suggestion> {
         let (mut files, mut bytes, mut verify_first) = (0u64, 0u64, 0u64);
@@ -405,7 +437,7 @@ impl Engine {
             let Some(f) = state.files.get(&e.path) else {
                 continue;
             };
-            match self.placement_check(rec, f, view, places, now_utc) {
+            match self.placement_check(rec, f, copies, places, now_utc) {
                 Ok(unverified) => {
                     files += 1;
                     bytes += f.size;
@@ -414,11 +446,9 @@ impl Engine {
                         examples.push(e.path.clone());
                     }
                     for c in &f.chunks {
-                        if let Some(r) = view.locate(&rec.folder_id, &c.chunk) {
-                            for (n, l) in &r.storages {
-                                if !l.claimed_by.is_empty() && places.durable(n) {
-                                    holders.insert(n.clone());
-                                }
+                        for (n, _, _) in copies.of(&c.object) {
+                            if places.durable(&n) {
+                                holders.insert(n);
                             }
                         }
                     }
@@ -601,9 +631,10 @@ impl Engine {
         let now = util::now_utc();
         let list = self.list_files(&fid)?;
         let state = self.load_state(&rec.folder_id)?;
-        let view = self.view()?;
+        let copies = self.copies3(&rec)?;
         let places = self.places();
         let mut backends: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
+
         for spec in self.config.storages.clone() {
             if places.readable.contains(spec.name()) {
                 if let Ok(b) = self.open_spec(&spec) {
@@ -620,14 +651,14 @@ impl Engine {
             let Some(f) = state.files.get(&e.path) else {
                 continue;
             };
-            let checked =
-                self.placement_check(&rec, f, &view, &places, now)
-                    .and_then(|unverified| {
-                        if unverified == 0 {
-                            return Ok(0);
-                        }
-                        self.verify_copies(&rec, f, &view, &places, &backends)
-                    });
+            let checked = self
+                .placement_check(&rec, f, &copies, &places, now)
+                .and_then(|unverified| {
+                    if unverified == 0 {
+                        return Ok(0);
+                    }
+                    self.verify_copies(f, &copies, &places, &backends)
+                });
             match checked {
                 Ok(verified) => report.blocks_verified += verified,
                 Err(reason) => {
@@ -647,52 +678,65 @@ impl Engine {
         Ok(report)
     }
 
-    /// Download and hash-check every block of `file` whose readable copies
-    /// nobody has verified, recording the checks in the ledger.
+    /// Read back whole and hash-check the pack of every block of `file`
+    /// whose readable copies nobody has verified, recording the checks in
+    /// the ledger (`pack_verified`). Returns the blocks checked.
     fn verify_copies(
         &mut self,
-        rec: &FolderRecord,
         file: &FileState,
-        view: &LedgerView,
+        copies: &Copies3,
         places: &Places,
         backends: &BTreeMap<String, Box<dyn Storage>>,
     ) -> std::result::Result<u64, String> {
         let mut verified = 0u64;
+        let mut done: HashSet<(String, crate::ledger3::PackId)> = HashSet::new();
         for c in &file.chunks {
-            let Some(r) = view.locate(&rec.folder_id, &c.chunk) else {
+            let held = copies.of(&c.object);
+            if held.is_empty() {
                 return Err("not on any storage yet; sync first".to_string());
-            };
-            let holders: Vec<&String> = r
-                .storages
+            }
+            let readable: Vec<&(String, bool, crate::ledger3::PackId)> = held
                 .iter()
-                .filter(|(n, l)| places.readable.contains(*n) && !l.claimed_by.is_empty())
-                .map(|(n, _)| n)
+                .filter(|(n, _, _)| places.readable.contains(n))
                 .collect();
-            if r.storages
-                .iter()
-                .any(|(n, l)| holders.contains(&n) && !l.verified_by.is_empty())
-            {
+            if readable.iter().any(|(_, v, _)| *v) {
                 continue;
             }
-            let key = chunk_storage_key(&r.object);
-            let good = holders.into_iter().find(|n| {
+            if readable
+                .iter()
+                .any(|(n, _, p)| done.contains(&(n.clone(), *p)))
+            {
+                verified += 1;
+                continue;
+            }
+            let good = readable.into_iter().find(|(n, _, pack)| {
                 backends
-                    .get(*n)
-                    .and_then(|b| b.get(&key).ok().flatten())
-                    .is_some_and(|ct| ObjectName::from_bytes(&crypto::hash(&ct)) == r.object)
+                    .get(n)
+                    .and_then(|b| {
+                        b.get_bounded(
+                            &crate::packs::pack_key(&hex::encode(pack)),
+                            crate::storage::MAX_PACK,
+                        )
+                        .ok()
+                        .flatten()
+                    })
+                    .is_some_and(|bytes| crypto::hash(&bytes) == *pack)
             });
-            let Some(storage) = good else {
+            let Some((storage, _, pack)) = good else {
                 return Err(format!(
                     "no readable copy of block {} could be downloaded and matched its hash",
-                    r.object.short()
+                    c.object.short()
                 ));
             };
-            self.pending.push(Event::ChunkVerified {
-                folder: rec.folder_id.clone(),
-                chunk: c.chunk.clone(),
-                object: r.object.clone(),
-                storage: storage.clone(),
-            });
+            done.insert((storage.clone(), *pack));
+            self.f3
+                .pending
+                .push(crate::ledger3::events::Event::PackVerified(
+                    crate::ledger3::events::PackOn {
+                        storage: storage.clone(),
+                        pack: *pack,
+                    },
+                ));
             verified += 1;
         }
         Ok(verified)

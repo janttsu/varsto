@@ -246,7 +246,10 @@ pub fn newest_placement<'a>(
 // ----- storage-names (19) --------------------------------------------------
 
 /// The body of a `storage-names` record: the writer's local names of its
-/// storages and their identities.
+/// storages and their identities, and the shared settings of storages
+/// (quota, drain) as the writer knows them. **As built:** the shared
+/// settings travel here (format 2 kept them in records of their own); of
+/// the entries for one storage the newest `updated_utc` wins.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorageNamesBody {
     pub device: Id16,
@@ -254,6 +257,21 @@ pub struct StorageNamesBody {
     pub updated_utc: i64,
     /// (local name, identity), sorted by name.
     pub names: Vec<(String, String)>,
+    /// Shared settings by storage key, sorted by key.
+    pub settings: Vec<StorageSettingsEntry>,
+}
+
+/// The shared settings of one storage (`crate::storage_settings`), keyed
+/// by the storage's key: its identity, a pool's identity, or a keyed hash
+/// of its name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageSettingsEntry {
+    pub storage: String,
+    /// The device that set them.
+    pub by: Id16,
+    pub updated_utc: i64,
+    /// `StorageSettings` as JSON.
+    pub settings_json: Vec<u8>,
 }
 
 impl RecordBody for StorageNamesBody {
@@ -266,6 +284,20 @@ impl RecordBody for StorageNamesBody {
         for (n, i) in &self.names {
             short(n, "a storage name")?;
             short(i, "a storage identity")?;
+        }
+        if self.settings.len() > MAX_ITEMS
+            || self
+                .settings
+                .windows(2)
+                .any(|w| w[0].storage >= w[1].storage)
+        {
+            return Err("storage settings are not sorted and unique".into());
+        }
+        for e in &self.settings {
+            short(&e.storage, "a storage key")?;
+            if e.settings_json.len() > MAX_TEXT {
+                return Err("storage settings longer than 4096 bytes".into());
+            }
         }
         Ok(())
     }

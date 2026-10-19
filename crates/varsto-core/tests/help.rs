@@ -96,8 +96,6 @@ fn no_vault_and_locked() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (storages)"]
-// Waits for policy evaluation on the pack-level view.
 fn steps_follow_the_vault_as_it_grows() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -244,7 +242,7 @@ fn steps_follow_the_vault_as_it_grows() {
     assert_eq!(first(&h), "policy:docs", "{:?}", ids(&h));
     assert_eq!(h.steps[0].level, "urgent");
     assert!(
-        h.steps[0].how[0].render().contains("only 3 storages"),
+        h.steps[0].how[0].render().contains("only 2 storages"),
         "{:?}",
         h.steps[0].how
     );

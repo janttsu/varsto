@@ -10,9 +10,11 @@
 //! would write to a storage that does not hold it yet, and whose copies do
 //! not keep the folder's copy rules, it fetches the ciphertext (block cache,
 //! another storage of this device, or a peer), checks it against its name
-//! and under the folder key, writes it as packs, reads it back and records
-//! `chunk_stored` for the storage. The bytes stay in memory and are dropped
-//! after every group, which is sealed and pushed before the next one.
+//! and under the folder key, writes it as packs, reads them back, lists
+//! their places in a block-map record of its own and claims the packs
+//! (`pack_stored`) for the storage (format 3, spec section 77.9). The bytes
+//! stay in memory and are dropped after every group, which is sealed and
+//! pushed before the next one.
 //!
 //! Two devices that could forward the same folder take a lease on the
 //! storages first (`vault/forward-leases/<folder>/<slot>.json`, put-if-
@@ -433,8 +435,17 @@ impl Engine {
             if !self.state_path(&rec.folder_id).exists() {
                 continue; // not synced here yet: no file list to work from
             }
-            let view = self.view()?;
-            let candidates = self.forward_candidates(&rec, &view, &opened)?;
+            let view = self.view3()?;
+            let Some(table) = self.folder_table3(&rec)? else {
+                report.no_key.push(rec.name.clone());
+                continue;
+            };
+            // The map records the ledger announced: other forwarders' places.
+            self.pull_folder_records3(&members3::bin(&rec.folder_id)?, &view)?;
+            let candidates = {
+                let t = table.read().unwrap_or_else(|e| e.into_inner());
+                self.forward_candidates(&rec, &view, &t, &opened)?
+            };
             if candidates.is_empty() {
                 continue;
             }
@@ -442,20 +453,22 @@ impl Engine {
                 folder: rec.name.clone(),
                 ..Default::default()
             };
-            // Whose blocks these are, for the report and the activity line.
+            // Whose blocks these are (they hold them, by the `held` flags of
+            // their manifests), for the report and the activity line.
+            let held = self
+                .load_manifests3(&members3::bin(&rec.folder_id)?)
+                .held_index();
+            let me3 = self.me3();
             let mut holders: BTreeSet<String> = BTreeSet::new();
             for c in &candidates {
-                if let Some(r) = view
-                    .locate(&rec.folder_id, &c.chunk.chunk)
-                    .filter(|r| r.object == c.chunk.object)
-                {
-                    for d in r.devices.iter().filter(|d| **d != me) {
-                        holders.insert(self.device_name(d));
+                if let Ok(o) = crate::storages3::object_bin(&c.chunk.object) {
+                    for d in held.holders(&o).iter().filter(|d| **d != me3) {
+                        holders.insert(self.device_name(&DeviceId::from_bytes(d)));
                     }
                 }
             }
             folder.for_devices = holders.into_iter().collect();
-
+            let _ = &me;
             let now = util::now_utc();
             let lease_on: Vec<usize> = (0..opened.len())
                 .filter(|i| !opened[*i].0.is_data_only() && !failed.contains(i))
@@ -501,11 +514,12 @@ impl Engine {
                     folder.waiting_for_target += 1;
                     continue;
                 }
-                let record = view
-                    .locate(&rec.folder_id, &c.chunk.chunk)
-                    .filter(|r| r.object == c.chunk.object);
+                let standing = {
+                    let t = table.read().unwrap_or_else(|e| e.into_inner());
+                    super::data_moves::BlockStanding::of(&view, &t, &c.chunk.object)
+                };
                 let Some((source, ct)) =
-                    self.forward_source(&c.chunk, record, &opened, &mut peer_misses)
+                    self.forward_source(&c.chunk, &standing, &opened, &mut peer_misses)
                 else {
                     debug_assert_eq!(c.state, TransferState::WaitingForSource);
                     folder.unavailable += 1;
@@ -585,7 +599,8 @@ impl Engine {
     fn forward_candidates(
         &self,
         rec: &FolderRecord,
-        view: &LedgerView,
+        view: &crate::ledger3::LedgerView,
+        table: &crate::blockmap::MapTable,
         opened: &[(StorageSpec, Box<dyn Storage>)],
     ) -> Result<Vec<Transfer>> {
         let state = self.load_state(&rec.folder_id)?;
@@ -605,15 +620,13 @@ impl Engine {
                 if !seen.insert(c.object.clone()) {
                     continue;
                 }
-                let known = view
-                    .locate(&rec.folder_id, &c.chunk)
-                    .filter(|r| r.object == c.object);
+                let standing = super::data_moves::BlockStanding::of(view, table, &c.object);
                 let to: Vec<usize> = opened
                     .iter()
                     .enumerate()
                     .filter(|(_, (spec, _))| {
-                        !known.is_some_and(|r| r.storages.contains_key(spec.name()))
-                            && targets.wants(spec.name(), known)
+                        !standing.copies.contains(spec.name())
+                            && targets.wants(spec.name(), Some(&standing))
                     })
                     .map(|(i, _)| i)
                     .collect();
@@ -622,16 +635,12 @@ impl Engine {
                 }
                 let needed = match &rules {
                     Some(p) => {
-                        let facts = self.chunk_facts(&mut ctx, view, &rec.folder_id, &c.chunk);
+                        let facts = self.chunk_facts(&mut ctx, view, table, &c.object);
                         crate::policy::evaluate(&rec.name, p, &[facts], &BTreeMap::new(), &[], 0)
                             .state
                             == PolicyState::Violated
                     }
-                    None => !known.is_some_and(|r| {
-                        r.storages
-                            .iter()
-                            .any(|(n, l)| !l.claimed_by.is_empty() && !ctx.carriers.contains(n))
-                    }),
+                    None => !standing.copies.iter().any(|n| !ctx.carriers.contains(n)),
                 };
                 if needed {
                     out.push(Transfer {
@@ -654,7 +663,7 @@ impl Engine {
     fn forward_source(
         &self,
         c: &ChunkRef,
-        record: Option<&crate::ledger::ChunkRecord>,
+        standing: &super::data_moves::BlockStanding,
         opened: &[(StorageSpec, Box<dyn Storage>)],
         peer_misses: &mut u32,
     ) -> Option<(Endpoint, Vec<u8>)> {
@@ -672,12 +681,11 @@ impl Engine {
                 }
             }
         }
+        // A storage that holds a live place of it: read at its place (the
+        // pack layer finds it through the folder's map).
         let key = chunk_storage_key(&c.object);
         for (spec, backend) in opened {
-            let held = record
-                .and_then(|r| r.storages.get(spec.name()))
-                .is_some_and(|l| !l.claimed_by.is_empty());
-            if !held {
+            if !standing.copies.contains(spec.name()) {
                 continue;
             }
             if let Ok(Some(ct)) = crate::storage::guarded(&key, || {
@@ -692,7 +700,8 @@ impl Engine {
     }
 
     /// Write a group of fetched blocks as packs to each target, read each
-    /// back, record the copies and seal them into a batch.
+    /// pack back, list their places in this device's map record of the
+    /// folder, claim them and seal it all into a batch.
     fn write_forwarded(
         &mut self,
         rec: &FolderRecord,
@@ -708,6 +717,18 @@ impl Engine {
         debug_assert!(held
             .iter()
             .all(|t| t.state == TransferState::Held(HeldAt::Memory) && t.source.is_some()));
+        let info: HashMap<crate::ledger3::ObjectBin, crate::blockmap::ChunkInfo> = held
+            .iter()
+            .filter_map(|t| {
+                let o = crate::storages3::object_bin(&t.chunk.object).ok()?;
+                let c = crate::storages3::object_bin(&ObjectName::from_bytes(
+                    &t.chunk.chunk.as_bytes(),
+                ))
+                .ok()?;
+                Some((o, (c, t.chunk.size as u32, t.chunk.epoch)))
+            })
+            .collect();
+        let mut per_storage: Vec<(String, Vec<crate::packs::NewPack>)> = Vec::new();
         for (i, (spec, backend)) in opened.iter().enumerate() {
             if failed.contains(&i) {
                 continue;
@@ -725,6 +746,9 @@ impl Engine {
                     (t.chunk.object.as_str().to_string(), t.bytes.as_slice())
                 })
                 .collect();
+            // Packs written earlier in this process by anything else stay
+            // out of this record.
+            let _ = backend.take_new_packs();
             if let Err(e) = backend.put_pack(&members) {
                 report
                     .storages_failed
@@ -732,38 +756,54 @@ impl Engine {
                 failed.insert(i);
                 continue;
             }
-            for k in mine {
-                let t = &mut held[k];
-                let key = chunk_storage_key(&t.chunk.object);
-                let back = crate::storage::guarded(&key, || backend.get(&key));
-                if !matches!(&back, Ok(Some(b)) if ObjectName::from_bytes(&crypto::hash(b)) == t.chunk.object)
-                {
+            // Each new pack read back whole and checked against its id
+            // before it is claimed.
+            let mut good = Vec::new();
+            for p in backend.take_new_packs() {
+                let mut id = [0u8; 32];
+                let intact = hex::decode_to_slice(&p.pack, &mut id).is_ok()
+                    && backend
+                        .get_bounded(&crate::packs::pack_key(&p.pack), crate::storage::MAX_PACK)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|b| crypto::hash(&b) == id);
+                if !intact {
                     log::warn!(
                         storage = spec.name(),
-                        object = t.chunk.object.short();
-                        "forward: the storage did not return the block intact; not recorded"
+                        pack = p.pack.as_str();
+                        "forward: the storage did not return the pack intact; not recorded"
                     );
                     continue;
                 }
-                self.pending.push(Event::ChunkStored {
-                    folder: rec.folder_id.clone(),
-                    chunk: t.chunk.chunk.clone(),
-                    object: t.chunk.object.clone(),
-                    storage: spec.name().to_string(),
-                    size: t.bytes.len() as u64,
-                    pack: None,
-                });
-                *folder
-                    .to_storages
-                    .entry(spec.name().to_string())
-                    .or_default() += 1;
-                if t.state != TransferState::Recorded {
-                    t.state = TransferState::Recorded;
-                    folder.blocks += 1;
-                    folder.bytes += t.bytes.len() as u64;
+                for (o, _) in &p.members {
+                    let Some(k) = mine
+                        .iter()
+                        .copied()
+                        .find(|k| held[*k].chunk.object.as_str() == o.as_str())
+                    else {
+                        continue;
+                    };
+                    *folder
+                        .to_storages
+                        .entry(spec.name().to_string())
+                        .or_default() += 1;
+                    let t = &mut held[k];
+                    if t.state != TransferState::Recorded {
+                        t.state = TransferState::Recorded;
+                        folder.blocks += 1;
+                        folder.bytes += t.bytes.len() as u64;
+                    }
                 }
+                good.push(p);
+            }
+            if !good.is_empty() {
+                per_storage.push((spec.name().to_string(), good));
             }
         }
+        let written = crate::blockmap::written_packs(&per_storage, &|o| info.get(o).copied())?;
+        let view = self.view3()?;
+        let epoch = self.folder_keys(rec)?.epoch;
+        self.publish_map3(&members3::bin(&rec.folder_id)?, epoch, &written, &view)?;
         // Sealed and pushed now: a run that stops later keeps this group,
         // and other devices see the copies.
         self.commit_batch()?;

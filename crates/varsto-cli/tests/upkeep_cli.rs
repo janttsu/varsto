@@ -94,7 +94,6 @@ fn verify_commands() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (placement): storage estimates and advice count the format-2 view; verification itself is `verify_commands`"]
 fn verify_price_and_advice_commands() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -282,7 +281,6 @@ fn scrub_commands() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (quotas and data moves)"]
 fn quota_and_drain_commands() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

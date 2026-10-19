@@ -105,9 +105,9 @@ fn phone(lab: &Lab) -> (Engine, String) {
 
 /// A laptop that joins with the shared storage, adds the bucket and
 /// attaches the camera folder with selective sync.
-fn laptop(lab: &Lab, name: &str, key: &str) -> Engine {
+fn laptop(lab: &Lab, name: &str, key: &str, owner: &mut Engine) -> Engine {
     let home = lab.p(&format!("{name}-home"));
-    let mut l = Engine::join(&home, name, PASS, key, lab.hub()).unwrap();
+    let mut l = common::join_approved(&home, name, PASS, key, lab.hub(), owner);
     l.chunker = ChunkerParams::SMALL;
     l.add_storage(lab.bucket()).unwrap();
     l.attach_folder("camera", &lab.p(&format!("{name}-camera")), true)
@@ -157,11 +157,10 @@ fn leases(root: &Path) -> usize {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (forwarding)"]
 fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
     let lab = Lab::new();
     let (mut phone, key) = phone(&lab);
-    let mut laptop = laptop(&lab, "laptop", &key);
+    let mut laptop = laptop(&lab, "laptop", &key, &mut phone);
     assert_eq!(
         common::object_count(&lab.p("bucket")),
         0,
@@ -222,18 +221,21 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
 
     // The copies are the laptop's claims, and its own read-back is not a
     // verification by another device.
-    let view = laptop.view().unwrap();
-    let mut claimed = 0;
-    for rec in view.chunks.values() {
-        if let Some(loc) = rec.storages.get("bucket") {
-            claimed += 1;
-            assert_eq!(
-                loc.claimed_by.iter().collect::<Vec<_>>(),
-                vec![laptop.device_id()]
-            );
-            assert!(!loc.independently_verified("bucket"));
+    let view = laptop.ledger_view3().unwrap();
+    let me: [u8; 16] = hex::decode(laptop.device_id().as_str())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let packs = laptop.packs_on_storage3("bucket").unwrap();
+    assert!(!packs.is_empty());
+    for id in packs.keys() {
+        let id: [u8; 32] = hex::decode(id).unwrap().try_into().unwrap();
+        for c in view.copies(&id) {
+            assert_eq!(c.claimed_by, vec![me]);
+            assert!(!c.independently_verified);
         }
     }
+    let claimed = laptop.objects_on_storage3("bucket").unwrap().len();
     assert_eq!(claimed as u64, waiting);
 
     // Nothing is left to do.
@@ -242,7 +244,14 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
 
     // Another device reads the pictures from the bucket alone, with the
     // phone offline: they are complete and intact there.
-    let mut desk = Engine::join(&lab.p("desk-home"), "desk", PASS, &key, lab.hub()).unwrap();
+    let mut desk = common::join_approved(
+        &lab.p("desk-home"),
+        "desk",
+        PASS,
+        &key,
+        lab.hub(),
+        &mut phone,
+    );
     desk.add_storage(lab.bucket()).unwrap();
     desk.attach_folder("camera", &lab.p("desk-camera"), false)
         .unwrap();
@@ -255,19 +264,15 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
     }
     // The phone learns of the copies too.
     phone.sync(None).unwrap();
-    let pv = phone.view().unwrap();
-    assert!(pv
-        .chunks
-        .values()
-        .any(|r| r.storages.contains_key("bucket")));
+    let pv = phone.ledger_view3().unwrap();
+    assert!(pv.packs.keys().any(|p| pv.is_held(p, "bucket")));
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (forwarding)"]
 fn turned_off_it_forwards_nothing() {
     let lab = Lab::new();
     let (mut phone, key) = phone(&lab);
-    let mut laptop = laptop(&lab, "laptop", &key);
+    let mut laptop = laptop(&lab, "laptop", &key, &mut phone);
     let _served = serve(&mut phone, &mut [&mut laptop]);
     laptop.set_forwarding(false).unwrap();
     let r = laptop.forward(&ForwardOptions::manual()).unwrap();
@@ -279,7 +284,6 @@ fn turned_off_it_forwards_nothing() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (forwarding)"]
 fn a_locked_strongroom_is_not_forwarded() {
     let lab = Lab::new();
     let (mut phone, key) = Engine::init(&lab.p("phone-home"), "phone", PASS).unwrap();
@@ -327,12 +331,11 @@ fn a_locked_strongroom_is_not_forwarded() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (forwarding)"]
 fn two_laptops_with_one_bucket_write_every_block_once() {
     let lab = Lab::new();
     let (mut phone, key) = phone(&lab);
-    let mut one = laptop(&lab, "laptop1", &key);
-    let mut two = laptop(&lab, "laptop2", &key);
+    let mut one = laptop(&lab, "laptop1", &key, &mut phone);
+    let mut two = laptop(&lab, "laptop2", &key, &mut phone);
     let _served = serve(&mut phone, &mut [&mut one, &mut two]);
 
     // The first stops after one block (its budget) and keeps the lease.

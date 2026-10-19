@@ -189,7 +189,7 @@ impl Engine {
         (ObjectName::from_bytes(&crypto::hash(&bytes)) == *object).then_some(bytes)
     }
 
-    fn cache_has(&self, object: &ObjectName) -> bool {
+    pub(super) fn cache_has(&self, object: &ObjectName) -> bool {
         cache_path(&self.block_cache_root(), object).is_file()
     }
 

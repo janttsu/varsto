@@ -437,7 +437,6 @@ fn a_damaged_file_without_a_good_copy_is_left_in_place() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (disks and pools): the scrub finds the bad pack on the disk, but PoolStorage::drop_bad_copy leaves its file there"]
 fn a_bad_copy_on_a_pool_disk_is_dropped_and_written_again() {
     let lab = Lab::new();
     let mounts = lab.p("mounts");
@@ -494,9 +493,10 @@ fn a_bad_copy_on_a_pool_disk_is_dropped_and_written_again() {
     assert!(!victim.exists(), "the bad copy is dropped from the disk");
     let rep = a.repair(&RepairOptions::service()).unwrap();
     assert_eq!(rep.repaired.len(), 1, "{rep:?}");
-    // The block is written again in a new pack (other padding, so another
-    // id); the damaged pack is gone.
-    assert!(!victim.exists());
+    // The pack is copied again, whole and under its id, from the storage
+    // that still holds it; the damaged bytes are gone.
+    assert!(victim.exists());
+    assert_ne!(fs::read(victim).unwrap(), bytes);
     let packs: Vec<PathBuf> = walkdir::WalkDir::new(d1.join(pool::DATA_DIR).join("packs"))
         .into_iter()
         .flatten()

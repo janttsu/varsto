@@ -233,7 +233,6 @@ fn pack_set(root: &Path) -> BTreeSet<(String, Vec<u8>)> {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (remote storages): a storage added after the first gets no copy of the membership records, so a device cannot join through it alone"]
 fn a_target_set_gets_one_pack_under_one_id_on_every_storage() {
     let t = tempfile::tempdir().unwrap();
     let (h1, h2, cold, docs) = (
@@ -293,7 +292,7 @@ fn a_target_set_gets_one_pack_under_one_id_on_every_storage() {
         let out = t.path().join(format!("out{i}"));
         let mut b = common::join_approved(
             &t.path().join(format!("b{i}")),
-            "phone",
+            &format!("phone{i}"),
             PASS,
             &key,
             dir(if i == 0 { "hot-one" } else { "hot-two" }, only),

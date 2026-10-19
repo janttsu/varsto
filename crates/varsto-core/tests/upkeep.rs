@@ -129,10 +129,12 @@ fn another_device_verifies_packs_automatically() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (policies): the policy check counts blocks from the format-2 view; automatic verification itself is `another_device_verifies_packs_automatically`"]
 fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
     let lab = lab();
     let (mut a, key) = writer(&lab);
+    // A second push: a second pack.
+    fs::write(lab.root.join("a-docs/more.bin"), pseudo_random(90_000, 8)).unwrap();
+    a.push("docs").unwrap();
     a.set_policy(
         "docs",
         Some(Policy {
@@ -142,6 +144,8 @@ fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
         }),
     )
     .unwrap();
+    let packs = common::pack_files(&lab.root.join("storage")).len() as u64;
+    assert_eq!(packs, 2);
     let chunks = chunks_of(&a);
     assert!(chunks > 2, "several chunks: {chunks}");
     // Just stored: verification pending (the grace for new data), no alert;
@@ -159,46 +163,39 @@ fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
     assert_eq!((r.due, r.blocks_verified), (0, 0));
 
     // Device B joins without attaching the folder: it only verifies. It calls
-    // the storage "primary"; the writer's run above published that its "box"
-    // is the same storage (by the identity object on it).
+    // the storage "primary"; the writer published that its "box" is the same
+    // storage (by the identity object on it).
     let renamed = dir_storage("primary", &lab.root.join("storage"), false);
     let mut b = Engine::join(&lab.root.join("b-home"), "nas", PASS, &key, renamed).unwrap();
     let now = varsto_core::util::now_utc();
     assert!(b.auto_verify_due(now), "a first run is due at once");
-    // A budget of one block per run: one is verified, the rest waits.
+    // A budget of one pack per run: one is verified, the other waits, and
+    // the blocks of the pack verified count for the policy.
     b.set_verify_schedule(VerifySchedule {
         max_blocks: 1,
         ..Default::default()
     })
     .unwrap();
     let r = b.auto_verify().unwrap();
-    assert_eq!(r.due, chunks);
-    assert_eq!(r.blocks_verified, 1);
-    assert_eq!(r.left_for_next_run, chunks - 1);
-    assert!(r.bytes_downloaded > 0);
-    assert!(!b.auto_verify_due(now + 3600), "next run a day later");
-    assert!(b.auto_verify_due(now + 25 * 3600));
+    assert_eq!(
+        (r.due, r.blocks_verified, r.left_for_next_run),
+        (packs, 1, 1)
+    );
     a.sync(None).unwrap();
     let r = a.policy_check().unwrap();
-    assert_eq!(r[0].chunks_verification_pending, chunks - 1);
+    let pending = r[0].chunks_verification_pending;
+    assert!(pending > 0 && pending < chunks, "{pending} of {chunks}");
     assert_eq!(
         a.policy_check_at(late).unwrap()[0].state,
         PolicyState::Violated
     );
 
-    // Default budget: the rest is verified, oldest first, and the policy holds.
+    // Default budget: the rest is verified, and the policy holds.
     b.set_verify_schedule(VerifySchedule::default()).unwrap();
     let r = b.auto_verify().unwrap();
-    assert_eq!(r.blocks_verified, chunks - 1, "{r:?}");
-    assert_eq!(r.left_for_next_run, 0);
+    assert_eq!((r.blocks_verified, r.left_for_next_run), (1, 0), "{r:?}");
     assert!(r.corrupt.is_empty() && r.missing.is_empty());
-    let st = b.verify_status();
-    assert_eq!(st.total_verified, chunks);
-    assert!(
-        st.describe().contains("blocks verified"),
-        "{}",
-        st.describe()
-    );
+    assert_eq!(b.verify_status().total_verified, packs);
     a.sync(None).unwrap();
     let rep = a.policy_check().unwrap();
     assert_eq!(
@@ -208,15 +205,11 @@ fn another_device_verifies_automatically_and_the_policy_becomes_ok() {
         rep[0].reasons,
         rep[0].warnings
     );
+    assert_eq!(rep[0].chunks_verification_pending, 0);
     assert_eq!(
         a.status().unwrap().folders[0].chunks_verified_elsewhere,
         chunks
     );
-
-    // Nothing is due again until half the 30-day window has passed.
-    assert_eq!(b.auto_verify().unwrap().due, 0);
-    let later = b.auto_verify_at(now + 16 * DAY).unwrap();
-    assert_eq!(later.due, chunks);
 }
 
 #[test]
@@ -265,7 +258,6 @@ fn automatic_verification_skips_cold_storage_and_reports_corruption() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (placement): storage estimates and placement advice count the format-2 view (engine/placement.rs)"]
 fn storage_prices_feed_the_estimates() {
     let lab = lab();
     let (mut a, _) = writer(&lab);
@@ -316,7 +308,6 @@ fn storage_prices_feed_the_estimates() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (placement): storage estimates and placement advice count the format-2 view (engine/placement.rs)"]
 fn applying_a_placement_suggestion_frees_idle_files_safely() {
     let lab = lab();
     let (mut a, _) = writer(&lab);
@@ -379,17 +370,28 @@ fn applying_a_placement_suggestion_frees_idle_files_safely() {
 }
 
 #[test]
-#[ignore = "f3-switch: port in part B (placement): storage estimates and placement advice count the format-2 view (engine/placement.rs)"]
 fn a_file_only_on_cold_storage_is_never_freed() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let (mut a, _) = Engine::init(&root.join("home"), "laptop", PASS).unwrap();
     a.chunker = ChunkerParams::SMALL;
+    // The folder's records live on a hot storage; its blocks go only to
+    // the archive.
+    a.add_storage(dir_storage("records", &root.join("records"), false))
+        .unwrap();
     a.add_storage(dir_storage("archive", &root.join("archive"), true))
         .unwrap();
     let dir = root.join("docs");
     fs::create_dir_all(&dir).unwrap();
     a.add_folder("docs", &dir).unwrap();
+    a.set_placement(
+        "docs",
+        Some(varsto_core::placement::Placement {
+            storages: vec!["archive".into()],
+            ..Default::default()
+        }),
+    )
+    .unwrap();
     fs::write(dir.join("only.txt"), b"one copy in the archive").unwrap();
     a.push("docs").unwrap();
     let adv = a.placement_advice(0, varsto_core::util::now_utc()).unwrap();

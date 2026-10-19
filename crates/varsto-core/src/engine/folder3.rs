@@ -166,13 +166,11 @@ impl Engine {
         util::write_json(&p, &StoredManifests::of(m))
     }
 
-    /// The hot metadata storages records are written to and read from.
+    /// The hot metadata storages records are written to and read from
+    /// (transferrers too: they carry the records between devices that are
+    /// never online together, F-048).
     pub(super) fn record_storages3(&self) -> Result<OpenStorages> {
-        Ok(self
-            .metadata_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect())
+        self.metadata_storages(false)
     }
 
     /// Read the map and manifest records of `folder` that the view

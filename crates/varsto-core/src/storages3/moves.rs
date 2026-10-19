@@ -84,6 +84,10 @@ pub enum PackAction {
         on_destination: bool,
         /// The pack's live members (all in scope).
         members: Vec<PackMember>,
+        /// Of those, the members the destination lacks (no live place in
+        /// a pack it holds): what a rebuild writes when the pack itself
+        /// cannot be read.
+        missing: Vec<PackMember>,
     },
     /// Live members outside the scope remain: `moving` go into new packs on
     /// the destination (members the destination lacks only), `staying` into
@@ -174,6 +178,7 @@ pub fn plan_move(
                 copy: !on_destination && !missing.is_empty(),
                 on_destination,
                 members: live.clone(),
+                missing,
             });
         } else {
             plan.actions.push(PackAction::Rebuild {
@@ -245,6 +250,18 @@ pub struct MoveReport {
     pub unavailable: Vec<(PackId, String)>,
     pub disks_used: Vec<String>,
     pub stopped_early: bool,
+    /// The source packs by what happened to them (for the caller's
+    /// reports in blocks): copied whole to the destination, rebuilt into
+    /// new packs, dropped from the source, waiting for room or for a
+    /// disk group's places.
+    pub copied_packs: Vec<PackId>,
+    pub rebuilt_packs: Vec<PackId>,
+    pub dropped_packs: Vec<PackId>,
+    pub waiting_room: Vec<PackId>,
+    pub waiting_place: Vec<PackId>,
+    /// Blocks in scope that found no room on the destination and went into
+    /// the remainder on the source (split moves).
+    pub kept_back: Vec<ObjectBin>,
 }
 
 /// The result of a run: what the caller publishes and pushes, and then
@@ -275,6 +292,21 @@ impl MoveRun {
         }
         Ok(n)
     }
+
+    /// Like [`MoveRun::delete_dropped`], going on past a pack that cannot
+    /// be deleted now (garbage collection deletes it later: the view shows
+    /// it dropped). Returns how many were deleted and the failures.
+    pub fn delete_dropped_each(&self, source: &dyn Storage) -> (u64, Vec<(PackId, String)>) {
+        let mut n = 0;
+        let mut failed = Vec::new();
+        for p in &self.dropped {
+            match source.delete(&pack_key(&hex::encode(p))) {
+                Ok(()) => n += 1,
+                Err(e) => failed.push((*p, format!("{e:#}"))),
+            }
+        }
+        (n, failed)
+    }
 }
 
 /// Packs the ledger shows dropped from `from` that are still there:
@@ -296,6 +328,31 @@ pub fn leftovers(view: &LedgerView, from: &str, source: &dyn Storage) -> Result<
     Ok(out)
 }
 
+/// Where a run reads what it moves besides the source storage.
+pub struct Sources<'a> {
+    /// The whole pack from another storage that holds it (whole-pack
+    /// copies are readable from any storage the view says holds the pack);
+    /// checked here against its id.
+    pub pack: &'a dyn Fn(&PackId) -> Option<Vec<u8>>,
+    /// The bytes of one member from elsewhere (the files on this device,
+    /// the block cache); checked here against the object name.
+    pub member: &'a dyn Fn(&PackMember) -> Option<Vec<u8>>,
+    /// The source itself may be read (not cold, or the cold read is
+    /// confirmed).
+    pub read_source: bool,
+}
+
+impl Sources<'_> {
+    /// The source storage alone.
+    pub fn source_only() -> Sources<'static> {
+        Sources {
+            pack: &|_| None,
+            member: &|_| None,
+            read_source: true,
+        }
+    }
+}
+
 fn read_pack(ep: &Endpoint, pack: &PackId) -> Result<Option<Vec<u8>>> {
     ep.storage
         .get_bounded(&pack_key(&hex::encode(pack)), MAX_PACK)
@@ -314,6 +371,11 @@ fn verified_on(ep: &Endpoint, pack: &PackId, opts: &MoveOptions) -> Result<bool>
         .is_some_and(|b| crate::crypto::hash(&b) == *pack))
 }
 
+/// A pool with no disk attached: the pack waits like one without room.
+fn no_disk(e: &anyhow::Error) -> bool {
+    matches!(pool_error(e), Some(PoolError::NoDiskAttached { .. }))
+}
+
 fn no_room(e: &anyhow::Error) -> bool {
     matches!(pool_error(e), Some(PoolError::NoRoom { .. }))
 }
@@ -329,22 +391,65 @@ fn hold_of(e: &anyhow::Error) -> Hold {
     Hold::Unavailable(format!("{e:#}"))
 }
 
+/// The bytes of a pack's members by object name.
+type MemberBytes = HashMap<ObjectBin, Vec<u8>>;
+
+/// A pack's bytes check out: a size class, hashing to its id, and every
+/// member in `check` hashing to its object name.
+fn pack_checks(bytes: &[u8], pack: &PackId, check: &[&PackMember]) -> bool {
+    if class_of_len(bytes.len() as u64).is_none() || crate::crypto::hash(bytes) != *pack {
+        return false;
+    }
+    check.iter().all(|m| {
+        let (s, e) = (
+            m.place.offset as usize,
+            m.place.offset as usize + m.place.len as usize,
+        );
+        e <= bytes.len() && crate::crypto::hash(&bytes[s..e]) == m.object
+    })
+}
+
 struct Runner<'a> {
     src: &'a Endpoint<'a>,
     dst: &'a Endpoint<'a>,
+    sources: &'a Sources<'a>,
     opts: &'a MoveOptions,
     run: MoveRun,
 }
 
 impl Runner<'_> {
-    /// Build packs from `members` of `bytes` (a whole source pack) and
-    /// write them to `to`, checking each. Splits in halves when a pool
-    /// disk has no room and `split` is set. The written packs are
-    /// returned; nothing is recorded in the run yet.
+    /// Build packs from `members` (their bytes in `bytes`) and write them
+    /// to `to`, checking each. Splits in halves when a pool disk has no
+    /// room and `split` is set. The written packs are returned; nothing is
+    /// recorded in the run yet.
+    /// Like [`Runner::build_to`] with halving, but a member that finds no
+    /// room is left out instead of failing the lot: (packs written, members
+    /// left).
+    fn build_partial(
+        &mut self,
+        to: &Endpoint,
+        bytes: &MemberBytes,
+        members: &[PackMember],
+    ) -> std::result::Result<(Vec<WrittenPack>, Vec<PackMember>), Hold> {
+        match self.build_to(to, bytes, members, false) {
+            Ok(m) => Ok((m, Vec::new())),
+            Err(Hold::NoRoom(_)) if members.len() > 1 => {
+                let (a, b) = members.split_at(members.len() / 2);
+                let (mut made, mut left) = self.build_partial(to, bytes, a)?;
+                let (made_b, left_b) = self.build_partial(to, bytes, b)?;
+                made.extend(made_b);
+                left.extend(left_b);
+                Ok((made, left))
+            }
+            Err(Hold::NoRoom(_)) => Ok((Vec::new(), members.to_vec())),
+            Err(w) => Err(w),
+        }
+    }
+
     fn build_to(
         &mut self,
         to: &Endpoint,
-        bytes: &[u8],
+        bytes: &MemberBytes,
         members: &[PackMember],
         split: bool,
     ) -> std::result::Result<Vec<WrittenPack>, Hold> {
@@ -361,18 +466,19 @@ impl Runner<'_> {
         for mut idx in packs::first_fit_decreasing(&sizes, packs::top_class(target)) {
             idx.sort_unstable(); // the order the pack had
             let group: Vec<&PackMember> = idx.iter().map(|&i| &members[i]).collect();
-            let named: Vec<(String, &[u8])> = group
-                .iter()
-                .map(|m| {
-                    let s = m.place.offset as usize;
-                    (hex::encode(m.object), &bytes[s..s + m.place.len as usize])
-                })
-                .collect();
+            let mut named: Vec<(String, &[u8])> = Vec::with_capacity(group.len());
+            for m in &group {
+                let b = bytes.get(&m.object).ok_or_else(|| {
+                    Hold::Unavailable("a member of the pack could not be read".into())
+                })?;
+                named.push((hex::encode(m.object), b.as_slice()));
+            }
             let (id_hex, data, locs) = packs::build(&named, target);
             let mut id = [0u8; 32];
             hex::decode_to_slice(&id_hex, &mut id).map_err(|e| Hold::Unavailable(e.to_string()))?;
             match to.storage.put_if_absent(&pack_key(&id_hex), &data) {
                 Ok(_) => {}
+                Err(e) if no_disk(&e) => return Err(Hold::NoRoom(0)),
                 Err(e) if no_room(&e) && split && group.len() > 1 => {
                     let owned: Vec<PackMember> = group.iter().map(|m| **m).collect();
                     let (a, b) = owned.split_at(owned.len() / 2);
@@ -399,6 +505,8 @@ impl Runner<'_> {
             }
             let class = class_of_len(data.len() as u64)
                 .ok_or_else(|| Hold::Unavailable("a built pack is not a size class".into()))?;
+            packs::debug_registry::written(&locs);
+            self.note_pool_disks(to, &id);
             self.run.report.packs_built += 1;
             self.run.report.bytes_written += data.len() as u64;
             out.push(WrittenPack {
@@ -422,30 +530,65 @@ impl Runner<'_> {
         Ok(out)
     }
 
-    /// Read a source pack whole and check it: its length is a size class,
-    /// its bytes hash to its id, and every member in `check` hashes to its
-    /// object name.
+    /// Read a source pack whole and check it (a size class, its bytes
+    /// hashing to its id, every member in `check` to its object name):
+    /// from another storage that holds it, or from the source when it may
+    /// be read.
     fn read_checked(
         &self,
         pack: &PackId,
         check: &[&PackMember],
     ) -> std::result::Result<Vec<u8>, Hold> {
+        if let Some(b) = (self.sources.pack)(pack) {
+            if pack_checks(&b, pack, check) {
+                return Ok(b);
+            }
+        }
+        if !self.sources.read_source {
+            return Err(Hold::Unavailable(format!(
+                "the only copy to read is on cold storage {}: confirm the cold read to move it",
+                self.src.name
+            )));
+        }
         let bytes = read_pack(self.src, pack)
             .map_err(|e| hold_of(&e))?
             .ok_or_else(|| Hold::Unavailable("not on the source".into()))?;
-        if class_of_len(bytes.len() as u64).is_none() || crate::crypto::hash(&bytes) != *pack {
+        if !pack_checks(&bytes, pack, check) {
             return Err(Hold::Corrupt);
         }
-        for m in check {
-            let (s, e) = (
-                m.place.offset as usize,
-                m.place.offset as usize + m.place.len as usize,
-            );
-            if e > bytes.len() || crate::crypto::hash(&bytes[s..e]) != m.object {
-                return Err(Hold::Corrupt);
+        Ok(bytes)
+    }
+
+    /// The bytes of `members` of a pack: sliced from the pack when it can
+    /// be read whole, else each from the member source (checked against
+    /// its name).
+    fn member_bytes(
+        &self,
+        pack: &PackId,
+        members: &[&PackMember],
+    ) -> std::result::Result<MemberBytes, Hold> {
+        let mut out = MemberBytes::new();
+        match self.read_checked(pack, members) {
+            Ok(bytes) => {
+                for m in members {
+                    let s = m.place.offset as usize;
+                    out.insert(m.object, bytes[s..s + m.place.len as usize].to_vec());
+                }
+                Ok(out)
+            }
+            Err(Hold::Corrupt) => Err(Hold::Corrupt),
+            Err(why) => {
+                for m in members {
+                    match (self.sources.member)(m) {
+                        Some(b) if crate::crypto::hash(&b) == m.object => {
+                            out.insert(m.object, b);
+                        }
+                        _ => return Err(why),
+                    }
+                }
+                Ok(out)
             }
         }
-        Ok(bytes)
     }
 
     fn hold(&mut self, pack: &PackId, class: u8, why: Hold) {
@@ -461,26 +604,27 @@ impl Runner<'_> {
                 } else {
                     r.waiting_min_bytes.min(min)
                 };
+                r.waiting_room.push(*pack);
             }
             Hold::Unavailable(e) => r.unavailable.push((*pack, e)),
         }
     }
 
     fn claim_copy(&mut self, pack: &PackId, class: u8) {
-        for ev in [
-            Event::PackStored(PackStored {
+        self.run.events.push(Event::PackStored(PackStored {
+            storage: self.dst.name.to_string(),
+            pack: *pack,
+            class,
+            folder: NO_FOLDER,
+            map_seq: 0,
+        }));
+        // A read-back of a cold copy checked by name only is not a
+        // verification.
+        if !self.dst.cold || self.opts.confirm_cold_read {
+            self.run.events.push(Event::PackVerified(PackOn {
                 storage: self.dst.name.to_string(),
                 pack: *pack,
-                class,
-                folder: NO_FOLDER,
-                map_seq: 0,
-            }),
-            Event::PackVerified(PackOn {
-                storage: self.dst.name.to_string(),
-                pack: *pack,
-            }),
-        ] {
-            self.run.events.push(ev);
+            }));
         }
     }
 
@@ -494,11 +638,13 @@ impl Runner<'_> {
         }));
         self.run.dropped.push(*pack);
         self.run.report.packs_dropped += 1;
+        self.run.report.dropped_packs.push(*pack);
     }
 
     /// Make sure the destination holds the pack (copying it if `copy`),
     /// checked and counted by its places. False: the pack is held back (or
-    /// was handled by `rebuilt`).
+    /// was handled by `rebuilt`, when it could not be read whole but its
+    /// `missing` members could).
     fn ensure(
         &mut self,
         pack: &PackId,
@@ -506,12 +652,26 @@ impl Runner<'_> {
         copy: bool,
         on_destination: bool,
         live: &[PackMember],
+        missing: &[PackMember],
     ) -> bool {
         let check: Vec<&PackMember> = live.iter().collect();
         if copy {
             let data = match self.read_checked(pack, &check) {
                 Ok(d) => d,
+                Err(Hold::Corrupt) => {
+                    self.hold(pack, class, Hold::Corrupt);
+                    return false;
+                }
                 Err(w) => {
+                    // The pack cannot be read whole: the members the
+                    // destination lacks may come from elsewhere.
+                    let need: Vec<&PackMember> = missing.iter().collect();
+                    if !need.is_empty() {
+                        if let Ok(bytes) = self.member_bytes(pack, &need) {
+                            self.rebuilt(pack, class, &bytes, missing, &[]);
+                            return false;
+                        }
+                    }
                     self.hold(pack, class, w);
                     return false;
                 }
@@ -527,8 +687,17 @@ impl Runner<'_> {
                         self.run.report.bytes_written += data.len() as u64;
                     }
                 }
+                Err(e) if no_disk(&e) => {
+                    self.hold(pack, class, Hold::NoRoom(0));
+                    return false;
+                }
                 Err(e) if no_room(&e) && self.opts.split_on_no_room && live.len() > 1 => {
-                    self.rebuilt(pack, class, &data, live, &[]);
+                    let mut bytes = MemberBytes::new();
+                    for m in live {
+                        let s = m.place.offset as usize;
+                        bytes.insert(m.object, data[s..s + m.place.len as usize].to_vec());
+                    }
+                    self.rebuilt(pack, class, &bytes, live, &[]);
                     return false;
                 }
                 Err(e) if no_room(&e) => {
@@ -563,6 +732,9 @@ impl Runner<'_> {
             }
             if copy {
                 self.claim_copy(pack, class);
+                self.run.report.copied_packs.push(*pack);
+                let dst = self.dst;
+                self.note_pool_disks(dst, pack);
             }
             if let Some(pool) = self.dst.pool {
                 let mut used = Vec::new();
@@ -572,6 +744,7 @@ impl Runner<'_> {
                     self.run.report.waiting_place_packs += 1;
                     self.run.report.waiting_place_bytes +=
                         crate::ledger3::events::class_bytes(class).unwrap_or(0);
+                    self.run.report.waiting_place.push(*pack);
                     return false;
                 }
             }
@@ -588,11 +761,25 @@ impl Runner<'_> {
         copy: bool,
         on_destination: bool,
         live: &[PackMember],
+        missing: &[PackMember],
     ) {
-        if self.ensure(pack, class, copy, on_destination, live) {
+        if self.ensure(pack, class, copy, on_destination, live, missing) {
             self.run.report.blocks_moved += live.len() as u64;
             self.run.report.bytes_moved += live.iter().map(|m| u64::from(m.place.len)).sum::<u64>();
             self.drop_source(pack);
+        }
+    }
+
+    /// The disks of a pool destination that hold `pack` now (reported as
+    /// used).
+    fn note_pool_disks(&mut self, to: &Endpoint, pack: &PackId) {
+        if let Some(pool) = to.pool {
+            let labels = pool
+                .locate_all(&pack_key(&hex::encode(pack)))
+                .into_iter()
+                .map(|l| l.label)
+                .collect();
+            self.note_disks(labels);
         }
     }
 
@@ -611,26 +798,61 @@ impl Runner<'_> {
         &mut self,
         pack: &PackId,
         class: u8,
-        bytes: &[u8],
+        bytes: &MemberBytes,
         moving: &[PackMember],
         staying: &[PackMember],
     ) {
         let split = self.opts.split_on_no_room;
         let (dst, src) = (self.dst, self.src);
-        let made = match self.build_to(dst, bytes, moving, split) {
-            Ok(m) => m,
-            Err(w) => return self.hold(pack, class, w),
+        // With `split` a destination without room for every member takes
+        // what fits; the rest stays on the source (in the remainder).
+        let (made, left) = if split {
+            match self.build_partial(dst, bytes, moving) {
+                Ok(x) => x,
+                Err(w) => return self.hold(pack, class, w),
+            }
+        } else {
+            match self.build_to(dst, bytes, moving, false) {
+                Ok(m) => (m, Vec::new()),
+                Err(w) => return self.hold(pack, class, w),
+            }
         };
+        if !left.is_empty() && made.is_empty() {
+            // Nothing fitted: the pack stays as it is.
+            let min = left
+                .iter()
+                .map(|m| u64::from(m.place.len))
+                .min()
+                .unwrap_or(0);
+            return self.hold(pack, class, Hold::NoRoom(min));
+        }
+        if !left.is_empty() {
+            let r = &mut self.run.report;
+            r.waiting_room_packs += 1;
+            r.waiting_room_bytes += left.iter().map(|m| u64::from(m.place.len)).sum::<u64>();
+            let min = left
+                .iter()
+                .map(|m| u64::from(m.place.len))
+                .min()
+                .unwrap_or(0);
+            r.waiting_min_bytes = if r.waiting_min_bytes == 0 {
+                min
+            } else {
+                r.waiting_min_bytes.min(min)
+            };
+            r.kept_back.extend(left.iter().map(|m| m.object));
+        }
+        let moving: Vec<PackMember> = moving
+            .iter()
+            .filter(|m| !left.iter().any(|l| l.object == m.object))
+            .copied()
+            .collect();
+        let staying: Vec<PackMember> = staying.iter().chain(left.iter()).copied().collect();
+        let (moving, staying) = (&moving[..], &staying[..]);
+        let ids: Vec<PackId> = made.iter().map(|p| p.id).collect();
         self.run.new_packs.extend(made);
         if let Some(pool) = self.dst.pool {
             // Group rule: each new pack counts by its places.
-            let ids: Vec<PackId> = self
-                .run
-                .new_packs
-                .iter()
-                .filter(|p| p.storages == [self.dst.name.to_string()])
-                .map(|p| p.id)
-                .collect();
             for id in ids {
                 let mut used = Vec::new();
                 let met = super::pools::group_rule_met(pool, &id, &mut used);
@@ -639,6 +861,7 @@ impl Runner<'_> {
                     self.run.report.waiting_place_packs += 1;
                     self.run.report.waiting_place_bytes +=
                         crate::ledger3::events::class_bytes(class).unwrap_or(0);
+                    self.run.report.waiting_place.push(*pack);
                     return;
                 }
             }
@@ -652,8 +875,15 @@ impl Runner<'_> {
         }
         self.run.report.blocks_moved += moving.len() as u64;
         self.run.report.bytes_moved += moving.iter().map(|m| u64::from(m.place.len)).sum::<u64>();
+        self.run.report.rebuilt_packs.push(*pack);
         self.drop_source(pack);
     }
+}
+
+/// Carry out a plan from `src` to `dst`, reading only from the source.
+/// See [`run_move_with`].
+pub fn run_move(plan: &MovePlan, src: &Endpoint, dst: &Endpoint, opts: &MoveOptions) -> MoveRun {
+    run_move_with(plan, src, dst, &Sources::source_only(), opts)
 }
 
 /// Carry out a plan from `src` to `dst`. Nothing is deleted: the caller
@@ -665,11 +895,21 @@ impl Runner<'_> {
 /// destination and checked (read back whole, hashed against the id; a
 /// cold destination by name unless `confirm_cold_read`), and, for a pool
 /// destination, when the pool holds the pack in as many places as its disk
-/// group rule asks. `keep_source` copies and checks but drops nothing.
-pub fn run_move(plan: &MovePlan, src: &Endpoint, dst: &Endpoint, opts: &MoveOptions) -> MoveRun {
+/// group rule asks. `keep_source` copies and checks but drops nothing. A
+/// pack is read from another storage that holds it first (`sources`), from
+/// the source when it may be read, and member by member from the member
+/// source when neither has it (then the members go into new packs).
+pub fn run_move_with(
+    plan: &MovePlan,
+    src: &Endpoint,
+    dst: &Endpoint,
+    sources: &Sources,
+    opts: &MoveOptions,
+) -> MoveRun {
     let mut r = Runner {
         src,
         dst,
+        sources,
         opts,
         run: MoveRun::default(),
     };
@@ -685,7 +925,8 @@ pub fn run_move(plan: &MovePlan, src: &Endpoint, dst: &Endpoint, opts: &MoveOpti
                 copy,
                 on_destination,
                 members,
-            } => r.whole(pack, *class, *copy, *on_destination, members),
+                missing,
+            } => r.whole(pack, *class, *copy, *on_destination, members, missing),
             PackAction::Rebuild {
                 pack,
                 class,
@@ -693,7 +934,7 @@ pub fn run_move(plan: &MovePlan, src: &Endpoint, dst: &Endpoint, opts: &MoveOpti
                 staying,
             } => {
                 let all: Vec<&PackMember> = moving.iter().chain(staying.iter()).collect();
-                let bytes = match r.read_checked(pack, &all) {
+                let bytes = match r.member_bytes(pack, &all) {
                     Ok(b) => b,
                     Err(w) => {
                         r.hold(pack, *class, w);
@@ -732,9 +973,23 @@ pub fn run_drain(
     dsts: &[Endpoint],
     opts: &MoveOptions,
 ) -> MoveRun {
+    run_drain_with(view, plan, src, dsts, &Sources::source_only(), opts)
+}
+
+/// [`run_drain`] reading packs from other storages that hold them first
+/// (`sources`).
+pub fn run_drain_with(
+    view: &LedgerView,
+    plan: &super::drain::DrainPlan,
+    src: &Endpoint,
+    dsts: &[Endpoint],
+    sources: &Sources,
+    opts: &MoveOptions,
+) -> MoveRun {
     let mut r = Runner {
         src,
         dst: src,
+        sources,
         opts,
         run: MoveRun::default(),
     };
@@ -762,7 +1017,7 @@ pub fn run_drain(
             r.dst = dst;
             // The copy is needed unless the ledger shows the pack there.
             let on = view.is_held(&item.pack, t);
-            if !r.ensure(&item.pack, item.class, !on, on, &[]) {
+            if !r.ensure(&item.pack, item.class, !on, on, &[], &[]) {
                 ready = false;
                 break;
             }

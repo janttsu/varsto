@@ -9,7 +9,7 @@
 //! there). Every storage therefore carries a random identity object
 //! (`vault/storage-id.json`), and every device publishes, sealed under the
 //! registry key, which of its storage names has which identity
-//! (`vault/storage-names/<device>/<time>.enc`). A copy the writer calls "box"
+//! (`storage-names` records, kind 19, `storages3_ops`). A copy the writer calls "box"
 //! is read from whichever local storage has the same identity, and the check
 //! is recorded under the writer's name so that it meets the writer's claim.
 
@@ -28,27 +28,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 pub(super) const STORAGE_ID_KEY: &str = "vault/storage-id.json";
-const NAMES_PREFIX: &str = "vault/storage-names/";
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct StorageIdentity {
     pub(super) storage_id: String,
-}
-
-/// One device's storage names and the identity of each storage.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-struct StorageNames {
-    device: DeviceId,
-    updated_utc: i64,
-    /// Local storage name -> storage identity.
-    names: BTreeMap<String, String>,
-}
-
-fn names_aad(vault: &crate::ids::VaultId, device: &DeviceId) -> Vec<u8> {
-    crypto::aad(
-        "storage-names",
-        &[vault.as_str().as_bytes(), device.as_str().as_bytes()],
-    )
 }
 
 /// The identity of a storage, created by the first device that asks.
@@ -225,85 +208,6 @@ impl Engine {
         result
     }
 
-    /// Publish this device's storage names with their identities (when they
-    /// changed) and read every other device's newest list.
-    fn exchange_storage_names(
-        &self,
-        mine: &BTreeMap<String, String>,
-        backends: &BTreeMap<String, Box<dyn Storage>>,
-    ) -> BTreeMap<DeviceId, BTreeMap<String, String>> {
-        let key = self.registry_key_now();
-        let reg_keys: Vec<crate::crypto::SecretKey> =
-            self.registry_keys().into_iter().map(|(_, k)| k).collect();
-        let vault = &self.vault.vault_id;
-        let me = &self.vault.device_id;
-        let mut out: BTreeMap<DeviceId, (i64, BTreeMap<String, String>)> = BTreeMap::new();
-        let metadata: Vec<&String> = self
-            .config
-            .storages
-            .iter()
-            .filter(|s| !s.is_data_only())
-            .map(|s| s.name())
-            .filter_map(|n| backends.get_key_value(n).map(|(k, _)| k))
-            .collect();
-        for name in metadata {
-            let backend = &backends[name];
-            let Ok(keys) = backend.list(NAMES_PREFIX) else {
-                continue;
-            };
-            // Newest object per device (keys sort by time within a device).
-            let mut newest: BTreeMap<&str, &String> = BTreeMap::new();
-            for k in &keys {
-                if let Some((dev, _)) = k[NAMES_PREFIX.len()..].split_once('/') {
-                    newest.insert(dev, k);
-                }
-            }
-            let mut mine_published = false;
-            let mut mine_newest = 0i64;
-            for (dev, k) in newest {
-                let Ok(dev) = DeviceId::from_hex(dev) else {
-                    continue;
-                };
-                let rec = backend
-                    .get(k)
-                    .ok()
-                    .flatten()
-                    .and_then(|blob| {
-                        reg_keys
-                            .iter()
-                            .find_map(|k| crypto::decrypt(k, &names_aad(vault, &dev), &blob).ok())
-                    })
-                    .and_then(|plain| serde_json::from_slice::<StorageNames>(&plain).ok())
-                    .filter(|r| r.device == dev);
-                let Some(rec) = rec else { continue };
-                if &dev == me {
-                    mine_published = rec.names == *mine;
-                    mine_newest = rec.updated_utc;
-                    continue;
-                }
-                if out.get(&dev).is_none_or(|(t, _)| *t < rec.updated_utc) {
-                    out.insert(dev, (rec.updated_utc, rec.names));
-                }
-            }
-            if !mine_published && !self.vault.member && !mine.is_empty() {
-                // Newer than the list it replaces, even within the same second.
-                let rec = StorageNames {
-                    device: me.clone(),
-                    updated_utc: util::now_utc().max(mine_newest + 1),
-                    names: mine.clone(),
-                };
-                let sealed = serde_json::to_vec(&rec)
-                    .ok()
-                    .and_then(|plain| crypto::encrypt(&key, &names_aad(vault, me), &plain).ok());
-                if let Some(blob) = sealed {
-                    let k = format!("{NAMES_PREFIX}{me}/{:020}.enc", rec.updated_utc);
-                    let _ = backend.put_if_absent(&k, &blob);
-                }
-            }
-        }
-        out.into_iter().map(|(d, (_, n))| (d, n)).collect()
-    }
-
     /// Storage identities: ours (published when they changed), and the
     /// other devices' names for them, read from the storages in `readable`.
     pub(super) fn storage_resolver(
@@ -323,8 +227,14 @@ impl Engine {
                 }
             }
         }
+        // Kind 19 records (`storages3_ops`): ours published when they
+        // changed, the other devices' newest read back.
+        let theirs = Engine::their_names3(&self.exchange_storage_names3(&mine))
+            .into_iter()
+            .map(|(d, names)| (DeviceId::from_bytes(&d), names))
+            .collect();
         NameResolver {
-            theirs: self.exchange_storage_names(&mine, readable),
+            theirs,
             local_by_id,
             readable: readable.keys().cloned().collect(),
         }

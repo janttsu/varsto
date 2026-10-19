@@ -303,11 +303,8 @@ impl Engine {
     /// The hot metadata storages membership records are read from and
     /// written to.
     fn member_storages(&self) -> Result<OpenStorages> {
-        Ok(self
-            .metadata_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect())
+        // Transferrers carry the records too (F-048).
+        self.metadata_storages(false)
     }
 
     /// Run `f` over a `Membership` of this device opened on the hot

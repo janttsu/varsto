@@ -26,91 +26,39 @@ pub struct DiskGroupStatus {
 }
 
 impl Engine {
-    /// The copies of `object` in a pool as a policy counts them: one per
-    /// disk that holds it, at the disk's place. A copy on a disk that is away
-    /// is named `<pool>:<label>` and counts as verified at the disk's last
-    /// check. Returns (name, place, verified, verified_utc, readable now).
-    pub(super) fn pool_copies(
-        name: &str,
-        pool: &PoolStorage,
-        record: &crate::ledger::ChunkRecord,
-        verified: bool,
-        verified_utc: i64,
-    ) -> Vec<(String, String, bool, i64, bool)> {
-        // The disks hold the block's pack.
-        let all = pool.locate_all(&super::pack_upkeep::held_key(record, name));
-        if all.is_empty() {
-            return vec![(
-                format!("{name}:unknown disk"),
-                pool.place().to_string(),
-                false,
-                0,
-                false,
-            )];
-        }
-        let mut named_pool = false;
-        all.into_iter()
-            .map(|l| {
-                if l.attached {
-                    // The first attached copy keeps the pool's name, as the
-                    // ledger names it.
-                    let copy = if named_pool {
-                        format!("{name}:{}", l.label)
-                    } else {
-                        named_pool = true;
-                        name.to_string()
-                    };
-                    (
-                        copy,
-                        l.place,
-                        verified || l.last_verified_utc > 0,
-                        verified_utc.max(l.last_verified_utc),
-                        true,
-                    )
-                } else {
-                    (
-                        format!("{name}:{}", l.label),
-                        l.place,
-                        l.last_verified_utc > 0,
-                        l.last_verified_utc,
-                        false,
-                    )
-                }
-            })
-            .collect()
-    }
-
     /// Add to a folder's policy report the blocks that a pool's disk group
-    /// rule is not met for.
+    /// rule is not met for: blocks (`objects`, of the folder's current
+    /// files) whose packs on the pool are on disks in fewer places than the
+    /// rule asks (spec section 77.9, "a disk group rule counts the places
+    /// that hold the pack").
     pub(super) fn disk_group_findings(
         &self,
-        rec: &FolderRecord,
-        state: &FolderState,
-        view: &LedgerView,
+        objects: &BTreeMap<ObjectName, u64>,
+        view: &crate::ledger3::LedgerView,
+        table: &crate::blockmap::MapTable,
         pools: &BTreeMap<String, PoolStorage>,
         report: &mut PolicyReport,
     ) {
         for (name, pool) in pools.iter().filter(|(_, p)| p.copies() > 1) {
-            let mut seen = HashSet::new();
             let mut short = 0u64;
-            for f in state.files.values().filter(|f| !f.deleted) {
-                for c in &f.chunks {
-                    if !seen.insert(&c.chunk) {
-                        continue;
-                    }
-                    let Some(r) = view.locate(&rec.folder_id, &c.chunk) else {
-                        continue;
-                    };
-                    let on_pool = r
-                        .storages
-                        .get(name)
-                        .is_some_and(|l| !l.claimed_by.is_empty());
-                    if on_pool
-                        && (pool.places_of(&super::pack_upkeep::held_key(r, name)).len() as u32)
-                            < pool.copies()
-                    {
-                        short += 1;
-                    }
+            for object in objects.keys() {
+                let Ok(obj) = crate::storages3::object_bin(object) else {
+                    continue;
+                };
+                let packs: Vec<crate::ledger3::PackId> =
+                    crate::storages3::block_copy_details(view, table, &obj)
+                        .into_iter()
+                        .filter(|c| c.storage == *name)
+                        .map(|c| c.pack)
+                        .collect();
+                let Some(pack) = packs.first() else {
+                    continue;
+                };
+                let places = pool
+                    .places_of(&crate::packs::pack_key(&hex::encode(pack)))
+                    .len() as u32;
+                if places < pool.copies() {
+                    short += 1;
                 }
             }
             if short > 0 {

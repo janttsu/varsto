@@ -119,8 +119,9 @@ impl Engine {
     /// durability policy state. One pass over the ledger view.
     pub fn protection(&self) -> Result<BTreeMap<String, Protection>> {
         let view = self.view()?;
+        let view3 = self.view3()?;
         let reports = self
-            .policy_reports(&view, util::now_utc(), |id| {
+            .policy_reports(&view3, util::now_utc(), |id| {
                 self.load_state(id).map(std::borrow::Cow::Owned)
             })
             .ok();

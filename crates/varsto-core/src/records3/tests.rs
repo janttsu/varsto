@@ -246,6 +246,7 @@ fn every_kind_round_trips_and_the_newest_wins() {
             ("bucket".into(), "id-2".into()),
             ("home".into(), "id-1".into()),
         ],
+        settings: Vec::new(),
     };
     write(
         &s,
