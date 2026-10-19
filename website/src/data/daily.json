@@ -54,6 +54,10 @@
       "text": "Some strings in the app interface are not translated yet; they are logged."
     },
     {
+      "id": "format3",
+      "text": "These builds write storage format 3. A vault made by 0.0.1-alpha.15 or earlier is refused and must be recreated (varsto reset --yes, varsto init, sync the files again); there is no upgrade. A device that joins holds no folder until an owner approves its request."
+    },
+    {
       "id": "windows-ios-previous",
       "text": "Windows and iOS are still from the previous build 20261016-316c579; they were not rebuilt this round."
     },
