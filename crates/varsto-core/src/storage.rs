@@ -4,13 +4,15 @@
 //! removable disks and network mounts); S3 and rclone remotes follow, and a
 //! pool of removable disks (`crate::pool`) that holds chunk objects only.
 //!
-//! Object keys use forward slashes. Layout written by the engine:
+//! Object keys use forward slashes. Layout written by the engine (storage
+//! format 3, `docs/spec/format-3-design.md`):
 //! - `vault/meta.json`                       vault identity (not secret)
-//! - `vault/devices/<device>.enc`            device record (encrypted)
-//! - `vault/folders/<device>/<folder>.enc`   folder record (encrypted)
-//! - `ledger/<device>/<seq>.json`            signed, encrypted ledger batches
-//! - `manifests/<folder>/<device>/<seq>.enc` encrypted folder manifests
-//! - `chunks/<xx>/<objectname>`              encrypted chunks
+//! - `<kind path>/<seq 16>-<part 4>.rec`     signed records (`crate::record`):
+//!   devices, folders, grants, ledger batches, manifests, block maps, ...
+//! - `packs/<xx>/<id>`                       packs of encrypted blocks
+//!
+//! `chunks/<xx>/<objectname>` is the name of one block inside a pack: a
+//! `crate::packs::PackStore` answers it from the packs and the block maps.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

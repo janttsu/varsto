@@ -72,7 +72,6 @@ pub mod s3;
 pub mod scrub;
 pub mod scrub3;
 pub mod share;
-pub mod snapshot;
 pub mod snapshot3;
 pub mod staged_move;
 pub mod storage;

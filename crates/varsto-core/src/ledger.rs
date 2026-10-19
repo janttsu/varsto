@@ -73,7 +73,7 @@ pub enum Event {
         object: ObjectName,
         storage: String,
     },
-    /// This device wrote snapshot `seq` of a backup (`crate::snapshot`):
+    /// This device wrote snapshot `seq` of a backup (`crate::snapshot3`):
     /// `snapshot_hash` is the hash of the stored object, which a restore
     /// checks. Only the backup's source device writes these.
     SnapshotTaken {

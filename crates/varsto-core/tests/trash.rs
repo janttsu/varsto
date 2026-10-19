@@ -509,3 +509,33 @@ fn the_upkeep_runs_daily() {
     assert_eq!(st.last_upkeep_utc, Some(now));
     assert!(a.trash_set(Some(0), None, None).is_err());
 }
+
+/// The vault's trash settings travel as `settings` records (kind 18,
+/// `vault/settings/<device>/`): what one device sets, another reads.
+#[test]
+fn trash_settings_reach_the_other_devices() {
+    let lab = Lab::new();
+    let store = dir("box", &lab.p("store"), false);
+    let (mut a, key) = init(&lab.p("a"), "laptop");
+    a.add_storage(store.clone()).unwrap();
+    a.add_folder("docs", &lab.p("a-docs")).unwrap();
+    a.sync(None).unwrap();
+    let mut b = join(&lab.p("b"), "phone", &key, store, &mut a);
+    b.attach_folder("docs", &lab.p("b-docs"), false).unwrap();
+    b.sync(None).unwrap();
+    assert_eq!(b.trash_status().unwrap().days, 30);
+
+    a.trash_set(Some(45), None, None).unwrap();
+    a.trash_set(Some(60), Some("docs"), None).unwrap();
+    let st = b.trash_status().unwrap();
+    assert_eq!(st.days, 45);
+    assert_eq!(st.folder_days.get("docs"), Some(&60));
+    assert!(lab.p("store").join("vault/settings").is_dir());
+    assert!(!lab.p("store").join("vault/trash-settings").exists());
+
+    // B changes them back; A follows.
+    b.trash_set(Some(0), Some("docs"), None).unwrap();
+    let st = a.trash_status().unwrap();
+    assert_eq!(st.days, 45);
+    assert!(st.folder_days.is_empty(), "{:?}", st.folder_days);
+}

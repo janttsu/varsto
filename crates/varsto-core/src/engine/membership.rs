@@ -351,26 +351,9 @@ impl Engine {
             .unwrap_or(&self.keys.master)
     }
 
-    // The format-2 key derivations below are still read by format-2 code
-    // of other areas (mailbox board, verification, quotas, data moves,
-    // trash, the format-2 ledger); they go when those parts are ported
-    // (f3-switch: part B).
-
-    /// Format-2 folder-record keys of every epoch, newest first.
-    pub(super) fn folder_record_keys(&self) -> Vec<SecretKey> {
-        self.epochs
-            .keys
-            .values()
-            .rev()
-            .map(|k| k.derive("folder-record", &[]))
-            .collect()
-    }
-
-    pub(super) fn folder_record_key_now(&self) -> SecretKey {
-        self.current_vault_key().derive("folder-record", &[])
-    }
-
-    /// Format-2 ledger key for a batch key id `ledger` or `ledger@<epoch>`.
+    /// The key of the in-memory location view's batches (`ledger` or
+    /// `ledger@<epoch>`, `Engine::view`). Format 3 stores no such batch, so
+    /// the view holds only this device's events not sealed yet.
     pub(super) fn ledger_key_for(&self, id: &str) -> Option<SecretKey> {
         let epoch = if id == KEY_LEDGER {
             0

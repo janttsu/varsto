@@ -27,7 +27,7 @@
 //! minimum storage duration has passed; those wait in a local queue.
 //!
 //! A vault may name a *trash storage* (vault-wide setting, published as
-//! `vault/trash-settings/<device>/<utc>.enc` under the folder-record key):
+//! the `settings` record `vault/settings/<device>/`, `crate::trash3::settings`):
 //! blocks only trash entries use are copied there, checked, and dropped from
 //! this device's other warm storages, so warm storage is not paid for
 //! deleted data. The trash storage takes no other blocks. Restoring from a
@@ -41,7 +41,6 @@ const DAY: i64 = 86_400;
 pub const DEFAULT_TRASH_DAYS: u32 = 30;
 /// Longest retention that can be set (ten years).
 pub const MAX_TRASH_DAYS: u32 = 3650;
-const SETTINGS_PREFIX: &str = "vault/trash-settings/";
 /// A record keeps an entry (and a removal) this long after the entry
 /// expired, so every device sees it go and drops its blocks.
 const KEEP_LISTED_SECS: i64 = 7 * DAY;
@@ -158,6 +157,65 @@ pub struct TrashSettings {
 
 fn default_history_days() -> u32 {
     super::history::DEFAULT_HISTORY_DAYS
+}
+
+impl TrashSettings {
+    /// From the body of a `settings` record (`crate::trash3::settings`).
+    fn from_record(b: &crate::trash3::SettingsBody) -> TrashSettings {
+        let folders = |list: &[(crate::record::Id16, u32)]| {
+            list.iter()
+                .map(|(f, d)| (FolderId::from_bytes(f), *d))
+                .collect()
+        };
+        TrashSettings {
+            days: b.trash_days,
+            folder_days: folders(&b.folder_trash_days),
+            storage: b.trash_storage.clone(),
+            storage_id: b.storage_id.clone(),
+            updated_utc: b.updated_utc,
+            device: Some(DeviceId::from_bytes(&b.device)),
+            history_days: b.history_days,
+            folder_history: folders(&b.folder_history_days),
+        }
+    }
+
+    /// The body of this device's next `settings` record (its `seq` is set
+    /// by the writer). A folder at 0 trash days follows the vault and is
+    /// not written.
+    fn to_record(
+        &self,
+        device: crate::record::Id16,
+        lamport: u64,
+        updated_utc: i64,
+    ) -> Result<crate::trash3::SettingsBody> {
+        let folders = |m: &BTreeMap<FolderId, u32>, keep_zero: bool| -> Result<Vec<_>> {
+            let mut out: Vec<(crate::record::Id16, u32)> = Vec::new();
+            for (f, d) in m {
+                if *d == 0 && !keep_zero {
+                    continue;
+                }
+                out.push((members3::bin(f)?, (*d).min(MAX_TRASH_DAYS)));
+            }
+            out.sort();
+            out.dedup_by_key(|(f, _)| *f);
+            Ok(out)
+        };
+        let body = crate::trash3::SettingsBody {
+            device,
+            seq: 1,
+            lamport,
+            updated_utc,
+            trash_days: self.days.clamp(1, MAX_TRASH_DAYS),
+            history_days: self.history_days.min(MAX_TRASH_DAYS),
+            trash_storage: self.storage.clone(),
+            storage_id: self.storage_id.clone(),
+            folder_trash_days: folders(&self.folder_days, false)?,
+            folder_history_days: folders(&self.folder_history, true)?,
+        };
+        body.validate()
+            .map_err(|e| anyhow!("trash settings: {e}"))?;
+        Ok(body)
+    }
 }
 
 impl Default for TrashSettings {
@@ -290,21 +348,6 @@ pub struct TrashUpkeepReport {
     /// Live blocks moved out of packs that were mostly dead (`pack_upkeep`).
     pub blocks_repacked: u64,
     pub notes: Vec<String>,
-}
-
-fn settings_key(base: &SecretKey) -> SecretKey {
-    base.derive("trash-settings", &[])
-}
-
-fn settings_aad(vault: &VaultId, device: &DeviceId, written: i64) -> Vec<u8> {
-    crypto::aad(
-        "trash-settings",
-        &[
-            vault.as_str().as_bytes(),
-            device.as_str().as_bytes(),
-            &written.to_le_bytes(),
-        ],
-    )
 }
 
 pub(super) fn entry_id(folder: &FolderId, path: &str, device: &DeviceId, clock: u64) -> String {
@@ -873,45 +916,41 @@ impl Engine {
             return Ok(());
         }
         let known = cache.settings.as_ref().map(|s| s.updated_utc).unwrap_or(0);
-        let mut best: Option<(i64, DeviceId, usize, String)> = None;
-        for (i, (_, b)) in storages.iter().enumerate() {
-            for key in b.list(SETTINGS_PREFIX)? {
-                let Some((dev, file)) = key
-                    .strip_prefix(SETTINGS_PREFIX)
-                    .and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let (Ok(dev), Some(t)) = (
-                    DeviceId::from_hex(dev),
-                    file.strip_suffix(".enc")
-                        .and_then(|t| t.parse::<i64>().ok()),
-                ) else {
-                    continue;
-                };
-                if t <= known || !self.trusted(&dev) {
-                    continue;
-                }
-                if best.as_ref().is_none_or(|(n, d, _, _)| (t, &dev) > (*n, d)) {
-                    best = Some((t, dev, i, key));
-                }
-            }
-        }
-        if let Some((t, dev, i, key)) = best {
-            if let Some(blob) = storages[i].1.get(&key)? {
-                let a = settings_aad(&self.vault.vault_id, &dev, t);
-                let opened = self
-                    .folder_record_keys()
-                    .iter()
-                    .find_map(|k| crypto::decrypt(&settings_key(k), &a, &blob).ok())
-                    .and_then(|j| serde_json::from_slice::<TrashSettings>(&j).ok())
-                    .filter(|s| s.updated_utc == t && s.device.as_ref() == Some(&dev));
-                if let Some(mut s) = opened {
-                    s.days = s.days.clamp(1, MAX_TRASH_DAYS);
-                    cache.local_storage = self.resolve_trash_storage(&s);
-                    cache.settings = Some(s);
+        // The newest `settings` record of every trusted device of the vault.
+        let streams: Vec<crate::record::StreamRef> = self
+            .f3
+            .members
+            .devices
+            .devices
+            .keys()
+            .copied()
+            .chain([self.me3()])
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter(|d| self.trusted(&DeviceId::from_bytes(d)))
+            .map(crate::trash3::settings::settings_stream)
+            .collect();
+        let view = self.view3()?;
+        let mut newest: BTreeMap<crate::record::Id16, crate::trash3::SettingsBody> =
+            BTreeMap::new();
+        self.each_store3(storages, &view, |_, store, counter| {
+            for b in crate::records3::read_newest::<crate::trash3::SettingsBody>(
+                store, &streams, counter,
+            )? {
+                if newest.get(&b.device).is_none_or(|n| n.seq < b.seq) {
+                    newest.insert(b.device, b);
                 }
             }
+            Ok(())
+        })?;
+        let best = newest
+            .into_values()
+            .max_by_key(|b| (b.updated_utc, b.lamport, b.device, b.seq));
+        if let Some(b) = best.filter(|b| b.updated_utc > known) {
+            let mut s = TrashSettings::from_record(&b);
+            s.days = s.days.clamp(1, MAX_TRASH_DAYS);
+            cache.local_storage = self.resolve_trash_storage(&s);
+            cache.settings = Some(s);
         }
         cache.read_utc = now;
         self.save_settings_cache(&cache)
@@ -1444,22 +1483,17 @@ impl Engine {
         let now = util::now_utc().max(s.updated_utc + 1);
         s.updated_utc = now;
         s.device = Some(me.clone());
-        let json = serde_json::to_vec(&s)?;
-        let blob = crypto::encrypt(
-            &settings_key(&self.folder_record_key_now()),
-            &settings_aad(&self.vault.vault_id, &me, now),
-            &json,
-        )?;
-        let key = format!("{SETTINGS_PREFIX}{me}/{now:020}.enc");
-        let own = format!("{SETTINGS_PREFIX}{me}/");
-        for (_, b) in self.metadata_storages(true)? {
-            b.put_if_absent(&key, &blob)?;
-            for old in b.list(&own)? {
-                if old != key {
-                    b.delete(&old)?;
-                }
-            }
-        }
+        let me3 = self.me3();
+        let lamport = self.clock.lamport + 1;
+        let storages = self.metadata_storages(true)?;
+        let stream = crate::trash3::settings::settings_stream(me3);
+        let key = crate::record::KeyId::Registry(self.vault_keys3().newest_epoch());
+        let body = s.to_record(me3, lamport, now)?;
+        self.write_record3(&storages, &stream, &key, |seq| {
+            let mut b = body.clone();
+            b.seq = seq;
+            b
+        })?;
         let mut cache = self.load_settings_cache();
         cache.local_storage = self.resolve_trash_storage(&s);
         cache.settings = Some(s);
