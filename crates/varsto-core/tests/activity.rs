@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Live activity between two devices on localhost: the laptop verifies
-//! every block of its storage (`fsck --verify`, slowed down by the test
+//! every pack of its storage, block by block (`fsck --verify`, slowed by the test
 //! hook), and the desktop, watching, sees that task with its progress over
 //! `/p2p/activity`.
 
@@ -18,8 +18,6 @@ use varsto_core::Engine;
 const PASS: &str = "correct horse battery staple";
 
 #[test]
-#[ignore = "f3-switch: port in part B (transport)"]
-// Waits for the v3 peer helpers (tests/common/p2p.rs).
 fn a_device_sees_another_devices_long_task_with_its_progress() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -46,8 +44,14 @@ fn a_device_sees_another_devices_long_task_with_its_progress() {
     laptop.add_folder("docs", &docs).unwrap();
     laptop.push("docs").unwrap();
     activity::set_identity(laptop.device_id(), laptop.own_device_name());
-    let mut desktop =
-        Engine::join(&root.join("desktop-home"), "desktop", PASS, &key, storage).unwrap();
+    let mut desktop = common::join_approved(
+        &root.join("desktop-home"),
+        "desktop",
+        PASS,
+        &key,
+        storage,
+        &mut laptop,
+    );
 
     // The laptop serves its snapshot over TLS on TCP.
     let serving = common::p2p::Serving::start(&mut laptop);
@@ -87,7 +91,10 @@ fn a_device_sees_another_devices_long_task_with_its_progress() {
     let seen = watcher.join().unwrap();
     drop(serving);
 
-    assert!(report.objects_verified_now > 150, "{report:?}");
+    // Format 3 reads whole packs; the task counts the blocks in them.
+    let f3 = report.format3.as_ref().unwrap();
+    assert!(f3.copies_verified_now >= 1, "{report:?}");
+    assert_eq!(f3.blocks.referenced, 200, "{report:?}");
     let verify: Vec<_> = seen
         .iter()
         .filter(|(_, _, t)| t.kind == "fsck" && t.phase == "verify")
