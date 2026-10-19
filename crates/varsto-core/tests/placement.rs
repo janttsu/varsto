@@ -126,17 +126,17 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
                 .append_own(&da, vec![stored("hot"), stored("cold")], 1, &key, &a)
                 .unwrap(),
         ),
-        // b verifies the hot copy before it is dropped (Lamport 2) ...
+        // b holds the plaintext (Lamport 5): no storage copy ...
         (
             1,
             own_b
                 .append_own(
                     &db,
-                    vec![Event::ChunkVerified {
+                    vec![Event::ChunkOnDevice {
                         folder: folder.clone(),
                         chunk: chunk.clone(),
                         object: object.clone(),
-                        storage: "hot".into(),
+                        size: 10,
                     }],
                     5,
                     &key,
@@ -144,7 +144,7 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
                 )
                 .unwrap(),
         ),
-        // ... a drops it at Lamport 3 (b's verification at 5 does not bring it back).
+        // ... a drops the hot copy at Lamport 3 (b's later event does not bring it back).
         (
             0,
             own_a

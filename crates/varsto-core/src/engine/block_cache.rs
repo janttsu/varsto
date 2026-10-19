@@ -493,15 +493,6 @@ impl Engine {
             report.chunks_downloaded += 1;
             report.bytes_downloaded += cref.size;
             progress.advance(cref.size);
-            // "peer:<id>" is a device, not a storage: only a storage copy is verified.
-            if !source.starts_with("peer:") {
-                self.pending.push(Event::ChunkVerified {
-                    folder: rec.folder_id.clone(),
-                    chunk: cref.chunk.clone(),
-                    object: cref.object.clone(),
-                    storage: source,
-                });
-            }
             self.pending.push(Event::ChunkOnDevice {
                 folder: rec.folder_id.clone(),
                 chunk: cref.chunk.clone(),

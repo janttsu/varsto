@@ -548,7 +548,7 @@ impl Engine {
         util::private_dir(&self.home.join("trash"))?;
         fs::create_dir_all(&tmp_dir)?;
         let tmp = tmp_dir.join(format!("{}-v{}", std::process::id(), e.id));
-        let got = self.restore_from_blocks(&rec, &fk, &e, &tmp, &storages);
+        let got = self.restore_from_blocks(&fk, &e, &tmp, &storages);
         if let Err(err) = got {
             let _ = fs::remove_file(&tmp);
             return Err(err.context(format!("restore a version of {path}")));

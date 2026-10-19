@@ -707,20 +707,6 @@ impl Engine {
             )
         })
     }
-    /// The opened storages as the set garbage collection and repair use.
-    pub(super) fn storage_set3(&self, storages: &OpenStorages) -> Result<StorageSet> {
-        let mut set = StorageSet::default();
-        for (spec, _) in storages {
-            let b: Arc<dyn Storage> = Arc::from(self.open_spec(spec)?);
-            let info = if spec.is_cold() {
-                StorageInfo::cold(self.storage_price(spec.name()).as_ref())
-            } else {
-                StorageInfo::HOT
-            };
-            set.add(b, info);
-        }
-        Ok(set)
-    }
 }
 
 fn hash32(s: &str) -> [u8; 32] {

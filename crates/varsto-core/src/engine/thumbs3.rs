@@ -89,11 +89,6 @@ impl Engine {
         .ok()
     }
 
-    /// Forget a removed folder's thumbnails on this device.
-    pub(super) fn forget_thumbs3(&self, folder: &FolderId) {
-        let _ = fs::remove_dir_all(self.thumb_dir(folder));
-    }
-
     /// The hot metadata storages thumbnail records go to.
     fn thumb_storages(&self) -> Result<OpenStorages> {
         Ok(self

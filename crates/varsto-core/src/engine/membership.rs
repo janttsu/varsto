@@ -356,20 +356,6 @@ impl Engine {
     // trash, the format-2 ledger); they go when those parts are ported
     // (f3-switch: part B).
 
-    /// Format-2 device-registry keys of every epoch, newest first.
-    pub(super) fn registry_keys(&self) -> Vec<(u32, SecretKey)> {
-        self.epochs
-            .keys
-            .iter()
-            .rev()
-            .map(|(e, k)| (*e, k.derive("device-registry", &[])))
-            .collect()
-    }
-
-    pub(super) fn registry_key_now(&self) -> SecretKey {
-        self.current_vault_key().derive("device-registry", &[])
-    }
-
     /// Format-2 folder-record keys of every epoch, newest first.
     pub(super) fn folder_record_keys(&self) -> Vec<SecretKey> {
         self.epochs
@@ -394,17 +380,6 @@ impl Engine {
                 .ok()?
         };
         Some(self.epochs.keys.get(&epoch)?.derive("ledger", &[]))
-    }
-
-    /// Format-2 key id and key new batches were sealed with.
-    pub(super) fn ledger_key_now(&self) -> (String, SecretKey) {
-        let e = self.key_epoch();
-        let id = if e == 0 {
-            KEY_LEDGER.to_string()
-        } else {
-            format!("{}{e}", ledger::KEY_LEDGER_EPOCH_PREFIX)
-        };
-        (id, self.current_vault_key().derive("ledger", &[]))
     }
 
     /// The keys of a folder this device holds: only what grants (or

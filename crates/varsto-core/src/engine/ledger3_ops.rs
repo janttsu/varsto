@@ -164,7 +164,6 @@ pub(crate) fn convert(ev: &Event) -> Option<Event3> {
         }
         // Per-block events of format 2: format 3 claims packs instead.
         Event::ChunkStored { .. }
-        | Event::ChunkVerified { .. }
         | Event::ChunkOnDevice { .. }
         | Event::ManifestPublished { .. }
         | Event::ChunkDropped { .. }

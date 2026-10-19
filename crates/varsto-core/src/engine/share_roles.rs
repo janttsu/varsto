@@ -103,46 +103,6 @@ impl Engine {
         self.role_guard_off = true;
     }
 
-    /// Whether this device takes a manifest or record of `dev` for a
-    /// folder now: it is this device, or an owner or editor of it.
-    pub(super) fn share_writer_ok(&self, rec: &FolderRecord, dev: &DeviceId) -> bool {
-        dev == &self.vault.device_id
-            || matches!(
-                self.folder_role3(&rec.folder_id, dev),
-                Some(Role::Owner | Role::Editor)
-            )
-    }
-
-    /// Viewers of a folder that were editors, with the Lamport time from
-    /// which their changes no longer count (`0`: never an editor).
-    pub(super) fn share_viewer_clocks(&self, rec: &FolderRecord) -> BTreeMap<DeviceId, u64> {
-        let mut out = BTreeMap::new();
-        let Ok(f) = members3::bin(&rec.folder_id) else {
-            return out;
-        };
-        let Some(st) = self.f3.members.registry.get(&f) else {
-            return out;
-        };
-        for (d, h) in &st.history {
-            if st.role(d) != Some(Role::Viewer) {
-                continue;
-            }
-            // The stamp of the change that made it a viewer for good.
-            let since = h
-                .iter()
-                .rev()
-                .take_while(|(_, r)| *r == Some(Role::Viewer))
-                .last()
-                .map(|(s, _)| s.lamport)
-                .unwrap_or(0);
-            let wrote = h
-                .iter()
-                .any(|(_, r)| matches!(r, Some(Role::Owner | Role::Editor)));
-            out.insert(DeviceId::from_bytes(d), if wrote { since } else { 0 });
-        }
-        out
-    }
-
     /// Owner: make a participant of a folder a viewer or an editor (a
     /// folder record entry and a grant that carries the role; the member
     /// devices of the folder get the change in their grants). Taking

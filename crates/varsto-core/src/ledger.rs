@@ -46,13 +46,6 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pack: Option<crate::packs::PackLoc>,
     },
-    /// This device fetched `object` from `storage` and the hash matched.
-    ChunkVerified {
-        folder: FolderId,
-        chunk: ChunkId,
-        object: ObjectName,
-        storage: String,
-    },
     /// This device holds the plaintext of the chunk (as part of a file).
     ChunkOnDevice {
         folder: FolderId,
@@ -117,8 +110,8 @@ pub enum EventScope {
     /// A trusted full device of the vault (or a removed one, for its
     /// batches up to its cut-off): every event.
     Full,
-    /// An untrusted replica: claims on objects only (`chunk_stored` and
-    /// `chunk_verified` with an empty folder).
+    /// An untrusted replica: claims on objects only (`chunk_stored` with
+    /// an empty folder).
     Replica,
     /// A member device of a shared folder: block claims, drops and
     /// manifests of that folder only.
@@ -147,15 +140,11 @@ impl EventScope {
     pub fn allows(&self, ev: &Event) -> bool {
         match (self, ev) {
             (EventScope::Full, _) | (_, Event::DeviceEnrolled { .. }) | (_, Event::Unknown) => true,
-            (
-                EventScope::Replica,
-                Event::ChunkStored { folder, .. } | Event::ChunkVerified { folder, .. },
-            ) => folder.as_str().is_empty(),
+            (EventScope::Replica, Event::ChunkStored { folder, .. }) => folder.as_str().is_empty(),
             (EventScope::Replica, _) => false,
             (
                 EventScope::Member(f),
                 Event::ChunkStored { folder, .. }
-                | Event::ChunkVerified { folder, .. }
                 | Event::ChunkOnDevice { folder, .. }
                 | Event::ManifestPublished { folder, .. }
                 | Event::ChunkDropped { folder, .. },
@@ -1757,28 +1746,6 @@ impl LedgerView {
                     loc.lamport = loc.lamport.max(batch.lamport);
                     loc.claimed_lamport = loc.claimed_lamport.max(batch.lamport);
                 }
-                Event::ChunkVerified {
-                    folder,
-                    chunk,
-                    object,
-                    storage,
-                } => {
-                    let rec = self
-                        .chunks
-                        .entry((folder.clone(), chunk.clone()))
-                        .or_default();
-                    rec.set_object(object, stamp());
-                    // Older versions recorded blocks fetched from a peer as verified at
-                    // "peer:<device>", which is no storage: ignored (it listed the device twice
-                    // and counted as a kept copy).
-                    if storage.starts_with("peer:") {
-                        continue;
-                    }
-                    let loc = rec.storages.entry(storage.clone()).or_default();
-                    loc.verified_by.insert(batch.device.clone());
-                    loc.verified_utc = loc.verified_utc.max(batch.created_utc);
-                    loc.lamport = loc.lamport.max(batch.lamport);
-                }
                 Event::ChunkOnDevice {
                     folder,
                     chunk,
@@ -2185,69 +2152,6 @@ mod tests {
         (dir, store, key, signer, device)
     }
 
-    /// A verification made after a drop (by a device that had not seen it)
-    /// does not bring the storage back into the view.
-    #[test]
-    fn a_late_verification_does_not_undo_a_drop() {
-        let x = DeviceId::from_bytes(&[1; 16]);
-        let y = DeviceId::from_bytes(&[2; 16]);
-        let folder = FolderId::from_bytes(&[3; 16]);
-        let chunk = ChunkId::from_bytes(&[4; 16]);
-        let object = ObjectName::from_bytes(&[5; 32]);
-        let mut v = LedgerView::default();
-        let mut seq = 0;
-        let mut put = |v: &mut LedgerView, dev: &DeviceId, lamport: u64, ev: Event| {
-            seq += 1;
-            v.apply(&Batch {
-                device: dev.clone(),
-                seq,
-                prev: None,
-                lamport,
-                created_utc: 0,
-                events: vec![ev],
-                seen: BTreeMap::new(),
-            });
-        };
-        let (f, c, o) = (folder.clone(), chunk.clone(), object.clone());
-        let stored = Event::ChunkStored {
-            folder: f.clone(),
-            chunk: c.clone(),
-            object: o.clone(),
-            storage: "s3".into(),
-            size: 10,
-            pack: None,
-        };
-        put(&mut v, &x, 1, stored);
-        put(
-            &mut v,
-            &x,
-            5,
-            Event::ChunkDropped {
-                folder: f.clone(),
-                chunk: c.clone(),
-                object: o.clone(),
-                storage: "s3".into(),
-            },
-        );
-        put(
-            &mut v,
-            &y,
-            7,
-            Event::ChunkVerified {
-                folder: f.clone(),
-                chunk: c.clone(),
-                object: o.clone(),
-                storage: "s3".into(),
-            },
-        );
-        v.apply_drops();
-        assert!(!v
-            .locate(&folder, &chunk)
-            .unwrap()
-            .storages
-            .contains_key("s3"));
-    }
-
     #[test]
     fn append_chain_and_ingest() {
         let (_d, mut a, key, signer, device) = setup();
@@ -2408,19 +2312,13 @@ mod tests {
             1 => Event::FolderAdded {
                 folder: folder(rng),
             },
-            2 | 3 => Event::ChunkStored {
+            2..=4 => Event::ChunkStored {
                 folder: folder(rng),
                 chunk: chunk(rng),
                 object: object(rng),
                 storage: storage(rng),
                 size: rng.below(1000),
                 pack: None,
-            },
-            4 => Event::ChunkVerified {
-                folder: folder(rng),
-                chunk: chunk(rng),
-                object: object(rng),
-                storage: storage(rng),
             },
             5 => Event::ChunkOnDevice {
                 folder: folder(rng),
@@ -2577,15 +2475,6 @@ mod tests {
                     storage: "box".into(),
                     size: 4,
                     pack: None,
-                },
-            ),
-            (
-                &y,
-                Event::ChunkVerified {
-                    folder: folder.clone(),
-                    chunk: chunk.clone(),
-                    object: object.clone(),
-                    storage: "box".into(),
                 },
             ),
             (
@@ -2795,34 +2684,5 @@ mod tests {
             .make_checkpoint(&device, 21, key_for, &key, KEY_LEDGER, &signer)
             .unwrap();
         assert_eq!(third.ingest_checkpoint(forged).unwrap(), Ingest::Fork);
-    }
-
-    /// A block fetched from a peer was once recorded as verified at the "storage"
-    /// `peer:<device>`; that is no storage and must not show up as one.
-    #[test]
-    fn peer_fetches_are_not_storage_copies() {
-        let x = device_id_for(&SigningKey::generate().public());
-        let folder = FolderId::from_bytes(&[1]);
-        let chunk = ChunkId::from_bytes(&[2, 7]);
-        let object = ObjectName::from_bytes(&[3, 9]);
-        let mut view = LedgerView::default();
-        view.apply(&Batch {
-            device: x.clone(),
-            seq: 1,
-            prev: None,
-            lamport: 1,
-            created_utc: 0,
-            events: vec![Event::ChunkVerified {
-                folder: folder.clone(),
-                chunk: chunk.clone(),
-                object,
-                storage: "peer:d5ffec12".into(),
-            }],
-            seen: BTreeMap::new(),
-        });
-        assert!(view
-            .chunks
-            .values()
-            .all(|c| !c.storages.contains_key("peer:d5ffec12")));
     }
 }

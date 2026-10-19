@@ -768,17 +768,6 @@ impl Engine {
         Ok(report)
     }
 
-    /// Before signing: a storage that holds this identity's batches after
-    /// the local head fences the device (nothing is signed).
-    pub(super) fn check_storage_before_signing(&mut self) -> Result<()> {
-        if let Some(n) = self.own_objects_ahead()? {
-            self.ledger_alarm.storage_ahead = Some(n);
-            self.forked_self = true;
-            self.ensure_ledger_writable()?;
-        }
-        Ok(())
-    }
-
     /// The cheap check of the storages (at service start and now and then):
     /// one listing of this identity's batches after the local head.
     pub fn ledger_check_storages(&mut self) -> Result<LedgerHealth> {

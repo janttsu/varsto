@@ -34,11 +34,6 @@ use super::*;
 
 const REPAIR_FILE: &str = "state/repair.json";
 
-/// Retry an unrepairable copy after this long.
-const RETRY_UNREPAIRABLE_SECS: i64 = 24 * 3600;
-/// Retry a copy whose storage could not be reached after this long.
-const RETRY_UNREACHABLE_SECS: i64 = 3600;
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
 pub enum DamageKind {

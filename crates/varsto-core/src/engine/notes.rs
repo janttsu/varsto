@@ -153,11 +153,6 @@ pub struct NotesExchangeReport {
     pub followed: usize,
 }
 
-/// The storage prefix of a folder's notes records.
-pub(super) fn folder_prefix(folder: &FolderId) -> String {
-    format!("notes/{folder}/")
-}
-
 fn no_control(s: &str) -> bool {
     !s.chars().any(|c| c.is_control())
 }

@@ -267,7 +267,6 @@ struct Group {
 
 /// Everything one read of one content id needs, apart from the engine.
 struct IngestCtx {
-    folder: FolderId,
     vault: VaultId,
     fk: FolderKeys,
     storages: Arc<OpenStorages>,
@@ -1356,7 +1355,6 @@ impl Engine {
             }
         }
         let mut ctx = IngestCtx {
-            folder: rec.folder_id.clone(),
             vault: self.vault.vault_id.clone(),
             fk,
             storages: Arc::new(self.open_storages(false)?),

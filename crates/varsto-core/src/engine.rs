@@ -19,8 +19,6 @@
 //! and manifests are base + delta records (`folder3`). Parts of the engine
 //! that still speak format 2 are marked `f3-switch: part B`; they are
 //! compiled but see an empty format-2 ledger.
-// f3-switch: format-2 paths are kept until part B ports or deletes them.
-#![allow(dead_code)]
 
 use crate::activity;
 use crate::chunking::{Chunker, ChunkerParams};
@@ -28,9 +26,7 @@ use crate::crypto::{self, KeyedHasher, SecretKey};
 use crate::fsmeta;
 use crate::ids::{ChunkId, DeviceId, FolderId, ObjectName, VaultId};
 use crate::ignore_rules::{self, Matcher as IgnoreMatcher};
-use crate::ledger::{
-    self, Event, Ingest, KeyDirectory, LedgerStore, LedgerView, KEY_LEDGER, KEY_REPLICA,
-};
+use crate::ledger::{self, Event, Ingest, LedgerStore, LedgerView, KEY_LEDGER, KEY_REPLICA};
 use crate::manifest::{self, ChunkRef, FileState, Manifest, Merge};
 use crate::policy::{Policy, PolicyReport};
 use crate::pool::{self, DiskStatus, PoolDisk, PoolError, PoolIdentity, PoolStorage};
@@ -1638,25 +1634,6 @@ impl Engine {
         util::write_json(&self.home.join("devices.json"), &self.devices)
     }
 
-    fn key_directory(&self) -> Result<KeyDirectory> {
-        let mut dir = KeyDirectory::new();
-        // Revoked devices stay in the directory: their batches up to the
-        // cut-off remain valid. Devices enrolled with an out-of-date vault
-        // key are left out.
-        for (id, rec) in self
-            .devices
-            .devices
-            .iter()
-            .filter(|(id, _)| self.trusted(id) || self.is_revoked(id))
-            .chain(self.devices.replicas.iter())
-            .chain(self.devices.members.iter())
-        {
-            dir.insert(id.clone(), rec.pubkey()?);
-        }
-        dir.insert(self.vault.device_id.clone(), self.keys.signer.public());
-        Ok(dir)
-    }
-
     /// The next logical clock value. The clock lives in memory; `clock.json`
     /// holds the end of a reservation of `CLOCK_RESERVE` values and is
     /// written (and fsynced) only when the reservation is used up, not on
@@ -2400,53 +2377,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Two devices that created a folder with the same name while offline:
-    /// every device keeps the older one's name and numbers the newer ones,
-    /// so all of them end up with the same unique names.
-    fn dedupe_folder_names(&mut self) -> bool {
-        let live_folders: Vec<&FolderRecord> = self
-            .keyring
-            .folders
-            .values()
-            .filter(|f| !f.is_removed())
-            .collect();
-        // A folder being converted into a Strongroom briefly exists twice
-        // under one name: the new Strongroom record arrives before the
-        // conversion record retires the old one. That pair is no conflict.
-        let converting = |f: &FolderRecord| {
-            f.is_strongroom()
-                && live_folders.iter().any(|o| {
-                    !o.is_strongroom()
-                        && o.created_utc <= f.created_utc
-                        && o.name.to_lowercase() == f.name.to_lowercase()
-                })
-        };
-        let mut live: Vec<(i64, FolderId, String)> = live_folders
-            .iter()
-            .filter(|f| !converting(f))
-            .map(|f| (f.created_utc, f.folder_id.clone(), f.name.clone()))
-            .collect();
-        live.sort();
-        let mut taken: HashSet<String> = HashSet::new();
-        let mut changed = false;
-        for (_, id, name) in live {
-            let mut candidate = name.clone();
-            let mut n = 2;
-            while taken.contains(&candidate.to_lowercase()) {
-                candidate = format!("{name} ({n})");
-                n += 1;
-            }
-            taken.insert(candidate.to_lowercase());
-            if candidate != name {
-                if let Some(f) = self.keyring.folders.get_mut(&id) {
-                    f.name = candidate;
-                    changed = true;
-                }
-            }
-        }
-        changed
-    }
-
     /// Stop syncing a folder on this device. Its files stay where they are;
     /// the sync state goes, so attaching it again later starts clean instead
     /// of reading missing files as deletions.
@@ -2987,71 +2917,6 @@ impl Engine {
     /// next format-3 batch and push it (`ledger3_ops::commit3`).
     fn commit_batch(&mut self) -> Result<Option<u64>> {
         self.commit3()
-    }
-
-    /// The format-2 batch of the events recorded (f3-switch: part B
-    /// deletes it).
-    fn commit_batch2(&mut self) -> Result<Option<u64>> {
-        if self.pending.is_empty() {
-            return Ok(None);
-        }
-        if self.removal.is_some() {
-            // A removed device signs nothing more.
-            self.pending.clear();
-            self.clear_deferred();
-            return self.ensure_active().map(|_| None);
-        }
-        if let Err(e) = self.ensure_ledger_writable() {
-            // Nothing is signed until the ledger is restored; the events
-            // wait for it in `ledger/pending.json`.
-            let _ = self.defer_events();
-            return Err(e);
-        }
-        if self.cycle.is_some() {
-            // One batch at the end of the action (see `one_batch`).
-            self.defer_events()?;
-            return Ok(None);
-        }
-        // A storage holding newer batches of this identity than this device
-        // has (a copy restored from an old backup): signing now would sign a
-        // number that exists already. One short listing, usually empty.
-        if let Err(e) = self.check_storage_before_signing() {
-            let _ = self.defer_events();
-            return Err(e);
-        }
-        let lamport = self.tick()?;
-        let events = std::mem::take(&mut self.pending);
-        let n_events = events.len();
-        if !self.vault.member {
-            let (key_id, ledger_key) = self.ledger_key_now();
-            let signed = self.ledger.append_own_seen(
-                &self.vault.device_id,
-                events,
-                self.seen_heads(),
-                lamport,
-                &ledger_key,
-                &key_id,
-                &self.keys.signer,
-            )?;
-            log::debug!(seq = signed.seq, events = n_events, lamport = lamport, key_id = key_id.as_str(); "ledger batch sealed");
-            // The events are in a local batch now.
-            self.clear_deferred();
-            let t = crate::logging::Timer::start();
-            self.push_own_batches()?;
-            log::debug!(seq = signed.seq, ms = t.ms(); "ledger batches pushed");
-            return Ok(Some(signed.seq));
-        }
-        // Format-2 member batches are gone: a member device seals
-        // folder-scoped batches of format 3 (`commit3`).
-        let _ = (events, lamport, n_events);
-        bail!("a member device writes format-3 folder-scoped batches only")
-    }
-
-    fn mark_forked(&mut self, _device: &DeviceId) -> Result<()> {
-        // Another copy of this device identity has published batches we never
-        // wrote (restored from an old backup, or cloned). Refuse to sign more.
-        self.forked_self = true;
-        Ok(())
     }
 
     /// Token for an untrusted replica device (F-045): it can store and verify
@@ -4035,96 +3900,6 @@ impl Engine {
         crate::blockmap::written_packs(&per_storage, &|o| info.get(o).copied())
     }
 
-    /// Storages added after a manifest was published get the latest manifest.
-    fn ensure_manifest_everywhere(
-        &mut self,
-        rec: &FolderRecord,
-        state: &FolderState,
-    ) -> Result<()> {
-        if state.published_seq == 0 {
-            return Ok(());
-        }
-        let key = Manifest::storage_key(&rec.folder_id, &self.vault.device_id, state.published_seq);
-        let storages = self.metadata_storages(true)?;
-        let mut blob: Option<Vec<u8>> = None;
-        let mut holder: Option<usize> = None;
-        for (i, (_, backend)) in storages.iter().enumerate() {
-            if backend.exists(&key)? {
-                holder.get_or_insert(i);
-                continue;
-            }
-            // Read the published copy only when a storage lacks it.
-            if blob.is_none() {
-                if let Some(h) = holder {
-                    blob = storages[h].1.get(&key)?;
-                }
-            }
-            if blob.is_none() {
-                let m = Manifest {
-                    format_version: crate::FORMAT_VERSION,
-                    folder: rec.folder_id.clone(),
-                    device: self.vault.device_id.clone(),
-                    seq: state.published_seq,
-                    lamport: self.clock.lamport,
-                    created_utc: util::now_utc(),
-                    files: state.files.clone(),
-                };
-                blob = Some(m.seal(&self.vault.vault_id, &self.folder_keys(rec)?.meta)?);
-            }
-            if let Some(b) = &blob {
-                backend.put_if_absent(&key, b)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn publish_manifest(
-        &mut self,
-        rec: &FolderRecord,
-        state: &mut FolderState,
-    ) -> Result<Option<u64>> {
-        let hash = Manifest::files_hash(&state.files);
-        if hash == state.published_hash {
-            return Ok(None);
-        }
-        let seq = state.published_seq + 1;
-        let lamport = self.tick()?;
-        let created_utc = util::now_utc();
-        let m = Manifest {
-            format_version: crate::FORMAT_VERSION,
-            folder: rec.folder_id.clone(),
-            device: self.vault.device_id.clone(),
-            seq,
-            lamport,
-            created_utc,
-            files: state.files.clone(),
-        };
-        let blob = m.seal(&self.vault.vault_id, &self.folder_keys(rec)?.meta)?;
-        let key = Manifest::storage_key(&rec.folder_id, &self.vault.device_id, seq);
-        for (_, backend) in self.metadata_storages(true)? {
-            backend.put_if_absent(&key, &blob)?;
-        }
-        log::debug!(
-            folder = rec.name.as_str(),
-            seq = seq,
-            files = state.files.values().filter(|f| !f.deleted).count(),
-            deleted = state.files.values().filter(|f| f.deleted).count(),
-            bytes = blob.len();
-            "manifest published"
-        );
-        self.pending.push(Event::ManifestPublished {
-            folder: rec.folder_id.clone(),
-            seq,
-            manifest_hash: hex::encode(crypto::hash(&blob)),
-            files: state.files.values().filter(|f| !f.deleted).count() as u64,
-        });
-        state.published_seq = seq;
-        state.published_hash = hash;
-        // This device's own versions enter its change history as published.
-        let _ = self.history_from_own(rec, state, created_utc);
-        Ok(Some(seq))
-    }
-
     // ----- pull ---------------------------------------------------------------
 
     pub fn pull(&mut self, folder: &str) -> Result<PullReport> {
@@ -4889,16 +4664,12 @@ impl Engine {
                 None
             };
             let mut write_chunk = |cref: &ChunkRef, fetched: Fetched| -> Result<()> {
-                let (storage_name, ct, from_peer) = match fetched {
-                    Fetched::Got {
-                        source,
-                        bytes,
-                        from_peer,
-                    } => {
+                let (ct, from_peer) = match fetched {
+                    Fetched::Got { bytes, from_peer } => {
                         if from_peer {
                             report.chunks_from_peers += 1;
                         }
-                        (source, bytes, from_peer)
+                        (bytes, from_peer)
                     }
                     Fetched::Failed(e) => return Err(e),
                     Fetched::Missing(needs_disk) => {
@@ -4932,16 +4703,6 @@ impl Engine {
                 report.bytes_downloaded += plain.len() as u64;
                 if from_peer {
                     report.bytes_from_peers += plain.len() as u64;
-                }
-                // A block that came from a peer says nothing about a storage: "peer:<id>"
-                // is not one (it would show up as a storage holding the block).
-                if !storage_name.starts_with("peer:") {
-                    self.pending.push(Event::ChunkVerified {
-                        folder: rec.folder_id.clone(),
-                        chunk: cref.chunk.clone(),
-                        object: cref.object.clone(),
-                        storage: storage_name,
-                    });
                 }
                 if !rec.is_backup() {
                     self.pending.push(Event::ChunkOnDevice {
@@ -4979,14 +4740,13 @@ impl Engine {
                         }
                         if here {
                             for c in &file.chunks[i..j] {
-                                let Some((path, pool)) = staged(c) else {
+                                let Some((path, _)) = staged(c) else {
                                     continue;
                                 };
                                 let bytes = fs::read(&path)?;
                                 let fetched =
                                     if ObjectName::from_bytes(&crypto::hash(&bytes)) == c.object {
                                         Fetched::Got {
-                                            source: pool,
                                             bytes,
                                             from_peer: false,
                                         }
@@ -5801,16 +5561,6 @@ impl Engine {
     /// reads its snapshot from, so a push can refresh it early.
     pub fn set_snapshot_sink(&mut self, sink: Option<SnapshotSink>) {
         self.snapshot_sink = sink;
-    }
-
-    fn refresh_snapshot(&self) {
-        let Some(sink) = &self.snapshot_sink else {
-            return;
-        };
-        match self.peer_snapshot() {
-            Ok(s) => *sink.lock().unwrap() = Some(std::sync::Arc::new(s)),
-            Err(e) => eprintln!("p2p snapshot after publishing failed: {e:#}"),
-        }
     }
 
     /// Tell the other devices over peer-to-peer that something new was

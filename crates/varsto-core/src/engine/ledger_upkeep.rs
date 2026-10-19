@@ -44,9 +44,6 @@ impl Default for LedgerPolicy {
     }
 }
 
-/// Typical size of a stored batch (mostly its hybrid signature).
-const TYPICAL_BATCH_BYTES: u64 = 8 * 1024;
-
 /// Events recorded but not yet sealed into a batch, kept across restarts.
 const DEFERRED_FILE: &str = "ledger/pending.json";
 
@@ -108,21 +105,6 @@ impl Engine {
         let committed = self.commit_batch();
         let out = out?;
         Ok((out, committed?))
-    }
-
-    /// The newest batch of every other device held here, for the `seen`
-    /// field of this device's next batch.
-    pub(super) fn seen_heads(&self) -> BTreeMap<DeviceId, u64> {
-        self.ledger
-            .devices()
-            .into_iter()
-            .filter(|d| d != &self.vault.device_id)
-            .map(|d| {
-                let seq = self.ledger.head(&d).seq;
-                (d, seq)
-            })
-            .filter(|(_, seq)| *seq > 0)
-            .collect()
     }
 
     /// Keep the ledger small, after a sync: acknowledge other devices'
@@ -318,18 +300,6 @@ impl Engine {
         parts.push(self.scope_context());
         let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
         hex::encode(crypto::hash(&crypto::aad("ledger-view-context", &refs)))
-    }
-
-    /// Forget the cached view (memory and `ledger/view.enc`): the next
-    /// call rebuilds it from the batches.
-    pub(super) fn reset_view_cache(&self) {
-        let mut slot = self.view_cache.lock().unwrap_or_else(|e| e.into_inner());
-        *slot = ViewSlot {
-            cache: None,
-            loaded: true,
-            unsaved: 0,
-        };
-        let _ = fs::remove_file(self.view_cache_path());
     }
 
     fn view_cache_path(&self) -> PathBuf {

@@ -45,18 +45,13 @@ pub(crate) struct Members3 {
     pub member: Option<MemberInfo>,
     /// The newest key wraps of every Strongroom folder.
     pub strongrooms: BTreeMap<Id16, crate::membership3::strongrooms::StrongroomRecord>,
-    /// Read at least once in this process.
-    pub read: bool,
 }
 
 /// A member device's own standing in its shared folder.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MemberInfo {
     pub folder: Id16,
-    pub role: Option<Role>,
     pub access_lost: bool,
-    /// The owner devices whose grants counted.
-    pub owners: BTreeSet<Id16>,
 }
 
 impl Members3 {
@@ -91,7 +86,6 @@ impl Members3 {
             cutoffs,
             member: None,
             strongrooms: m.strongrooms.clone(),
-            read: true,
         }
     }
 
@@ -100,9 +94,7 @@ impl Members3 {
         Members3 {
             member: Some(MemberInfo {
                 folder: v.folder,
-                role: v.role,
                 access_lost: v.access_lost,
-                owners: v.owners.clone(),
             }),
             devices: v.devices,
             registry: v.registry,
@@ -115,7 +107,6 @@ impl Members3 {
             vault_forks: BTreeMap::new(),
             cutoffs: v.cutoffs,
             strongrooms: BTreeMap::new(),
-            read: true,
         }
     }
 
@@ -799,14 +790,6 @@ impl Engine {
         self.devices.record_epochs = epochs;
         if changed {
             self.save_devices()?;
-        }
-        Ok(())
-    }
-
-    /// Read the membership once in this process if nothing did yet.
-    pub(crate) fn members3_ready(&mut self) -> Result<()> {
-        if !self.f3.members.read {
-            self.refresh_members3()?;
         }
         Ok(())
     }

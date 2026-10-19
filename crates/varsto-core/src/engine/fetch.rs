@@ -46,7 +46,6 @@ const EXPLORE_EVERY: u64 = 16;
 /// One chunk object as a download looked for it.
 pub(super) enum Fetched {
     Got {
-        source: String,
         bytes: Vec<u8>,
         from_peer: bool,
     },
@@ -270,8 +269,7 @@ fn from_peers(
         t.elapsed().as_secs_f64(),
         got.as_ref().map(|(_, b)| b.len()),
     );
-    got.map(|(dev, ct)| Fetched::Got {
-        source: format!("peer:{}", dev.short()),
+    got.map(|(_, ct)| Fetched::Got {
         bytes: ct,
         from_peer: true,
     })
@@ -286,7 +284,7 @@ fn from_storages(
     let t = Instant::now();
     let key = chunk_storage_key(object);
     let mut needs_disk: Option<PoolError> = None;
-    for (spec, backend) in storages {
+    for (_, backend) in storages {
         match crate::storage::guarded(&key, || {
             backend.get_bounded(&key, crate::storage::MAX_BLOCK_OBJECT)
         }) {
@@ -296,7 +294,6 @@ fn from_storages(
                 }
                 stats.record(Source::Storages, t.elapsed().as_secs_f64(), Some(ct.len()));
                 return Fetched::Got {
-                    source: spec.name().to_string(),
                     bytes: ct,
                     from_peer: false,
                 };

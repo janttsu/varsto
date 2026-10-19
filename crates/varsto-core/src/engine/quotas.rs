@@ -195,24 +195,6 @@ impl QuotaGate {
         })
     }
 
-    /// Give back room taken for a write that did not happen.
-    pub(super) fn give_back(&self, storage: &str, bytes: u64) {
-        let mut left = self.left.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((b, o)) = left.get_mut(storage) {
-            let mut taken = self.taken.lock().unwrap_or_else(|e| e.into_inner());
-            let t = taken.entry(storage.to_string()).or_default();
-            let (b1, p1) = padded(*t);
-            *t = t.saturating_sub(bytes);
-            let (b0, p0) = padded(*t);
-            if let Some(b) = b {
-                *b += (b1 - b0) as i128;
-            }
-            if let Some(o) = o {
-                *o += (p1 - p0) as i128;
-            }
-        }
-    }
-
     /// The sentences for the storages that refused a write.
     pub(super) fn refusals(&self) -> Vec<String> {
         self.refused
