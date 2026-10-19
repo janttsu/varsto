@@ -21,10 +21,10 @@
 //! moves of a whole folder take them along, a storage is not removed while
 //! they would lose their last copy, and `fsck` counts them as referenced.
 //! Once an entry has gone, its blocks that no current file, no other entry
-//! and no other folder (backups included) uses are dropped
-//! (`Event::ChunkDropped`, sealed and pushed before anything is deleted)
-//! from this device's storages, except from a cold storage before its
-//! minimum storage duration has passed; those wait in a local queue.
+//! and no other folder (backups included) uses are marked dead and
+//! collected by garbage collection in the trash upkeep (`pack_upkeep`,
+//! `crate::gc3`); a cold storage keeps its packs until its minimum storage
+//! duration has passed.
 //!
 //! A vault may name a *trash storage* (vault-wide setting, published as
 //! the `settings` record `vault/settings/<device>/`, `crate::trash3::settings`):

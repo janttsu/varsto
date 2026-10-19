@@ -4,10 +4,8 @@
 //! copies as operations of the engine, so that the command line, the local
 //! API and the pages share one implementation.
 //!
-//! The engine of a format-2 vault stands in for the device keys that
-//! format 3 needs until work package 12 flips the format: K6 is the
-//! device's signing key, K8 its KEM key (made on first use and kept in
-//! `vault-keys.enc` like today), K3 the vault key. Every operation opens a
+//! K6 is the device's signing key, K8 its KEM key (kept in
+//! `vault-keys.enc`), K3 the vault key. Every operation opens a
 //! [`Membership`] over the metadata storages, enrols this device in the
 //! registry when it is not there yet, and runs one step.
 //!

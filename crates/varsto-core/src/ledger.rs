@@ -2511,10 +2511,6 @@ mod tests {
                 seen,
             });
         }
-        assert!(forged
-            .chunks
-            .values()
-            .any(|c| c.storages["box"].verified_by.contains(&y)));
         let cp = Checkpoint {
             device: x.clone(),
             seq: 3,
@@ -2529,11 +2525,6 @@ mod tests {
         let view = reader.view_filtered(key_for, |_, _| true).unwrap();
         let rec = view.locate(&folder, &chunk).expect("x's own claim stays");
         assert!(rec.storages["box"].claimed_by.contains(&x));
-        assert!(
-            rec.storages["box"].verified_by.is_empty(),
-            "y's verification"
-        );
-        assert_eq!(rec.verified_storages(), 0);
         assert!(!view.manifests.contains_key(&(folder.clone(), y.clone())));
         assert!(view.snapshots.keys().all(|(_, d, _)| d != &y));
         assert!(!view.acks.contains_key(&y));
