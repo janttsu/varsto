@@ -18,7 +18,7 @@ The guide never contains a secret. It names the secrets (the recovery words, sto
 
 | What | Why | Without it |
 | --- | --- | --- |
-| **Recovery kit**: the vault key as 24 words (`varsto recovery kit`), or three shares of which any two rebuild it (`--shares`). | It is the only thing that opens the vault. There is no account, no reset and no copy anywhere else. | Nobody can read the vault, including the makers of Varsto. |
+| **Recovery kit**: two sets of 24 words. The **vault words** are the vault key (`varsto recovery kit`, or with `--shares` three shares of which any two rebuild it). The **recovery words** (`varsto recovery kit --recovery-words`) open the recovery copy of every folder's key. | The vault words open the vault's bookkeeping (device and folder names, where the packs are) and no file content. With the recovery words as well, every folder that has a recovery copy opens on a new device. There is no account, no reset and no copy anywhere else. | Without the vault words nobody can read the vault, including the makers of Varsto. Without the recovery words a new device sees folder names only, until another of your devices approves it for each folder. |
 | **Storage credentials**: for each S3 bucket the endpoint, bucket and region (in the guide) plus the access key ID and secret key (keep them yourself); the login to the provider account. | A new device reads your encrypted data from the storages. Varsto keeps the secret key only in the encrypted secret store of each device. | You need the provider account to make new keys; without it the bucket cannot be reached. |
 | **rclone configuration** (`rclone.conf`) for rclone remotes, kept like a password. | rclone, not Varsto, holds the remote's token. | Set the remote up again from the provider account. |
 | **NAS and network shares**: where they are and how to reach them. A directory on a computer's own disk is lost with it. | A directory storage is only a recovery source if it survives. | Data that only that directory held is lost. |
@@ -46,11 +46,11 @@ The guide gives the exact commands for your vault. In outline:
 
 1. Install Varsto from the download page and check the download with `varsto verify-release`.
 2. If you kept shares, rebuild the words: `varsto recovery combine --check <key check>` (it asks for two shares, one `<index>: <words>` per line, or reads them from standard input or `--file`) (the key check is printed on the kit; with it a share from another kit or a copying mistake is caught).
-3. Join through a bucket or a directory that holds the vault: `varsto join --storage-path ... ` (or the `--s3-*` options); it asks for the 24 words without echo. `VARSTO_VAULT_KEY` or `--key-file` supply them in scripts; they are never taken from the command line.
+3. Join through a bucket or a directory that holds the vault: `varsto join --recovery-words --storage-path ... ` (or the `--s3-*` options); it asks for the 24 vault words and then the 24 recovery words without echo. `VARSTO_VAULT_KEY` or `--key-file` supply the vault words and `VARSTO_RECOVERY_WORDS` the recovery words in scripts; they are never taken from the command line. A folder that has no recovery copy cannot be restored this way: `varsto status` warns while a folder lacks one (`varsto recovery escrow` writes it).
 4. Add the other storages under the same names (`varsto storage add-s3`, `add-rclone`, `add-local`, `add-pool`).
 5. Connect the pool disks one at a time (`varsto disk insert` on Linux).
 6. Attach the folders (`varsto folder attach <folder> <directory>`), unlock Strongroom folders with a security key, restore backups (`varsto backup restore`).
 7. Files whose blocks are only on cold storage need a confirmed read (`varsto repair --from-cold` or `varsto move ... --confirm-cold-read`); archive classes need a restore request at the provider first.
-8. Remove the lost devices (`varsto device revoke`), print a new recovery kit and make the guide again.
+8. Remove the lost devices (`varsto device revoke`, which also gives every folder they held a new key), print a new recovery kit (the vault words change; the recovery words do not) and make the guide again.
 
 The limits are those of the [failure model](failure-model.md): if the recovery words and every share are lost, nothing can restore access.

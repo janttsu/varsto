@@ -25,7 +25,7 @@ description: Varsto: end-to-end encrypted sync, sharing and backup on storage yo
     <h2 id="security">Security, honestly</h2>
     <ul>
       <li>Content is encrypted with XChaCha20-Poly1305 under keys derived from a random vault key that only your devices hold; a storage sees ciphertext objects named by their hash and nothing else. <a href="how-it-works/">How it works</a>, step by step.</li>
-      <li>Every stored signature is hybrid (Ed25519 + ML-DSA-65, both must verify) and every sealed key is hybrid (X25519 + ML-KEM-768): post-quantum hybrid cryptography, designed for, not audited. Transport (direct connections carry only encrypted blocks with a per-request token; QUIC with TLS 1.3 and pinned certificates through NAT) and release signing (minisign) use classical algorithms.</li>
+      <li>Every stored signature is hybrid (Ed25519 + ML-DSA-65, both must verify) and every sealed key is hybrid (X25519 + ML-KEM-768): post-quantum hybrid cryptography, designed for, not audited. Transport (direct connections carry only encrypted blocks over TLS 1.3 with pinned certificates, on TCP or, through NAT, QUIC) and release signing (minisign) use classical algorithms.</li>
       <li>Strongroom folders open only with a FIDO2 security key; the enforcement is cryptographic, not a dialog.</li>
       <li>AI assistance stays local: the MCP server is meant for language models that run on your own machine, inside the folders you grant and never a Strongroom. Nothing is sent to a model provider.</li>
       <li>A lost device is removed with a signed revocation and the vault moves to new keys; a wipe order runs when the device next reaches a storage. There is no account and no escrow: the recovery kit, 24 words or three shares, is yours to keep.</li>

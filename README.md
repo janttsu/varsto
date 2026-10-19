@@ -121,8 +121,9 @@ varsto verify-release varsto-<version>-x86_64-unknown-linux-musl.tar.gz --github
 varsto storage add-local stick /media/usb --carrier       # a transferrer: carries only what the other device lacks
 varsto replica token                                      # give to an untrusted backup device
 varsto --home ~/.varsto-replica replica init --name nas --token <t> --source /mnt/shared --target /mnt/nas/varsto
-varsto share create docs                                  # token for another Varsto user
-varsto --home ~/.varsto-shared share accept --name laptop --token <t> --storage-path /mnt/shared
+varsto share request --name laptop                        # on the other person's device: request code and six words
+varsto share create docs --to <request code>              # compare the six words first; writes a grant for that device
+varsto --home ~/.varsto-shared share accept --name laptop --storage-path /mnt/shared
 ```
 
 Test data only. Keep your own backups.
