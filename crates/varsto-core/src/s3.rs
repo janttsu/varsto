@@ -292,11 +292,25 @@ impl S3Storage {
         body: &[u8],
         cap: u64,
     ) -> Result<(u16, Vec<u8>)> {
+        self.request_capped_full(method, path, query, extra_headers, body, cap)
+            .map(|(status, bytes, _)| (status, bytes))
+    }
+
+    /// `request_capped`, also giving the answer's `Content-Range`.
+    fn request_capped_full(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        extra_headers: &[(&str, &str)],
+        body: &[u8],
+        cap: u64,
+    ) -> Result<(u16, Vec<u8>, Option<String>)> {
         use std::sync::atomic::Ordering;
         let t = crate::logging::Timer::start();
         let first = self.request_once(method, path, query, extra_headers, body, cap);
         let failed = match &first {
-            Ok((st, _, _)) => *st >= 400 && *st != 404,
+            Ok((st, ..)) => *st >= 400 && *st != 404,
             Err(_) => true,
         };
         // The engine logs each logical request; the HTTP level only adds
@@ -314,7 +328,7 @@ impl S3Storage {
                 first.as_ref().err(),
             );
         }
-        let (status, bytes, server_date) = first?;
+        let (status, bytes, server_date, content_range) = first?;
         // Refused (403, or 400 from some servers for a signature outside the
         // allowed window) by a server whose clock is far from ours: retry
         // once with our clock set to the server's.
@@ -329,13 +343,13 @@ impl S3Storage {
                     );
                     self.clock_offset
                         .store(server - unix_now(), Ordering::Relaxed);
-                    let (status, bytes, _) =
+                    let (status, bytes, _, content_range) =
                         self.request_once(method, path, query, extra_headers, body, cap)?;
-                    return Ok((status, bytes));
+                    return Ok((status, bytes, content_range));
                 }
             }
         }
-        Ok((status, bytes))
+        Ok((status, bytes, content_range))
     }
 
     /// Build and sign one request. `query` must already be sorted by key.
@@ -347,7 +361,7 @@ impl S3Storage {
         extra_headers: &[(&str, &str)],
         body: &[u8],
         cap: u64,
-    ) -> Result<(u16, Vec<u8>, Option<String>)> {
+    ) -> Result<Answer> {
         let amz_date =
             amz_date_at(unix_now() + self.clock_offset.load(std::sync::atomic::Ordering::Relaxed));
         let date = &amz_date[..8];
@@ -441,6 +455,11 @@ impl S3Storage {
             .get("date")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
+        let content_range = resp
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
         let bytes = if method == "HEAD" {
             Vec::new()
         } else {
@@ -458,13 +477,25 @@ impl S3Storage {
             }
             // ureq stops at 10 MiB by default, but a ledger batch or a file
             // list of a folder with tens of thousands of files is larger.
-            resp.body_mut()
+            // ureq refuses a body that reaches its limit, so the limit is one
+            // past the cap: a body of exactly `cap` bytes (a pack read with
+            // its class size) is accepted, a longer one is refused here.
+            let limit = cap.max(64 * 1024);
+            let bytes = resp
+                .body_mut()
                 .with_config()
-                .limit(cap.max(64 * 1024))
+                .limit(limit.saturating_add(1))
                 .read_to_vec()
-                .with_context(|| format!("{method} {}: reading the response", self.cfg.name))?
+                .with_context(|| format!("{method} {}: reading the response", self.cfg.name))?;
+            if bytes.len() as u64 > limit {
+                bail!(
+                    "{method} {}: the response is longer than the {limit} bytes allowed",
+                    self.cfg.name
+                );
+            }
+            bytes
         };
-        Ok((status, bytes, server_date))
+        Ok((status, bytes, server_date, content_range))
     }
 
     /// `put_if_absent` for a large object: a multipart upload. Large
@@ -570,6 +601,50 @@ impl S3Storage {
         }
         Ok(status)
     }
+}
+
+/// One answer: status, body, its `Date` and its `Content-Range` header.
+type Answer = (u16, Vec<u8>, Option<String>, Option<String>);
+
+/// The `start` of a `Content-Range: bytes start-end/total` header.
+fn content_range_start(header: &str) -> Option<u64> {
+    let rest = header.trim().strip_prefix("bytes")?.trim_start();
+    let (span, _) = rest.split_once('/')?;
+    let (start, _) = span.split_once('-')?;
+    start.trim().parse().ok()
+}
+
+/// The bytes `offset .. offset + len` out of a range answer. A `206`, or a
+/// `200` that names its `Content-Range` (rclone serve s3 does that), holds
+/// the bytes from the header's start, which may be clipped at the object's
+/// end. A `200` without one is the whole object (the server ignored Range).
+/// Bytes past what was asked are dropped; a range past the end is empty.
+fn range_part(
+    status: u16,
+    body: Vec<u8>,
+    content_range: Option<&str>,
+    offset: u64,
+    len: u64,
+) -> Vec<u8> {
+    let start = match content_range.and_then(content_range_start) {
+        Some(start) => start,
+        // A 206 without a readable header: trust it to begin at the offset.
+        None if status == 206 => offset,
+        None => 0,
+    };
+    let Some(skip) = offset.checked_sub(start) else {
+        // The answer begins after the offset: not the bytes asked for.
+        return Vec::new();
+    };
+    let (Ok(skip), Ok(len)) = (usize::try_from(skip), usize::try_from(len)) else {
+        return Vec::new();
+    };
+    if skip == 0 && body.len() <= len {
+        return body;
+    }
+    body.get(skip..)
+        .map(|rest| rest[..rest.len().min(len)].to_vec())
+        .unwrap_or_default()
 }
 
 fn unix_now() -> i64 {
@@ -756,7 +831,7 @@ impl Storage for S3Storage {
             bail!("GET {key}: the range starting at {offset} is out of bounds");
         };
         let range = format!("bytes={offset}-{last}");
-        let (status, body) = self.request_capped(
+        let (status, body, content_range) = self.request_capped_full(
             "GET",
             &self.object_path(key),
             &[],
@@ -765,20 +840,16 @@ impl Storage for S3Storage {
             crate::storage::MAX_PACK,
         )?;
         match status {
-            206 => Ok(Some(body)),
-            // Some servers (rclone serve s3) send the range with 200; one that
-            // ignores Range sends the whole object, which is longer whenever
-            // the offset is not 0.
-            200 if body.len() as u64 == len => Ok(Some(body)),
-            200 => Ok(Some(
-                usize::try_from(offset)
-                    .ok()
-                    .zip(usize::try_from(last).ok())
-                    .and_then(|(a, z)| body.get(a..=z))
-                    .map(<[u8]>::to_vec)
-                    .unwrap_or_default(),
-            )),
+            206 | 200 => Ok(Some(range_part(
+                status,
+                body,
+                content_range.as_deref(),
+                offset,
+                len,
+            ))),
             404 => Ok(None),
+            // The range starts past the object's end: nothing there.
+            416 => Ok(Some(Vec::new())),
             s => Err(self.explain("GET", key, s, &body)),
         }
     }

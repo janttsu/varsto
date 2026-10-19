@@ -54,10 +54,22 @@ impl Trust<'_> {
         )
     }
 
-    /// The role a record of `device` is judged with (`writer_role`).
+    /// The role a record of `device` is judged with (`writer_role`). A
+    /// device removed from the vault is denied in its folders by the
+    /// removal; what it wrote before is judged with the role it held
+    /// (spec 77.20: its manifests, maps, trash and snapshots count up to
+    /// its cut-off, which step 5 enforces through the announcements). A
+    /// device that has not read the folder epoch the removal made (it
+    /// joined later and is no participant of it) has only the denial to
+    /// go on, so the role cannot come from the epochs.
     fn role(&self, device: &Id16, folder: &Id16, epoch: u32) -> Option<Role> {
-        self.folders
-            .and_then(|f| f.writer_role(device, folder, epoch))
+        let f = self.folders?;
+        f.writer_role(device, folder, epoch).or_else(|| {
+            self.revoked
+                .contains(device)
+                .then(|| f.former_role(device, folder))
+                .flatten()
+        })
     }
 
     /// The section 9 row of `device` in `folder` at `epoch`.

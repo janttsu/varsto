@@ -213,3 +213,39 @@ fn the_changed_message_carries_head_lists_both_ways() {
     assert_eq!(&heard[0].from, b.device_id());
     assert_eq!(heard[0].heads, mine);
 }
+
+/// The storage withholds the laptop's new batches, and the laptop hands
+/// them over itself: the desk now holds them, but the storage still shows
+/// less than the laptop proved, so the next pulls flag it. (The judge used
+/// to count a storage as showing at least the head held here.)
+#[test]
+fn a_storage_is_judged_by_its_own_listing_after_a_hand_over() {
+    let (lab, mut a, mut b) = two();
+    let (before, top) = new_batches_withheld(&lab, &mut a, &b);
+    let serving = common::p2p::Serving::start(&mut a);
+    common::p2p::connect(&mut a, &serving, &mut [&mut b]);
+    let r = b.p2p_catch_up().unwrap();
+    assert_eq!(r.fetched as u64, top - before, "{r:?}");
+    assert_eq!(head(&b, &a), top);
+    drop(serving);
+    // The proof is older than the pulls that judge it.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    b.sync(None).unwrap();
+    b.sync(None).unwrap();
+    let suspects = b.rollback_suspects();
+    let s = suspects
+        .values()
+        .next()
+        .unwrap_or_else(|| panic!("the storage is not suspect: {suspects:?}"));
+    assert!(s.pulls >= 2, "{s:?}");
+    assert_eq!(s.shown, before, "{s:?}");
+    assert_eq!(s.proved, top, "{s:?}");
+    // The storage shows them again: cleared at the next pull.
+    lab.release(a.device_id());
+    b.sync(None).unwrap();
+    assert!(
+        b.rollback_suspects().is_empty(),
+        "{:?}",
+        b.rollback_suspects()
+    );
+}

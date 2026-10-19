@@ -625,7 +625,9 @@ pub(super) mod tests {
         let (forks, _, calls) = measure(c, |e| e.pull_ledger().unwrap());
         assert!(forks.is_empty());
         assert_eq!(calls.ledger_gets, 0, "nothing new to download: {calls:?}");
-        assert_eq!(calls.ledger_listed_keys, 0, "{calls:?}");
+        // The listing starts at the head held here (the rollback judge needs
+        // the storage's own newest): at most that one key per device.
+        assert!(calls.ledger_listed_keys <= 3, "{calls:?}");
         assert_eq!(c.view3().unwrap().batches, before);
 
         // A new batch of A is the only one B downloads.

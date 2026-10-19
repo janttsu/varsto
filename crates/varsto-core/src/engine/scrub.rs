@@ -218,7 +218,9 @@ impl Engine {
 
     /// One run as of `now_utc` (tests look ahead in time).
     pub fn scrub_at(&mut self, opts: &ScrubOptions, now_utc: i64) -> Result<ScrubReport> {
-        crate::logged_op!("scrub at", "", { self.scrub_at_inner(opts, now_utc) })
+        crate::logged_op!("scrub at", "", {
+            self.exclusive(|e| e.scrub_at_inner(opts, now_utc))
+        })
     }
 
     fn scrub_at_inner(&mut self, opts: &ScrubOptions, now_utc: i64) -> Result<ScrubReport> {
