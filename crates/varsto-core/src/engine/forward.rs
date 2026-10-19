@@ -720,6 +720,7 @@ impl Engine {
     /// Write a group of fetched blocks as packs to each target, read each
     /// pack back, list their places in this device's map record of the
     /// folder, claim them and seal it all into a batch.
+    #[allow(clippy::too_many_arguments)]
     fn write_forwarded(
         &mut self,
         rec: &FolderRecord,
