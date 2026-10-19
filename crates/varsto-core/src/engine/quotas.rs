@@ -172,6 +172,29 @@ impl QuotaGate {
         fits
     }
 
+    /// Give back what `take` took for one block of `bytes` on `storage`
+    /// whose write did not happen (the storage failed, the block was there
+    /// already, its source had nothing, the run stopped before it): the
+    /// packs that block would have filled are free again for the rest of
+    /// the run.
+    pub(super) fn give_back(&self, storage: &str, bytes: u64) {
+        let mut left = self.left.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((b, o)) = left.get_mut(storage) else {
+            return;
+        };
+        let mut taken = self.taken.lock().unwrap_or_else(|e| e.into_inner());
+        let t = taken.entry(storage.to_string()).or_default();
+        let (b1, p1) = padded(*t);
+        *t = t.saturating_sub(bytes);
+        let (b0, p0) = padded(*t);
+        if let Some(b) = b {
+            *b += (b1 - b0) as i128;
+        }
+        if let Some(o) = o {
+            *o += (p1 - p0) as i128;
+        }
+    }
+
     /// Give back what `take_pack` took.
     pub(super) fn give_back_pack(&self, storage: &str, bytes: u64) {
         let mut left = self.left.lock().unwrap_or_else(|e| e.into_inner());
@@ -623,5 +646,60 @@ impl Engine {
         }
         gate.left = Mutex::new(left);
         gate
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A gate with `bytes` of room (and no object limit) on "q".
+    fn gate(bytes: i128) -> QuotaGate {
+        let g = QuotaGate::default();
+        g.left
+            .lock()
+            .unwrap()
+            .insert("q".to_string(), (Some(bytes), None));
+        g
+    }
+
+    fn left(g: &QuotaGate) -> i128 {
+        g.left.lock().unwrap()["q"].0.unwrap()
+    }
+
+    #[test]
+    fn a_write_that_did_not_happen_gives_its_room_back() {
+        // Room for one 256 KiB pack: one 200 kB block fits, a second
+        // would need a 1 MiB pack.
+        let g = gate(300_000);
+        assert!(g.take("q", 200_000));
+        assert_eq!(left(&g), 300_000 - (256 << 10));
+        assert!(
+            !g.take("q", 200_000),
+            "the second block needs a larger pack"
+        );
+        // The first write failed: its room is free again, and the next
+        // block of the run takes it.
+        g.give_back("q", 200_000);
+        assert_eq!(left(&g), 300_000);
+        assert!(g.take("q", 200_000));
+        // Giving back a block in a pack that others share frees only what
+        // the pack no longer needs.
+        let g = gate(10 << 20);
+        assert!(g.take("q", 100_000));
+        assert!(g.take("q", 100_000));
+        assert_eq!(left(&g), (10 << 20) - (256 << 10));
+        g.give_back("q", 100_000);
+        assert_eq!(left(&g), (10 << 20) - (256 << 10));
+        g.give_back("q", 100_000);
+        assert_eq!(left(&g), 10 << 20);
+        // Storages without a quota, and more than was taken, change nothing.
+        g.give_back("other", 1);
+        g.give_back("q", 5);
+        assert_eq!(left(&g), 10 << 20);
+        // A whole pack copy that did not happen.
+        assert!(g.take_pack("q", 1 << 20));
+        g.give_back_pack("q", 1 << 20);
+        assert_eq!(left(&g), 10 << 20);
     }
 }

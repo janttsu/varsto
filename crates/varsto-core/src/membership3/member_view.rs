@@ -313,6 +313,8 @@ impl MemberView {
         let mut st = FolderState {
             id: folder,
             name: dir.name.clone(),
+            shown: dir.name.clone(),
+            created_utc: 0,
             settings: BTreeMap::new(),
             creator: dir.creator,
             entries: BTreeMap::new(),

@@ -233,6 +233,78 @@ impl Storage for SharedStorage {
     }
 }
 
+/// Tests: called with the storage's name before every pack write; an error
+/// fails the write (`Engine::set_pack_write_hook`).
+pub type PackWriteHook = Arc<dyn Fn(&str) -> Result<()> + Send + Sync>;
+
+/// A storage whose pack writes go through a `PackWriteHook` first (a slow
+/// or failing storage in tests).
+pub struct HookedStorage {
+    inner: Box<dyn Storage>,
+    hook: PackWriteHook,
+}
+
+impl HookedStorage {
+    pub fn new(inner: Box<dyn Storage>, hook: PackWriteHook) -> Self {
+        HookedStorage { inner, hook }
+    }
+}
+
+impl Storage for HookedStorage {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        self.inner.put_if_absent(key, data)
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.inner.get(key)
+    }
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        self.inner.get_bounded(key, max)
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        self.inner.exists(key)
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.inner.list(prefix)
+    }
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
+        self.inner.list_after(prefix, start_after)
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        self.inner.delete(key)
+    }
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        self.inner.get_range(key, offset, len)
+    }
+    fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
+        (self.hook)(self.inner.name())?;
+        self.inner.put_pack(members)
+    }
+    fn put_built_pack(
+        &self,
+        id: &str,
+        data: &[u8],
+        members: &[(String, crate::packs::PackLoc)],
+    ) -> Result<Option<Vec<bool>>> {
+        (self.hook)(self.inner.name())?;
+        self.inner.put_built_pack(id, data, members)
+    }
+    fn pack_target(&self) -> usize {
+        self.inner.pack_target()
+    }
+    fn pack_location(&self, object: &str) -> Option<crate::packs::PackLoc> {
+        self.inner.pack_location(object)
+    }
+    fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
+        self.inner.take_new_packs()
+    }
+    fn conditional_writes(&self) -> Option<bool> {
+        self.inner.conditional_writes()
+    }
+}
+
 /// What the engine knows about a storage when opening it, beyond its spec.
 #[derive(Clone, Debug, Default)]
 pub struct OpenOptions {

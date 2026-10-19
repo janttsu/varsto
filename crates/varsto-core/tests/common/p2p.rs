@@ -56,6 +56,12 @@ impl Serving {
         }
     }
 
+    /// Where the server takes its snapshot from, for
+    /// `Engine::set_snapshot_sink` (as the service hands it over).
+    pub fn sink(&self) -> Snap {
+        self.snap.clone()
+    }
+
     /// Read `e`'s membership and the peer records again (the server
     /// admits the devices it reads now) and serve a fresh snapshot.
     pub fn refresh(&self, e: &mut Engine) {
