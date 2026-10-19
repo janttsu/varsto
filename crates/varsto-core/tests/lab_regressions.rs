@@ -64,7 +64,11 @@ fn fill(dir: &Path, n: usize) {
     for i in 0..n {
         let d = dir.join(format!("dir{}", i % 7));
         fs::create_dir_all(&d).unwrap();
-        fs::write(d.join(format!("note-{i}.txt")), format!("note {i} ").repeat(1 + i % 40)).unwrap();
+        fs::write(
+            d.join(format!("note-{i}.txt")),
+            format!("note {i} ").repeat(1 + i % 40),
+        )
+        .unwrap();
     }
     fs::write(dir.join("big.bin"), data(200_000, 9)).unwrap();
 }
@@ -109,7 +113,11 @@ fn attach_after_detach_gets_every_file_again() {
         expect.len(),
         "placeholders after attaching again: {got:?}"
     );
-    assert_eq!(placeholders.len(), got.len(), "real files in a selective folder");
+    assert_eq!(
+        placeholders.len(),
+        got.len(),
+        "real files in a selective folder"
+    );
 
     // And once more in full, after a restart of the engine.
     b.detach_folder("docs").unwrap();
@@ -276,8 +284,14 @@ fn gc_settles_with_helpers_running_upkeep(helpers: &[&str], sync_first: bool) {
     a.sync(None).unwrap();
     let mut others = Vec::new();
     for name in helpers {
-        let mut e =
-            common::join_approved(&root.join(name), name, PASS, &words, storage.clone(), &mut a);
+        let mut e = common::join_approved(
+            &root.join(name),
+            name,
+            PASS,
+            &words,
+            storage.clone(),
+            &mut a,
+        );
         e.chunker = ChunkerParams::SMALL;
         e.attach_folder("docs", &root.join(format!("{name}-docs")), false)
             .unwrap();
@@ -325,7 +339,10 @@ fn gc_settles_with_helpers_running_upkeep(helpers: &[&str], sync_first: bool) {
             break;
         }
     }
-    assert!(collected(&packs_in(&store)), "no pack was collected: {last:?}");
+    assert!(
+        collected(&packs_in(&store)),
+        "no pack was collected: {last:?}"
+    );
     // One more round: nobody waits for anybody.
     for e in &mut others {
         e.sync(None).unwrap();

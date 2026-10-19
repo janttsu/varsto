@@ -148,7 +148,11 @@ fn range_reads_work_whatever_the_server_answers() {
             "{how:?}"
         );
         let pack = [0xabu8; 32];
-        assert_eq!(probe_len(&s, &pack, class).unwrap(), LenProbe::Exact, "{how:?}");
+        assert_eq!(
+            probe_len(&s, &pack, class).unwrap(),
+            LenProbe::Exact,
+            "{how:?}"
+        );
         assert_eq!(
             probe_len(&s, &pack, class / 2).unwrap(),
             LenProbe::Longer,

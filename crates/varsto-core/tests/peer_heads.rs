@@ -243,5 +243,9 @@ fn a_storage_is_judged_by_its_own_listing_after_a_hand_over() {
     // The storage shows them again: cleared at the next pull.
     lab.release(a.device_id());
     b.sync(None).unwrap();
-    assert!(b.rollback_suspects().is_empty(), "{:?}", b.rollback_suspects());
+    assert!(
+        b.rollback_suspects().is_empty(),
+        "{:?}",
+        b.rollback_suspects()
+    );
 }

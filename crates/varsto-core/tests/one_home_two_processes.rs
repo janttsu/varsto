@@ -76,8 +76,16 @@ fn assert_consistent(lab: &Lab, words: &str, expect: &[&str]) {
     let mut e = open(&lab.home);
     let report = e.fsck(true).unwrap();
     let f3 = report.format3.as_ref().expect("a format-3 report");
-    assert!(f3.is_clean(), "fsck after the two engines: {}", f3.describe());
-    assert!(e.ledger_health().is_ok(), "{}", e.ledger_health().describe());
+    assert!(
+        f3.is_clean(),
+        "fsck after the two engines: {}",
+        f3.describe()
+    );
+    assert!(
+        e.ledger_health().is_ok(),
+        "{}",
+        e.ledger_health().describe()
+    );
     let other_home = lab.root.join("other-home");
     let other_dir = lab.root.join("other-docs");
     let mut b = Engine::join(&other_home, "desk", PASS, words, lab.storage.clone()).unwrap();
@@ -120,7 +128,13 @@ fn a_second_engine_on_the_same_home_does_not_break_the_first() {
     assert_consistent(
         &lab,
         &words,
-        &["first.bin", "cli.bin", "service.bin", "cli2.bin", "service2.bin"],
+        &[
+            "first.bin",
+            "cli.bin",
+            "service.bin",
+            "cli2.bin",
+            "service2.bin",
+        ],
     );
 }
 

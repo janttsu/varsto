@@ -4089,9 +4089,7 @@ impl Engine {
     // ----- pull ---------------------------------------------------------------
 
     pub fn pull(&mut self, folder: &str) -> Result<PullReport> {
-        let out = crate::logged_op!("pull", folder, {
-            self.exclusive(|e| e.pull_inner(folder))
-        });
+        let out = crate::logged_op!("pull", folder, { self.exclusive(|e| e.pull_inner(folder)) });
         self.finish_storages();
         out
     }
