@@ -325,7 +325,7 @@ impl Engine {
         } else {
             self.pull_ledger_once()?;
         }
-        let view = self.view3()?;
+        let mut view = self.view3()?;
         let folders = self.fsck_folders(&view)?;
         let specs: BTreeMap<String, StorageSpec> = self
             .config
@@ -625,6 +625,10 @@ impl Engine {
                 here.iter().map(|(o, (b, _))| (*o, b.clone())).collect();
             let r =
                 self.repair_pack3(&folder, &d.storage, &pack, &damaged, &fetched, &all, &view)?;
+            // The repair sealed a map record and a batch: the next pack is
+            // repaired over the view that has them (a map writer built on
+            // the older view writes over this record's rows).
+            view = self.view3()?;
             for o in &r.from_same_place {
                 report.repaired.push(copy(o, "another storage".into(), 0));
             }

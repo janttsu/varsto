@@ -127,3 +127,129 @@ fn attach_after_detach_gets_every_file_again() {
         );
     }
 }
+
+fn packs_in(storage: &Path) -> std::collections::BTreeMap<String, PathBuf> {
+    common::pack_files(storage)
+        .into_iter()
+        .map(|(p, id)| (id, p))
+        .collect()
+}
+
+fn fsck_clean(e: &mut Engine, what: &str) {
+    let r = e.fsck(true).unwrap();
+    let f3 = r.format3.as_ref().expect("a format-3 report");
+    assert!(f3.is_clean(), "fsck --verify {what}: {}", f3.describe());
+}
+
+fn two_devices(root: &Path) -> (Engine, Engine, PathBuf, PathBuf) {
+    let storage = local("box", root.join("storage"));
+    let (mut a, words) = Engine::init(&root.join("a"), "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(storage.clone()).unwrap();
+    let a_dir = root.join("a-docs");
+    a.add_folder("docs", &a_dir).unwrap();
+    fill(&a_dir, 20);
+    a.sync(None).unwrap();
+    let mut b = common::join_approved(&root.join("b"), "desktop", PASS, &words, storage, &mut a);
+    b.chunker = ChunkerParams::SMALL;
+    let b_dir = root.join("b-docs");
+    b.attach_folder("docs", &b_dir, false).unwrap();
+    b.sync(None).unwrap();
+    a.sync(None).unwrap();
+    (a, b, a_dir, b_dir)
+}
+
+/// `repair` and at once `fsck --verify`: the repaired packs are what the
+/// fsck sees, without a sync in between.
+#[test]
+fn fsck_right_after_repair_is_clean() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let (mut a, _b, a_dir, _) = two_devices(root);
+    let store = root.join("storage");
+    fsck_clean(&mut a, "before the damage");
+    // A pack of the laptop's own file, lost; the big first pack, damaged.
+    let before = packs_in(&store);
+    fs::write(a_dir.join("repair-probe.bin"), data(3000, 77)).unwrap();
+    a.push("docs").unwrap();
+    let after = packs_in(&store);
+    let new: Vec<&String> = after.keys().filter(|k| !before.contains_key(*k)).collect();
+    assert_eq!(new.len(), 1, "the probe made {} packs", new.len());
+    let gone = after[new[0]].clone();
+    let victim = before
+        .values()
+        .max_by_key(|p| fs::metadata(p).unwrap().len())
+        .unwrap()
+        .clone();
+    let mut bytes = fs::read(&victim).unwrap();
+    bytes[4096] ^= 0xff;
+    fs::write(&victim, bytes).unwrap();
+    fs::remove_file(&gone).unwrap();
+    let r = a.fsck(true).unwrap();
+    let f3 = r.format3.unwrap();
+    assert!(
+        !f3.corrupt_copies.is_empty() && !f3.missing_copies.is_empty(),
+        "{}",
+        f3.describe()
+    );
+    let rep = a
+        .repair(&varsto_core::engine::RepairOptions::manual())
+        .unwrap();
+    assert!(rep.unrepairable.is_empty(), "{rep:?}");
+    fsck_clean(&mut a, "right after the repair");
+    // And after a restart.
+    drop(a);
+    let mut a = open(&root.join("a"));
+    fsck_clean(&mut a, "after a restart");
+}
+
+/// A pack the desktop wrote, of an edit the laptop holds only as one side
+/// of a conflict: the laptop rebuilds it from its own file. `laptop_first`:
+/// the laptop's edit reaches the storage first and the desktop's becomes the
+/// conflict copy (made on the desktop); otherwise the laptop makes the copy.
+fn rebuild_after_conflict(laptop_first: bool) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let (mut a, mut b, a_dir, b_dir) = two_devices(root);
+    let store = root.join("storage");
+    let theirs = data(5000, 501);
+    fs::write(a_dir.join("dir1/note-1.txt"), data(4000, 502)).unwrap();
+    fs::write(b_dir.join("dir1/note-1.txt"), &theirs).unwrap();
+    if laptop_first {
+        a.push("docs").unwrap();
+    }
+    let before = packs_in(&store);
+    b.sync(None).unwrap();
+    let after = packs_in(&store);
+    let new: Vec<&String> = after.keys().filter(|k| !before.contains_key(*k)).collect();
+    assert_eq!(new.len(), 1, "the desktop's sync made {} packs", new.len());
+    let gone = after[new[0]].clone();
+    a.sync(None).unwrap();
+    let files = files_under(&a_dir);
+    let copies: Vec<&String> = files.iter().filter(|p| p.contains(".conflict-")).collect();
+    assert_eq!(copies.len(), 1, "{files:?}");
+    assert!(
+        files
+            .iter()
+            .any(|p| p.contains("note-1.") && fs::read(a_dir.join(p)).unwrap() == theirs),
+        "the desktop's version is not on the laptop"
+    );
+    drop(b);
+    fs::remove_file(&gone).unwrap();
+    let rep = a
+        .repair(&varsto_core::engine::RepairOptions::manual())
+        .unwrap();
+    assert!(rep.unrepairable.is_empty(), "{rep:?}");
+    assert!(!rep.repaired.is_empty(), "{rep:?}");
+    fsck_clean(&mut a, "after rebuilding the desktop's pack");
+}
+
+#[test]
+fn a_lost_pack_is_rebuilt_from_a_conflict_copy() {
+    rebuild_after_conflict(true);
+}
+
+#[test]
+fn a_lost_pack_is_rebuilt_from_the_side_of_a_conflict_kept_here() {
+    rebuild_after_conflict(false);
+}
