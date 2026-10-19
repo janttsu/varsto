@@ -2,15 +2,15 @@
 //! A long upload with peers (spec section 77.23): the uploading device
 //! publishes its file list before the upload and the packs it stored so
 //! far while the upload runs, so another device gets the new files from
-//! the uploader peer to peer, and sees the stored packs claimed, before the
-//! upload to a slow storage ends.
+//! the uploader peer to peer, and sees the stored packs claimed, while the
+//! storage still holds back the rest of the upload.
 
 mod common;
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::engine::EarlyPublish;
@@ -48,15 +48,28 @@ fn files_in(root: &Path) -> BTreeMap<String, Vec<u8>> {
     }
 }
 
-/// What the desk saw while the laptop uploaded.
+/// What the desk saw while the laptop uploaded, with the number of packs
+/// the storage had taken at that moment.
 #[derive(Debug, Default)]
 struct Seen {
-    /// When every new file was there, complete, and how many blocks had
-    /// come from peers by then.
-    files_at: Option<Instant>,
+    /// Every new file was there, complete.
+    files: bool,
+    packs_written_at_files: usize,
+    /// Packs of the upload were claimed on the storage.
+    packs: bool,
+    packs_written_at_packs: usize,
+    /// Blocks that came from peers.
     from_peers: u64,
-    /// When the desk first saw packs of the upload claimed on the storage.
-    packs_at: Option<Instant>,
+}
+
+/// The storage's hold on the upload.
+#[derive(Clone, Debug, Default)]
+struct Gate {
+    /// Packs written so far.
+    written: usize,
+    /// The desk saw what it waited for (or the wait timed out).
+    released: bool,
+    timed_out: bool,
 }
 
 #[test]
@@ -90,15 +103,33 @@ fn peers_get_a_long_upload_from_the_uploader_before_it_ends() {
     common::p2p::meet(&mut a);
     a.set_snapshot_sink(Some(serving.sink()));
 
-    // A slow storage: one pack at a time, 250 ms each; small packs, so
-    // 4 MiB make about 16 of them, and the upload takes seconds.
+    // A storage that holds the upload: after `HELD_AFTER` packs it takes
+    // no more until the desk has seen what the push must show it during
+    // the upload (or a minute passes), so "before the upload ended" is a
+    // fact of the test, not a race with the clock. Small packs: 4 MiB
+    // make about 16 of them.
+    const HELD_AFTER: usize = 2;
     a.set_pack_target_for_tests(Some(256 << 10));
-    let one_at_a_time = Arc::new(Mutex::new(()));
+    let gate = Arc::new((Mutex::new(Gate::default()), Condvar::new()));
+    let gate2 = gate.clone();
     a.set_pack_write_hook(Some(Arc::new(move |name: &str| {
-        if name == "box" {
-            let _g = one_at_a_time.lock().unwrap();
-            std::thread::sleep(Duration::from_millis(250));
+        if name != "box" {
+            return Ok(());
         }
+        let (lock, cv) = &*gate2;
+        let mut g = lock.lock().unwrap();
+        if g.written >= HELD_AFTER && !g.released {
+            let (got, timeout) = cv
+                .wait_timeout_while(g, Duration::from_secs(60), |g| !g.released)
+                .unwrap();
+            g = got;
+            if timeout.timed_out() {
+                g.timed_out = true;
+                g.released = true;
+                cv.notify_all();
+            }
+        }
+        g.written += 1;
         Ok(())
     })));
     a.set_early_publish(EarlyPublish {
@@ -112,62 +143,59 @@ fn peers_get_a_long_upload_from_the_uploader_before_it_ends() {
         wanted.insert(format!("f{i}.bin"), data);
     }
 
-    // The desk pulls again and again while the laptop pushes.
-    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let stop2 = stop.clone();
+    // The desk pulls again and again while the laptop pushes, and lets the
+    // storage go on once it has every file and sees packs claimed.
+    let gate3 = gate.clone();
     let b_dir2 = b_dir.clone();
     let desk = std::thread::spawn(move || {
         let mut seen = Seen::default();
         let t0 = Instant::now();
-        while t0.elapsed() < Duration::from_secs(120) {
+        let (lock, cv) = &*gate3;
+        while t0.elapsed() < Duration::from_secs(120) && !lock.lock().unwrap().released {
             let r = b.pull("docs").unwrap();
             seen.from_peers += r.chunks_from_peers;
-            if seen.files_at.is_none() && files_in(&b_dir2) == wanted {
-                seen.files_at = Some(Instant::now());
-            }
-            if seen.packs_at.is_none() && !b.packs_on_storage("box").unwrap().is_empty() {
-                seen.packs_at = Some(Instant::now());
-            }
-            if (seen.files_at.is_some() && seen.packs_at.is_some())
-                || stop2.load(std::sync::atomic::Ordering::SeqCst)
-            {
+            let mut g = lock.lock().unwrap();
+            if g.released {
                 break;
             }
+            if !seen.files && files_in(&b_dir2) == wanted {
+                seen.files = true;
+                seen.packs_written_at_files = g.written;
+            }
+            if !seen.packs && !b.packs_on_storage("box").unwrap().is_empty() {
+                seen.packs = true;
+                seen.packs_written_at_packs = g.written;
+            }
+            if seen.files && seen.packs {
+                g.released = true;
+                cv.notify_all();
+                break;
+            }
+            drop(g);
             std::thread::sleep(Duration::from_millis(100));
         }
         (b, seen)
     });
 
-    let started = Instant::now();
     let push = a.push("docs").unwrap();
-    let ended = Instant::now();
-    stop.store(true, std::sync::atomic::Ordering::SeqCst);
     let (mut b, seen) = desk.join().unwrap();
+    let g = gate.0.lock().unwrap().clone();
     drop(serving);
 
-    assert!(
-        ended - started > Duration::from_secs(2),
-        "the upload is slow: {:?}",
-        ended - started
-    );
     assert!(push.chunks_uploaded > 0, "{push:?}");
-    let files_at = seen.files_at.expect("the desk got the new files");
     assert!(
-        files_at < ended,
-        "the files arrived {:?} after the upload ended",
-        files_at - ended
+        !g.timed_out,
+        "the desk did not get the files and see packs claimed while the storage held the upload: {seen:?}"
+    );
+    assert!(seen.files && seen.packs, "{seen:?}");
+    // Both happened while packs of the upload were still to be written.
+    assert!(
+        g.written > seen.packs_written_at_files.max(seen.packs_written_at_packs),
+        "{seen:?} {g:?}"
     );
     assert!(
         seen.from_peers > 0,
         "from the laptop peer to peer: {seen:?}"
-    );
-    let packs_at = seen
-        .packs_at
-        .expect("the desk saw the packs stored during the upload");
-    assert!(
-        packs_at < ended,
-        "the packs were claimed {:?} after the upload ended",
-        packs_at - ended
     );
 
     // At the end every block is claimed on the storage, and the desk reads
