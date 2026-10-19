@@ -474,6 +474,18 @@ impl FolderRegistry {
         Some(best.map_or(now, |b| b.min(now)))
     }
 
+    /// The highest role `device` ever held in `folder` (its accepted
+    /// entries), whatever it holds now.
+    pub fn former_role(&self, device: &Id16, folder: &Id16) -> Option<Role> {
+        self.folders
+            .get(folder)?
+            .history
+            .get(device)?
+            .iter()
+            .filter_map(|(_, r)| *r)
+            .min()
+    }
+
     pub fn is_owner(&self, device: &Id16, folder: &Id16, epoch: u32) -> bool {
         self.role(device, folder, epoch) == Some(Role::Owner)
     }

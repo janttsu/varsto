@@ -445,6 +445,47 @@ fn a_recovered_device_owns_the_folders_once_the_lost_ones_are_removed() {
     );
 }
 
+/// Recovering after the lost owner was removed: a device that joins with
+/// the new vault words and recovers with the (unchanged) recovery words
+/// reads what the removed owner wrote before its cut-off (its manifest and
+/// block map), so every file arrives.
+#[test]
+fn recovering_after_the_lost_owner_was_removed_reads_its_records() {
+    let lab = Lab::new();
+    let (a, key) = first_device(&lab);
+    let words = a.recovery_kit_text().unwrap();
+    drop(a);
+    let mut c = Engine::join(
+        &lab.p("c-home"),
+        "new laptop",
+        PASS,
+        &key,
+        lab.storage.clone(),
+    )
+    .unwrap();
+    c.chunker = ChunkerParams::SMALL;
+    c.recover_folders(&recovery_key_of(&words)).unwrap();
+    c.revoke_device("laptop", false).unwrap();
+    let new_key = c.export_vault_key().unwrap();
+    drop(c);
+    // A later device: the new vault words and the recovery words.
+    let mut e = Engine::join(
+        &lab.p("e-home"),
+        "spare",
+        PASS,
+        &new_key,
+        lab.storage.clone(),
+    )
+    .unwrap();
+    e.chunker = ChunkerParams::SMALL;
+    let got = e.recover_folders(&recovery_key_of(&words)).unwrap();
+    assert_eq!(got, vec!["docs".to_string()]);
+    e.attach_folder("docs", &lab.p("e-docs"), false).unwrap();
+    let pull = e.pull("docs").unwrap();
+    assert_eq!(pull.files_updated, 3, "{pull:?}");
+    assert_eq!(tree(&lab.p("a-docs")), tree(&lab.p("e-docs")));
+}
+
 /// The recovery key from the kit text: the 24 words after its heading.
 fn recovery_key_of(kit: &str) -> varsto_core::membership3::RecoveryKey {
     let lines: Vec<&str> = kit.lines().collect();
