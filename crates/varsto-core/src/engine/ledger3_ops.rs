@@ -697,9 +697,11 @@ impl Engine {
         let mut forks = BTreeSet::new();
         let (mut malformed, mut refused) = (0u64, 0u64);
         let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
-        // What each storage's listing showed, for the rollback judge. The
-        // listing starts after the head held here, so a storage that lists
-        // nothing newer counts as showing that head.
+        // What each storage's listing showed, for the rollback judge: the
+        // storage's own newest batch, never the head held here (that may
+        // have come from a peer or another storage). The listing starts at
+        // the head held here, so a storage that has it lists it; one that
+        // lists nothing from there is listed in full for its own newest.
         let mut views: Vec<crate::p2p::v3::heads::StorageView> = Vec::new();
         // Transferrers carry the ledger too (F-048), but are no
         // storage view for the rollback judge (they may lag).
@@ -711,23 +713,29 @@ impl Engine {
                     continue;
                 }
                 let prefix = format!("ledger/{}/", hex::encode(dev));
-                let after = if head.forked || head.seq == 0 {
+                let after = if head.forked || head.seq <= 1 {
                     String::new()
                 } else {
-                    ledger3::checkpoint::batch_key(dev, head.seq)
+                    ledger3::checkpoint::batch_key(dev, head.seq - 1)
                 };
                 let names = backend.list_after(&prefix, &after)?;
-                let top = names
-                    .iter()
-                    .filter_map(|n| n.strip_prefix(&prefix))
-                    .filter_map(ledger3::LedgerObject::parse)
-                    .filter_map(|o| match o {
-                        ledger3::LedgerObject::Batch(s) => Some(s),
-                        _ => None,
-                    })
-                    .max()
-                    .unwrap_or(0);
-                shown.insert(*dev, top.max(head.seq));
+                let newest = |names: &[String]| {
+                    names
+                        .iter()
+                        .filter_map(|n| n.strip_prefix(&prefix))
+                        .filter_map(ledger3::LedgerObject::parse)
+                        .map(|o| match o {
+                            ledger3::LedgerObject::Batch(s) => s,
+                            ledger3::LedgerObject::Checkpoint(s, _) => s,
+                        })
+                        .max()
+                        .unwrap_or(0)
+                };
+                let mut top = newest(&names);
+                if top < head.seq && !after.is_empty() {
+                    top = newest(&backend.list(&prefix)?);
+                }
+                shown.insert(*dev, top);
                 // The newest checkpoint first: it stands in for batches a
                 // pruning device deleted (other devices' only; one of this
                 // device's own is its own).
