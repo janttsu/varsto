@@ -424,8 +424,7 @@ impl Engine {
         true
     }
 
-    /// Format 2: whether a ledger batch counts (the format-2 ledger of
-    /// other areas still asks; f3-switch: part B).
+    /// Whether a batch of the location view's store counts (`Engine::view`).
     pub(super) fn batch_accepted(&self, device: &DeviceId, seq: u64) -> bool {
         self.devices
             .revoked
@@ -433,8 +432,7 @@ impl Engine {
             .is_none_or(|r| seq <= r.cutoff_seq)
     }
 
-    /// Format 2: the scope of a format-2 batch (the format-2 ledger of
-    /// other areas still asks; f3-switch: part B).
+    /// The scope of a batch of the location view's store (`Engine::view`).
     pub(super) fn event_scope(&self, device: &DeviceId, key_id: &str) -> Option<EventScope> {
         let scope = EventScope::of_key_id(key_id)?;
         let me = device == &self.vault.device_id;

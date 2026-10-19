@@ -5480,14 +5480,7 @@ mod tests {
             }
             panic!("no question");
         };
-        let started = api(
-            &mut st,
-            Method::Post,
-            "/api/pair/start",
-            "",
-            &json!({"format": 3}),
-        )
-        .unwrap();
+        let started = api(&mut st, Method::Post, "/api/pair/start", "", &json!({})).unwrap();
         let code = started["code"].as_str().unwrap().to_string();
         let port = started["port"].as_u64().unwrap() as u16;
 
@@ -5539,14 +5532,7 @@ mod tests {
         assert!(!photos.participants.iter().any(|p| p.device_id == device));
 
         // A second device is declined: no grants, and it learns so.
-        let started = api(
-            &mut st,
-            Method::Post,
-            "/api/pair/start",
-            "",
-            &json!({"format": 3}),
-        )
-        .unwrap();
+        let started = api(&mut st, Method::Post, "/api/pair/start", "", &json!({})).unwrap();
         let code2 = started["code"].as_str().unwrap().to_string();
         let port2 = started["port"].as_u64().unwrap() as u16;
         let (h2, device2) = f3_joiner("tablet", code2, port2);

@@ -16,9 +16,10 @@
 //! Storage format 3 (`docs/spec/format-3-design.md`): the ledger is
 //! `ledger3` (`ledger3_ops`), membership and folder keys come from signed
 //! records and grants (`members3`), block places from the folder block map
-//! and manifests are base + delta records (`folder3`). Parts of the engine
-//! that still speak format 2 are marked `f3-switch: part B`; they are
-//! compiled but see an empty format-2 ledger.
+//! and manifests are base + delta records (`folder3`). The location view
+//! of `crate::ledger` (`Engine::view`) is kept in memory only: no batch of
+//! it is stored, so it holds this device's events not sealed yet, which
+//! placement, `where`, protection and history read during an action.
 
 use crate::activity;
 use crate::chunking::{Chunker, ChunkerParams};
@@ -726,8 +727,8 @@ pub struct Engine {
     keys: Keys,
     config: Config,
     keyring: Keyring,
-    /// The format-2 ledger store, kept empty in a format-3 vault
-    /// (`state/f2-ledger`) for the parts not ported yet (f3-switch: part B).
+    /// The store behind the in-memory location view (`Engine::view`); it
+    /// holds no batch in a format-3 vault (`state/f2-ledger`).
     ledger: LedgerStore,
     /// The format-3 ledger, membership and folder records (`ledger3_ops`).
     f3: ledger3_ops::Core3,
@@ -1510,9 +1511,8 @@ impl Engine {
         self.vault.member
     }
 
-    /// Which key opens a format-2 ledger batch with this key id, on this
-    /// device (the format-2 ledger of other areas still asks; f3-switch:
-    /// part B). Format-2 member batches are gone.
+    /// Which key opens a batch of the location view's store with this key
+    /// id (`Engine::view`; the store holds none in a format-3 vault).
     fn key_for_id(&self, id: &str) -> Option<SecretKey> {
         match id {
             KEY_REPLICA if !self.vault.member => {
@@ -2904,9 +2904,8 @@ impl Engine {
     }
 
     /// Read the membership records: devices, folders, grants to this
-    /// device (format 3, `members3`). Policies, placement, storage
-    /// settings, Strongroom records and device details are format-2
-    /// records still (f3-switch: part B).
+    /// device, policies, placement, storage settings, Strongroom records
+    /// and device details (format 3, `members3`).
     fn pull_registry(&mut self) -> Result<()> {
         self.refresh_members3()
     }
@@ -3478,8 +3477,8 @@ impl Engine {
         report.files_changed = changed;
         (report.files_ignored, report.metadata_changed) = self.scan_extra;
         // Format 3 publishes the file list after the upload, with the map
-        // record of the blocks (publishing it first for peers to fetch from
-        // this device: f3-switch: part B).
+        // record of the blocks: other devices fetch the new blocks once the
+        // push is done (not from this device during the upload).
         // A folder added with many pictures shows its first thumbnails
         // before the (possibly hours long) upload, not only after it.
         report.thumbnails = self.make_thumbnails(
@@ -3872,9 +3871,8 @@ impl Engine {
             }
         }
         // The packs written, for the map record of this push.
-        // Packs written in this process by anything but this push (part B
-        // writers that make no map record yet) are left out: their blocks
-        // are written again where a target lacks them.
+        // Packs written in this process by anything but this push are left
+        // out: their writers make their own map records.
         let mut per_storage = Vec::new();
         for (spec, backend) in &storages {
             let new: Vec<crate::packs::NewPack> = backend
