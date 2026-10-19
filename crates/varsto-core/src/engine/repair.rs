@@ -320,7 +320,9 @@ impl Engine {
 
     /// One repair run (see the module documentation).
     pub fn repair(&mut self, opts: &RepairOptions) -> Result<RepairReport> {
-        crate::logged_op!("repair", "", { self.repair_inner(opts) })
+        crate::logged_op!("repair", "", {
+            self.exclusive(|e| e.repair_inner(opts))
+        })
     }
 
     fn repair_inner(&mut self, opts: &RepairOptions) -> Result<RepairReport> {

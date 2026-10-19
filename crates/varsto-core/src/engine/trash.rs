@@ -2031,6 +2031,10 @@ impl Engine {
 
     /// `trash_upkeep` as if it were `now` (tests).
     pub fn trash_upkeep_at(&mut self, now: i64) -> Result<TrashUpkeepReport> {
+        self.exclusive(|e| e.trash_upkeep_inner(now))
+    }
+
+    fn trash_upkeep_inner(&mut self, now: i64) -> Result<TrashUpkeepReport> {
         self.ensure_active()?;
         let mut report = TrashUpkeepReport::default();
         self.trash_refresh(true)?;

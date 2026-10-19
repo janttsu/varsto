@@ -574,7 +574,7 @@ impl Engine {
     /// snapshot is written also when nothing changed.
     pub fn take_snapshot(&mut self, backup: &str) -> Result<SnapshotReport> {
         crate::logged_op!("take snapshot", backup, {
-            self.take_snapshot_inner(backup)
+            self.exclusive(|e| e.take_snapshot_inner(backup))
         })
     }
 

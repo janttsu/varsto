@@ -68,6 +68,7 @@ mod fsck3_ops;
 mod guide;
 mod help;
 mod history;
+mod home_lock;
 mod imports;
 mod ledger3_ops;
 mod ledger_heads;
@@ -793,6 +794,11 @@ pub struct Engine {
     /// Tests: the platform and version this device says it runs (`devinfo`).
     platform_override: Option<String>,
     version_override: Option<String>,
+    /// Set while this engine holds the device directory's lock (`home_lock`).
+    home_held: bool,
+    /// The write counter of the device directory as of this engine's last
+    /// read of it (`home_lock`).
+    home_generation: u64,
 }
 
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
@@ -1534,6 +1540,7 @@ impl Engine {
         keys.save(home, passphrase, &vault.vault_id, &vault.device_id)?;
         util::write_json(&home.join("vault.json"), &vault)?;
         let f3 = ledger3_ops::Core3::open(home, &vault.vault_id)?;
+        let home_generation = home_lock::read_generation(home);
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
@@ -1577,6 +1584,8 @@ impl Engine {
             role_guard_off: false,
             platform_override: None,
             version_override: None,
+            home_held: false,
+            home_generation,
         };
         engine.config.save(home)?;
         if !engine.vault.member {
@@ -1630,6 +1639,8 @@ impl Engine {
             bail!("{}", crate::format_mismatch(vault.format_version));
         }
         util::private_home(home)?;
+        // Read before the state: a writer that comes after is noticed.
+        let home_generation = home_lock::read_generation(home);
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
         let keyring = Keyring::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let epochs = membership::VaultEpochs::load(home, &keys, &vault.vault_id, &vault.device_id)?;
@@ -1680,6 +1691,8 @@ impl Engine {
             role_guard_off: false,
             platform_override: None,
             version_override: None,
+            home_held: false,
+            home_generation,
         };
         // The membership as this device last read it (no storage is read).
         if let Err(e) = engine.load_members3_local() {
@@ -2418,7 +2431,7 @@ impl Engine {
         selective: bool,
     ) -> Result<FolderId> {
         crate::logged_op_plain!("attach folder", name_or_id, {
-            self.attach_folder_inner(name_or_id, path, selective)
+            self.exclusive(|e| e.attach_folder_inner(name_or_id, path, selective))
         })
     }
 
@@ -2504,7 +2517,9 @@ impl Engine {
     /// the sync state goes, so attaching it again later starts clean instead
     /// of reading missing files as deletions.
     pub fn detach_folder(&mut self, name: &str) -> Result<()> {
-        crate::logged_op_plain!("detach folder", name, { self.detach_folder_inner(name) })
+        crate::logged_op_plain!("detach folder", name, {
+            self.exclusive(|e| e.detach_folder_inner(name))
+        })
     }
 
     fn detach_folder_inner(&mut self, name: &str) -> Result<()> {
@@ -3560,7 +3575,9 @@ impl Engine {
     /// `push` with the scan a pull of the same folder just made, so a sync
     /// walks the folder once (`sync_folders`).
     fn push_with_scan(&mut self, folder: &str, scan: Option<ScanOutcome>) -> Result<PushReport> {
-        let out = crate::logged_op!("push", folder, { self.push_inner(folder, scan) });
+        let out = crate::logged_op!("push", folder, {
+            self.exclusive(|e| e.push_inner(folder, scan))
+        });
         self.finish_storages();
         out
     }
@@ -4072,7 +4089,9 @@ impl Engine {
     // ----- pull ---------------------------------------------------------------
 
     pub fn pull(&mut self, folder: &str) -> Result<PullReport> {
-        let out = crate::logged_op!("pull", folder, { self.pull_inner(folder) });
+        let out = crate::logged_op!("pull", folder, {
+            self.exclusive(|e| e.pull_inner(folder))
+        });
         self.finish_storages();
         out
     }
@@ -6243,7 +6262,7 @@ impl Engine {
     /// pull then push, for every attached folder (or one).
     pub fn sync(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         crate::logged_op!("sync", folder.unwrap_or("all folders"), {
-            self.sync_inner(folder)
+            self.exclusive(|e| e.sync_inner(folder))
         })
     }
 
@@ -6591,7 +6610,7 @@ impl Engine {
     /// corrupt is queued for automatic repair (`engine::repair`).
     pub fn fsck(&mut self, verify_content: bool) -> Result<FsckReport> {
         crate::logged_op!("fsck", if verify_content { "with content" } else { "" }, {
-            self.fsck_inner(verify_content)
+            self.exclusive(|e| e.fsck_inner(verify_content))
         })
     }
 
