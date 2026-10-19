@@ -2,9 +2,7 @@
 //! Marks, garbage collection, verification and repair of storage format 3
 //! (`docs/spec/format-3-design.md` section 3, "Dead marks, settling and
 //! collection", "Who may mark", "Garbage collection", "Verification and
-//! repair", "Pruning"; work package 5). Built behind the `format3`
-//! feature; nothing in the format-2 code path calls it (the trash upkeep
-//! calls these functions from WP12 on).
+//! repair", "Pruning"; work package 5).
 //!
 //! Every function here works over what a device holds, without the
 //! engine: the storages ([`Storages`]), the ledger view, the folder's map

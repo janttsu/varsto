@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Backup snapshots of storage format 3 (`docs/spec/format-3-design.md`,
-//! section 7; work package 7). Built behind the `format3` feature; nothing
-//! in the format-2 code path calls it yet.
+//! section 7; work package 7).
 //!
 //! A snapshot is either a base (a full listing) or a differential against
 //! a base (`base` = that base's seq): every entry that differs from the

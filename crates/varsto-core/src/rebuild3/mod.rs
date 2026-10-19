@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Rebuilding a device's ledger on the pack-level format
 //! (`docs/spec/format-3-design.md` sections 3 and 4; `alpha-0-format.md`
-//! section 38 adapted; work package 10b). Built behind the `format3`
-//! feature; nothing in the format-2 engine calls it.
+//! section 38 adapted; work package 10b).
 //!
 //! The scenario is a device whose local `ledger/` directory is gone. It
 //! signed batches that the storages may or may not hold; signing a number

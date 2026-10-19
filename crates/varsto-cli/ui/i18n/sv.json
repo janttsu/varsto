@@ -977,7 +977,6 @@
   "{done} of {all} done": "{done} av {all} klara",
   "Varsto recovery package": "Varstos återställningspaket",
   "Print the recovery kit": "Skriv ut återställningsorden",
-  "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.": "Återställningsorden är valvnyckeln som 24 ord. Av säkerhetsskäl skrivs de ut på kommandoraden på den här datorn, som frågar efter din lösenfras: kör kommandot nedan och skriv ut eller kopiera orden för hand. Med --shares skrivs också tre delar ut, där vilka två som helst återskapar nyckeln.",
   "Done": "Klart",
   "{n} tasks": "{n} uppgifter",
   "Progress": "Förlopp",

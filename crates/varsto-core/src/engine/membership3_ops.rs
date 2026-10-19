@@ -2,8 +2,7 @@
 //! The user-facing side of format-3 folder membership (design section 6,
 //! work package 8b): requests, approval, roles, removal and recovery
 //! copies as operations of the engine, so that the command line, the local
-//! API and the pages share one implementation. Built behind the `format3`
-//! feature.
+//! API and the pages share one implementation.
 //!
 //! The engine of a format-2 vault stands in for the device keys that
 //! format 3 needs until work package 12 flips the format: K6 is the

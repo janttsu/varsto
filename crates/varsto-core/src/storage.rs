@@ -43,7 +43,6 @@ pub const MAX_RECORD: u64 = 256 << 20;
 /// How many bytes a read of `key` may return: nothing a storage holds can
 /// make the program allocate more.
 pub fn read_limit(key: &str) -> u64 {
-    #[cfg(feature = "format3")]
     if key.ends_with(".rec") {
         return crate::record::MAX_PART_READ;
     }

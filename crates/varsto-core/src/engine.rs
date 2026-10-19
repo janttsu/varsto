@@ -81,7 +81,6 @@ mod mailbox;
 mod manifest_upkeep;
 mod members3;
 mod membership;
-#[cfg(feature = "format3")]
 mod membership3_ops;
 mod notes;
 mod org_ops;
@@ -149,7 +148,6 @@ pub use manifest_upkeep::ManifestPolicy;
 pub use membership::{
     removal_notice, DeviceInfo, DeviceRemoved, EpochForks, Removal, RevokeReport, Revoked,
 };
-#[cfg(feature = "format3")]
 pub use membership3_ops::{
     parse_role as parse_folder_role, FolderMember, FolderMembers, FolderRemoval, FolderRequest,
     MissingRecoveryCopy,

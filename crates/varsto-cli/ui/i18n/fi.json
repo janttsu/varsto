@@ -984,7 +984,6 @@
   "{done} of {all} done": "{done}/{all} tehty",
   "Varsto recovery package": "Varston palautuspaketti",
   "Print the recovery kit": "Tulosta palautussanat",
-  "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.": "Palautussanat ovat holviavain 24 sanana. Turvallisuuden vuoksi ne tulostetaan tämän tietokoneen komentorivillä, joka kysyy salalauseesi: suorita alla oleva komento ja tulosta tai kopioi sanat käsin. Valitsimella --shares se tulostaa myös kolme osaa, joista mitkä tahansa kaksi muodostavat avaimen.",
   "Done": "Valmis",
   "{n} tasks": "{n} tehtävää",
   "Progress": "Edistyminen",

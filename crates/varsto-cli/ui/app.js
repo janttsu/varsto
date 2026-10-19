@@ -490,7 +490,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("version").textContent = st.version; $("version2").textContent = st.version;
       appState.mobile = !!st.mobile; appState.folder_root = st.folder_root || ""; appState.platform = st.platform || ""; joinKindForDevice();
       appState.plain_root = st.plain_root || ""; appState.plain_root_writable = st.plain_root_writable !== false;
-      appState.format3 = !!st.format3; if (appState.format3) { f3Reload(); }
+      f3Reload();
       applyMobile();
       refreshAllFiles();
       if (st.removal && !removalShown) {
@@ -4203,7 +4203,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // exists. Nothing is approved without the person ticking that the words
   // match; the background service only lists requests.
   var f3Owned = 0, f3Busy = false, f3Soon = null, f3Asked = "";
-  function f3Wanted() { return !!appState.format3 && document.body.dataset.view === "app"; }
+  function f3Wanted() { return document.body.dataset.view === "app"; }
   function f3Reload() { if (f3Soon) { return; } f3Soon = setTimeout(function () { f3Soon = null; loadF3(); }, 250); }
   function f3Role(r) { return r === "owner" ? "owner" : r === "viewer" ? "viewer" : "editor"; }
   function f3Words(t) { var c = el("code", "f3-words", t); c.setAttribute("data-no-i18n", ""); return c; }
@@ -4704,7 +4704,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   };
   // The kit holds the vault key: it is printed on the command line, which asks for the passphrase.
   $("rg-kit").onclick = function () {
-    dialog({ title: "Print the recovery kit", text: appState.format3 ? "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key." : "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.", code: "varsto recovery kit\nvarsto recovery kit --shares" + (appState.format3 ? "\nvarsto recovery kit --recovery-words\nvarsto recovery kit --new-recovery-key" : ""), ok: "Close", cancel: false }).then(function () { loadGuide(); });
+    dialog({ title: "Print the recovery kit", text: "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.", code: "varsto recovery kit\nvarsto recovery kit --shares\nvarsto recovery kit --recovery-words\nvarsto recovery kit --new-recovery-key", ok: "Close", cancel: false }).then(function () { loadGuide(); });
   };
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
   // The service answers it without waiting for a sync, so it stays live during long transfers.
