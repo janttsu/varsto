@@ -123,10 +123,14 @@ impl Engine {
         let out = f(self);
         self.home_held = false;
         let next = found.wrapping_add(1);
-        let path = self.home.join("state").join(GEN_FILE);
-        match util::write_atomic(&path, next.to_string().as_bytes()) {
-            Ok(()) => self.home_generation = next,
-            Err(e) => log::warn!("{}: {e:#}", path.display()),
+        let state = self.home.join("state");
+        // A wipe (this device was removed) leaves no state to mark.
+        if state.is_dir() {
+            let path = state.join(GEN_FILE);
+            match util::write_atomic(&path, next.to_string().as_bytes()) {
+                Ok(()) => self.home_generation = next,
+                Err(e) => log::warn!("{}: {e:#}", path.display()),
+            }
         }
         drop(lock);
         out
