@@ -361,7 +361,7 @@ impl S3Storage {
         extra_headers: &[(&str, &str)],
         body: &[u8],
         cap: u64,
-    ) -> Result<(u16, Vec<u8>, Option<String>, Option<String>)> {
+    ) -> Result<Answer> {
         let amz_date =
             amz_date_at(unix_now() + self.clock_offset.load(std::sync::atomic::Ordering::Relaxed));
         let date = &amz_date[..8];
@@ -602,6 +602,9 @@ impl S3Storage {
         Ok(status)
     }
 }
+
+/// One answer: status, body, its `Date` and its `Content-Range` header.
+type Answer = (u16, Vec<u8>, Option<String>, Option<String>);
 
 /// The `start` of a `Content-Range: bytes start-end/total` header.
 fn content_range_start(header: &str) -> Option<u64> {
