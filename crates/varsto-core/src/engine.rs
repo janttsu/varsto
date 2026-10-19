@@ -4215,8 +4215,25 @@ impl Engine {
         // changed are merged.
         let folder3 = members3::bin(&rec.folder_id)?;
         let view3 = self.view3()?;
-        let (manifests, changed) = self.pull_folder_records(&folder3, &view3)?;
+        let (manifests, mut changed) = self.pull_folder_records(&folder3, &view3)?;
         let me3 = self.me3();
+        // A writer whose view is past what this folder state applied (a
+        // state that starts clean after `folder detach`, while the views
+        // read before stay; a pull stopped before its state was saved)
+        // counts with every path of its view, not only the paths its last
+        // records changed.
+        for (dev3, v) in &manifests.views {
+            if *dev3 == me3 {
+                continue;
+            }
+            let applied = state.last_seen.get(&DeviceId::from_bytes(dev3)).copied();
+            if applied.is_none_or(|seq| seq < v.seq) {
+                changed
+                    .entry(*dev3)
+                    .or_default()
+                    .extend(v.files.keys().cloned());
+            }
+        }
         // Change history (`changes_ops`): started once from what is held,
         // then fed by the paths every writer's records changed. Never in
         // the way of syncing.
