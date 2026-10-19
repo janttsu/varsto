@@ -99,7 +99,7 @@ impl Engine {
     }
 
     /// Write `made` as one record of this device and keep the pictures.
-    fn publish_thumbs3(
+    fn publish_thumbs(
         &self,
         rec: &FolderRecord,
         storages: &OpenStorages,
@@ -136,7 +136,7 @@ impl Engine {
     /// Read the thumbnail records of every writer past what was read,
     /// from the hot storages, into the local cache. Returns how many
     /// pictures were new here.
-    fn pull_thumbs3(&self, rec: &FolderRecord, force: bool) -> Result<usize> {
+    fn pull_thumbs(&self, rec: &FolderRecord, force: bool) -> Result<usize> {
         let storages = self.thumb_storages()?;
         if storages.is_empty() {
             return Ok(0);
@@ -148,11 +148,11 @@ impl Engine {
             return Ok(0);
         }
         let folder = members3::bin(&rec.folder_id)?;
-        let writers: Vec<Id16> = self.stream_writers3();
+        let writers: Vec<Id16> = self.stream_writers();
         let view = self.view3()?;
         let mut fresh: Vec<ThumbsBody> = Vec::new();
         let mut top: BTreeMap<String, u64> = applied.seqs.clone();
-        self.each_store3(&storages, &view, |_, store, counter| {
+        self.each_store(&storages, &view, |_, store, counter| {
             for d in &writers {
                 let stream = records3::thumbs_stream(folder, *d);
                 let after = applied.seqs.get(&hex::encode(d)).copied().unwrap_or(0);
@@ -211,7 +211,7 @@ impl Engine {
             return Ok(0);
         }
         // Thumbnails other devices made are not made again.
-        let _ = self.pull_thumbs3(rec, false);
+        let _ = self.pull_thumbs(rec, false);
         self.replicate_thumbnails(rec, state, &storages);
         let videos_here = thumbs::video_tool_available();
         let candidates: Vec<(String, String)> = state
@@ -293,7 +293,7 @@ impl Engine {
         }
         let count = made.len() as u64;
         // The record first: a thumbnail is done once it is on the storages.
-        self.publish_thumbs3(rec, &storages, made)?;
+        self.publish_thumbs(rec, &storages, made)?;
         state.thumbs_done.extend(done);
         Ok(count)
     }
@@ -377,7 +377,7 @@ impl Engine {
         if storages.is_empty() {
             bail!("add a storage first: thumbnails are kept on the vault's storages");
         }
-        self.publish_thumbs3(&rec, &storages, vec![(h32, jpeg)])?;
+        self.publish_thumbs(&rec, &storages, vec![(h32, jpeg)])?;
         state.thumbs_done.insert(hash);
         self.save_state(&rec.folder_id, &state)
     }
@@ -401,7 +401,7 @@ impl Engine {
         if let Some(t) = self.thumb_get(&rec.folder_id, &h) {
             return Ok(Some(t));
         }
-        self.pull_thumbs3(&rec, false)?;
+        self.pull_thumbs(&rec, false)?;
         Ok(self.thumb_get(&rec.folder_id, &h))
     }
 }

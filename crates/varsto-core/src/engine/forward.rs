@@ -436,12 +436,12 @@ impl Engine {
                 continue; // not synced here yet: no file list to work from
             }
             let view = self.view3()?;
-            let Some(table) = self.folder_table3(&rec)? else {
+            let Some(table) = self.folder_table(&rec)? else {
                 report.no_key.push(rec.name.clone());
                 continue;
             };
             // The map records the ledger announced: other forwarders' places.
-            self.pull_folder_records3(&members3::bin(&rec.folder_id)?, &view)?;
+            self.pull_folder_records(&members3::bin(&rec.folder_id)?, &view)?;
             let candidates = {
                 let t = table.read().unwrap_or_else(|e| e.into_inner());
                 self.forward_candidates(&rec, &view, &t, &opened)?
@@ -456,7 +456,7 @@ impl Engine {
             // Whose blocks these are (they hold them, by the `held` flags of
             // their manifests), for the report and the activity line.
             let held = self
-                .load_manifests3(&members3::bin(&rec.folder_id)?)
+                .load_manifests(&members3::bin(&rec.folder_id)?)
                 .held_index();
             let me3 = self.me3();
             let mut holders: BTreeSet<String> = BTreeSet::new();

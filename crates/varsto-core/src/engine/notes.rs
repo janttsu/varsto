@@ -679,7 +679,7 @@ impl Engine {
         })?;
         // Only the newest record of a device is ever read.
         let view = self.view3()?;
-        self.each_store3(storages, &view, |_, store, _| {
+        self.each_store(storages, &view, |_, store, _| {
             for l in store.list_after(&stream, 0)? {
                 if l.seq < published.seq {
                     for n in &l.names {
@@ -705,14 +705,14 @@ impl Engine {
         let folder = members3::bin(&fk.folder)?;
         let me = self.me3();
         let streams: Vec<crate::record::StreamRef> = self
-            .stream_writers3()
+            .stream_writers()
             .into_iter()
             .filter(|d| *d != me && !self.is_revoked(&DeviceId::from_bytes(d)))
             .map(|d| records3::notes_stream(folder, d))
             .collect();
         let view = self.view3()?;
         let mut newest: BTreeMap<Id16, NotesBody> = BTreeMap::new();
-        self.each_store3(storages, &view, |_, store, counter| {
+        self.each_store(storages, &view, |_, store, counter| {
             for b in records3::read_newest::<NotesBody>(store, &streams, counter)? {
                 if newest.get(&b.device).is_none_or(|n| n.seq < b.seq) {
                     newest.insert(b.device, b);

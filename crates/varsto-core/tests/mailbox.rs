@@ -497,10 +497,10 @@ fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
     .unwrap();
     e.push("docs").unwrap();
     // Packs (the mailbox stages and moves whole packs) and blocks claimed.
-    let claims = |e: &Engine, s: &str| e.packs_on_storage3(s).unwrap().len();
+    let claims = |e: &Engine, s: &str| e.packs_on_storage(s).unwrap().len();
     let blocks = claims(&e, "old");
     assert!(blocks >= 1);
-    let objects = e.objects_on_storage3("old").unwrap().len();
+    let objects = e.objects_on_storage("old").unwrap().len();
     assert!(objects > 1);
     // The job cannot write to B: it waits.
     let (job, _) = e
@@ -522,7 +522,7 @@ fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
     // Nothing is dropped from A yet, nothing is on B.
     assert_eq!(claims(&e, "old"), blocks);
     assert_eq!(claims(&e, "new"), 0);
-    let view = e.ledger_view3().unwrap();
+    let view = e.ledger_view().unwrap();
     assert!(view.packs.keys().all(|p| !view.dropped_from(p, "old")));
     // A away, B docked: the job reads the outbox, writes B, checks, drops A.
     lab.undock("disk-a");
@@ -537,8 +537,8 @@ fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
         .unwrap()
         .try_into()
         .unwrap();
-    let view = e.ledger_view3().unwrap();
-    for id in e.packs_on_storage3("new").unwrap().keys() {
+    let view = e.ledger_view().unwrap();
+    for id in e.packs_on_storage("new").unwrap().keys() {
         let id: [u8; 32] = hex::decode(id).unwrap().try_into().unwrap();
         let c = view.copies(&id);
         assert!(
@@ -721,7 +721,7 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     .unwrap();
     x.push("docs").unwrap();
     // The mailbox stages whole packs.
-    let blocks = x.packs_on_storage3("home-pool").unwrap().len();
+    let blocks = x.packs_on_storage("home-pool").unwrap().len();
 
     assert_eq!(docs_policy(&x).state, PolicyState::Violated);
 
@@ -768,8 +768,8 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
         .unwrap()
         .try_into()
         .unwrap();
-    let view = z.ledger_view3().unwrap();
-    for id in z.packs_on_storage3("off-pool").unwrap().keys() {
+    let view = z.ledger_view().unwrap();
+    for id in z.packs_on_storage("off-pool").unwrap().keys() {
         let id: [u8; 32] = hex::decode(id).unwrap().try_into().unwrap();
         for c in view
             .copies(&id)

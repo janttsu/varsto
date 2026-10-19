@@ -17,7 +17,7 @@ impl Engine {
     /// Run `f` for every storage of `storages` with a `RecordStore` that
     /// accepts records under this engine's keys and trust. Returns the
     /// records refused meanwhile.
-    pub(super) fn each_store3(
+    pub(super) fn each_store(
         &self,
         storages: &OpenStorages,
         view: &View3,
@@ -93,7 +93,7 @@ impl Engine {
 
     /// Every device that may have a stream of a record kind: the vault's
     /// devices and the members of shared folders.
-    pub(super) fn stream_writers3(&self) -> Vec<Id16> {
+    pub(super) fn stream_writers(&self) -> Vec<Id16> {
         let m = &self.f3.members;
         let mut out: BTreeSet<Id16> = m.devices.devices.keys().copied().collect();
         out.insert(self.me3());

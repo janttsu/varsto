@@ -693,7 +693,7 @@ impl Engine {
         let k1 = self.f3.recovery.clone();
         // A device the organization's policy locks out stays a member of the
         // new epoch; it gets the key once it is allowed again.
-        let held = self.org_held3();
+        let held = self.org_held();
         let report = self
             .with_members3_as(!unchecked, |m| {
                 m.hold_grants = held;
@@ -703,7 +703,7 @@ impl Engine {
         // Everything this device writes from now on uses the new keys; its
         // peer record goes out again under them, so the removed device stops
         // learning its addresses at once.
-        self.reset_view3();
+        self.reset_view();
         self.republish_own_peer_record();
         let folder_name = |f: &crate::record::Id16| {
             self.f3
@@ -742,14 +742,14 @@ impl Engine {
     /// Format-2 name of reading the membership (the format-2 ledger of
     /// other areas still calls it): format 3 reads it with every pull.
     pub(super) fn sync_membership(&mut self) -> Result<()> {
-        self.refresh_members3()
+        self.refresh_members()
     }
 
     /// After every read of the membership: act on a revocation of this
     /// device (with a wipe order, wipe it), record vault epochs two devices
     /// wrote under one number, and refuse to go on while one waits for the
     /// user's choice.
-    pub(super) fn after_members3(
+    pub(super) fn after_members(
         &mut self,
         own: Option<crate::membership3::RevocationRecord>,
         forks: BTreeMap<u32, BTreeSet<crate::record::Id16>>,
@@ -842,7 +842,7 @@ impl Engine {
         }
         self.epochs.forks.kept.insert(epoch, issuer.clone());
         util::write_json(&self.home.join(EPOCH_FORK_FILE), &self.epochs.forks)?;
-        self.reset_view3();
+        self.reset_view();
         Ok(())
     }
 

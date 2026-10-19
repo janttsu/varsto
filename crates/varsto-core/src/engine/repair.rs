@@ -326,7 +326,7 @@ impl Engine {
     fn repair_inner(&mut self, opts: &RepairOptions) -> Result<RepairReport> {
         self.ensure_active()?;
         self.ensure_ledger_writable()?;
-        let result = self.one_batch(|e| e.run_repair3(opts));
+        let result = self.one_batch(|e| e.run_repair(opts));
         if opts.dry_run {
             return result.map(|(r, _)| r);
         }

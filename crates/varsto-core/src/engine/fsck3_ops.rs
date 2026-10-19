@@ -81,14 +81,14 @@ type HeldFolder = (
 impl Engine {
     /// The folders whose keys this device holds, with their tables and
     /// manifests brought up to date.
-    fn fsck_folders3(&self, view: &View3) -> Result<Vec<HeldFolder>> {
+    fn fsck_folders(&self, view: &View3) -> Result<Vec<HeldFolder>> {
         let mut out = Vec::new();
         for (rec, _) in self.folders() {
             if rec.key_hex.is_empty() && rec.epoch_keys.is_empty() {
                 continue;
             }
             let id = members3::bin(&rec.folder_id)?;
-            let (manifests, _) = self.pull_folder_records3(&id, view)?;
+            let (manifests, _) = self.pull_folder_records(&id, view)?;
             out.push((id, rec.name.clone(), self.table3(&id)?, manifests));
         }
         Ok(out)
@@ -112,7 +112,7 @@ impl Engine {
                 media: crate::media::Media::Unknown,
             })
             .collect();
-        let folders = self.fsck_folders3(&view)?;
+        let folders = self.fsck_folders(&view)?;
         let guards: Vec<_> = folders
             .iter()
             .map(|(_, _, t, _)| t.read().unwrap_or_else(|e| e.into_inner()))
@@ -223,7 +223,7 @@ impl Engine {
     /// The ciphertext of `row`'s block from this device: the block cache,
     /// or a current file on disk cut and sealed again (chunking and sealing
     /// are deterministic).
-    fn block_from_here3(&self, folder: &FolderId, row: &MapRow) -> Option<Vec<u8>> {
+    fn block_from_here(&self, folder: &FolderId, row: &MapRow) -> Option<Vec<u8>> {
         let object = ObjectName::from_bytes(&row.object);
         if let Some(b) = self.cached_object(&object) {
             return Some(b);
@@ -296,7 +296,7 @@ impl Engine {
     /// `lost`). A missing pack nothing can be rebuilt from stays queued with
     /// the reason and is tried again a day later. Returns the report and
     /// the queue to keep.
-    pub(super) fn run_repair3(
+    pub(super) fn run_repair(
         &mut self,
         opts: &RepairOptions,
     ) -> Result<(RepairReport, Vec<Damage>)> {
@@ -326,7 +326,7 @@ impl Engine {
             self.pull_ledger_once()?;
         }
         let view = self.view3()?;
-        let folders = self.fsck_folders3(&view)?;
+        let folders = self.fsck_folders(&view)?;
         let specs: BTreeMap<String, StorageSpec> = self
             .config
             .storages
@@ -582,7 +582,7 @@ impl Engine {
                         here.insert(r.object, (b, label));
                         continue;
                     }
-                    if let Some(b) = self.block_from_here3(&fid, r) {
+                    if let Some(b) = self.block_from_here(&fid, r) {
                         here.insert(r.object, (b, "local file".into()));
                         continue;
                     }
@@ -700,7 +700,7 @@ impl Engine {
         let epoch = self.folder_keys(&rec)?.epoch;
         let standing = self.standing3(folder);
         let _ = me;
-        self.with_map_writer3(folder, epoch, view, |writer, t, out, sink| {
+        self.with_map_writer(folder, epoch, view, |writer, t, out, sink| {
             let fetch = |row: &MapRow| here.get(&row.object).cloned();
             crate::gc3::repair_pack(
                 &standing, writer, t, view, out, storages, storage, pack, damaged, &fetch, sink,

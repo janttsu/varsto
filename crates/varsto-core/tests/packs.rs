@@ -105,7 +105,7 @@ fn the_same_file_in_two_folders_gives_other_packs_and_no_block_objects() {
     assert!(one.len() >= 3 && two.len() >= 3, "{one:?} {two:?}");
     assert_ne!(one, two);
     // Every pack is claimed on the storage, for one of the two folders.
-    let view = a.ledger_view3().unwrap();
+    let view = a.ledger_view().unwrap();
     let ids: BTreeSet<String> = [first, second]
         .iter()
         .map(|f| f.as_str().to_string())

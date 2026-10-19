@@ -130,7 +130,7 @@ impl Engine {
 
     /// Open the map table of every folder whose keys this device holds, so
     /// that reads of their blocks find their places.
-    pub(super) fn ensure_tables3(&self) {
+    pub(super) fn ensure_tables(&self) {
         for rec in self.keyring.folders.values() {
             if rec.is_removed() || (rec.key_hex.is_empty() && rec.epoch_keys.is_empty()) {
                 continue;
@@ -152,13 +152,13 @@ impl Engine {
     }
 
     /// Every writer's manifest view of `folder` as read so far.
-    pub(super) fn load_manifests3(&self, folder: &Id16) -> FolderManifests {
+    pub(super) fn load_manifests(&self, folder: &Id16) -> FolderManifests {
         util::read_json_or_default::<StoredManifests>(&self.manifests3_path(folder))
             .unwrap_or_default()
             .into_manifests(*folder)
     }
 
-    pub(super) fn save_manifests3(&self, m: &FolderManifests) -> Result<()> {
+    pub(super) fn save_manifests(&self, m: &FolderManifests) -> Result<()> {
         let p = self.manifests3_path(&m.folder);
         if let Some(dir) = p.parent() {
             fs::create_dir_all(dir)?;
@@ -169,7 +169,7 @@ impl Engine {
     /// The hot metadata storages records are written to and read from
     /// (transferrers too: they carry the records between devices that are
     /// never online together, F-048).
-    pub(super) fn record_storages3(&self) -> Result<OpenStorages> {
+    pub(super) fn record_storages(&self) -> Result<OpenStorages> {
         self.metadata_storages(false)
     }
 
@@ -177,13 +177,13 @@ impl Engine {
     /// announces past what this device applied, from every hot metadata
     /// storage. Returns every writer's manifests and the paths that changed
     /// per writer.
-    pub(super) fn pull_folder_records3(
+    pub(super) fn pull_folder_records(
         &self,
         folder: &Id16,
         view: &View3,
     ) -> Result<(FolderManifests, BTreeMap<Id16, BTreeSet<String>>)> {
         let table = self.table3(folder)?;
-        let mut manifests = self.load_manifests3(folder);
+        let mut manifests = self.load_manifests(folder);
         let me = self.me3();
         let vault = members3::bin(&self.vault.vault_id)?;
         let vault_keys = self.vault_keys3();
@@ -194,7 +194,7 @@ impl Engine {
         };
         let mut refused = RecordsRefused::default();
         let mut changed: BTreeMap<Id16, BTreeSet<String>> = BTreeMap::new();
-        for (_, backend) in self.record_storages3()? {
+        for (_, backend) in self.record_storages()? {
             let store = RecordStore {
                 storage: backend.as_ref(),
                 acceptor: Acceptor {
@@ -239,7 +239,7 @@ impl Engine {
                 manifests.remove_writer(&d);
             }
         }
-        self.save_manifests3(&manifests)?;
+        self.save_manifests(&manifests)?;
         Ok((manifests, changed))
     }
 
@@ -285,7 +285,7 @@ impl Engine {
         let lamport = self.tick()?;
         let (vault, me, vault_keys) = self.record_writer_parts();
         let table = self.table3(folder)?;
-        let storages = self.record_storages3()?;
+        let storages = self.record_storages()?;
         let refs: Vec<&dyn Storage> = storages.iter().map(|(_, b)| &**b).collect();
         let events =
             {
@@ -332,13 +332,13 @@ impl Engine {
     /// since the last one: a delta (or a base, by section 7's rule) to every
     /// hot metadata storage; the announcement goes into the next batch.
     /// Returns the record's seq.
-    pub(super) fn publish_manifest3(
+    pub(super) fn publish_manifest(
         &mut self,
         folder: &Id16,
         epoch: u32,
         state: &FolderState,
     ) -> Result<Option<u64>> {
-        let storages = self.record_storages3()?;
+        let storages = self.record_storages()?;
         if storages.is_empty() {
             return Ok(None);
         }
@@ -347,7 +347,7 @@ impl Engine {
             let e = FileEntry::from_state(f, held_here(state, f))?;
             current.insert(e.path.clone(), e);
         }
-        let mut manifests = self.load_manifests3(folder);
+        let mut manifests = self.load_manifests(folder);
         let (vault, me, vault_keys) = self.record_writer_parts();
         let view = self.view3()?;
         let mut writer = ManifestWriter::new(*folder, me);
@@ -444,7 +444,7 @@ impl Engine {
             created_utc: now,
             files: writer.published.clone(),
         });
-        self.save_manifests3(&manifests)?;
+        self.save_manifests(&manifests)?;
         self.f3.pending.push(Event3::RecordPublished(Announcement {
             kind: a.kind,
             scope: a.scope,

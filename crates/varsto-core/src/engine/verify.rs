@@ -185,7 +185,7 @@ impl Engine {
         }
         // Kind 19 records (`storages3_ops`): ours published when they
         // changed, the other devices' newest read back.
-        let theirs = Engine::their_names3(&self.exchange_storage_names3(&mine))
+        let theirs = Engine::their_names(&self.exchange_storage_names(&mine))
             .into_iter()
             .map(|(d, names)| (DeviceId::from_bytes(&d), names))
             .collect();

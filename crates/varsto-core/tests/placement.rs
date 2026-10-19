@@ -41,7 +41,7 @@ fn objects(path: &Path) -> usize {
 /// Blocks the ledger shows on a storage: a live place of each in a pack
 /// held there.
 fn on_storage(e: &Engine, storage: &str) -> usize {
-    e.objects_on_storage3(storage).unwrap().len()
+    e.objects_on_storage(storage).unwrap().len()
 }
 
 fn pseudo_random(len: usize, seed: u64) -> Vec<u8> {
@@ -321,7 +321,7 @@ fn placement_writes_only_to_the_chosen_storages_on_every_device() {
     a.sync(None).unwrap();
     assert_eq!(objects(&p("s2")), objects(&p("s3")));
     assert_eq!(
-        a.ledger_view3().unwrap().canonical(),
+        a.ledger_view().unwrap().canonical(),
         a.view3_replayed().unwrap().canonical()
     );
 }
@@ -496,7 +496,7 @@ fn moving_keeps_the_policy_and_lowers_the_bill() {
     assert!(lab.p("docs-b").join("new.bin").exists());
     assert_eq!(objects(&lab.p("h1")), blocks - plan.blocks as usize);
     assert_eq!(
-        b.ledger_view3().unwrap().canonical(),
+        b.ledger_view().unwrap().canonical(),
         b.view3_replayed().unwrap().canonical()
     );
     assert_eq!(on_storage(&b, "hot1"), blocks - plan.blocks as usize);
@@ -589,7 +589,7 @@ fn moving_a_whole_folder_changes_its_placement_and_never_drops_the_last_copy() {
     assert!(objects(&lab.p("h1")) > 0);
     assert_eq!(objects(&lab.p("c")), 0);
     assert_eq!(
-        lab.a.ledger_view3().unwrap().canonical(),
+        lab.a.ledger_view().unwrap().canonical(),
         lab.a.view3_replayed().unwrap().canonical()
     );
 }

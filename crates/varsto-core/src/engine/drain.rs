@@ -251,7 +251,7 @@ impl Engine {
             let Ok(folder) = members3::bin(&rec.folder_id) else {
                 continue;
             };
-            if let Some(t) = self.folder_table3(rec)? {
+            if let Some(t) = self.folder_table(rec)? {
                 tables.insert(folder, t);
             }
             let all: Vec<String> = candidates.iter().map(|s| s.name().to_string()).collect();
@@ -751,7 +751,7 @@ impl Engine {
     /// (blocks, bytes) the ledger places on `name`: the live blocks in the
     /// packs held there, and the size classes of those packs.
     fn claimed_bytes_on(&self, name: &str) -> Result<(u64, u64)> {
-        let blocks = self.objects_on_storage3(name)?.len() as u64;
+        let blocks = self.objects_on_storage(name)?.len() as u64;
         let view = self.view3()?;
         Ok((blocks, crate::storages3::storage_usage(&view, name).bytes))
     }
@@ -1082,7 +1082,7 @@ impl Engine {
             }
             let events = run.events.clone();
             self.f3.pending.extend(events);
-            self.commit_now3()?;
+            self.commit_now()?;
             let (deleted, failed) = run.delete_dropped_each(source.as_ref());
             report.objects_deleted += deleted;
             for (_, e) in failed {

@@ -283,7 +283,7 @@ impl Engine {
         let mut slot = self.f3.view.lock().unwrap_or_else(|e| e.into_inner());
         if slot.is_none() {
             // The view saved by an earlier process (`ledger/view.rec`).
-            *slot = self.load_view3();
+            *slot = self.load_view();
         }
         let fits = slot.as_ref().is_some_and(|c| {
             c.format == ViewCache::FORMAT && c.context == context && self.f3.ledger.cache_fits(c)
@@ -300,13 +300,13 @@ impl Engine {
             &self.f3.members.registry,
         )?;
         if applied > 0 {
-            if let Err(e) = self.save_view3(cache) {
+            if let Err(e) = self.save_view(cache) {
                 log::debug!("ledger view not saved: {e:#}");
             }
         }
         // Other devices' names for this device's storages become its own.
         let view = self.f3.ledger.finish(&cache.raw);
-        Ok(storages3_ops::localized(view, &self.storage_aliases3()))
+        Ok(storages3_ops::localized(view, &self.storage_aliases()))
     }
 
     pub(crate) fn view3_path(&self) -> PathBuf {
@@ -327,13 +327,13 @@ impl Engine {
         )
     }
 
-    pub(crate) fn load_view3(&self) -> Option<ViewCache> {
+    pub(crate) fn load_view(&self) -> Option<ViewCache> {
         let blob = fs::read(self.view3_path()).ok()?;
         let (key, aad) = self.view3_key();
         ViewCache::open(&blob, &key, &aad).ok()
     }
 
-    fn save_view3(&self, cache: &ViewCache) -> Result<()> {
+    fn save_view(&self, cache: &ViewCache) -> Result<()> {
         let path = self.view3_path();
         // Never recreate a ledger directory that was removed (reset, wipe).
         if !path.parent().is_some_and(|p| p.is_dir()) {
@@ -352,11 +352,11 @@ impl Engine {
             |d, id| self.scope3(d, id),
             &self.f3.members.registry,
         )?;
-        Ok(storages3_ops::localized(view, &self.storage_aliases3()))
+        Ok(storages3_ops::localized(view, &self.storage_aliases()))
     }
 
     /// The pack-level view (`view3`), for tests and tools.
-    pub fn ledger_view3(&self) -> Result<View3> {
+    pub fn ledger_view(&self) -> Result<View3> {
         self.view3()
     }
 
@@ -366,7 +366,7 @@ impl Engine {
     }
 
     /// Forget the view kept in memory (keys or roles changed).
-    pub(crate) fn reset_view3(&self) {
+    pub(crate) fn reset_view(&self) {
         *self.f3.view.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
@@ -403,16 +403,16 @@ impl Engine {
         // before (its packs and its records), so a member that joins later
         // finds them. A member device writes folder-scoped batches only.
         let mut groups: BTreeMap<Id16, Vec<Event3>> = BTreeMap::new();
-        let view = if self.vault.member || !self.shared_folders3().is_empty() {
+        let view = if self.vault.member || !self.shared_folders().is_empty() {
             self.view3().ok()
         } else {
             None
         };
         for ev in events {
-            let f = self.batch_folder3(&ev, view.as_ref());
+            let f = self.batch_folder(&ev, view.as_ref());
             groups.entry(f).or_default().push(ev);
         }
-        let announced = self.reannounce3(&mut groups, view.as_ref())?;
+        let announced = self.reannounce(&mut groups, view.as_ref())?;
         if groups.values().all(|g| g.is_empty()) {
             return Ok(None);
         }
@@ -430,7 +430,7 @@ impl Engine {
                 }
                 self.ledger_key3()?
             } else {
-                self.share_ledger_key3(&folder)?
+                self.share_ledger_key(&folder)?
             };
             let raw: Vec<_> = evs.iter().map(Event3::to_raw).collect();
             // One batch per action (and folder), more only past the size limits.
@@ -470,7 +470,7 @@ impl Engine {
         let (key_id, key, scope) = match &self.f3.members.member {
             Some(m) => {
                 let f = m.folder;
-                let (id, k) = self.share_ledger_key3(&f)?;
+                let (id, k) = self.share_ledger_key(&f)?;
                 (id, k, f)
             }
             None => {
@@ -506,7 +506,7 @@ impl Engine {
     }
 
     /// The share-ledger key id and key of `folder`'s newest epoch held.
-    fn share_ledger_key3(&self, folder: &Id16) -> Result<(String, SecretKey)> {
+    fn share_ledger_key(&self, folder: &Id16) -> Result<(String, SecretKey)> {
         let k =
             self.f3.members.granted.get(folder).ok_or_else(|| {
                 anyhow!("this device holds no key of folder {}", hex::encode(folder))
@@ -521,7 +521,7 @@ impl Engine {
     }
 
     /// Folders shared with other people whose keys this device holds.
-    fn shared_folders3(&self) -> Vec<Id16> {
+    fn shared_folders(&self) -> Vec<Id16> {
         let m = &self.f3.members;
         m.granted
             .folders
@@ -533,7 +533,7 @@ impl Engine {
 
     /// The folder whose folder-scoped batch an event goes into, or
     /// `NO_FOLDER` for the vault batch.
-    fn batch_folder3(&self, ev: &Event3, view: Option<&View3>) -> Id16 {
+    fn batch_folder(&self, ev: &Event3, view: Option<&View3>) -> Id16 {
         if let Some(m) = &self.f3.members.member {
             return m.folder;
         }
@@ -559,7 +559,7 @@ impl Engine {
     /// Add, for every shared folder not announced yet, this device's claims
     /// of the packs it wrote and its announcements of the folder's records
     /// to the folder's group. Returns the folders announced now.
-    fn reannounce3(
+    fn reannounce(
         &self,
         groups: &mut BTreeMap<Id16, Vec<Event3>>,
         view: Option<&View3>,
@@ -573,7 +573,7 @@ impl Engine {
         let done = self.announced3();
         let me = self.me3();
         let mut out = Vec::new();
-        for f in self.shared_folders3() {
+        for f in self.shared_folders() {
             if done.contains(&hex::encode(f)) {
                 continue;
             }
@@ -664,13 +664,13 @@ impl Engine {
     /// Pull the membership and every known device's new batches from every
     /// hot metadata storage. Returns the devices found forked.
     pub(crate) fn pull_ledger3(&mut self) -> Result<Vec<DeviceId>> {
-        self.refresh_members3()?;
+        self.refresh_members()?;
         // Replicas the vault enrolled, and other devices' names for this
         // device's storages (`storages3_ops`).
-        self.refresh_replicas3();
-        self.refresh_storage_aliases3();
+        self.refresh_replicas();
+        self.refresh_storage_aliases();
         // Folders' policies and placements (kinds 11 and 12).
-        if let Err(e) = self.refresh_folder_rules3() {
+        if let Err(e) = self.refresh_folder_rules() {
             log::warn!("policies and placements not read: {e:#}");
         }
         // Head exchange first (design section 8): what peers prove, and the
@@ -742,7 +742,7 @@ impl Engine {
                     .filter(|s| self.keep3(dev, *s))
                     .max();
                 if let (Some(s), false) = (newest_cp, *dev == me) {
-                    self.pull_checkpoint3(backend.as_ref(), dev, pk, s)?;
+                    self.pull_checkpoint(backend.as_ref(), dev, pk, s)?;
                 }
                 for name in names {
                     let Some(file) = name.strip_prefix(&prefix) else {
@@ -832,14 +832,14 @@ impl Engine {
             }
             Err(e) => log::debug!("rollback check failed: {e:#}"),
         }
-        self.watch_freshness3(&view, malformed, refused);
+        self.watch_freshness(&view, malformed, refused);
         Ok(forks.into_iter().collect())
     }
 
     /// Take the newest checkpoint of another device listed in `objects`
     /// when it is newer than the one held here: it stands in for the
     /// batches it covers, which may be gone from the storages.
-    fn pull_checkpoint3(
+    fn pull_checkpoint(
         &mut self,
         backend: &dyn Storage,
         dev: &Id16,
@@ -896,7 +896,7 @@ impl Engine {
 
     /// The full devices whose acknowledgements let a checkpoint's batches
     /// go: every device of the registry that is not removed.
-    fn ledger_readers3(&self) -> Vec<Id16> {
+    fn ledger_readers(&self) -> Vec<Id16> {
         self.f3
             .members
             .devices
@@ -980,12 +980,12 @@ impl Engine {
         }
         // 3. What checkpoints cover goes once every reader has seen past it.
         let view = self.view3()?;
-        let readers = self.ledger_readers3();
+        let readers = self.ledger_readers();
         let keep = self.ledger_policy.keep_before;
         // A device that writes for a folder shared with other people keeps
         // its batches on the storages: members read the folder-scoped ones
         // (they cannot read the checkpoints that would stand in for them).
-        let keep_all = !self.shared_folders3().is_empty();
+        let keep_all = !self.shared_folders().is_empty();
         if let Some(b) = self.f3.ledger.head(&me).base.filter(|_| !keep_all) {
             if view.vault_acked_by_all(readers.iter(), &me, b.seq) {
                 let upto = b.seq.saturating_sub(keep);

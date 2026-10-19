@@ -358,7 +358,7 @@ impl Engine {
     /// for a predecessor. The pull has just asked every storage for them; a
     /// gap that stays for `WITHHOLD_PULLS` pulls in a row is reported as a
     /// storage that may be withholding batches (`LedgerHealth::warnings`).
-    pub(super) fn watch_freshness3(
+    pub(super) fn watch_freshness(
         &mut self,
         view: &crate::ledger3::LedgerView,
         malformed: u64,
@@ -710,7 +710,7 @@ pub(super) mod tests {
         let home = b.home.clone();
         drop(devs);
         let mut b = Engine::open(&home, PASS).unwrap();
-        assert!(b.load_view3().is_some());
+        assert!(b.load_view().is_some());
         view_is_replay(&b);
         append_synthetic(&mut b, 1, 3, &folder);
         view_is_replay(&b);
@@ -791,7 +791,7 @@ pub(super) mod tests {
         let a = &mut devs[0];
         a.sync(None).unwrap();
         let folder = crate::record::id16(&a.keyring.find("photos").unwrap().folder_id).unwrap();
-        let held = a.load_manifests3(&folder).held_index();
+        let held = a.load_manifests(&folder).held_index();
         let state = a.load_state(&FolderId::from_bytes(&folder)).unwrap();
         let object = &state.files["one.jpg"].chunks[0].object;
         let obj = crate::storages3::object_bin(object).unwrap();

@@ -50,7 +50,7 @@ pub(super) fn set_read_only(path: &Path, read_only: bool) {
 
 impl Engine {
     /// The current role of `dev` in a folder (`None`: not a participant).
-    pub(super) fn folder_role3(&self, folder: &FolderId, dev: &DeviceId) -> Option<Role> {
+    pub(super) fn folder_role(&self, folder: &FolderId, dev: &DeviceId) -> Option<Role> {
         let (f, d) = (members3::bin(folder).ok()?, members3::bin(dev).ok()?);
         self.f3.members.role(&d, &f)
     }
@@ -58,7 +58,7 @@ impl Engine {
     /// The role of another device in a folder: whether this device takes
     /// what it writes there now.
     pub fn share_role_of(&self, folder: &FolderId, dev: &DeviceId) -> ShareRole {
-        match self.folder_role3(folder, dev) {
+        match self.folder_role(folder, dev) {
             Some(Role::Viewer) | None => ShareRole::Viewer,
             Some(_) => ShareRole::Editor,
         }
@@ -68,13 +68,13 @@ impl Engine {
     pub fn share_own_role(&self, folder: &FolderId) -> ShareRole {
         if let Some(m) = &self.f3.members.member {
             if members3::bin(folder).ok() == Some(m.folder) {
-                return match self.folder_role3(folder, &self.vault.device_id) {
+                return match self.folder_role(folder, &self.vault.device_id) {
                     Some(Role::Viewer) | None => ShareRole::Viewer,
                     Some(_) => ShareRole::Editor,
                 };
             }
         }
-        match self.folder_role3(folder, &self.vault.device_id) {
+        match self.folder_role(folder, &self.vault.device_id) {
             Some(Role::Viewer) => ShareRole::Viewer,
             _ => ShareRole::Editor,
         }
@@ -155,7 +155,7 @@ impl Engine {
         }
         let dev = members3::bin(&DeviceId::from_hex(&m.id)?)?;
         let stamp = self
-            .with_enrolled3(|ms| {
+            .with_enrolled(|ms| {
                 let epoch = ms.folder_epochs(&id).current();
                 if !ms.registry.is_owner(&ms.me, &id, epoch) {
                     bail!("this device is not an owner of {}", rec.name);

@@ -104,7 +104,7 @@ fn a_withheld_batch_holds_back_the_ones_after_it() {
     let b = &mut devs[1];
     b.sync(None).unwrap();
     assert_eq!(head_of(b, &a_id), n - 1, "the head does not pass the gap");
-    let view = b.ledger_view3().unwrap();
+    let view = b.ledger_view().unwrap();
     assert!(!view.folders.contains(&bin(&f1)) && !view.folders.contains(&bin(&f2)));
     let health = b.ledger_health();
     let behind = health
@@ -117,11 +117,11 @@ fn a_withheld_batch_holds_back_the_ones_after_it() {
     lab.release(&a_id, n);
     b.sync(None).unwrap();
     assert_eq!(head_of(b, &a_id), n + 1);
-    let view = b.ledger_view3().unwrap();
+    let view = b.ledger_view().unwrap();
     assert!(view.folders.contains(&bin(&f1)) && view.folders.contains(&bin(&f2)));
     assert!(b.ledger_health().behind.is_empty());
     assert_eq!(
-        b.ledger_view3().unwrap().canonical(),
+        b.ledger_view().unwrap().canonical(),
         b.view3_replayed().unwrap().canonical()
     );
 }
@@ -193,7 +193,7 @@ fn a_malformed_batch_on_one_storage_does_not_stop_the_pull() {
     fs::write(lab.batch(&a_id, n), b"{\"not\": \"a batch\"}").unwrap();
     let b = &mut devs[1];
     b.sync(None).expect("one bad object does not stop the pull");
-    assert!(b.ledger_view3().unwrap().folders.contains(&bin(&f)));
+    assert!(b.ledger_view().unwrap().folders.contains(&bin(&f)));
     assert!(b.ledger_health().batches_malformed >= 1);
 }
 
@@ -209,7 +209,7 @@ fn a_batch_with_an_absurd_lamport_time_is_refused() {
         .unwrap();
     let b = &mut devs[1];
     b.sync(None).unwrap();
-    assert!(!b.ledger_view3().unwrap().folders.contains(&bin(&f)));
+    assert!(!b.ledger_view().unwrap().folders.contains(&bin(&f)));
     assert_eq!(head_of(b, &a_id), n - 1);
     let st = b.status().unwrap();
     assert!(st.lamport < 1 << 41, "the clock jumped to {}", st.lamport);

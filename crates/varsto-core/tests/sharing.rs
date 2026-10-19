@@ -532,7 +532,7 @@ fn a_members_batch_cannot_reach_outside_its_folder() {
     a.sync(None).unwrap();
     let mut m = invite(&lab, &mut a, "robin");
     let private = varsto_core::record::id16(&folder_id(&a, "private")).unwrap();
-    let refused_before = a.ledger_view3().unwrap().events_refused;
+    let refused_before = a.ledger_view().unwrap().events_refused;
     let clock = a.status().unwrap().lamport;
     m.seal_batch3_unchecked(
         vec![
@@ -580,7 +580,7 @@ fn a_members_batch_cannot_reach_outside_its_folder() {
             f.name
         );
     }
-    assert!(a.ledger_view3().unwrap().events_refused >= refused_before + 4);
+    assert!(a.ledger_view().unwrap().events_refused >= refused_before + 4);
     // The member's own folder still takes its legitimate events.
     fs::write(lab.dir("robin").join("note.txt"), b"from robin").unwrap();
     m.sync(None).unwrap();

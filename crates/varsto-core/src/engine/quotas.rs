@@ -328,12 +328,12 @@ impl Engine {
             },
         );
         self.config.save(&self.home)?;
-        if self.record_storages3()?.is_empty() {
+        if self.record_storages()?.is_empty() {
             bail!(
                 "the storage settings could not be published: no storage holds the vault's records"
             );
         }
-        self.refresh_storage_aliases3();
+        self.refresh_storage_aliases();
         Ok(())
     }
 

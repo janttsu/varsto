@@ -1361,7 +1361,7 @@ impl Engine {
             targets: self.write_targets(&rec),
             view: self.view3()?,
             table: self
-                .folder_table3(&rec)?
+                .folder_table(&rec)?
                 .ok_or_else(|| anyhow!("this device holds no key of folder {}", rec.name))?,
 
             unavailable: BTreeSet::new(),
@@ -1850,7 +1850,7 @@ impl Engine {
         if publish {
             let folder = members3::bin(&rec.folder_id)?;
             let epoch = self.folder_keys(rec)?.epoch;
-            if let Some(seq) = self.publish_manifest3(&folder, epoch, state)? {
+            if let Some(seq) = self.publish_manifest(&folder, epoch, state)? {
                 state.published_seq = seq;
                 state.published_hash = Manifest::files_hash(&state.files);
             }
@@ -2079,7 +2079,7 @@ impl Engine {
             .expect("one folder");
         let state = self.load_state(&rec.folder_id)?;
         let view = self.view3()?;
-        let table = self.folder_table3(&rec)?;
+        let table = self.folder_table(&rec)?;
         let carriers: BTreeSet<String> = self
             .config
             .storages
@@ -2227,7 +2227,7 @@ impl Engine {
         task.set_phase("cleanup");
         let state = self.load_state(&rec.folder_id)?;
         let view = self.view3()?;
-        let table = self.folder_table3(&rec)?;
+        let table = self.folder_table(&rec)?;
         let mut pctx = self.policy_ctx();
 
         let policy = rec.effective_policy();

@@ -193,7 +193,7 @@ impl Engine {
     /// first makes its K8 (when it has none) and publishes its device
     /// record if the registry lacks it; without, a device that never did
     /// that gets `None`.
-    fn with_membership3<R>(
+    fn with_membership<R>(
         &mut self,
         enrol: bool,
         f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
@@ -202,7 +202,7 @@ impl Engine {
             bail!("this device is a member of a shared folder only; it has no folder membership of its own");
         }
         if enrol {
-            return self.with_enrolled3(f);
+            return self.with_enrolled(f);
         }
         Ok(self
             .with_members3(|m| {
@@ -215,7 +215,7 @@ impl Engine {
     }
 
     fn enrolled3<R>(&mut self, f: impl FnOnce(&mut Membership<'_>) -> Result<R>) -> Result<R> {
-        self.with_membership3(true, f)?
+        self.with_membership(true, f)?
             .ok_or_else(|| anyhow!("this device could not be enrolled: add a storage first"))
     }
 
@@ -273,7 +273,7 @@ impl Engine {
 
     /// Pending requests for `folder`, or for every folder this device owns.
     pub fn f3_requests(&mut self, folder: Option<&str>) -> Result<Vec<FolderRequest>> {
-        let Some(out) = self.with_membership3(false, |m| {
+        let Some(out) = self.with_membership(false, |m| {
             let ids: Vec<Id16> = match folder {
                 Some(f) => vec![find_folder(m, f)?],
                 None => m
@@ -358,7 +358,7 @@ impl Engine {
 
     /// Every folder of the membership records this device can see.
     pub fn f3_folders(&mut self) -> Result<Vec<FolderMembers>> {
-        let Some(v) = self.with_membership3(false, |m| {
+        let Some(v) = self.with_membership(false, |m| {
             let ids: Vec<Id16> = m.registry.folders.keys().copied().collect();
             ids.iter().map(|id| members_of(m, id)).collect()
         })?
@@ -462,7 +462,7 @@ impl Engine {
     /// Folder epochs this device holds with no recovery copy (empty for a
     /// device that never took part in format 3).
     pub fn f3_missing_escrows(&mut self) -> Result<Vec<MissingRecoveryCopy>> {
-        let Some(v) = self.with_membership3(false, |m| {
+        let Some(v) = self.with_membership(false, |m| {
             Ok(m.missing_escrows()?
                 .into_iter()
                 .map(|e: MissingEscrow| MissingRecoveryCopy {

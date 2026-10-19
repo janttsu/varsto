@@ -337,11 +337,11 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
     // The kept views (rebuilt on the new epoch and the cut-off) equal a
     // replay of every batch, also after a restart.
     for e in [&a, &d] {
-        assert_eq!(e.ledger_view3().unwrap(), e.view3_replayed().unwrap());
+        assert_eq!(e.ledger_view().unwrap(), e.view3_replayed().unwrap());
     }
     drop(a);
     let a = Engine::open(&lab.home("a"), PASS).unwrap();
-    assert_eq!(a.ledger_view3().unwrap(), a.view3_replayed().unwrap());
+    assert_eq!(a.ledger_view().unwrap(), a.view3_replayed().unwrap());
 }
 
 #[test]

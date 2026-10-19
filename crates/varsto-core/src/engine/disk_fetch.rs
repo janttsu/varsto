@@ -223,7 +223,7 @@ impl Engine {
         let (rec, _) = self.resolve_folder(folder)?;
         let state = self.load_state(&rec.folder_id)?;
         let view = self.view3()?;
-        let table = self.folder_table3(&rec)?;
+        let table = self.folder_table(&rec)?;
         // The live places of a block, with the storages holding each pack.
         let places_of = |o: &ObjectName| -> Vec<crate::ledger3::view::BlockPlace> {
             let (Some(t), Ok(obj)) = (&table, crate::storages3::object_bin(o)) else {
@@ -568,7 +568,7 @@ impl Engine {
             let Ok((rec, _)) = self.resolve_folder(&name) else {
                 continue;
             };
-            let Some(t) = self.folder_table3(&rec)? else {
+            let Some(t) = self.folder_table(&rec)? else {
                 continue;
             };
             let t = t.read().unwrap_or_else(|e| e.into_inner());

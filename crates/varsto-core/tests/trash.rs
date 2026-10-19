@@ -335,7 +335,7 @@ fn expired_entries_drop_only_blocks_nothing_else_uses() {
     assert!(twin.is_subset(&left), "blocks a current file uses stay");
     assert!(kept.is_subset(&left));
     // The drops are in the ledger: no device counts those packs any more.
-    let view = a.ledger_view3().unwrap();
+    let view = a.ledger_view().unwrap();
     for p in &gone_packs {
         let mut id = [0u8; 32];
         hex::decode_to_slice(p, &mut id).unwrap();

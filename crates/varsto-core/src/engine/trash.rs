@@ -684,7 +684,7 @@ impl Engine {
             self.save_trash_cache(&rec.folder_id, &cache)?;
             return Ok(false);
         }
-        let storages = self.record_storages3()?;
+        let storages = self.record_storages()?;
         if storages.is_empty() {
             self.save_trash_cache(&rec.folder_id, &cache)?;
             return Ok(false);
@@ -848,7 +848,7 @@ impl Engine {
                 .state
                 .removals
                 .values()
-                .map(|r| trash3_io::removal_from3(r, &did))
+                .map(|r| trash3_io::removal_from(r, &did))
                 .collect();
             cache.remote.insert(
                 did.clone(),
@@ -933,7 +933,7 @@ impl Engine {
         let view = self.view3()?;
         let mut newest: BTreeMap<crate::record::Id16, crate::trash3::SettingsBody> =
             BTreeMap::new();
-        self.each_store3(storages, &view, |_, store, counter| {
+        self.each_store(storages, &view, |_, store, counter| {
             for b in crate::records3::read_newest::<crate::trash3::SettingsBody>(
                 store, &streams, counter,
             )? {
@@ -1050,7 +1050,7 @@ impl Engine {
     /// How far each device's trash stream of `folder` was applied here
     /// (this device's own: as far as it published): garbage collection
     /// waits for a writer whose announced trash records are not applied.
-    pub(super) fn trash_applied3(&self, folder: &FolderId) -> Vec<(crate::record::Id16, u64)> {
+    pub(super) fn trash_applied(&self, folder: &FolderId) -> Vec<(crate::record::Id16, u64)> {
         let cache = self.load_trash_cache(folder);
         let mut out: Vec<(crate::record::Id16, u64)> = cache
             .remote3
@@ -1101,9 +1101,9 @@ impl Engine {
             return Ok(());
         }
         let epoch = self.folder_keys(rec)?.epoch;
-        self.flush_pending3()?;
+        self.flush_pending()?;
         let view = self.view3()?;
-        let (manifests, _) = self.pull_folder_records3(&folder, &view)?;
+        let (manifests, _) = self.pull_folder_records(&folder, &view)?;
         let live: HashSet<[u8; 32]> = manifests.references().copied().collect();
         // Blocks only the trash or the version history uses.
         let mut trashed: HashSet<[u8; 32]> = HashSet::new();
@@ -1172,7 +1172,7 @@ impl Engine {
             }
             // The copies and drops are sealed and pushed before anything
             // is deleted.
-            self.with_map_writer3(&folder, epoch, &view, |w, t, out, sink| {
+            self.with_map_writer(&folder, epoch, &view, |w, t, out, sink| {
                 let mut events = Vec::new();
                 let mut publish = None;
                 if !run.new_packs.is_empty() {
@@ -1295,7 +1295,7 @@ impl Engine {
         let mut cold_only = false;
         for c in &e.chunks {
             let held = self.block_copies3(&view, folder, &c.object);
-            if self.needs_cold_read3(&held, c) {
+            if self.needs_cold_read(&held, c) {
                 cold_only = true;
             }
             names.extend(held);
@@ -1305,7 +1305,7 @@ impl Engine {
 
     /// A block that no warm storage of this device and no cache holds, but
     /// a cold one does (format 3: `held` are the storages with a copy).
-    pub(super) fn needs_cold_read3(&self, held: &BTreeSet<String>, c: &ChunkRef) -> bool {
+    pub(super) fn needs_cold_read(&self, held: &BTreeSet<String>, c: &ChunkRef) -> bool {
         let spec = |n: &str| self.config.storages.iter().find(|s| s.name() == n);
         let warm = held
             .iter()
@@ -1380,7 +1380,7 @@ impl Engine {
                 st.local_copy_bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
             }
         }
-        st.drops_waiting = self.gc_drops_waiting3();
+        st.drops_waiting = self.gc_drops_waiting();
         Ok(st)
     }
 
@@ -1660,7 +1660,7 @@ impl Engine {
         };
         for c in &e.chunks {
             let held = self.block_copies3(&view, folder, &c.object);
-            if self.needs_cold_read3(&held, c) {
+            if self.needs_cold_read(&held, c) {
                 plan.cold_bytes += c.size;
                 cold.extend(
                     held.iter()

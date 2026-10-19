@@ -148,7 +148,7 @@ impl Engine {
         let mut devices: Vec<Id16> = self.full_device_keys().keys().copied().collect();
         devices.push(self.me3());
         let mut out = Vec::new();
-        let Ok(storages) = self.record_storages3() else {
+        let Ok(storages) = self.record_storages() else {
             return out;
         };
         for (spec, backend) in storages {
@@ -226,7 +226,7 @@ impl Engine {
         // This device's own batches: what it pushed to each storage it
         // knows itself.
         let mut own_top = 0;
-        for (spec, backend) in self.record_storages3()? {
+        for (spec, backend) in self.record_storages()? {
             let seq = self.f3.ledger.pushed(spec.name());
             let Some(storage) = verify::storage_identity(backend.as_ref())
                 .ok()

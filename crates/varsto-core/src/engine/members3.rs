@@ -325,7 +325,7 @@ impl Engine {
         let vault = bin(&self.vault.vault_id)?;
         // Every membership record read is kept in a local mirror, so that
         // a later process knows the membership without reading a storage.
-        let mirror = self.records_mirror3()?;
+        let mirror = self.records_mirror()?;
         let teed: Vec<Tee> = open
             .iter()
             .map(|(_, b)| Tee {
@@ -336,7 +336,7 @@ impl Engine {
         let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
         let lamport = self.clock.lamport;
         let kept = self.vault_kept3();
-        let recovered = self.keyring_keys3()?;
+        let recovered = self.keyring_keys()?;
         let (out, snapshot, keys, stamped) = {
             let Some(kem) = self.epochs.kem.as_ref() else {
                 bail!("this device has no KEM key (K8); it cannot take part in format-3 folders");
@@ -372,16 +372,16 @@ impl Engine {
         };
         let own = snapshot.own_revocation.clone();
         let forks = snapshot.vault_forks.clone();
-        self.adopt_members3(snapshot, keys)?;
+        self.adopt_members(snapshot, keys)?;
         self.observe_clock(stamped)?;
         if guard {
-            self.after_members3(own, forks)?;
+            self.after_members(own, forks)?;
         }
         out.map(Some)
     }
 
     /// The local mirror of the membership records (`state/records3/`).
-    fn records_mirror3(&self) -> Result<crate::storage::LocalDirStorage> {
+    fn records_mirror(&self) -> Result<crate::storage::LocalDirStorage> {
         crate::storage::LocalDirStorage::new(
             "records3".into(),
             self.home.join("state").join("records3"),
@@ -390,12 +390,12 @@ impl Engine {
 
     /// Copy every membership record of the local mirror to `to` (a storage
     /// just added), put-if-absent.
-    pub(crate) fn copy_records3(&self, to: &dyn Storage) -> Result<()> {
+    pub(crate) fn copy_records(&self, to: &dyn Storage) -> Result<()> {
         let dir = self.home.join("state").join("records3");
         if !dir.is_dir() {
             return Ok(());
         }
-        let mirror = self.records_mirror3()?;
+        let mirror = self.records_mirror()?;
         for key in mirror.list("vault/")? {
             if let Some(b) = mirror.get(&key)? {
                 to.put_if_absent(&key, &b)?;
@@ -412,11 +412,11 @@ impl Engine {
             return Ok(());
         }
         if self.vault.member {
-            let mirror = self.records_mirror3()?;
+            let mirror = self.records_mirror()?;
             return self.read_member3(&[&mirror]);
         }
         let vault = bin(&self.vault.vault_id)?;
-        let mirror = self.records_mirror3()?;
+        let mirror = self.records_mirror()?;
         let refs: Vec<&dyn Storage> = vec![&mirror];
         let (snapshot, keys) = {
             let Some(kem) = self.epochs.kem.as_ref() else {
@@ -432,18 +432,18 @@ impl Engine {
             )?;
             (Members3::of(&m), m.vault_keys.clone())
         };
-        self.adopt_members3(snapshot, keys)
+        self.adopt_members(snapshot, keys)
     }
 
     /// Read every membership record again (and publish this device's own
     /// device record when the registry lacks it).
-    pub(crate) fn refresh_members3(&mut self) -> Result<()> {
+    pub(crate) fn refresh_members(&mut self) -> Result<()> {
         if self.vault.member {
             let open = self.member_storages()?;
             if open.is_empty() {
                 return Ok(());
             }
-            let mirror = self.records_mirror3()?;
+            let mirror = self.records_mirror()?;
             let teed: Vec<Tee> = open
                 .iter()
                 .map(|(_, b)| Tee {
@@ -454,13 +454,13 @@ impl Engine {
             let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
             return self.read_member3(&refs);
         }
-        self.with_enrolled3(|_| Ok(()))?;
+        self.with_enrolled(|_| Ok(()))?;
         // The organization's manifest, roster and log (`org_ops`), judged
         // with the devices just read; a device its policy allows again gets
         // the vault key it was held back from.
         self.sync_org()?;
         if self.org.is_some() && self.removal.is_none() {
-            let held = self.org_held3();
+            let held = self.org_held();
             self.with_members3(|m| {
                 m.hold_grants = held;
                 m.grant_missing_vault_keys()
@@ -471,7 +471,7 @@ impl Engine {
 
     /// Devices of the registry that an organization's policy locks out:
     /// they get no new vault key until it allows them again.
-    pub(crate) fn org_held3(&self) -> BTreeSet<Id16> {
+    pub(crate) fn org_held(&self) -> BTreeSet<Id16> {
         self.f3
             .members
             .devices
@@ -484,14 +484,14 @@ impl Engine {
 
     /// The shared folder of a member device (`member3.json`: the folder
     /// and the owner device its trust starts from).
-    pub(crate) fn member_state3(&self) -> Option<(Id16, Id16)> {
+    pub(crate) fn member_state(&self) -> Option<(Id16, Id16)> {
         let st: MemberState3 = util::read_json(&self.home.join(MEMBER_FILE)).ok()?;
         let f = hex::decode(&st.folder).ok()?.try_into().ok()?;
         let a = hex::decode(&st.anchor).ok()?.try_into().ok()?;
         Some((f, a))
     }
 
-    pub(crate) fn save_member_state3(&self, folder: &Id16, anchor: &Id16) -> Result<()> {
+    pub(crate) fn save_member_state(&self, folder: &Id16, anchor: &Id16) -> Result<()> {
         util::write_json(
             &self.home.join(MEMBER_FILE),
             &MemberState3 {
@@ -504,7 +504,7 @@ impl Engine {
     /// A member device: read its grants and the folder epochs, and keep
     /// what they give as the engine's membership.
     fn read_member3(&mut self, storages: &[&dyn Storage]) -> Result<()> {
-        let Some((folder, anchor)) = self.member_state3() else {
+        let Some((folder, anchor)) = self.member_state() else {
             return Ok(());
         };
         let vault = bin(&self.vault.vault_id)?;
@@ -514,12 +514,12 @@ impl Engine {
             };
             crate::membership3::MemberView::read(storages, vault, self.me3(), kem, folder, anchor)?
         };
-        self.adopt_members3(Members3::of_member(view), VaultKeys::default())
+        self.adopt_members(Members3::of_member(view), VaultKeys::default())
     }
 
     /// `with_members3` after publishing this device's device record when
     /// the registry lacks it.
-    pub(crate) fn with_enrolled3<R>(
+    pub(crate) fn with_enrolled<R>(
         &mut self,
         f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
     ) -> Result<Option<R>> {
@@ -537,7 +537,7 @@ impl Engine {
     /// to this device), the device list.
     /// The folder keys the local keyring holds (from grants, or taken from
     /// escrow by `recover_folders`, which only the keyring keeps).
-    fn keyring_keys3(&self) -> Result<Vec<crate::membership3::FolderKeys>> {
+    fn keyring_keys(&self) -> Result<Vec<crate::membership3::FolderKeys>> {
         let mut out = Vec::new();
         for rec in self.keyring.folders.values() {
             let Ok(id) = bin(&rec.folder_id) else {
@@ -565,10 +565,10 @@ impl Engine {
         Ok(out)
     }
 
-    fn adopt_members3(&mut self, mut snapshot: Members3, keys: VaultKeys) -> Result<()> {
+    fn adopt_members(&mut self, mut snapshot: Members3, keys: VaultKeys) -> Result<()> {
         // Keys this device took from escrow (`recover_folders3`) are kept
         // in the local keyring only: they count as held.
-        for k in self.keyring_keys3()? {
+        for k in self.keyring_keys()? {
             if snapshot.granted.get(&k.folder).is_none() {
                 snapshot.granted.add(k);
             }
@@ -595,15 +595,15 @@ impl Engine {
         // A folder another device converted into a Strongroom (or gave a
         // new Strongroom key) takes the old one's place here before the
         // old one, now removed, is forgotten.
-        self.adopt_conversions3()?;
-        self.sync_keyring3()?;
-        self.sync_devices3()
+        self.adopt_conversions()?;
+        self.sync_keyring()?;
+        self.sync_devices()
     }
 
     /// The local keyring follows the folder records: every folder of the
     /// vault is listed (with its keys when a grant gave them here), removed
     /// folders are forgotten.
-    fn sync_keyring3(&mut self) -> Result<()> {
+    fn sync_keyring(&mut self) -> Result<()> {
         let mut changed = false;
         let folders: Vec<(Id16, String, Id16, bool, bool, Option<String>)> = self
             .f3
@@ -722,7 +722,7 @@ impl Engine {
     }
 
     /// The device list (`devices.json`) follows the device records.
-    fn sync_devices3(&mut self) -> Result<()> {
+    fn sync_devices(&mut self) -> Result<()> {
         let m = &self.f3.members;
         let mut devices = BTreeMap::new();
         let mut epochs = BTreeMap::new();
@@ -820,7 +820,7 @@ impl Engine {
     /// recovered.
     pub fn recover_folders(&mut self, k1: &crate::membership3::RecoveryKey) -> Result<Vec<String>> {
         let got = self
-            .with_enrolled3(|m| {
+            .with_enrolled(|m| {
                 let keys = m.recover_all_folders(k1)?;
                 Ok(keys
                     .folders
