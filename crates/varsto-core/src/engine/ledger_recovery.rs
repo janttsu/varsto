@@ -28,8 +28,8 @@
 //! everywhere" check runs only when the view has no block claims at all.
 
 use super::*;
-use crate::ledger::{LedgerObject, Rescan, SignedCheckpoint};
-use crate::snapshot::Snapshot;
+use crate::ledger::Rescan;
+use crate::record::Id16;
 
 /// What the command line suggests.
 pub const REBUILD_COMMAND: &str = "varsto ledger rebuild";
@@ -42,9 +42,6 @@ const REPAIR_ADVICE: &str =
 /// A fork found by a rebuild is remembered here, so the device stays
 /// fenced across restarts until it is paired again.
 const FORK_FILE: &str = "ledger/fork.json";
-
-/// Events per batch when claims are rebuilt from the storages.
-const EVENTS_PER_BATCH: usize = 2000;
 
 /// The verification of a rebuild from the storages is on by default up to
 /// this much data; above it, objects are verified up to the budget.
@@ -77,8 +74,8 @@ pub struct LedgerBehind {
     /// storage may be withholding batches and `warnings` says so.
     pub pulls: u32,
     /// Where the gap was learned from: `acks` (another device's signed
-    /// acknowledgement), `peer` (a head statement a peer sent over
-    /// peer-to-peer, section 74) or `pending` (batches wait for a
+    /// acknowledgement), `peer` (a batch a peer proved, by an envelope or
+    /// the writer's own peer record) or `pending` (batches wait for a
     /// predecessor that no storage offered).
     #[serde(default = "default_source")]
     pub source: String,
@@ -113,9 +110,17 @@ pub(super) struct Watch {
     /// fence this device; `varsto ledger clean-junk --yes` deletes them.
     #[serde(default)]
     pub(super) junk: BTreeMap<String, BTreeSet<String>>,
+    /// Rollback warnings of the last pull (design section 8: a storage
+    /// shows less of a device's ledger than a peer proved).
+    #[serde(default)]
+    pub(super) rollback: Vec<String>,
+    /// The writing devices those warnings name (for the Help page).
+    #[serde(default)]
+    pub(super) rollback_devices: Vec<String>,
 }
 
-const WATCH_FILE: &str = "ledger/watch.json";
+/// Kept apart from what peers proved (`p2p::v3::heads::WATCH_FILE`).
+const WATCH_FILE: &str = "ledger/health.json";
 
 impl Watch {
     pub(super) fn load(home: &Path) -> Watch {
@@ -225,10 +230,6 @@ pub(super) struct Alarm {
     no_ledger: bool,
     repairing: bool,
     lost_checked_utc: Option<i64>,
-    /// The newest head statement of every peer (`ledger/heads-seen.json`).
-    pub(super) heads: crate::ledger_heads::HeadsSeen,
-    /// When the peers were last asked for their statements.
-    pub(super) heads_asked: Option<std::time::Instant>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -240,23 +241,21 @@ struct ForkFile {
 impl Alarm {
     /// What the local files say when the engine opens (no storage is read).
     pub(super) fn at_open(e: &Engine, pending_lost: bool) -> Alarm {
-        let me = &e.vault.device_id;
-        let head = e.ledger.head(me);
-        let mut a = Alarm {
-            heads: crate::ledger_heads::HeadsSeen::load(&e.home),
-            ..Alarm::default()
-        };
+        // Format 3: the ledger is `ledger3` (`Engine::f3`).
+        let me = &e.me3();
+        let head = e.f3.ledger.head(me);
+        let mut a = Alarm { ..Alarm::default() };
         if e.removal.is_some() {
             // A removed device signs nothing anyway.
             return a;
         }
-        let damaged = e.ledger.damaged();
+        let damaged = e.f3.ledger.damaged();
         if damaged.iter().any(|n| n == "heads.json") {
             a.local.push(LedgerProblem {
                 code: "local_files_damaged".into(),
                 detail: "the local ledger's heads file could not be read".into(),
             });
-        } else if e.ledger.heads_absent() && !e.vault.member {
+        } else if e.f3.ledger.heads_absent() && !e.vault.member {
             // Every full device signs its enrolment when it is created, so
             // its heads file exists from then on.
             a.local.push(LedgerProblem {
@@ -276,7 +275,7 @@ impl Alarm {
                     .into(),
             );
         }
-        let pushed = e.ledger.pushed_max();
+        let pushed = e.f3.ledger.pushed_max();
         if a.local.is_empty() && pushed > head.seq {
             a.local.push(LedgerProblem {
                 code: "behind_pushed".into(),
@@ -289,7 +288,8 @@ impl Alarm {
         if a.local.is_empty()
             && head.seq > head.dropped
             && head.base.as_ref().is_none_or(|b| b.seq < head.seq)
-            && e.ledger
+            && e.f3
+                .ledger
                 .get(me, head.seq)
                 .map(|b| b.is_none())
                 .unwrap_or(true)
@@ -464,23 +464,7 @@ pub struct LedgerStatus {
     pub devices: Vec<LedgerDeviceStatus>,
 }
 
-/// The copies of one own batch on the storages.
-enum Fetched {
-    None,
-    One(SignedBatch),
-    /// Two storages hold different batches under this number.
-    Disagree,
-}
-
 const TWO_HISTORIES: &str = "the storages hold two different ledger histories of this device";
-
-/// Own batches and checkpoints on each storage.
-struct OwnListing {
-    batches: BTreeMap<u64, Vec<usize>>,
-    checkpoints: BTreeMap<u64, Vec<usize>>,
-    /// Per storage: (lowest batch, holds a checkpoint).
-    per_storage: Vec<(usize, Option<u64>, bool)>,
-}
 
 impl Engine {
     /// One sentence on key epoch `e`, written by two devices.
@@ -503,9 +487,8 @@ impl Engine {
     /// The ledger's state as far as this device knows without reading a
     /// storage (see `ledger_check_storages` for the one cheap read).
     pub fn ledger_health(&self) -> LedgerHealth {
-        let me = &self.vault.device_id;
         let a = &self.ledger_alarm;
-        let own_head = self.ledger.head(me).seq;
+        let own_head = self.own_head3();
         let mut problems = a.local.clone();
         if let Some(n) = a.storage_ahead {
             problems.push(LedgerProblem {
@@ -586,6 +569,7 @@ impl Engine {
                 }
             })
             .collect();
+        warnings.extend(a.watch.rollback.iter().cloned());
         let junk: u64 = a.watch.junk.values().map(|k| k.len() as u64).sum();
         if junk > 0 {
             warnings.push(format!(
@@ -647,35 +631,53 @@ impl Engine {
         Ok(())
     }
 
+    /// The devices whose ledger a storage may be withholding or rolling
+    /// back (the rollback warning of the last pull).
+    pub(super) fn ledger_rollback_devices(&self) -> Vec<String> {
+        self.ledger_alarm.watch.rollback_devices.clone()
+    }
+
+    /// This device's own ledger prefix on the storages.
+    fn own_prefix(&self) -> String {
+        format!("ledger/{}/", hex::encode(self.me3()))
+    }
+
     /// Own batches or checkpoints after the local head on the first hot
     /// metadata storage that answers: `Some(newest)` when there are any
     /// that this device's key signed. Anything else under its name is junk
     /// (noted, never a reason to stop signing).
     fn own_objects_ahead(&mut self) -> Result<Option<u64>> {
-        let me = self.vault.device_id.clone();
-        let head = self.ledger.head(&me).seq;
-        let prefix = format!("ledger/{me}/");
+        let me = self.me3();
+        let head = self.own_head3();
+        let prefix = self.own_prefix();
         let start = if head == 0 {
             String::new()
         } else {
-            SignedBatch::storage_key(&me, head)
+            crate::ledger3::checkpoint::batch_key(&me, head)
         };
         for (spec, backend) in self.metadata_storages(false)? {
+            if spec.is_carrier() {
+                continue;
+            }
             let Ok(keys) = backend.list_after(&prefix, &start) else {
                 continue;
             };
             let mut newest = None;
             for k in keys {
-                let Some(o) = k.strip_prefix(&prefix).and_then(LedgerObject::parse) else {
+                let Some(o) = k
+                    .strip_prefix(&prefix)
+                    .and_then(crate::ledger3::LedgerObject::parse)
+                else {
                     continue;
                 };
                 let seq = match o {
-                    LedgerObject::Batch(s) | LedgerObject::Checkpoint(s) => s,
+                    crate::ledger3::LedgerObject::Batch(s)
+                    | crate::ledger3::LedgerObject::Checkpoint(s, _) => s,
                 };
                 if seq <= head || newest.is_some_and(|n| n >= seq) {
                     continue;
                 }
-                if self.own_object_genuine(spec.name(), backend.as_ref(), &o)? {
+                if self.own_object_genuine(spec.name(), backend.as_ref(), &k)? {
                     newest = Some(seq);
                 }
             }
@@ -685,49 +687,51 @@ impl Engine {
         Ok(None)
     }
 
-    /// Whether the own ledger object `o` on a storage was signed by this
-    /// device: it parses as a batch or checkpoint of this device under that
-    /// number and verifies with this device's key. One that does not is
-    /// junk: noted (`Watch::junk`) and not read again. Objects that do not
-    /// answer are neither.
+    /// Whether the own ledger object `key` on a storage was signed by this
+    /// device: a record of this device under that number that verifies
+    /// with its key. One that does not is junk: noted (`Watch::junk`) and
+    /// not read again. Objects that do not answer are neither.
     pub(super) fn own_object_genuine(
         &mut self,
         storage: &str,
         backend: &dyn Storage,
-        o: &LedgerObject,
+        key: &str,
     ) -> Result<bool> {
-        let me = self.vault.device_id.clone();
-        let key = match o {
-            LedgerObject::Batch(s) => SignedBatch::storage_key(&me, *s),
-            LedgerObject::Checkpoint(s) => SignedCheckpoint::storage_key(&me, *s),
+        let me = self.me3();
+        let prefix = self.own_prefix();
+        let Some(o) = key
+            .strip_prefix(&prefix)
+            .and_then(crate::ledger3::LedgerObject::parse)
+        else {
+            return Ok(false);
         };
         if self
             .ledger_alarm
             .watch
             .junk
             .get(storage)
-            .is_some_and(|j| j.contains(&key))
+            .is_some_and(|j| j.contains(key))
         {
             return Ok(false);
         }
-        let Some(blob) = backend.get(&key)? else {
+        let Some(blob) = backend.get_bounded(key, crate::record::MAX_PART_READ)? else {
             return Ok(false);
         };
-        let pk = self.keys.signer.public();
-        let genuine = match o {
-            LedgerObject::Batch(s) => serde_json::from_slice::<SignedBatch>(&blob)
-                .is_ok_and(|b| b.device == me && b.seq == *s && b.verify(&pk).is_ok()),
-            LedgerObject::Checkpoint(s) => serde_json::from_slice::<SignedCheckpoint>(&blob)
-                .is_ok_and(|c| c.device == me && c.seq == *s && c.verify(&pk).is_ok()),
+        let seq = match o {
+            crate::ledger3::LedgerObject::Batch(s)
+            | crate::ledger3::LedgerObject::Checkpoint(s, _) => s,
         };
+        let pk = self.keys.signer.public();
+        let genuine = crate::record::SignedRecord::decode(&blob)
+            .is_ok_and(|r| r.device == me && r.seq == seq && r.verify(&pk).is_ok());
         if !genuine {
-            log::warn!(storage = storage, key = key.as_str(); "junk under this device's ledger name");
+            log::warn!(storage = storage, key = key; "junk under this device's ledger name");
             self.ledger_alarm
                 .watch
                 .junk
                 .entry(storage.to_string())
                 .or_default()
-                .insert(key);
+                .insert(key.to_string());
         }
         Ok(genuine)
     }
@@ -738,8 +742,7 @@ impl Engine {
     /// genuine objects are never touched, whatever their number.
     pub fn ledger_clean_junk(&mut self, dry_run: bool) -> Result<JunkReport> {
         self.ensure_active()?;
-        let me = self.vault.device_id.clone();
-        let prefix = format!("ledger/{me}/");
+        let prefix = self.own_prefix();
         let mut report = JunkReport {
             dry_run,
             ..Default::default()
@@ -747,11 +750,7 @@ impl Engine {
         self.ledger_alarm.watch.junk.clear();
         for (spec, backend) in self.metadata_storages(false)? {
             for key in backend.list(&prefix)? {
-                let genuine = match key.strip_prefix(&prefix).and_then(LedgerObject::parse) {
-                    Some(o) => self.own_object_genuine(spec.name(), backend.as_ref(), &o)?,
-                    None => false,
-                };
-                if genuine {
+                if self.own_object_genuine(spec.name(), backend.as_ref(), &key)? {
                     report.genuine += 1;
                     continue;
                 }
@@ -769,17 +768,6 @@ impl Engine {
         Ok(report)
     }
 
-    /// Before signing: a storage that holds this identity's batches after
-    /// the local head fences the device (nothing is signed).
-    pub(super) fn check_storage_before_signing(&mut self) -> Result<()> {
-        if let Some(n) = self.own_objects_ahead()? {
-            self.ledger_alarm.storage_ahead = Some(n);
-            self.forked_self = true;
-            self.ensure_ledger_writable()?;
-        }
-        Ok(())
-    }
-
     /// The cheap check of the storages (at service start and now and then):
     /// one listing of this identity's batches after the local head.
     pub fn ledger_check_storages(&mut self) -> Result<LedgerHealth> {
@@ -791,9 +779,24 @@ impl Engine {
         Ok(self.ledger_health())
     }
 
-    /// Whether the ledger is gone everywhere (no block claims at all while
-    /// the folders' manifests name blocks), checked at most once an hour
-    /// and only when the view holds no claims. Sets `no_ledger`.
+    /// Whether some folder held here names blocks in its files.
+    fn files_name_blocks(&self) -> bool {
+        self.keyring
+            .folders
+            .values()
+            .filter(|r| !r.is_removed() && !r.is_backup())
+            .any(|r| {
+                self.load_state(&r.folder_id).is_ok_and(|st| {
+                    st.files
+                        .values()
+                        .any(|f| !f.deleted && !f.chunks.is_empty())
+                })
+            })
+    }
+
+    /// Whether the ledger is gone everywhere (no pack claims at all while
+    /// the folders' files name blocks), checked at most once an hour.
+    /// Sets `no_ledger`.
     pub fn ledger_lost_everywhere(&mut self, force: bool) -> Result<bool> {
         if self.vault.member {
             return Ok(false);
@@ -808,18 +811,23 @@ impl Engine {
             return Ok(self.ledger_alarm.no_ledger);
         }
         self.ledger_alarm.lost_checked_utc = Some(now);
-        let lost = self.view()?.chunks.is_empty() && self.chunk_map(true)?.objects_named() > 0;
+        let lost = self.view3()?.packs.is_empty() && self.files_name_blocks();
         self.ledger_alarm.no_ledger = lost;
         Ok(lost)
     }
 
-    /// Restore this device's ledger: rebuild the heads from the local
-    /// files, take this device's own batches and checkpoints back from the
-    /// storages and continue after the newest (or set aside batches that
-    /// were never published and sign their events again), download the
-    /// other devices' batches, rebuild the view, and, with `from_storage`
-    /// (or by itself in the service when no ledger is left anywhere),
-    /// rebuild the block claims from what the storages hold.
+    /// Restore this device's ledger (`rebuild3`, spec section 77.10):
+    /// rebuild the heads from the local files, take every device's newest
+    /// checkpoint and the batches after it back from the metadata storages
+    /// (this device's own included, continuing after the newest), refuse
+    /// when two histories of this identity exist or when other devices
+    /// hold batches of it that no storage gives, and sign again the events
+    /// that were in lost batches: claims of the packs this device's maps
+    /// name, announcements of its map and manifest records, folders it
+    /// holds, its enrolment. With `from_storage` (and in the service when
+    /// no ledger is left anywhere) the packs the maps name are read and
+    /// hashed first, and packs nobody claims are claimed once their hash is
+    /// their id.
     pub fn ledger_rebuild(&mut self, opts: &LedgerRebuildOptions) -> Result<LedgerRebuildReport> {
         self.ensure_active()?;
         let task = activity::start(activity::LEDGER_REBUILD, "", 0, activity::Unit::Items);
@@ -836,199 +844,287 @@ impl Engine {
         opts: &LedgerRebuildOptions,
         task: &activity::Guard,
     ) -> Result<LedgerRebuildReport> {
-        let me = self.vault.device_id.clone();
+        let me = self.me3();
         let mut report = LedgerRebuildReport::default();
         task.set_phase("local");
-        report.local = self.ledger.rescan()?;
-        report.own_head_before = self.ledger.head(&me).seq;
+        report.local = self.f3.ledger.rescan()?;
+        report.own_head_before = self.f3.ledger.head(&me).seq;
+        let base_before = self.f3.ledger.head(&me).base.map(|b| b.seq);
+        self.refresh_members()?;
 
         task.set_phase("own");
-        self.restore_own_history(opts.confirm_cold_read, &mut report)?;
-        report.own_head_after = self.ledger.head(&me).seq;
+        // Own batches signed here that no storage holds while the storages
+        // hold other batches of this device under those numbers (a copy
+        // restored from a backup that signed before it noticed): set aside,
+        // their events signed again after the storages' history.
+        let requeued = self.set_aside_unpublished(&mut report)?;
+        let no_ledger_before = self.ledger_lost_everywhere(true)?;
+        let verify = opts.from_storage || (opts.automatic && no_ledger_before);
+        let storages: Vec<(StorageSpec, Box<dyn Storage>)> = self
+            .metadata_storages(true)?
+            .into_iter()
+            .filter(|(s, _)| !s.is_carrier())
+            .collect();
+        let descs: Vec<crate::fsck3::StorageDesc> = storages
+            .iter()
+            .map(|(spec, b)| crate::fsck3::StorageDesc {
+                name: spec.name().to_string(),
+                storage: b.as_ref(),
+                cold: spec.is_cold(),
+                meta: true,
+                media: crate::media::Media::Unknown,
+            })
+            .collect();
+        let folders: Vec<Id16> = self
+            .keyring
+            .folders
+            .values()
+            .filter(|r| !r.is_removed() && (!r.key_hex.is_empty() || !r.epoch_keys.is_empty()))
+            .filter_map(|r| members3::bin(&r.folder_id).ok())
+            .collect();
+        let (key_id, ledger_key) = self.ledger_key3()?;
+        let vault = members3::bin(&self.vault.vault_id)?;
+        let device_name = self.vault.device_name.clone();
+        let vault_keys = self.vault_keys3();
+        let marker = self.home.join("ledger");
+        let verify_pack = |c: &crate::fsck3::PackCheck| -> crate::fsck3::PackVerdict {
+            match crate::blockmap::class_of_len(c.class_len)
+                .map(|class| crate::gc3::verify_pack(c.backend, &c.pack, class))
+            {
+                Some(Ok(v)) if v.check == crate::gc3::PackCheck::Good => {
+                    crate::fsck3::PackVerdict::Ok
+                }
+                Some(Ok(_)) => crate::fsck3::PackVerdict::Corrupt("damaged".into()),
+                Some(Err(e)) => crate::fsck3::PackVerdict::Unreadable(format!("{e:#}")),
+                None => crate::fsck3::PackVerdict::Corrupt("no size class".into()),
+            }
+        };
+        // What `scope3` and `key_for3` read of the engine besides the
+        // membership, taken before the ledger store is borrowed.
+        let member_device = self.vault.member;
+        let untrusted: BTreeSet<Id16> = self
+            .f3
+            .members
+            .devices
+            .devices
+            .keys()
+            .copied()
+            .filter(|d| self.org_untrusted3(d))
+            .collect();
+        let result = {
+            let Engine {
+                f3, epochs, keys, ..
+            } = &mut *self;
+            let members = &f3.members;
+            let key_for =
+                |id: &str| super::ledger3_ops::key_for3_in(epochs, members, member_device, id);
+            let scope_of = |d: &Id16, id: &str| {
+                (!untrusted.contains(d))
+                    .then(|| super::ledger3_ops::scope3_in(members, d, id))
+                    .flatten()
+            };
+            let pubkey_of = |d: &Id16| -> Option<crypto::VerifyingKey> {
+                members
+                    .devices
+                    .devices
+                    .get(d)
+                    .and_then(|(r, _)| r.signing_key())
+                    .or_else(|| (*d == me).then(|| keys.signer.public()))
+            };
+            let ring = crate::membership3::KeyRing {
+                me,
+                vault: &vault_keys,
+                kem: epochs.kem.as_ref(),
+                devices: Some(&members.devices),
+                folders: Some(&members.granted),
+                recovery: None,
+                extra: Vec::new(),
+                members: Some(&members.members),
+            };
+            let trust = members.trust();
+            let input = crate::rebuild3::RebuildInput {
+                vault,
+                me,
+                device_name,
+                signer: &keys.signer,
+                ledger_key: &ledger_key,
+                key_id,
+                key_for: &key_for,
+                scope_of: &scope_of,
+                pubkey_of: &pubkey_of,
+                storages: &descs,
+                folders,
+                record_keys: &ring,
+                record_trust: &trust,
+                verify_pack: verify.then_some(&verify_pack as &crate::fsck3::VerifyPack),
+                fill_own: None,
+                marker_dir: Some(&marker),
+            };
+            crate::rebuild3::rebuild(
+                &mut f3.ledger,
+                &input,
+                &crate::rebuild3::RebuildOptions {
+                    confirm_cold_read: opts.confirm_cold_read,
+                    verify_named: verify,
+                    push: true,
+                },
+            )
+        };
+        drop(descs);
+        drop(storages);
+        let rep = match result {
+            Ok(r) => r,
+            Err(crate::rebuild3::RebuildError::Forked(what)) => {
+                return self
+                    .refuse_fork(format!("{TWO_HISTORIES} ({what})"))
+                    .map(|_| report)
+            }
+            Err(e) => bail!("{e}"),
+        };
+        report.own_head_after = self.f3.ledger.head(&me).seq;
+        report.own_found_on_storages = rep.own_on_storage.values().any(|s| *s > 0);
+        report.adopted_batches = report
+            .own_head_after
+            .saturating_sub(report.own_head_before.max(rep.own_head_before))
+            .saturating_sub(rep.new_batches.len() as u64);
+        let base_after = self.f3.ledger.head(&me).base.map(|b| b.seq);
+        if base_after != base_before {
+            report.adopted_checkpoint = base_after;
+        }
+        report.batches_pulled = rep.batches;
+        report.checkpoints_pulled = rep.checkpoints;
+        report.reenrolled = rep.enrolled;
+        report.notes.extend(rep.skipped.iter().cloned());
+        if !rep.new_batches.is_empty() {
+            report
+                .notes
+                .push(format!("signed again: {}", rep.describe()));
+        }
         self.ledger_alarm.local.clear();
         self.ledger_alarm.storage_ahead = None;
         self.ledger_alarm.fork = None;
         let _ = fs::remove_file(self.home.join(FORK_FILE));
         self.forked_self = false;
-        self.ledger.clear_fork(&me)?;
-        self.ledger.save()?;
+        self.f3.ledger.clear_fork(&me)?;
+        self.f3.ledger.save()?;
+        self.reset_view();
 
         task.set_phase("others");
-        let held = |e: &Engine| -> (u64, u64) {
-            e.ledger
-                .devices()
-                .iter()
-                .filter(|d| **d != me)
-                .fold((0, 0), |(b, c), d| {
-                    let h = e.ledger.head(d);
-                    (
-                        b + h.seq.saturating_sub(h.dropped),
-                        c + h.base.is_some() as u64,
-                    )
-                })
-        };
-        let (b0, c0) = held(self);
         let forks = self.pull_ledger()?;
-        if forks.contains(&me) {
+        if forks.contains(&DeviceId::from_bytes(&me)) {
             // Something signed by this identity appeared meanwhile.
             self.forked_self = true;
             bail!("a storage received a batch of this device while it was being restored; run `{REBUILD_COMMAND}` again");
         }
-        let (b1, c1) = held(self);
-        report.batches_pulled = b1.saturating_sub(b0);
-        report.checkpoints_pulled = c1.saturating_sub(c0);
-        self.reset_view_cache();
-        self.view()?;
-        report.manifests_caught_up = self.catch_up_own_manifests()?;
-
-        if !self.vault.member && self.ledger.head(&me).seq == 0 {
-            // Nothing of this device was found anywhere: it enrols again
-            // under its own name (as a new device does), starting at 1.
-            self.pending.push(Event::DeviceEnrolled {
-                name: self.vault.device_name.clone(),
-            });
-            self.commit_batch()?;
-            report.reenrolled = true;
+        if requeued > 0 {
+            report.events_requeued = requeued;
         }
-
         report.no_ledger_anywhere = self.ledger_lost_everywhere(true)?;
-        if opts.from_storage || (opts.automatic && report.no_ledger_anywhere) {
-            report.from_storage = Some(self.rebuild_claims_from_storage(opts, task)?);
-            self.ledger_alarm.no_ledger = false;
-            self.ledger_alarm.lost_checked_utc = Some(util::now_utc());
-        } else if report.no_ledger_anywhere {
+        let claims = rep.claims_from_maps + rep.claims_from_listing;
+        if verify || claims > 0 {
+            report.from_storage = Some(StorageRebuildReport {
+                folders: self.keyring.folders.len() as u64,
+                storages_listed: rep.own_on_storage.keys().cloned().collect(),
+                claims_written: claims,
+                objects_verified: rep.verified,
+                objects_corrupt: (rep.unnamed_corrupt.len() + rep.named_corrupt.len()) as u64,
+                objects_unverified: if verify { 0 } else { rep.claims_from_maps },
+                manifests_announced: rep.announced,
+                batches: rep.new_batches.len() as u64,
+                ..Default::default()
+            });
+            self.ledger_alarm.no_ledger = report.no_ledger_anywhere;
+        }
+        // Packs whose bytes do not match their id are not claimed: the
+        // repair queue takes them.
+        let view = self.view3()?;
+        let damage: Vec<Damage> = rep
+            .unnamed_corrupt
+            .iter()
+            .chain(&rep.named_corrupt)
+            .filter_map(|s| {
+                let (storage, id) = s.rsplit_once(':')?;
+                let mut pack = [0u8; 32];
+                hex::decode_to_slice(id, &mut pack).ok()?;
+                Some(super::repair::pack_damage(
+                    &view,
+                    &pack,
+                    storage,
+                    DamageKind::Corrupt,
+                    "ledger rebuild",
+                    util::now_utc(),
+                ))
+            })
+            .collect();
+        self.queue_damage(damage)?;
+        if report.no_ledger_anywhere {
             report.notes.push(format!(
-                "no storage holds any record of where the blocks are; run `{REBUILD_FROM_STORAGE_COMMAND}` to rebuild it from the storages"
+                "no storage holds any record of where the blocks are; run `{REBUILD_FROM_STORAGE_COMMAND}` to read and claim what the storages hold"
             ));
         }
         report.notes.append(&mut self.ledger_alarm.notes);
         Ok(report)
     }
 
-    /// List this device's own ledger objects on every metadata storage
-    /// (cold ones too: listing is not a read of their contents).
-    fn list_own(
-        &self,
-        storages: &OpenStorages,
-        report: &mut LedgerRebuildReport,
-    ) -> Result<OwnListing> {
-        let me = &self.vault.device_id;
-        let prefix = format!("ledger/{me}/");
-        let mut out = OwnListing {
-            batches: BTreeMap::new(),
-            checkpoints: BTreeMap::new(),
-            per_storage: Vec::new(),
-        };
-        for (i, (spec, backend)) in storages.iter().enumerate() {
-            let keys = match backend.list(&prefix) {
-                Ok(k) => k,
-                Err(e) if spec.is_cold() => {
-                    report
-                        .notes
-                        .push(format!("cold storage {} could not be listed: {e:#}", spec.name()));
+    /// Own batches held here past the newest own batch that the storages'
+    /// history agrees with, while a storage holds another batch of this
+    /// device under one of their numbers: they were published nowhere (the
+    /// storage's copy would be the same), so they are set aside under
+    /// `ledger/discarded/` and their events go into the next batch.
+    /// Returns how many events were requeued.
+    fn set_aside_unpublished(&mut self, report: &mut LedgerRebuildReport) -> Result<u64> {
+        let me = self.me3();
+        let head = self.f3.ledger.head(&me);
+        if head.seq == 0 {
+            return Ok(0);
+        }
+        let pk = self.keys.signer.public();
+        let mut first_bad: Option<u64> = None;
+        for (spec, backend) in self.metadata_storages(true)? {
+            if spec.is_carrier() || (spec.is_cold()) {
+                continue;
+            }
+            for seq in (head.dropped + 1).max(1)..=head.seq {
+                let Some(mine) = self.f3.ledger.get(&me, seq)? else {
                     continue;
+                };
+                let key = crate::ledger3::checkpoint::batch_key(&me, seq);
+                let Some(blob) = backend.get_bounded(&key, crate::record::MAX_PART_READ)? else {
+                    continue;
+                };
+                let Ok(theirs) = crate::record::SignedRecord::decode(&blob) else {
+                    continue;
+                };
+                if theirs.body_hash != mine.body_hash && theirs.verify(&pk).is_ok() {
+                    first_bad = Some(first_bad.map_or(seq, |f: u64| f.min(seq)));
+                    break;
                 }
-                Err(e) => {
-                    return Err(e).with_context(|| {
-                        format!(
-                            "storage {} could not be listed; the ledger is restored when every storage answers",
-                            spec.name()
-                        )
-                    })
-                }
+            }
+        }
+        let Some(from) = first_bad else {
+            return Ok(0);
+        };
+        let vault = members3::bin(&self.vault.vault_id)?;
+        let mut events: Vec<crate::ledger3::events::Event> = Vec::new();
+        for seq in (from..=head.seq).rev() {
+            let Some(rec) = self.f3.ledger.get(&me, seq)? else {
+                continue;
             };
-            let mut lowest = None;
-            let mut has_cp = false;
-            for o in keys
-                .iter()
-                .filter_map(|k| k.strip_prefix(&prefix).and_then(LedgerObject::parse))
+            let key = self.key_for3(&rec.key_id);
+            if let Ok(Some(b)) = crate::ledger3::store::check_batch(&rec, &vault, &pk, key.as_ref())
             {
-                match o {
-                    LedgerObject::Batch(s) => {
-                        out.batches.entry(s).or_default().push(i);
-                        lowest = Some(lowest.map_or(s, |l: u64| l.min(s)));
-                    }
-                    LedgerObject::Checkpoint(s) => {
-                        out.checkpoints.entry(s).or_default().push(i);
-                        has_cp = true;
-                    }
-                }
+                let mut evs: Vec<_> = b.decoded().0.into_iter().map(|(_, e)| e).collect();
+                evs.append(&mut events);
+                events = evs;
             }
-            out.per_storage.push((i, lowest, has_cp));
+            self.f3.ledger.discard_own(&me, seq)?;
+            report.discarded_unpublished.insert(0, seq);
         }
-        Ok(out)
-    }
-
-    /// The batch `seq` of this device from the first storage that holds a
-    /// copy signed with this device's key.
-    fn fetch_own_batch(
-        &self,
-        storages: &OpenStorages,
-        holders: &[usize],
-        seq: u64,
-        cold_ok: bool,
-    ) -> Result<Fetched> {
-        let me = &self.vault.device_id;
-        let pk = self.keys.signer.public();
-        let mut cold_only = false;
-        let mut found: Option<SignedBatch> = None;
-        // Every copy is read: storages that hold different batches of this
-        // device under one number mean two histories were published.
-        for &i in holders {
-            let (spec, backend) = &storages[i];
-            if spec.is_cold() && !cold_ok {
-                cold_only = true;
-                continue;
-            }
-            let Ok(Some(blob)) = backend.get(&SignedBatch::storage_key(me, seq)) else {
-                continue;
-            };
-            let Ok(b) = serde_json::from_slice::<SignedBatch>(&blob) else {
-                continue;
-            };
-            if &b.device != me || b.seq != seq || b.verify(&pk).is_err() {
-                continue;
-            }
-            match &found {
-                Some(f) if f.hash != b.hash => return Ok(Fetched::Disagree),
-                Some(_) => {}
-                None => found = Some(b),
-            }
-        }
-        match found {
-            Some(b) => Ok(Fetched::One(b)),
-            None if cold_only => bail!(
-                "batch {seq} of this device is held only on cold storage: run `{REBUILD_COMMAND} --confirm-cold-read` to read it there"
-            ),
-            None => Ok(Fetched::None),
-        }
-    }
-
-    fn fetch_own_checkpoint(
-        &self,
-        storages: &OpenStorages,
-        holders: &[usize],
-        seq: u64,
-        cold_ok: bool,
-    ) -> Option<SignedCheckpoint> {
-        let me = &self.vault.device_id;
-        let pk = self.keys.signer.public();
-        for &i in holders {
-            let (spec, backend) = &storages[i];
-            if spec.is_cold() && !cold_ok {
-                continue;
-            }
-            let Ok(Some(blob)) = backend.get(&SignedCheckpoint::storage_key(me, seq)) else {
-                continue;
-            };
-            let Ok(cp) = serde_json::from_slice::<SignedCheckpoint>(&blob) else {
-                continue;
-            };
-            if &cp.device == me && cp.seq == seq && cp.verify(&pk).is_ok() {
-                return Some(cp);
-            }
-        }
-        None
+        let n = events.len() as u64;
+        events.append(&mut self.f3.pending);
+        self.f3.pending = events;
+        report.events_requeued = n;
+        Ok(n)
     }
 
     /// Remember a fork found while restoring and refuse.
@@ -1045,632 +1141,6 @@ impl Engine {
         bail!("{detail}; this device signs nothing more: {REPAIR_ADVICE}")
     }
 
-    /// Take this device's own history back from the storages (S2, S3).
-    fn restore_own_history(
-        &mut self,
-        cold_ok: bool,
-        report: &mut LedgerRebuildReport,
-    ) -> Result<()> {
-        let me = self.vault.device_id.clone();
-        let pk = self.keys.signer.public();
-        let storages = self.metadata_storages(true)?;
-        let listing = self.list_own(&storages, report)?;
-        report.own_found_on_storages =
-            !listing.batches.is_empty() || !listing.checkpoints.is_empty();
-        let holders = |seq: u64| listing.batches.get(&seq).cloned().unwrap_or_default();
-
-        // 1. Where the local history and the storages' agree. Equal hashes
-        // at a number mean equal histories up to it (each batch names the
-        // hash of the one before), so the walk stops at the first match.
-        let head = self.ledger.head(&me);
-        let mut diverged: Vec<u64> = Vec::new();
-        let low = head
-            .dropped
-            .max(head.base.as_ref().map(|b| b.seq).unwrap_or(0));
-        for seq in (low + 1..=head.seq).rev() {
-            let Some(local) = self.ledger.get(&me, seq)? else {
-                continue;
-            };
-            if !listing.batches.contains_key(&seq) {
-                // Not on any storage. If the storages' next batch names it
-                // as its predecessor, it is part of the published history
-                // (a storage lost it): that is the agreement point.
-                let continues = match listing.batches.get(&(seq + 1)) {
-                    Some(h) => match self.fetch_own_batch(&storages, h, seq + 1, cold_ok)? {
-                        Fetched::One(next) => self
-                            .key_for_id(&next.key_id)
-                            .and_then(|key| next.open(&key).ok())
-                            .is_some_and(|n| n.prev.as_deref() == Some(local.hash.as_str())),
-                        Fetched::Disagree => {
-                            return self.refuse_fork(format!(
-                                "{TWO_HISTORIES} (batch #{} differs between them)",
-                                seq + 1
-                            ))
-                        }
-                        Fetched::None => false,
-                    },
-                    None => false,
-                };
-                if continues {
-                    break;
-                }
-                diverged.push(seq);
-                continue;
-            }
-            match self.fetch_own_batch(&storages, &holders(seq), seq, cold_ok)? {
-                Fetched::One(remote) if remote.hash == local.hash => {
-                    break;
-                }
-                Fetched::One(_) => diverged.push(seq),
-                Fetched::Disagree => {
-                    return self.refuse_fork(format!(
-                        "{TWO_HISTORIES} (batch #{seq} differs between them)"
-                    ))
-                }
-                // Listed but not readable as this device's batch (a damaged
-                // copy): it decides nothing, compare the next one down.
-                Fetched::None => {}
-            }
-        }
-        // Batches here that no storage holds, above the agreement point, or
-        // that the storages hold under the same number with other content.
-        let newest_remote = listing
-            .batches
-            .keys()
-            .next_back()
-            .copied()
-            .unwrap_or(0)
-            .max(listing.checkpoints.keys().next_back().copied().unwrap_or(0));
-        let conflicting: Vec<u64> = diverged
-            .iter()
-            .copied()
-            .filter(|s| listing.batches.contains_key(s) || *s <= newest_remote)
-            .collect();
-        if !conflicting.is_empty() {
-            // Set them aside only if none of them was ever published: a
-            // storage holding this device's version of one of them means
-            // two histories were published (two copies of one identity).
-            for seq in &conflicting {
-                let local = self.ledger.get(&me, *seq)?.expect("held");
-                for &i in &holders(*seq) {
-                    let (spec, backend) = &storages[i];
-                    if spec.is_cold() && !cold_ok {
-                        continue;
-                    }
-                    if let Ok(Some(blob)) = backend.get(&SignedBatch::storage_key(&me, *seq)) {
-                        if let Ok(b) = serde_json::from_slice::<SignedBatch>(&blob) {
-                            if b.hash == local.hash {
-                                return self.refuse_fork(format!(
-                                    "{TWO_HISTORIES} (batch #{seq} differs between them)"
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-            // Never published: set aside (kept in `ledger/discarded/`) from
-            // the newest down, their events signed again later.
-            let lowest = *conflicting.iter().min().expect("not empty");
-            let mut requeued = Vec::new();
-            for seq in (lowest..=head.seq).rev() {
-                if self.ledger.head(&me).seq != seq {
-                    continue;
-                }
-                if let Some(b) = self.ledger.get(&me, seq)? {
-                    if let Some(key) = self.key_for_id(&b.key_id) {
-                        if let Ok(batch) = b.open(&key) {
-                            let mut evs = batch.events;
-                            evs.append(&mut requeued);
-                            requeued = evs;
-                        }
-                    }
-                }
-                self.ledger.discard_own(&me, seq)?;
-                report.discarded_unpublished.push(seq);
-            }
-            report.discarded_unpublished.sort();
-            report.events_requeued = requeued.len() as u64;
-            if !requeued.is_empty() {
-                requeued.append(&mut self.pending);
-                self.pending = requeued;
-                self.defer_events()?;
-            }
-        }
-
-        // 2. Continue with the storages' newer history. A checkpoint after
-        // the local head first (the batches it covers may be pruned), then
-        // every batch after what is held; `ingest_with` checks that each
-        // chains onto the one before, here or in the checkpoint.
-        let held_to = self.ledger.head(&me).seq;
-        // The newest checkpoint this device's key signed: junk under its
-        // name (a higher number that does not verify) is passed over.
-        let newest_cp = listing
-            .checkpoints
-            .iter()
-            .rev()
-            .find(|(seq, holders)| {
-                self.fetch_own_checkpoint(&storages, holders, **seq, cold_ok)
-                    .is_some()
-                    || holders.iter().all(|i| storages[*i].0.is_cold())
-            })
-            .or_else(|| listing.checkpoints.iter().next_back());
-        if let Some((&cseq, cholders)) = newest_cp {
-            let base = self.ledger.head(&me).base.map(|b| b.seq).unwrap_or(0);
-            if cseq > held_to.max(base) {
-                if let Some(cp) = self.fetch_own_checkpoint(&storages, cholders, cseq, cold_ok) {
-                    // The batch it ends at stays beside it on the storages.
-                    let anchor =
-                        match self.fetch_own_batch(&storages, &holders(cseq), cseq, cold_ok) {
-                            Ok(Fetched::One(b)) => Some(b),
-                            _ => None,
-                        };
-                    match self.key_for_id(&cp.key_id) {
-                        Some(key) if cp.open(&key).is_ok() => {
-                            match self.ledger.ingest_checkpoint_anchored(cp, anchor.as_ref())? {
-                                Ingest::Fork => {
-                                    return self.refuse_fork(format!(
-                                        "this device's checkpoint #{cseq} on the storages contradicts its own ledger"
-                                    ));
-                                }
-                                Ingest::Refused => bail!(
-                                    "this device's checkpoint #{cseq} on the storages is too far ahead of its ledger and the batch it ends at is missing"
-                                ),
-                                _ => {}
-                            }
-                            report.adopted_checkpoint = Some(cseq);
-                        }
-                        _ => report.notes.push(format!(
-                            "checkpoint #{cseq} of this device does not open with the keys held here; its batches are used instead"
-                        )),
-                    }
-                } else if listing
-                    .checkpoints
-                    .values()
-                    .next_back()
-                    .is_some_and(|h| h.iter().all(|i| storages[*i].0.is_cold()))
-                    && !cold_ok
-                {
-                    bail!("this device's newest checkpoint is held only on cold storage: run `{REBUILD_COMMAND} --confirm-cold-read` to read it there");
-                }
-            }
-        }
-        let mut gap = false;
-        for (&seq, h) in listing.batches.iter() {
-            let now = self.ledger.head(&me);
-            if seq <= now.seq || now.base.as_ref().is_some_and(|b| seq <= b.seq) {
-                continue;
-            }
-            let signed = match self.fetch_own_batch(&storages, h, seq, cold_ok)? {
-                Fetched::One(b) => b,
-                // Junk under this device's name: not its history.
-                Fetched::None => continue,
-                Fetched::Disagree => {
-                    return self.refuse_fork(format!(
-                        "{TWO_HISTORIES} (batch #{seq} differs between them)"
-                    ))
-                }
-            };
-            if seq > now.seq + 1 && !now.base.as_ref().is_some_and(|b| b.seq + 1 >= seq) {
-                gap = true;
-            }
-            let key = self.key_for_id(&signed.key_id);
-            // Its own history continues past a gap no storage can fill:
-            // signing a number it already used would be a fork.
-            match self.ledger.ingest_own_restored(signed, &pk, key.as_ref())? {
-                Ingest::Fork => {
-                    return self.refuse_fork(format!(
-                        "batch #{seq} of this device on the storages does not continue the history this device holds"
-                    ));
-                }
-                Ingest::New => report.adopted_batches += 1,
-                Ingest::Known | Ingest::Refused | Ingest::Pending => {}
-            }
-        }
-        if gap {
-            report.notes.push(
-                "some batches of this device are on no storage; what they recorded is missing from the view until the blocks are claimed again"
-                    .into(),
-            );
-        }
-
-        // 3. Pruning resumes where the storages stand.
-        for (i, lowest, has_cp) in &listing.per_storage {
-            let name = storages[*i].0.name().to_string();
-            if let (Some(l), true) = (lowest, has_cp) {
-                if *l > 1 && self.ledger.pruned(&name) < l - 1 {
-                    self.ledger.set_pruned(&name, l - 1)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// A device restored from a backup holds folder states that name an
-    /// older manifest than it published later: its next manifest goes on
-    /// after the newest one it published (in the ledger or on a storage),
-    /// so no number is used twice. The files of that later manifest come
-    /// back through the other devices' manifests, which include them.
-    fn catch_up_own_manifests(&mut self) -> Result<u64> {
-        let view = self.view()?;
-        let me = self.vault.device_id.clone();
-        let storages = self.metadata_storages(false)?;
-        let mut n = 0;
-        for (rec, mount) in self.folders() {
-            if mount.is_none() {
-                continue;
-            }
-            let mut state = self.load_state(&rec.folder_id)?;
-            let mut newest = view
-                .manifests
-                .get(&(rec.folder_id.clone(), me.clone()))
-                .copied()
-                .unwrap_or(0);
-            let folder_prefix = format!("manifests/{}/", rec.folder_id);
-            let prefix = Manifest::storage_prefix(&rec.folder_id, &me);
-            let start = Manifest::storage_key(&rec.folder_id, &me, state.published_seq.max(newest));
-            for (_, backend) in &storages {
-                let Ok(keys) = backend.list_after(&prefix, &start) else {
-                    continue;
-                };
-                for k in keys {
-                    if let Some((d, seq)) = super::manifest_upkeep::parse_key(&folder_prefix, &k) {
-                        if d == me {
-                            newest = newest.max(seq);
-                        }
-                    }
-                }
-            }
-            if newest > state.published_seq {
-                state.published_seq = newest;
-                // Publish again at the next sync, under a new number.
-                state.published_hash = String::new();
-                self.save_state(&rec.folder_id, &state)?;
-                n += 1;
-            }
-        }
-        Ok(n)
-    }
-
-    /// Every block object the newest manifests (and backup snapshots) of
-    /// every folder name, with where it belongs. With `first_only`, stops
-    /// at the first object (the "ledger lost everywhere" check).
-    fn chunk_map(&self, first_only: bool) -> Result<ChunkMap> {
-        let mut map = ChunkMap::default();
-        let storages: OpenStorages = self
-            .metadata_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
-        let me = self.vault.device_id.clone();
-        for rec in self.keyring.folders.values().filter(|r| !r.is_removed()) {
-            let Ok(fk) = self.folder_keys(rec) else {
-                map.skipped.push(rec.name.clone());
-                continue;
-            };
-            let metas = fk.meta_keys();
-            map.folders += 1;
-            if rec.is_backup() {
-                let prefix = Snapshot::backup_prefix(&rec.folder_id);
-                let mut seen = BTreeSet::new();
-                for (_, backend) in &storages {
-                    for key in backend.list(&prefix)? {
-                        let Some((dev, seq)) = Snapshot::parse_key(&rec.folder_id, &key) else {
-                            continue;
-                        };
-                        if !seen.insert((dev.clone(), seq)) {
-                            continue;
-                        }
-                        let Some(blob) = backend.get(&key)? else {
-                            continue;
-                        };
-                        let Ok(snap) = Snapshot::open(
-                            &blob,
-                            &self.vault.vault_id,
-                            &rec.folder_id,
-                            &dev,
-                            seq,
-                            &metas,
-                        ) else {
-                            continue;
-                        };
-                        map.snapshots_read += 1;
-                        map.add_files(&rec.folder_id, snap.files.values());
-                        if dev == me {
-                            map.own_snapshots.push(Event::SnapshotTaken {
-                                backup: rec.folder_id.clone(),
-                                seq,
-                                taken_utc: snap.taken_utc,
-                                expires_utc: snap.expires_utc,
-                                files: snap.files.len() as u64,
-                                bytes: snap.bytes(),
-                                snapshot_hash: hex::encode(crypto::hash(&blob)),
-                            });
-                        }
-                        if first_only && map.objects_named() > 0 {
-                            return Ok(map);
-                        }
-                    }
-                }
-                continue;
-            }
-            // The newest manifest of every device, across storages.
-            let prefix = format!("manifests/{}/", rec.folder_id);
-            let mut newest: BTreeMap<DeviceId, (u64, usize)> = BTreeMap::new();
-            for (idx, (_, backend)) in storages.iter().enumerate() {
-                for key in backend.list(&prefix)? {
-                    let Some((dev, seq)) = super::manifest_upkeep::parse_key(&prefix, &key) else {
-                        continue;
-                    };
-                    let e = newest.entry(dev).or_insert((0, idx));
-                    if seq > e.0 {
-                        *e = (seq, idx);
-                    }
-                }
-            }
-            for (dev, (seq, idx)) in newest {
-                let key = Manifest::storage_key(&rec.folder_id, &dev, seq);
-                let Some(blob) = storages[idx].1.get(&key)? else {
-                    continue;
-                };
-                let Some(m) = metas.iter().find_map(|k| {
-                    Manifest::open(&blob, &self.vault.vault_id, &rec.folder_id, &dev, seq, k).ok()
-                }) else {
-                    continue;
-                };
-                map.manifests_read += 1;
-                map.add_files(&rec.folder_id, m.files.values().filter(|f| !f.deleted));
-                if dev == me {
-                    map.own_manifests.push(Event::ManifestPublished {
-                        folder: rec.folder_id.clone(),
-                        seq,
-                        manifest_hash: hex::encode(crypto::hash(&blob)),
-                        files: m.files.values().filter(|f| !f.deleted).count() as u64,
-                    });
-                }
-                if first_only && map.objects_named() > 0 {
-                    return Ok(map);
-                }
-            }
-        }
-        Ok(map)
-    }
-
-    /// Rebuild the block claims from what the storages hold (S4): map the
-    /// objects to folders and blocks through the newest manifests and
-    /// snapshots, list every storage (cold ones only when confirmed),
-    /// verify the objects within the budget, and sign the claims as this
-    /// device's own. Claims already in the ledger are not repeated, so it
-    /// is safe to run again.
-    fn rebuild_claims_from_storage(
-        &mut self,
-        opts: &LedgerRebuildOptions,
-        task: &activity::Guard,
-    ) -> Result<StorageRebuildReport> {
-        if self.vault.member {
-            bail!("a member of shared folders does not hold the vault's ledger; rebuild it on one of the owner's devices");
-        }
-        self.ensure_ledger_writable()?;
-        let me = self.vault.device_id.clone();
-        let mut r = StorageRebuildReport::default();
-        task.set_phase("manifests");
-        let map = self.chunk_map(false)?;
-        r.folders = map.folders;
-        r.folders_skipped = map.skipped.clone();
-        r.manifests_read = map.manifests_read;
-        r.snapshots_read = map.snapshots_read;
-        r.objects_mapped = map.objects.len() as u64;
-        let view = self.view()?;
-
-        task.set_phase("list");
-        let storages: OpenStorages = self
-            .open_storages(opts.confirm_cold_read)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
-        for spec in &self.config.storages {
-            if spec.is_cold() && !opts.confirm_cold_read {
-                r.storages_skipped_cold.push(spec.name().to_string());
-            }
-        }
-        // (storage index, object) pairs to claim.
-        let mut found: Vec<(usize, ObjectName)> = Vec::new();
-        let mut anywhere: HashSet<ObjectName> = HashSet::new();
-        for (i, (spec, backend)) in storages.iter().enumerate() {
-            // Blocks are in packs: where they are comes from the pack
-            // indexes when the ledger lost the claims.
-            if let Err(e) = self.load_pack_indexes(backend.as_ref()) {
-                log::warn!(storage = spec.name(); "pack indexes not read: {e:#}");
-            }
-            let listed: HashSet<String> = backend.list("chunks/")?.into_iter().collect();
-            r.storages_listed.push(spec.name().to_string());
-            for object in map.objects.keys() {
-                if listed.contains(&chunk_storage_key(object)) {
-                    found.push((i, object.clone()));
-                    anywhere.insert(object.clone());
-                }
-            }
-        }
-        r.objects_missing = map
-            .objects
-            .keys()
-            .filter(|o| !anywhere.contains(*o))
-            .count() as u64;
-        // Skip what the ledger already says.
-        let claimed = |i: usize, o: &ObjectName| -> bool {
-            let storage = storages[i].0.name();
-            map.objects[o].iter().all(|(folder, chunk, _)| {
-                view.locate(folder, chunk)
-                    .is_some_and(|c| c.storages.contains_key(storage) && !c.dropped_from(storage))
-            })
-        };
-        let (known, todo): (Vec<_>, Vec<_>) = found.into_iter().partition(|(i, o)| claimed(*i, o));
-        r.claims_known = known.len() as u64;
-
-        // Verification: everything when asked, nothing when told not to,
-        // and by default everything up to `AUTO_VERIFY_BYTES`, otherwise
-        // as much as the budget allows.
-        let total: u64 = todo.iter().map(|(_, o)| map.size_of(o)).sum();
-        let budget = match opts.verify {
-            Some(true) => u64::MAX,
-            Some(false) => 0,
-            None if total <= AUTO_VERIFY_BYTES => u64::MAX,
-            None => opts.verify_budget_bytes,
-        };
-        task.set_phase("verify");
-        task.set_total(todo.len() as u64);
-        let mut spent = 0u64;
-        let mut events = Vec::new();
-        let mut damage = Vec::new();
-        for (i, object) in &todo {
-            if budget > 0 && (spent < budget) {
-                let (spec, backend) = &storages[*i];
-                match backend.get(&chunk_storage_key(object)) {
-                    Ok(Some(bytes)) => {
-                        spent = spent.saturating_add(bytes.len() as u64);
-                        r.objects_verified += 1;
-                        r.bytes_verified += bytes.len() as u64;
-                        if ObjectName::from_bytes(&crypto::hash(&bytes)) != *object {
-                            r.objects_corrupt += 1;
-                            for (folder, chunk, _) in &map.objects[object] {
-                                damage.push(Damage {
-                                    folder: folder.clone(),
-                                    chunk: chunk.clone(),
-                                    object: object.clone(),
-                                    storage: spec.name().to_string(),
-                                    kind: DamageKind::Corrupt,
-                                    found_by: "ledger_rebuild".into(),
-                                    found_utc: util::now_utc(),
-                                    retry_utc: 0,
-                                    reason: None,
-                                });
-                            }
-                            task.advance(1);
-                            continue;
-                        }
-                    }
-                    Ok(None) => {
-                        task.advance(1);
-                        continue;
-                    }
-                    Err(e) => {
-                        return Err(e).with_context(|| {
-                            format!("reading {} on storage {}", object.short(), spec.name())
-                        })
-                    }
-                }
-            } else {
-                r.objects_unverified += 1;
-            }
-            for (folder, chunk, sz) in &map.objects[object] {
-                events.push(Event::ChunkStored {
-                    folder: folder.clone(),
-                    chunk: chunk.clone(),
-                    object: object.clone(),
-                    storage: storages[*i].0.name().to_string(),
-                    size: *sz,
-                    pack: storages[*i].1.pack_location(object.as_str()),
-                });
-            }
-            r.claims_written += 1;
-            task.advance(1);
-        }
-        if !damage.is_empty() {
-            self.queue_damage(damage)?;
-        }
-
-        // What this device holds itself, and what only it can say again.
-        for (rec, mount) in self.folders() {
-            if mount.is_none() || self.mount_is_encrypted(&rec.folder_id) {
-                continue;
-            }
-            let state = self.load_state(&rec.folder_id)?;
-            let mut seen = HashSet::new();
-            for f in state
-                .files
-                .values()
-                .filter(|f| !f.deleted && state.local_index.contains_key(&f.path))
-            {
-                for c in &f.chunks {
-                    if !seen.insert(c.chunk.clone()) {
-                        continue;
-                    }
-                    if view
-                        .locate(&rec.folder_id, &c.chunk)
-                        .is_some_and(|x| x.devices.contains(&me))
-                    {
-                        continue;
-                    }
-                    events.push(Event::ChunkOnDevice {
-                        folder: rec.folder_id.clone(),
-                        chunk: c.chunk.clone(),
-                        object: c.object.clone(),
-                        size: c.size,
-                    });
-                    r.blocks_on_device += 1;
-                }
-            }
-        }
-        for ev in &map.own_manifests {
-            if let Event::ManifestPublished { folder, seq, .. } = ev {
-                if view
-                    .manifests
-                    .get(&(folder.clone(), me.clone()))
-                    .is_none_or(|s| s < seq)
-                {
-                    events.push(ev.clone());
-                    r.manifests_announced += 1;
-                }
-            }
-        }
-        for ev in &map.own_snapshots {
-            if let Event::SnapshotTaken { backup, seq, .. } = ev {
-                if !view
-                    .snapshots
-                    .get(&(backup.clone(), me.clone(), *seq))
-                    .is_some_and(|s| s.taken)
-                {
-                    events.push(ev.clone());
-                    r.snapshots_announced += 1;
-                }
-            }
-        }
-        if !view.devices.contains_key(&me) {
-            events.push(Event::DeviceEnrolled {
-                name: self.vault.device_name.clone(),
-            });
-        }
-        for rec in self.keyring.folders.values() {
-            if rec.created_by == me && !rec.is_removed() && !view.folders.contains(&rec.folder_id) {
-                events.push(Event::FolderAdded {
-                    folder: rec.folder_id.clone(),
-                });
-            }
-        }
-
-        task.set_phase("seal");
-        for part in events.chunks(EVENTS_PER_BATCH) {
-            let lamport = self.tick()?;
-            let (key_id, key) = self.ledger_key_now();
-            self.ledger.append_own_seen(
-                &me,
-                part.to_vec(),
-                self.seen_heads(),
-                lamport,
-                &key,
-                &key_id,
-                &self.keys.signer,
-            )?;
-            r.batches += 1;
-        }
-        if r.batches > 0 {
-            self.push_own_batches()?;
-        }
-        // The device and folder records this device wrote, if a storage
-        // lost them as well.
-        self.publish_registry()?;
-        Ok(r)
-    }
-
     /// `varsto ledger status`: heads per device, where each device's
     /// batches are held (this device and, with `list_storages`, every
     /// metadata storage) and the health.
@@ -1685,20 +1155,23 @@ impl Engine {
                 health = self.ledger_health();
             }
             for (spec, backend) in self.metadata_storages(true)? {
+                if spec.is_carrier() {
+                    continue;
+                }
                 let listed = backend.list("ledger/").map_err(|e| format!("{e:#}"));
                 listings.push((spec.name().to_string(), spec.is_cold(), listed));
             }
         }
-        let view = self.view().unwrap_or_default();
-        let me = self.vault.device_id.clone();
-        let mut ids: BTreeSet<DeviceId> = self.ledger.devices().into_iter().collect();
-        ids.extend(self.devices.devices.keys().cloned());
-        ids.insert(me.clone());
+        let view = self.view3().unwrap_or_default();
+        let me = self.me3();
+        let mut ids: BTreeSet<Id16> = self.f3.ledger.devices().into_iter().collect();
+        ids.extend(self.f3.members.devices.devices.keys().copied());
+        ids.insert(me);
         let mut devices = Vec::new();
         for d in ids {
-            let h = self.ledger.head(&d);
+            let h = self.f3.ledger.head(&d);
             let local: Vec<u64> = (h.dropped + 1..=h.seq)
-                .filter(|s| self.ledger.get(&d, *s).ok().flatten().is_some())
+                .filter(|s| self.f3.ledger.get(&d, *s).ok().flatten().is_some())
                 .collect();
             let mut held = vec![LedgerHolding {
                 place: "this device".into(),
@@ -1709,8 +1182,8 @@ impl Engine {
                 checkpoints: h.base.as_ref().map(|b| vec![b.seq]).unwrap_or_default(),
                 error: None,
             }];
+            let prefix = format!("ledger/{}/", hex::encode(d));
             for (name, cold, listed) in &listings {
-                let prefix = format!("ledger/{d}/");
                 let mut hold = LedgerHolding {
                     place: name.clone(),
                     cold: *cold,
@@ -1718,17 +1191,20 @@ impl Engine {
                 };
                 match listed {
                     Ok(keys) => {
-                        for o in keys
-                            .iter()
-                            .filter_map(|k| k.strip_prefix(&prefix).and_then(LedgerObject::parse))
-                        {
+                        for o in keys.iter().filter_map(|k| {
+                            k.strip_prefix(&prefix)
+                                .and_then(crate::ledger3::LedgerObject::parse)
+                        }) {
                             match o {
-                                LedgerObject::Batch(s) => {
+                                crate::ledger3::LedgerObject::Batch(s) => {
                                     hold.batches += 1;
                                     hold.first = Some(hold.first.map_or(s, |f| f.min(s)));
                                     hold.last = Some(hold.last.map_or(s, |l| l.max(s)));
                                 }
-                                LedgerObject::Checkpoint(s) => hold.checkpoints.push(s),
+                                crate::ledger3::LedgerObject::Checkpoint(s, 0) => {
+                                    hold.checkpoints.push(s)
+                                }
+                                crate::ledger3::LedgerObject::Checkpoint(..) => {}
                             }
                         }
                     }
@@ -1736,17 +1212,17 @@ impl Engine {
                 }
                 held.push(hold);
             }
+            let did = DeviceId::from_bytes(&d);
             let name = view
                 .devices
                 .get(&d)
                 .cloned()
-                .or_else(|| self.devices.devices.get(&d).map(|r| r.name.clone()))
-                .unwrap_or_default();
+                .unwrap_or_else(|| self.device_name(&did));
             devices.push(LedgerDeviceStatus {
-                device: d.to_string(),
+                device: did.to_string(),
                 name,
                 this_device: d == me,
-                revoked: self.is_revoked(&d),
+                revoked: self.f3.members.revoked.contains(&d),
                 head: h.seq,
                 checkpoint: h.base.as_ref().map(|b| b.seq),
                 dropped: h.dropped,
@@ -1755,45 +1231,6 @@ impl Engine {
             });
         }
         Ok(LedgerStatus { health, devices })
-    }
-}
-
-/// Block objects named by the newest manifests and snapshots.
-#[derive(Default)]
-struct ChunkMap {
-    /// Object -> (folder, chunk, size) it stands for.
-    objects: BTreeMap<ObjectName, BTreeSet<(FolderId, ChunkId, u64)>>,
-    folders: u64,
-    skipped: Vec<String>,
-    manifests_read: u64,
-    snapshots_read: u64,
-    own_manifests: Vec<Event>,
-    own_snapshots: Vec<Event>,
-}
-
-impl ChunkMap {
-    fn add_files<'a>(&mut self, folder: &FolderId, files: impl Iterator<Item = &'a FileState>) {
-        for f in files {
-            for c in &f.chunks {
-                self.objects.entry(c.object.clone()).or_default().insert((
-                    folder.clone(),
-                    c.chunk.clone(),
-                    c.size,
-                ));
-            }
-        }
-    }
-
-    fn objects_named(&self) -> usize {
-        self.objects.len()
-    }
-
-    fn size_of(&self, o: &ObjectName) -> u64 {
-        self.objects
-            .get(o)
-            .and_then(|s| s.iter().next())
-            .map(|(_, _, sz)| *sz)
-            .unwrap_or(0)
     }
 }
 
@@ -1817,8 +1254,8 @@ mod tests {
         let home = devs[0].home.clone();
         let backup = lab.root.join("backup");
         copy_tree(&home, &backup);
-        let me = devs[0].vault.device_id.clone();
-        let old = devs[0].ledger.head(&me).seq;
+        let me = devs[0].me3();
+        let old = devs[0].f3.ledger.head(&me).seq;
         append_synthetic(&mut devs[0], 0, 3, &folder);
         devs[0].push_own_batches().unwrap();
         drop(devs);
@@ -1827,20 +1264,23 @@ mod tests {
 
         let mut a = Engine::open(&home, PASS).unwrap();
         append_synthetic(&mut a, 9, 2, &folder);
-        assert_eq!(a.ledger.head(&me).seq, old + 2);
+        assert_eq!(a.f3.ledger.head(&me).seq, old + 2);
         let r = a.ledger_rebuild(&LedgerRebuildOptions::default()).unwrap();
         assert_eq!(r.discarded_unpublished, vec![old + 1, old + 2]);
-        assert!(r.events_requeued >= 4);
-        assert_eq!(a.pending.len() as u64, r.events_requeued);
-        assert_eq!(a.ledger.head(&me).seq, old + 3);
+        assert_eq!(r.events_requeued, 2, "one synthetic claim in each");
+        assert_eq!(a.f3.pending.len() as u64, r.events_requeued);
+        assert_eq!(a.f3.ledger.head(&me).seq, old + 3, "{r:?}");
         assert!(home.join("ledger/discarded").read_dir().unwrap().count() == 2);
         assert!(r.health.is_ok());
         a.commit_batch().unwrap();
-        assert_eq!(a.ledger.head(&me).seq, old + 4);
+        assert_eq!(a.f3.ledger.head(&me).seq, old + 4);
         let mut b = Engine::open(&lab.root.join("dev1"), PASS).unwrap();
         assert!(b.pull_ledger().unwrap().is_empty());
-        assert_eq!(b.ledger.head(&me).seq, old + 4);
-        assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
+        assert_eq!(b.f3.ledger.head(&me).seq, old + 4);
+        assert_eq!(
+            a.view3().unwrap().canonical(),
+            a.view3_replayed().unwrap().canonical()
+        );
     }
 
     #[test]

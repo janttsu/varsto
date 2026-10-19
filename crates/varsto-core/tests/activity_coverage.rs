@@ -5,6 +5,8 @@
 //! so that it outlives the quiet period, and a watcher thread records what
 //! `activity::tasks` lists meanwhile.
 
+mod common;
+
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -29,6 +31,11 @@ fn pseudo_random(len: usize, mut seed: u64) -> Vec<u8> {
 
 /// Run `op` slowed down while a thread collects the tasks listed.
 fn watch<T>(op: impl FnOnce() -> T) -> (T, Vec<TaskView>) {
+    watch_at(12, op)
+}
+
+/// `watch` with `ms` of delay per step.
+fn watch_at<T>(ms: u64, op: impl FnOnce() -> T) -> (T, Vec<TaskView>) {
     let stop = Arc::new(AtomicBool::new(false));
     let s2 = stop.clone();
     let watcher = std::thread::spawn(move || {
@@ -39,7 +46,7 @@ fn watch<T>(op: impl FnOnce() -> T) -> (T, Vec<TaskView>) {
         }
         seen
     });
-    activity::set_test_delay_ms(12);
+    activity::set_test_delay_ms(ms);
     let out = op();
     activity::set_test_delay_ms(0);
     stop.store(true, Ordering::Relaxed);
@@ -68,7 +75,7 @@ fn fetching_a_file_and_purging_a_folder_are_tasks() {
     a.add_folder("docs", &docs).unwrap();
     a.push("docs").unwrap();
 
-    let mut b = Engine::join(&root.join("b"), "b", PASS, &key, storage).unwrap();
+    let mut b = common::join_approved(&root.join("b"), "b", PASS, &key, storage, &mut a);
     b.attach_folder("docs", &root.join("docs-b"), true).unwrap();
     b.sync(Some("docs")).unwrap();
     assert!(!root.join("docs-b/big.bin").exists(), "a placeholder first");
@@ -87,8 +94,11 @@ fn fetching_a_file_and_purging_a_folder_are_tasks() {
         "{fetch:?}"
     );
 
-    let (r, seen) = watch(|| a.remove_folder("docs", true));
-    assert!(r.unwrap() > 100);
+    // A purge has few steps (packs and records, not blocks): slower ones,
+    // so the task is listed (after two seconds).
+    let (r, seen) = watch_at(800, || a.remove_folder("docs", true));
+    // Packs and records go (a pack holds many blocks).
+    assert!(r.unwrap() > 0);
     let purge: Vec<&TaskView> = seen.iter().filter(|t| t.kind == "folder_purge").collect();
     assert!(!purge.is_empty(), "no purge task among {seen:?}");
     assert!(purge.iter().any(|t| t.total > 0 && t.done > 0), "{purge:?}");

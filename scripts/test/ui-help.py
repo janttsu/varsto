@@ -14,6 +14,7 @@ browser (default /usr/bin/chromium when it exists).
 """
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -130,7 +131,10 @@ try:
         stop()
 
         # 2. A vault without a storage: Help opens by itself, add a storage first.
-        cli("init", "--name", "laptop")
+        init = subprocess.run([BIN, "--home", home, "--json", "init", "--name", "laptop"], env=ENV,
+                              check=True, capture_output=True, text=True).stdout
+        kit = json.loads(init)["kit"].split("RECOVERY WORDS")[1]
+        RECOVERY_WORDS = " ".join(re.findall(r"\d+\.\s+([a-z]+)", kit))
         start()
         for lang in ("en", "fi"):
             c, pg = page(b, lang)
@@ -160,7 +164,9 @@ try:
         with open(os.path.join(work, "docs", "notes.txt"), "w") as f:
             f.write("hello\n" * 1000)
         cli("storage", "add-local", "box", os.path.join(work, "box"))
-        cli("folder", "add", "docs", os.path.join(work, "docs"))
+        subprocess.run([BIN, "--home", home, "folder", "add", "docs", os.path.join(work, "docs")],
+                       env=dict(ENV, VARSTO_RECOVERY_WORDS=RECOVERY_WORDS), check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cli("sync")
         start()
         for lang in ("en", "fi"):

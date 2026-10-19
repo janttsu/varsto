@@ -12,7 +12,7 @@
 //!   that batch's SignedRecord envelope without its body (the signature
 //!   covers `body_hash`, so it verifies alone and proves that the signer
 //!   wrote that batch), at most 64 envelopes and 512 KiB, plus its own list.
-//! - The receiver records what was proved (`Watch`, `ledger/watch.json`)
+//! - The receiver records what was proved (`Watch`, `ledger/proofs.json`)
 //!   and fetches the batches it lacks from that peer (`GET
 //!   /p2p/ledger/<device>/<seq>`, the whole record), checked like a record
 //!   from a storage (`record::Acceptor`). Batches learnt this way are not
@@ -46,8 +46,9 @@ pub const LEDGER_PREFIX: &str = "/p2p/ledger/";
 /// A list whose path would be longer than this is not sent along; the
 /// bare path asks for everything the responder can prove.
 pub const MAX_PATH: usize = 24 * 1024;
-/// Where a device keeps what peers proved.
-pub const WATCH_FILE: &str = "ledger/watch.json";
+/// Where a device keeps what peers proved (`ledger/watch.json` holds the
+/// pull's own freshness state).
+pub const WATCH_FILE: &str = "ledger/proofs.json";
 
 /// The newest batch of `device` someone holds: its seq and the
 /// `body_hash` of its record.
@@ -111,9 +112,8 @@ impl HeadsAnswer {
     }
 }
 
-/// The local ledger as the peer-to-peer side sees it. Implemented by the
-/// format-3 ledger store when the engine switches over (work package 12).
-// WP12: implement over ledger3::LedgerStore (`head`, `get`).
+/// The local ledger as the peer-to-peer side sees it (the engine's
+/// snapshot implements it over the ledger directory).
 pub trait BatchSource: Send + Sync {
     /// The newest batch held of every full device (this one included).
     fn heads(&self) -> Vec<HeadRef>;
@@ -248,8 +248,8 @@ pub fn check_fetched<T: RecordBody>(
 }
 
 /// Where batches fetched from peers go: the ledger store, which checks the
-/// chain and keeps them as from any source but does not push them.
-// WP12: implement over ledger3::LedgerStore (`head`, `ingest`).
+/// chain and keeps them as from any source but does not push them
+/// (`Engine::p2p_catch_up`).
 pub trait BatchSink {
     /// The seq of the newest batch held of `device` (0: none).
     fn head(&self, device: &Id16) -> u64;
@@ -270,7 +270,7 @@ pub struct Proved {
     pub utc: i64,
 }
 
-/// What peers proved, per writing device (`ledger/watch.json`), and the
+/// What peers proved, per writing device (`ledger/proofs.json`), and the
 /// rollback judge's state.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Watch {

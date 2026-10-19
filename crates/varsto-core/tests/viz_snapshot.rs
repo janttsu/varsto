@@ -88,7 +88,7 @@ fn snapshot_joins_storages_disks_costs_and_a_running_upload() {
     let heavy = e.viz_heavy().unwrap();
     let light = e.viz_light().unwrap();
     assert_eq!(heavy.this_device, e.device_id().to_string());
-    assert!(heavy.total_bytes > 200_000);
+    assert_eq!(heavy.total_bytes, 200_000);
     assert_eq!(heavy.storages.len(), 3);
     let cloud = heavy.storages.iter().find(|s| s.name == "cloud").unwrap();
     assert_eq!(cloud.kind, "directory");

@@ -34,6 +34,8 @@
 //! changed since is reported `stale`.
 
 use super::*;
+use crate::record::{Id16, KeyId};
+use crate::records3::{self, NoteWire, NotesBody};
 
 /// Largest analysis text, in bytes of UTF-8.
 pub const ANALYSIS_MAX_BYTES: usize = 16 * 1024;
@@ -51,7 +53,6 @@ pub const NOTES_READ_INTERVAL_SECS: i64 = 300;
 /// A cleared analysis is remembered this long, so that a device that still
 /// publishes the older text does not bring it back.
 pub const TOMBSTONE_KEEP_SECS: i64 = 180 * 86_400;
-const PREFIX: &str = "vault/notes/";
 
 /// One file's analysis as kept and published.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -105,14 +106,6 @@ struct NotesState {
     seen: BTreeMap<DeviceId, i64>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-struct NotesBody {
-    device: DeviceId,
-    folder: FolderId,
-    written_utc: i64,
-    entries: BTreeMap<String, NoteEntry>,
-}
-
 /// A file's analysis as reported to the interface, the command line and MCP.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileAnalysis {
@@ -158,31 +151,6 @@ pub struct NotesExchangeReport {
     pub received: usize,
     /// Analyses moved to a renamed file or dropped with a deleted one.
     pub followed: usize,
-}
-
-fn record_key(meta: &SecretKey, folder: &FolderId) -> SecretKey {
-    meta.derive("notes-record", &[folder.as_str().as_bytes()])
-}
-
-fn aad(vault: &VaultId, folder: &FolderId, device: &DeviceId, written: i64) -> Vec<u8> {
-    crypto::aad(
-        "notes-record",
-        &[
-            vault.as_str().as_bytes(),
-            folder.as_str().as_bytes(),
-            device.as_str().as_bytes(),
-            &written.to_le_bytes(),
-        ],
-    )
-}
-
-fn storage_key(folder: &FolderId, device: &DeviceId, written: i64) -> String {
-    format!("{PREFIX}{folder}/{device}/{written:020}.enc")
-}
-
-/// The storage prefix of a folder's notes records.
-pub(super) fn folder_prefix(folder: &FolderId) -> String {
-    format!("{PREFIX}{folder}/")
 }
 
 fn no_control(s: &str) -> bool {
@@ -657,39 +625,70 @@ impl Engine {
         notes: &mut NotesState,
         now: i64,
     ) -> Result<bool> {
-        if notes.entries.is_empty() && notes.published_utc == 0 {
+        let me_dev = &self.vault.device_id;
+        // What this device wrote: sets, clears and moves.
+        let mine: Vec<(String, NoteWire)> = notes
+            .entries
+            .iter()
+            .filter(|(p, e)| &e.updated_by == me_dev && crate::names::check_synced_path(p).is_ok())
+            .map(|(p, e)| {
+                (
+                    p.clone(),
+                    NoteWire {
+                        analysis: if e.cleared {
+                            String::new()
+                        } else {
+                            e.analysis.clone()
+                        },
+                        tags: e.tags.clone(),
+                        content_hash: e.content_hash.clone(),
+                        by: e.by.clone(),
+                        // The merge order of the wire: a clear or a move
+                        // counts from the time it was made.
+                        analysed_utc: if e.cleared || e.updated_utc > e.analysed_utc {
+                            e.updated_utc
+                        } else {
+                            e.analysed_utc
+                        },
+                    },
+                )
+            })
+            .collect();
+        if mine.is_empty() && notes.published_utc == 0 {
             return Ok(false);
         }
-        let json = serde_json::to_vec(&notes.entries)?;
+        let json = serde_json::to_vec(&mine)?;
         let hash = hex::encode(crypto::hash(&json));
         if hash == notes.published_hash {
             return Ok(false);
         }
-        let me = &self.vault.device_id;
-        let written = now.max(notes.published_utc + 1);
-        let body = NotesBody {
-            device: me.clone(),
-            folder: fk.folder.clone(),
-            written_utc: written,
-            entries: notes.entries.clone(),
+        let folder = members3::bin(&fk.folder)?;
+        let me = self.me3();
+        let stream = records3::notes_stream(folder, me);
+        let key = KeyId::Meta {
+            folder,
+            epoch: fk.epoch,
         };
-        let packed = zstd::bulk::compress(&serde_json::to_vec(&body)?, 3)?;
-        let blob = crypto::encrypt(
-            &record_key(&fk.meta, &fk.folder),
-            &aad(&self.vault.vault_id, &fk.folder, me, written),
-            &packed,
-        )?;
-        let key = storage_key(&fk.folder, me, written);
-        let own = format!("{PREFIX}{}/{me}/", fk.folder);
-        for (_, b) in storages {
-            b.put_if_absent(&key, &blob)?;
-            // Only the newest record of a device is ever read.
-            for old in b.list(&own)? {
-                if old != key {
-                    b.delete(&old)?;
+        let written = now.max(notes.published_utc + 1);
+        let published = self.write_record3(storages, &stream, &key, |seq| NotesBody {
+            folder,
+            device: me,
+            seq,
+            updated_utc: written,
+            notes: mine.clone(),
+        })?;
+        // Only the newest record of a device is ever read.
+        let view = self.view3()?;
+        self.each_store(storages, &view, |_, store, _| {
+            for l in store.list_after(&stream, 0)? {
+                if l.seq < published.seq {
+                    for n in &l.names {
+                        store.storage.delete(n)?;
+                    }
                 }
             }
-        }
+            Ok(())
+        })?;
         notes.published_utc = written;
         notes.published_hash = hash;
         Ok(true)
@@ -703,76 +702,54 @@ impl Engine {
         fk: &FolderKeys,
         notes: &mut NotesState,
     ) -> Result<usize> {
-        let prefix = folder_prefix(&fk.folder);
-        let mut newest: BTreeMap<DeviceId, (i64, usize, String)> = BTreeMap::new();
-        for (i, (_, b)) in storages.iter().enumerate() {
-            for key in b.list(&prefix)? {
-                let Some((dev, file)) = key.strip_prefix(&prefix).and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let (Ok(dev), Some(t)) = (
-                    DeviceId::from_hex(dev),
-                    file.strip_suffix(".enc")
-                        .and_then(|t| t.parse::<i64>().ok()),
-                ) else {
-                    continue;
-                };
-                if newest.get(&dev).is_none_or(|(n, _, _)| t > *n) {
-                    newest.insert(dev, (t, i, key));
+        let folder = members3::bin(&fk.folder)?;
+        let me = self.me3();
+        let streams: Vec<crate::record::StreamRef> = self
+            .stream_writers()
+            .into_iter()
+            .filter(|d| *d != me && !self.is_revoked(&DeviceId::from_bytes(d)))
+            .map(|d| records3::notes_stream(folder, d))
+            .collect();
+        let view = self.view3()?;
+        let mut newest: BTreeMap<Id16, NotesBody> = BTreeMap::new();
+        self.each_store(storages, &view, |_, store, counter| {
+            for b in records3::read_newest::<NotesBody>(store, &streams, counter)? {
+                if newest.get(&b.device).is_none_or(|n| n.seq < b.seq) {
+                    newest.insert(b.device, b);
                 }
             }
-        }
-        let metas = fk.meta_keys();
+            Ok(())
+        })?;
         let mut read = 0;
-        for (dev, (t, i, key)) in newest {
-            let known =
-                self.devices.devices.contains_key(&dev) || self.devices.members.contains_key(&dev);
-            // Read-only members of a shared folder: their records are not
-            // taken (`share_roles`).
-            if dev == self.vault.device_id
-                || !known
-                || self.is_revoked(&dev)
-                || !self.share_role_of(&fk.folder, &dev).is_editor()
-            {
+        for (dev3, body) in newest {
+            let dev = DeviceId::from_bytes(&dev3);
+            if notes.seen.get(&dev).is_some_and(|s| *s >= body.updated_utc) {
                 continue;
             }
-            if notes.seen.get(&dev).is_some_and(|s| *s >= t) {
-                continue;
-            }
-            let Some(blob) = storages[i].1.get(&key)? else {
-                continue;
-            };
-            let a = aad(&self.vault.vault_id, &fk.folder, &dev, t);
-            let Some(packed) = metas
-                .iter()
-                .find_map(|m| crypto::decrypt(&record_key(m, &fk.folder), &a, &blob).ok())
-            else {
-                continue;
-            };
-            let Ok(json) = zstd::bulk::decompress(&packed, 256 << 20) else {
-                continue;
-            };
-            let Ok(body) = serde_json::from_slice::<NotesBody>(&json) else {
-                continue;
-            };
-            if body.device != dev || body.folder != fk.folder || body.written_utc != t {
-                continue;
-            }
-            for (path, e) in body.entries {
+            let name = self.any_device_name(&dev);
+            for (path, w) in body.notes {
                 // Entries over the limits (another implementation, or a
                 // tampering device) are not taken.
-                if e.analysis.len() > ANALYSIS_MAX_BYTES || e.tags.len() > TAGS_MAX {
+                if w.analysis.len() > ANALYSIS_MAX_BYTES || w.tags.len() > TAGS_MAX {
                     continue;
                 }
-                if crate::names::check_synced_path(&path).is_err() {
-                    continue;
-                }
+                let e = NoteEntry {
+                    cleared: w.analysis.is_empty(),
+                    analysis: w.analysis,
+                    tags: w.tags,
+                    content_hash: w.content_hash,
+                    device: dev.clone(),
+                    device_name: name.clone(),
+                    by: w.by,
+                    analysed_utc: w.analysed_utc,
+                    updated_utc: w.analysed_utc,
+                    updated_by: dev.clone(),
+                };
                 if notes.entries.get(&path).is_none_or(|o| e.newer_than(o)) {
                     notes.entries.insert(path, e);
                 }
             }
-            notes.seen.insert(dev, t);
+            notes.seen.insert(dev, body.updated_utc);
             read += 1;
         }
         Ok(read)

@@ -113,6 +113,12 @@ fn devices_never_online_together_converge() {
     // Before attaching anything B already knows the other device.
     let names: Vec<String> = b.status().unwrap().devices.into_values().collect();
     assert!(names.contains(&"laptop".to_string()), "{names:?}");
+    // Format 3: B opens no folder until an owner approves its request; A
+    // comes online for that and goes again.
+    assert!(b.attach_folder("docs", &lab.b_dir, false).is_err());
+    let mut a = open(&lab.a_home);
+    common::approve_all(&mut a, &mut b);
+    drop(a);
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     let pull = b.pull("docs").unwrap();
     assert_eq!(pull.files_updated, 3);
@@ -137,10 +143,9 @@ fn devices_never_online_together_converge() {
     let docs = &status.folders[0];
     assert_eq!(docs.files, 3);
     assert_eq!(docs.chunks_without_storage_copy, 0);
-    assert!(
-        docs.chunks_verified_elsewhere > 0,
-        "B verified A's chunks when it fetched them"
-    );
+    // Format 3 verifies whole packs (automatic verification), not blocks
+    // as they are fetched: `chunks_verified_elsewhere` comes from
+    // `pack_verified` (automatic verification, `fsck --verify`).
     assert_eq!(status.devices.len(), 2);
     drop(b);
 
@@ -184,7 +189,14 @@ fn concurrent_edits_keep_both_versions() {
     a.add_folder("docs", &lab.a_dir).unwrap();
     fs::write(lab.a_dir.join("report.txt"), b"v1").unwrap();
     a.push("docs").unwrap();
-    let mut b = Engine::join(&lab.b_home, "phone", PASS, &vault_key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(
+        &lab.b_home,
+        "phone",
+        PASS,
+        &vault_key,
+        lab.storage.clone(),
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.pull("docs").unwrap();
@@ -338,9 +350,13 @@ fn untrusted_replica_holds_copies_without_keys() {
         st.folders[0].chunks_verified_elsewhere,
         st.folders[0].chunks
     );
-    // A second run copies nothing new.
+    // A second run copies and claims no pack again (records the owner
+    // wrote since, its enrolment of the replica among them, are copied as
+    // they are).
     let rep2 = r.run_once().unwrap();
-    assert_eq!(rep2.objects_copied, 0);
+    assert_eq!(rep2.chunks_verified, 0, "{rep2:?}");
+    let rep3 = r.run_once().unwrap();
+    assert_eq!(rep3.objects_copied, 0, "{rep3:?}");
 }
 
 #[test]
@@ -359,10 +375,25 @@ fn shared_folder_between_two_users() {
     .unwrap();
     fs::write(lab.a_dir.join("plan.txt"), b"shared plan").unwrap();
     a.sync(None).unwrap();
-    let token = a.share_create("project").unwrap();
-    // User C accepts with only the token and the shared storage.
-    let mut c =
-        Engine::accept_share(&lab.b_home, "c-laptop", PASS, &token, lab.storage.clone()).unwrap();
+    // User C asks with a request code; A adds it and tells its own words.
+    let code = varsto_core::vault::ShareRequest::code_for(&lab.b_home).unwrap();
+    let added = a
+        .share_add(
+            "project",
+            &code,
+            None,
+            varsto_core::share::ShareRole::Editor,
+        )
+        .unwrap();
+    // C accepts with only those words and the shared storage.
+    let mut c = Engine::accept_share(
+        &lab.b_home,
+        "c-laptop",
+        PASS,
+        Some(&added.owner_fingerprint),
+        lab.storage.clone(),
+    )
+    .unwrap();
     c.chunker = ChunkerParams::SMALL;
     assert!(c.is_member());
     assert_eq!(c.folders().len(), 1, "a member sees only the shared folder");
@@ -410,7 +441,7 @@ fn carrier_disk_only_carries_what_is_missing_and_empties_itself() {
         "the carrier holds the chunks in transit"
     );
     // The disk travels to the second device.
-    let mut b = Engine::join(&lab.b_home, "office-pc", PASS, &key, usb.clone()).unwrap();
+    let mut b = common::join_approved(&lab.b_home, "office-pc", PASS, &key, usb.clone(), &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.sync(None).unwrap();
@@ -442,7 +473,14 @@ fn selective_sync_uses_placeholders() {
     fs::write(lab.a_dir.join("one.jpg"), pseudo_random(30_000, 1)).unwrap();
     fs::write(lab.a_dir.join("two.jpg"), pseudo_random(30_000, 2)).unwrap();
     a.push("photos").unwrap();
-    let mut b = Engine::join(&lab.b_home, "phone", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(
+        &lab.b_home,
+        "phone",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("photos", &lab.b_dir, true).unwrap();
     b.pull("photos").unwrap();
@@ -528,7 +566,14 @@ fn thumbnails_are_generated_once_and_shared_encrypted() {
         "stored thumbnail must be ciphertext"
     );
     // Another device shows the preview without fetching the picture itself (selective sync).
-    let mut b = Engine::join(&lab.b_home, "phone", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(
+        &lab.b_home,
+        "phone",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("photos", &lab.b_dir, true).unwrap();
     b.pull("photos").unwrap();
@@ -546,8 +591,8 @@ fn thumbnails_are_generated_once_and_shared_encrypted() {
 }
 
 #[test]
-fn sealed_share_token_opens_only_on_the_requesting_device() {
-    use varsto_core::vault::{SealedShareToken, ShareRequest};
+fn a_share_opens_only_on_the_requesting_device() {
+    use varsto_core::vault::ShareRequest;
     let lab = lab();
     let (mut owner, _key) = Engine::init(&lab.a_home, "owner", PASS).unwrap();
     owner.chunker = ChunkerParams::SMALL;
@@ -559,28 +604,48 @@ fn sealed_share_token_opens_only_on_the_requesting_device() {
     // Recipient creates a request code before it has any vault.
     let code = ShareRequest::code_for(&lab.b_home).unwrap();
     assert!(code.starts_with("vsr1."));
-    let plain = owner.share_create("docs").unwrap();
-    let sealed = plain
-        .seal(&ShareRequest::parse_code(&code).unwrap())
+    let added = owner
+        .share_add("docs", &code, None, varsto_core::share::ShareRole::Editor)
         .unwrap();
-    let encoded = sealed.encode();
-    assert!(SealedShareToken::is_sealed(&encoded));
-    assert!(
-        !encoded.contains(&plain.key_hex),
-        "folder key must not appear in the sealed token"
-    );
+    // Nothing on the storage holds the folder key in the clear.
+    let key_hex = owner.folders()[0].0.key_hex.clone();
+    for e in walkdir::WalkDir::new(lab.a_home.with_file_name("storage"))
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let data = fs::read(e.path()).unwrap();
+        assert!(
+            !String::from_utf8_lossy(&data).contains(&key_hex),
+            "the folder key appears in {}",
+            e.path().display()
+        );
+    }
 
-    // A different device cannot open it.
+    // A different device (another request) finds nothing shared with it.
     let other = tempfile::tempdir().unwrap();
     ShareRequest::code_for(other.path()).unwrap();
-    assert!(ShareRequest::open_token(other.path(), &encoded).is_err());
+    assert!(Engine::share_offers(other.path(), &lab.storage, None)
+        .unwrap()
+        .is_empty());
+    assert!(Engine::accept_share(
+        other.path(),
+        "eve",
+        PASS,
+        Some(&added.owner_fingerprint),
+        lab.storage.clone()
+    )
+    .is_err());
 
-    // The requesting device opens it and syncs the folder.
-    let opened = ShareRequest::open_token(&lab.b_home, &encoded).unwrap();
-    assert_eq!(opened.key_hex, plain.key_hex);
-    let mut member =
-        Engine::accept_share(&lab.b_home, "friend", PASS, &opened, lab.storage.clone()).unwrap();
-    ShareRequest::clear(&lab.b_home);
+    // The requesting device accepts and syncs the folder.
+    let mut member = Engine::accept_share(
+        &lab.b_home,
+        "friend",
+        PASS,
+        Some(&added.owner_fingerprint),
+        lab.storage.clone(),
+    )
+    .unwrap();
     member.chunker = ChunkerParams::SMALL;
     member.attach_folder("docs", &lab.b_dir, false).unwrap();
     member.pull("docs").unwrap();
@@ -606,7 +671,14 @@ fn last_accessed_is_recorded_and_files_can_be_moved() {
     );
     assert!(before.modified_utc > 1_600_000_000);
 
-    let mut b = Engine::join(&lab.b_home, "phone", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(
+        &lab.b_home,
+        "phone",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, true).unwrap();
     b.pull("docs").unwrap();
@@ -669,7 +741,7 @@ fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
     assert_eq!(r[0].chunks_verification_pending, 0);
 
     // Another device joins, adopts the policy through the registry and verifies the storage.
-    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(&lab.b_home, "desk", PASS, &key, lab.storage.clone(), &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.pull("docs").unwrap();
@@ -725,9 +797,35 @@ fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
     assert!(a.policy_check().unwrap().is_empty());
 }
 
+/// A device that synced before it attached the folder (it read the
+/// folder's records then) downloads every file at the sync after the
+/// attach, and its report counts the blocks and bytes it fetched.
+#[test]
+fn a_folder_attached_after_a_sync_is_downloaded_and_counted() {
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    let big: Vec<u8> = (0..150_000u32).map(|i| (i % 249) as u8).collect();
+    fs::write(lab.a_dir.join("big.bin"), &big).unwrap();
+    fs::write(lab.a_dir.join("note.txt"), b"counted").unwrap();
+    a.push("docs").unwrap();
+    let mut b = common::join_approved(&lab.b_home, "desk", PASS, &key, lab.storage.clone(), &mut a);
+    b.chunker = ChunkerParams::SMALL;
+    b.sync(None).unwrap();
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
+    let reports = b.sync(Some("docs")).unwrap();
+    let pull = &reports[0].0;
+    assert_eq!(fs::read(lab.b_dir.join("big.bin")).unwrap(), big);
+    assert_eq!(pull.files_updated, 2, "{pull:?}");
+    assert!(pull.chunks_downloaded >= 3, "{pull:?}");
+    assert_eq!(pull.bytes_downloaded, big.len() as u64 + 7, "{pull:?}");
+    assert_eq!(pull.bytes_from_peers, 0, "no peers: all from the storage");
+}
+
 #[test]
 fn peers_serve_chunks_when_the_storage_has_none() {
-    use std::sync::{atomic::AtomicBool, Arc, Mutex};
     use varsto_core::p2p;
     let lab = lab();
     let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
@@ -742,31 +840,19 @@ fn peers_serve_chunks_when_the_storage_has_none() {
     // The storage keeps the manifests and ledger but loses every chunk object.
     common::lose_all_objects(&lab.a_home.with_file_name("storage"));
 
-    // Laptop serves its files to peers.
-    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let addr = server.addr;
-    let snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
-    let stop = Arc::new(AtomicBool::new(false));
-    let (snap2, stop2) = (snap.clone(), stop.clone());
-    let th = std::thread::spawn(move || server.run(snap2, stop2));
+    // Laptop serves its files to peers (TLS over TCP, pinned to its
+    // signed peer record).
+    let serving = common::p2p::Serving::start(&mut a);
+    let addr = serving.addr;
 
-    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(&lab.b_home, "desk", PASS, &key, lab.storage.clone(), &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     // Without peers the pull cannot complete.
     let r = b.pull("docs").unwrap();
     assert_eq!(r.files_unavailable.len(), 2);
     // With the laptop as a peer, every chunk comes from it and verifies.
-    let peers = p2p::Peers::new(
-        b.peer_key(),
-        b.device_id().clone(),
-        vec![p2p::PeerAddr {
-            device: a.device_id().clone(),
-            addr,
-            name: "laptop".into(),
-        }],
-    );
-    b.set_peers(Some(Arc::new(peers)));
+    common::p2p::connect(&mut a, &serving, &mut [&mut b]);
     let r = b.pull("docs").unwrap();
     assert!(r.files_unavailable.is_empty(), "{:?}", r.files_unavailable);
     assert!(r.chunks_from_peers >= 2, "{}", r.chunks_from_peers);
@@ -775,22 +861,28 @@ fn peers_serve_chunks_when_the_storage_has_none() {
         fs::read(lab.b_dir.join("note.txt")).unwrap(),
         b"from a peer"
     );
-    // A stranger without the vault key gets nothing.
-    let stranger = p2p::Peers::new(
-        varsto_core::crypto::SecretKey::random(),
-        b.device_id().clone(),
-        vec![p2p::PeerAddr {
-            device: a.device_id().clone(),
-            addr,
-            name: String::new(),
-        }],
+    // A stranger, whose certificate no peer record names, does not even
+    // complete the handshake.
+    let laptop = b
+        .peer_directory()
+        .unwrap()
+        .infos()
+        .into_iter()
+        .find(|i| &i.device == a.device_id())
+        .unwrap();
+    let stranger = p2p::v3::Client::new(
+        varsto_core::ids::DeviceId::random(),
+        p2p::quic::Identity::generate().unwrap(),
     );
-    assert!(stranger
-        .get(&varsto_core::ids::ObjectName::from_bytes(&[0u8; 32]))
-        .is_none());
-    assert!(stranger.probe().iter().all(|s| !s.ok));
-    stop.store(true, std::sync::atomic::Ordering::Relaxed);
-    th.join().unwrap();
+    let got = stranger.tcp_get(
+        addr,
+        &laptop.cert_sha256,
+        a.device_id(),
+        "/p2p/info",
+        std::time::Duration::from_secs(3),
+    );
+    assert!(!matches!(got, Ok((200, _))), "{got:?}");
+    drop(serving);
 }
 
 #[test]
@@ -816,7 +908,14 @@ fn strongroom_folder_needs_the_security_key_on_every_device() {
         Some(true)
     );
     assert!(
-        a.share_create("taxes").is_err(),
+        a.share_add(
+            "taxes",
+            &varsto_core::vault::ShareRequest::code_for(&lab.b_home.with_file_name("x-home"))
+                .unwrap(),
+            None,
+            varsto_core::share::ShareRole::Editor
+        )
+        .is_err(),
         "strongrooms cannot be shared"
     );
 
@@ -842,7 +941,7 @@ fn strongroom_folder_needs_the_security_key_on_every_device() {
     assert!(a.push("taxes").is_err());
 
     // Another device adopts the record and needs the same security key.
-    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(&lab.b_home, "desk", PASS, &key, lab.storage.clone(), &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("taxes", &lab.b_dir, true).unwrap();
     assert!(b.pull("taxes").is_err(), "locked on the new device too");
@@ -901,7 +1000,7 @@ fn many_chunk_files_arrive_in_order_and_a_missing_chunk_fails_the_file() {
     fs::rename(&pack, &away).unwrap();
     assert!(common::read_object(&store, hidden).is_none());
 
-    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(&lab.b_home, "desk", PASS, &key, lab.storage.clone(), &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     let r = b.pull("docs").unwrap();
@@ -929,7 +1028,7 @@ fn turning_selective_sync_off_downloads_the_placeholders() {
     fs::write(lab.a_dir.join("sub/two.txt"), b"second").unwrap();
     a.sync(None).unwrap();
 
-    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(&lab.b_home, "desk", PASS, &key, lab.storage.clone(), &mut a);
     b.attach_folder("docs", &lab.b_dir, true).unwrap();
     b.sync(None).unwrap();
     assert!(
@@ -968,7 +1067,7 @@ fn small_files_travel_in_packs() {
     assert_eq!(common::object_count(&store), 201);
     assert!(!store.join("chunks").exists());
     // Another device reads every file from the pack.
-    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(&lab.b_home, "desk", PASS, &key, lab.storage.clone(), &mut a);
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     let r = b.sync(None).unwrap();
     assert!(

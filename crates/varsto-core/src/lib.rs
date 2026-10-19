@@ -16,7 +16,6 @@ pub mod activity;
 pub mod advice;
 pub mod autoverify;
 pub mod blockdev;
-#[cfg(feature = "format3")]
 pub mod blockmap;
 pub mod changes;
 pub mod chunk_seal;
@@ -27,13 +26,10 @@ pub mod diskformat;
 pub mod disksuggest;
 pub mod engine;
 pub mod events;
-#[cfg(feature = "format3")]
 pub mod fingerprint;
 pub mod freespace;
-#[cfg(feature = "format3")]
 pub mod fsck3;
 pub mod fsmeta;
-#[cfg(feature = "format3")]
 pub mod gc3;
 pub mod help;
 pub mod ids;
@@ -41,16 +37,12 @@ pub mod ignore_rules;
 pub mod import;
 pub mod kem;
 pub mod ledger;
-#[cfg(feature = "format3")]
 pub mod ledger3;
-pub mod ledger_heads;
 pub mod logging;
 pub mod mailbox;
 pub mod manifest;
-#[cfg(feature = "format3")]
 pub mod manifest3;
 pub mod media;
-#[cfg(feature = "format3")]
 pub mod membership3;
 pub mod names;
 pub mod netif;
@@ -68,12 +60,9 @@ pub mod progress;
 pub mod providers;
 pub mod qr;
 pub mod rclone;
-#[cfg(feature = "format3")]
 pub mod rebuild3;
-#[cfg(feature = "format3")]
 pub mod record;
 pub mod record_shim;
-#[cfg(feature = "format3")]
 pub mod records3;
 pub mod recovery;
 pub mod recovery_guide;
@@ -81,20 +70,15 @@ pub mod replica;
 pub mod restic;
 pub mod s3;
 pub mod scrub;
-#[cfg(feature = "format3")]
 pub mod scrub3;
 pub mod share;
-pub mod snapshot;
-#[cfg(feature = "format3")]
 pub mod snapshot3;
 pub mod staged_move;
 pub mod storage;
 pub mod storage_settings;
-#[cfg(feature = "format3")]
 pub mod storages3;
 pub mod strongroom;
 pub mod thumbs;
-#[cfg(feature = "format3")]
 pub mod trash3;
 pub mod util;
 pub mod vault;
@@ -102,17 +86,18 @@ pub mod viz;
 
 /// Storage format version written into every object header. See
 /// `docs/spec/format-versions.md`.
-pub const FORMAT_VERSION: u16 = 2;
+pub const FORMAT_VERSION: u16 = 3;
 
 /// Why a vault of storage format `found` cannot be opened by this build, in
-/// words a person can act on: an older vault (0.0.1-alpha.14 and earlier
-/// wrote format 1: block objects of their own, no packs) is not read and has
-/// to be created again; a newer one needs a newer Varsto.
+/// words a person can act on: an older vault (0.0.1-alpha.15 and the daily
+/// builds before format 3 wrote format 2; 0.0.1-alpha.14 and earlier wrote
+/// format 1) is not read and has to be created again; a newer one needs a
+/// newer Varsto.
 pub fn format_mismatch(found: u16) -> String {
     if found < FORMAT_VERSION {
         format!(
             "this vault uses storage format {found}, which this version of Varsto ({FORMAT_VERSION}) does not read \
-             (0.0.1-alpha.14 and earlier wrote format 1). Recreate the vault: \
+             (0.0.1-alpha.15 wrote format 2). Recreate the vault: \
              run `varsto reset --yes` on this device, then `varsto init`, and sync your files into the new vault"
         )
     } else {
@@ -121,6 +106,15 @@ pub fn format_mismatch(found: u16) -> String {
              Update Varsto on this device"
         )
     }
+}
+
+/// Why a device stops at a storage that already holds a vault of another
+/// storage format: its objects are not cleaned up or mixed with this
+/// vault's.
+pub fn storage_holds_other_format(storage: &str, found: u16) -> String {
+    format!(
+        "storage {storage} holds a vault of format {found}; use another bucket or directory, or delete it first"
+    )
 }
 
 pub use engine::{Engine, FsckReport, PullReport, PushReport, StatusReport};

@@ -22,51 +22,6 @@
 //! (`docs/spec/alpha-0-format.md` section 22).
 
 use super::*;
-use crate::ledger::{LedgerObject, SignedCheckpoint};
-
-/// Listing start for the objects of `device` after batch `seq` (0: all).
-/// Checkpoint names sort after every batch name, so they are always listed.
-fn start_after(device: &DeviceId, seq: u64) -> String {
-    if seq == 0 {
-        String::new()
-    } else {
-        SignedBatch::storage_key(device, seq)
-    }
-}
-
-/// The batches and checkpoints of `device` on a storage after batch `seq`.
-fn remote_objects(
-    backend: &dyn Storage,
-    device: &DeviceId,
-    seq: u64,
-) -> Result<BTreeSet<LedgerObject>> {
-    let prefix = format!("ledger/{device}/");
-    Ok(backend
-        .list_after(&prefix, &start_after(device, seq))?
-        .iter()
-        .filter_map(|k| k.strip_prefix(&prefix).and_then(LedgerObject::parse))
-        .collect())
-}
-
-fn batches_of(objects: &BTreeSet<LedgerObject>) -> BTreeSet<u64> {
-    objects
-        .iter()
-        .filter_map(|o| match o {
-            LedgerObject::Batch(s) => Some(*s),
-            LedgerObject::Checkpoint(_) => None,
-        })
-        .collect()
-}
-
-fn checkpoints_of(objects: &BTreeSet<LedgerObject>) -> BTreeSet<u64> {
-    objects
-        .iter()
-        .filter_map(|o| match o {
-            LedgerObject::Checkpoint(s) => Some(*s),
-            LedgerObject::Batch(_) => None,
-        })
-        .collect()
-}
 
 /// When a device writes a checkpoint of its own batches and how many
 /// batches it keeps on the storages before its newest checkpoint.
@@ -88,9 +43,6 @@ impl Default for LedgerPolicy {
         }
     }
 }
-
-/// Typical size of a stored batch (mostly its hybrid signature).
-const TYPICAL_BATCH_BYTES: u64 = 8 * 1024;
 
 /// Events recorded but not yet sealed into a batch, kept across restarts.
 const DEFERRED_FILE: &str = "ledger/pending.json";
@@ -155,91 +107,6 @@ impl Engine {
         Ok((out, committed?))
     }
 
-    /// Fetch, check and keep checkpoint `seq` of another device. One that
-    /// does not verify or open is skipped (the batches still count), and so
-    /// is one that is not a trusted full device's: replicas and members
-    /// write none, and a checkpoint speaks for its signer only anyway
-    /// (`LedgerView::restricted_to`). One far beyond the batches held is
-    /// kept only beside the signed batch it ends at.
-    fn pull_checkpoint(
-        &mut self,
-        backend: &dyn Storage,
-        dev: &DeviceId,
-        seq: u64,
-        pk: &crypto::VerifyingKey,
-    ) -> Result<Ingest> {
-        let Some(blob) = backend.get(&SignedCheckpoint::storage_key(dev, seq))? else {
-            return Ok(Ingest::Known);
-        };
-        let Ok(cp) = serde_json::from_slice::<SignedCheckpoint>(&blob) else {
-            return Ok(Ingest::Known);
-        };
-        if &cp.device != dev || cp.seq != seq || cp.verify(pk).is_err() {
-            return Ok(Ingest::Known);
-        }
-        if self.event_scope(dev, &cp.key_id) != Some(ledger::EventScope::Full) {
-            return Ok(Ingest::Known);
-        }
-        let head = self.ledger.head(dev);
-        let floor = head.seq.max(head.base.as_ref().map(|b| b.seq).unwrap_or(0));
-        let anchor = if seq > floor.saturating_add(ledger::MAX_AHEAD) {
-            backend
-                .get(&SignedBatch::storage_key(dev, seq))?
-                .and_then(|b| serde_json::from_slice::<SignedBatch>(&b).ok())
-                .filter(|b| b.verify(pk).is_ok())
-        } else {
-            None
-        };
-        match self.key_for_id(&cp.key_id) {
-            Some(key) if cp.open(&key).is_ok() => {
-                self.ledger.ingest_checkpoint_anchored(cp, anchor.as_ref())
-            }
-            _ => Ok(Ingest::Known),
-        }
-    }
-
-    /// The newest batch of every other device held here, for the `seen`
-    /// field of this device's next batch.
-    pub(super) fn seen_heads(&self) -> BTreeMap<DeviceId, u64> {
-        self.ledger
-            .devices()
-            .into_iter()
-            .filter(|d| d != &self.vault.device_id)
-            .map(|d| {
-                let seq = self.ledger.head(&d).seq;
-                (d, seq)
-            })
-            .filter(|(_, seq)| *seq > 0)
-            .collect()
-    }
-
-    /// The devices whose acknowledgement a checkpoint needs before the
-    /// batches it covers may go: full devices of the vault that are trusted
-    /// and not revoked. Members of shared folders and replicas do not read
-    /// the vault ledger.
-    pub(super) fn ledger_readers(&self) -> Vec<DeviceId> {
-        self.devices
-            .devices
-            .keys()
-            .filter(|d| *d != &self.vault.device_id && self.trusted(d))
-            .cloned()
-            .collect()
-    }
-
-    /// Whether every reader other than `device` itself has said it holds
-    /// `device`'s batches up to `seq`.
-    fn all_acked(&self, view: &LedgerView, device: &DeviceId, seq: u64) -> bool {
-        self.ledger_readers()
-            .iter()
-            .filter(|r| *r != device)
-            .all(|r| {
-                view.acks
-                    .get(r)
-                    .and_then(|a| a.get(device))
-                    .is_some_and(|s| *s >= seq)
-            })
-    }
-
     /// Keep the ledger small, after a sync: acknowledge other devices'
     /// checkpoints, write a checkpoint of this device's own batches when
     /// enough have accumulated, and once every reader has acknowledged a
@@ -247,110 +114,7 @@ impl Engine {
     /// this device's own, locally for everyone's). Cold storages are left
     /// as they are.
     pub fn ledger_upkeep(&mut self) -> Result<()> {
-        crate::logged_op_plain!("ledger upkeep", "", { self.ledger_upkeep_inner() })
-    }
-
-    fn ledger_upkeep_inner(&mut self) -> Result<()> {
-        if self.vault.member
-            || self.forked_self
-            || self.removal.is_some()
-            || self.ledger_alarm.needs_rebuild()
-        {
-            return Ok(());
-        }
-        let me = self.vault.device_id.clone();
-        let view = self.view()?;
-
-        // 1. Acknowledge checkpoints of others in a batch of our own.
-        let acked = view.acks.get(&me).cloned().unwrap_or_default();
-        let ack_due = self.ledger.devices().iter().any(|d| {
-            d != &me
-                && self
-                    .ledger
-                    .head(d)
-                    .base
-                    .is_some_and(|b| acked.get(d).copied().unwrap_or(0) < b.seq)
-        });
-        if ack_due {
-            if self.pending.is_empty() {
-                let lamport = self.tick()?;
-                let (key_id, key) = self.ledger_key_now();
-                self.ledger.append_own_seen(
-                    &me,
-                    Vec::new(),
-                    self.seen_heads(),
-                    lamport,
-                    &key,
-                    &key_id,
-                    &self.keys.signer,
-                )?;
-                self.push_own_batches()?;
-            } else {
-                self.commit_batch()?;
-            }
-        }
-
-        // 2. A checkpoint of our own batches.
-        let head = self.ledger.head(&me);
-        let base = head.base.as_ref().map(|b| b.seq).unwrap_or(0);
-        let last_size = match head.base.as_ref() {
-            Some(_) => self
-                .ledger
-                .checkpoint(&me)?
-                .map(|c| c.body_hex.len() as u64 / 2)
-                .unwrap_or(0),
-            None => 0,
-        };
-        let every = self
-            .ledger_policy
-            .checkpoint_every
-            .max(last_size / TYPICAL_BATCH_BYTES);
-        if head.seq >= base + every {
-            let (key_id, key) = self.ledger_key_now();
-            let own = self
-                .ledger
-                .contribution(&me, head.seq, |id| self.key_for_id(id))?;
-            self.ledger
-                .seal_checkpoint(&me, head.seq, own, &key, &key_id, &self.keys.signer)?;
-            self.push_own_batches()?;
-        }
-
-        // 3. Drop what checkpoints cover once every reader has seen past them.
-        let view = self.view()?;
-        let keep = self.ledger_policy.keep_before;
-        if let Some(b) = self.ledger.head(&me).base {
-            if self.all_acked(&view, &me, b.seq) {
-                let upto = b.seq.saturating_sub(keep);
-                for (spec, backend) in self.metadata_storages(false)? {
-                    if self.ledger.pruned(spec.name()) >= upto
-                        || !backend.exists(&SignedCheckpoint::storage_key(&me, b.seq))?
-                    {
-                        continue;
-                    }
-                    for seq in self.ledger.pruned(spec.name()) + 1..=upto {
-                        backend.delete(&SignedBatch::storage_key(&me, seq))?;
-                    }
-                    for old in checkpoints_of(&remote_objects(backend.as_ref(), &me, upto)?) {
-                        if old < b.seq {
-                            backend.delete(&SignedCheckpoint::storage_key(&me, old))?;
-                        }
-                    }
-                    self.ledger.set_pruned(spec.name(), upto)?;
-                }
-                self.ledger.drop_through(&me, upto)?;
-            }
-        }
-        for d in self.ledger.devices() {
-            if d == me {
-                continue;
-            }
-            if let Some(b) = self.ledger.head(&d).base {
-                if self.batch_accepted(&d, b.seq) && self.all_acked(&view, &d, b.seq) {
-                    self.ledger.drop_through(&d, b.seq)?;
-                }
-            }
-        }
-        Ok(())
+        crate::logged_op_plain!("ledger upkeep", "", { self.ledger_upkeep3() })
     }
 
     /// Write a checkpoint after `checkpoint_every` own batches and keep
@@ -379,41 +143,41 @@ impl Engine {
         let (key_id, key) = match key_id {
             Some(id) => (
                 id.to_string(),
-                self.key_for_id(id)
+                self.key_for3(id)
                     .ok_or_else(|| anyhow!("no key for {id} on this device"))?,
             ),
             None if self.vault.member => {
-                let rec = self
-                    .keyring
-                    .folders
-                    .values()
-                    .next()
-                    .cloned()
-                    .ok_or_else(|| anyhow!("no shared folder"))?;
-                self.share_ledger_key_now(&rec)?
+                bail!("a member device writes format-3 folder-scoped batches only")
             }
-            None => self.ledger_key_now(),
+            None => self.ledger_key3()?,
+        };
+        let scope = match crate::record::KeyId::parse(&key_id) {
+            Some(crate::record::KeyId::ShareLedger { folder, .. }) => folder,
+            _ => crate::ledger3::NO_FOLDER,
         };
         let lamport = match lamport {
             Some(l) => l,
             None => self.tick()?,
         };
-        let seen = if self.vault.member {
-            BTreeMap::new()
-        } else {
-            self.seen_heads()
-        };
-        let signed = self.ledger.append_own_seen(
-            &self.vault.device_id.clone(),
-            events,
+        let me = self.me3();
+        let seen = self.f3.ledger.vault_seen(&me);
+        let raw = events
+            .iter()
+            .filter_map(super::ledger3_ops::convert)
+            .map(|e| e.to_raw())
+            .collect();
+        let rec = self.f3.ledger.append_own(
+            &me,
+            raw,
             seen,
             lamport,
             &key,
             &key_id,
+            scope,
             &self.keys.signer,
         )?;
-        self.push_own_batches()?;
-        Ok(signed.seq)
+        self.push_own_batches3()?;
+        Ok(rec.seq)
     }
 
     /// Pull the ledger, once per `one_batch` action.
@@ -431,7 +195,6 @@ impl Engine {
     /// Keep the recorded events for the next batch, on disk so a restart
     /// does not lose them. They count in this device's view meanwhile.
     pub(super) fn defer_events(&mut self) -> Result<()> {
-        self.locate_pending();
         if self.pending.is_empty() {
             self.clear_deferred();
             return Ok(());
@@ -476,11 +239,8 @@ impl Engine {
         if *unsaved >= VIEW_SAVE_EVERY && self.save_view_cache(c).is_ok() {
             *unsaved = 0;
         }
-        let generation = Self::pack_generation(&c.raw, &c.context);
         if self.pending.is_empty() {
-            let view = self.ledger.finish(&c.raw);
-            self.feed_pack_locator(&view, generation);
-            return Ok(view);
+            return Ok(self.ledger.finish(&c.raw));
         }
         // Events recorded and not sealed yet count as this device's next batch.
         let mut raw = c.raw.clone();
@@ -494,9 +254,7 @@ impl Engine {
             seen: BTreeMap::new(),
         });
         raw.batches -= 1;
-        let view = self.ledger.finish_owned(raw);
-        self.feed_pack_locator(&view, generation);
-        Ok(view)
+        Ok(self.ledger.finish_owned(raw))
     }
 
     /// The view replayed from every local batch, without the cache (and
@@ -521,7 +279,6 @@ impl Engine {
                 .filter(|e| **e > 0)
                 .map(|e| format!("{}{e}", ledger::KEY_LEDGER_EPOCH_PREFIX)),
         );
-        ids.extend(self.share_ledger_key_ids());
         let mut parts: Vec<Vec<u8>> = Vec::new();
         for id in ids {
             if let Some(k) = self.key_for_id(&id) {
@@ -543,18 +300,6 @@ impl Engine {
         parts.push(self.scope_context());
         let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
         hex::encode(crypto::hash(&crypto::aad("ledger-view-context", &refs)))
-    }
-
-    /// Forget the cached view (memory and `ledger/view.enc`): the next
-    /// call rebuilds it from the batches.
-    pub(super) fn reset_view_cache(&self) {
-        let mut slot = self.view_cache.lock().unwrap_or_else(|e| e.into_inner());
-        *slot = ViewSlot {
-            cache: None,
-            loaded: true,
-            unsaved: 0,
-        };
-        let _ = fs::remove_file(self.view_cache_path());
     }
 
     fn view_cache_path(&self) -> PathBuf {
@@ -595,332 +340,98 @@ impl Engine {
         util::write_atomic(&path, &crypto::encrypt(&key, &aad, &packed)?)
     }
 
-    /// Push every own batch (and the newest own checkpoint) that a storage
-    /// does not have yet; detect forks.
+    /// Push every own batch that a hot metadata storage does not have yet
+    /// (format 3, `ledger3_ops`).
     pub(super) fn push_own_batches(&mut self) -> Result<()> {
-        let me = self.vault.device_id.clone();
-        let head = self.ledger.head(&me);
-        let checkpoint = self.ledger.checkpoint(&me)?;
-        for (spec, backend) in self.metadata_storages(true)? {
-            // List from the newest batch this storage is known to hold, so
-            // that batch is seen again: a storage that lost it (or another
-            // storage under a known name) is filled from the start.
-            let mut done = self.ledger.pushed(spec.name()).min(head.seq);
-            let mut objects = remote_objects(backend.as_ref(), &me, done.saturating_sub(1))?;
-            let mut present = batches_of(&objects);
-            if done > 0 && !present.contains(&done) && done > head.dropped {
-                done = 0;
-                objects = remote_objects(backend.as_ref(), &me, 0)?;
-                present = batches_of(&objects);
-            }
-            // Only objects this device's key signed are its history; junk
-            // under its name is noted and never taken for a fork.
-            for newest in present.iter().rev().take_while(|n| **n > head.seq) {
-                if self.own_object_genuine(
-                    spec.name(),
-                    backend.as_ref(),
-                    &LedgerObject::Batch(*newest),
-                )? {
-                    bail!("ledger fork: storage {} holds batch {} of this device, newer than its own last batch {} (restored from an old copy?)", backend.name(), newest, head.seq);
-                }
-            }
-            for newest in checkpoints_of(&objects)
-                .iter()
-                .rev()
-                .take_while(|n| **n > head.seq)
-            {
-                if self.own_object_genuine(
-                    spec.name(),
-                    backend.as_ref(),
-                    &LedgerObject::Checkpoint(*newest),
-                )? {
-                    bail!("ledger fork: storage {} holds checkpoint {} of this device, newer than its own last batch {} (restored from an old copy?)", backend.name(), newest, head.seq);
-                }
-            }
-            if let Some(cp) = checkpoint.as_ref() {
-                if !checkpoints_of(&objects).contains(&cp.seq) {
-                    backend.put_if_absent(
-                        &SignedCheckpoint::storage_key(&me, cp.seq),
-                        &serde_json::to_vec(cp)?,
-                    )?;
-                }
-            }
-            for seq in done.max(head.dropped).max(1)..=head.seq {
-                let key = SignedBatch::storage_key(&me, seq);
-                if present.contains(&seq) {
-                    if seq == head.seq {
-                        if let (Some(remote), Some(batch)) =
-                            (backend.get(&key)?, self.ledger.get(&me, seq)?)
-                        {
-                            let remote = serde_json::from_slice::<SignedBatch>(&remote)
-                                .ok()
-                                .filter(|r| r.device == me && r.seq == seq);
-                            match remote {
-                                Some(r) if r.hash == batch.hash => {}
-                                Some(r) if r.verify(&self.keys.signer.public()).is_ok() => {
-                                    bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
-                                }
-                                _ => {
-                                    // Junk occupies the name: noted; the
-                                    // other storages hold the batch.
-                                    self.own_object_genuine(
-                                        spec.name(),
-                                        backend.as_ref(),
-                                        &LedgerObject::Batch(seq),
-                                    )?;
-                                }
-                            }
-                        }
-                    }
-                    continue;
-                }
-                let Some(batch) = self.ledger.get(&me, seq)? else {
-                    continue;
-                };
-                let written = backend.put_if_absent(&key, &serde_json::to_vec(&batch)?)?;
-                if !written {
-                    let same = backend
-                        .get(&key)?
-                        .and_then(|b| serde_json::from_slice::<SignedBatch>(&b).ok())
-                        .is_some_and(|r| r.hash == batch.hash);
-                    if !same
-                        && self.own_object_genuine(
-                            spec.name(),
-                            backend.as_ref(),
-                            &LedgerObject::Batch(seq),
-                        )?
-                    {
-                        bail!(
-                            "ledger fork: batch {} of this device appeared on {} concurrently",
-                            seq,
-                            backend.name()
-                        );
-                    }
-                }
-            }
-            self.ledger.set_pushed(spec.name(), head.seq)?;
-        }
-        self.ledger_alarm.watch.save(&self.home);
-        Ok(())
+        self.push_own_batches3()
     }
 
-    /// Pull everyone's new batches from every hot storage: for each device
-    /// with a known key, only the batches after the local head, and its
-    /// newest checkpoint when that is newer than the one held here.
+    /// Pull the membership and everyone's new batches (format 3,
+    /// `ledger3_ops`).
     pub(super) fn pull_ledger(&mut self) -> Result<Vec<DeviceId>> {
-        self.pull_registry()?;
-        self.sync_membership()?;
-        let dir = self.key_directory()?;
-        let me = self.vault.device_id.clone();
-        let mut devices: Vec<DeviceId> = dir.keys().cloned().collect();
-        devices.sort();
-        // What peers say they hold (section 74); the pull below asks the
-        // storages for it.
-        self.exchange_heads();
-        let mut forks = BTreeSet::new();
-        let (mut malformed, mut refused) = (0u64, 0u64);
-        for (spec, backend) in self.metadata_storages(false)? {
-            for dev in &devices {
-                let head = self.ledger.head(dev);
-                if !self.batch_accepted(dev, head.seq + 1) {
-                    // Revoked, and everything up to the cut-off is here.
-                    continue;
-                }
-                // Our own identity is listed after our head too: anything
-                // there was written by another copy of this device. A forked
-                // device is read in full, as it always was.
-                let after = if head.forked { 0 } else { head.seq };
-                let objects = remote_objects(backend.as_ref(), dev, after)?;
-                if !objects.is_empty() {
-                    log::debug!(device:% = dev, storage = backend.name(), after = after, objects = objects.len(); "ledger: new objects of a device");
-                }
-                let pk = &dir[dev];
-                if dev == &me {
-                    // Only a checkpoint this device's key signed fences it:
-                    // anything else under its name is junk.
-                    let own_head = self.ledger.head(&me).seq;
-                    for n in checkpoints_of(&objects).into_iter().rev() {
-                        if n <= own_head {
-                            break;
-                        }
-                        let o = LedgerObject::Checkpoint(n);
-                        if self.own_object_genuine(spec.name(), backend.as_ref(), &o)? {
-                            forks.insert(me.clone());
-                            self.mark_forked(&me)?;
-                            break;
-                        }
-                    }
-                } else if let Some(n) = checkpoints_of(&objects)
-                    .into_iter()
-                    .rfind(|n| self.batch_accepted(dev, *n))
-                {
-                    if !self.vault.member && head.base.as_ref().is_none_or(|b| b.seq < n) {
-                        if let Ingest::Fork = self.pull_checkpoint(backend.as_ref(), dev, n, pk)? {
-                            forks.insert(dev.clone());
-                        }
-                    }
-                }
-                for seq in batches_of(&objects) {
-                    if !self.batch_accepted(dev, seq) {
-                        // Signed by a revoked device after its cut-off.
-                        continue;
-                    }
-                    let head = self.ledger.head(dev);
-                    if head.base.as_ref().is_some_and(|b| seq <= b.seq) && !head.forked {
-                        // A checkpoint held here covers it.
-                        continue;
-                    }
-                    if (self.ledger.get(dev, seq)?.is_some() || self.ledger.has_pending(dev, seq))
-                        && !head.forked
-                    {
-                        continue;
-                    }
-                    if dev == &me
-                        && self
-                            .ledger_alarm
-                            .watch
-                            .junk
-                            .get(spec.name())
-                            .is_some_and(|j| j.contains(&SignedBatch::storage_key(dev, seq)))
-                    {
-                        // Known junk under this device's name.
-                        continue;
-                    }
-                    let Some(blob) = backend.get(&SignedBatch::storage_key(dev, seq))? else {
-                        continue;
-                    };
-                    // One storage holding a damaged or planted object does
-                    // not stop the pull: another storage may hold the batch.
-                    let parsed = serde_json::from_slice::<SignedBatch>(&blob)
-                        .ok()
-                        .filter(|b| &b.device == dev && b.seq == seq);
-                    let Some(signed) = parsed else {
-                        if dev == &me {
-                            self.own_object_genuine(
-                                spec.name(),
-                                backend.as_ref(),
-                                &LedgerObject::Batch(seq),
-                            )?;
-                        } else {
-                            malformed += 1;
-                        }
-                        continue;
-                    };
-                    // A batch under a key this device lacks is kept unread.
-                    let key = self.key_for_id(&signed.key_id);
-                    if dev == &me && seq > self.ledger.head(&me).seq {
-                        if signed.verify(pk).is_err() {
-                            // Not signed by this device: junk, it fences nothing.
-                            self.own_object_genuine(
-                                spec.name(),
-                                backend.as_ref(),
-                                &LedgerObject::Batch(seq),
-                            )?;
-                            continue;
-                        }
-                        // Another copy of this device identity published ahead of us.
-                        forks.insert(me.clone());
-                        let _ = self.ledger.ingest_with(signed, pk, key.as_ref());
-                        self.mark_forked(&me)?;
-                        continue;
-                    }
-                    let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
-                    match self.ledger.ingest_limited(signed, pk, key.as_ref(), limit) {
-                        Ok(Ingest::Fork) => {
-                            forks.insert(dev.clone());
-                        }
-                        Ok(Ingest::Refused) => {
-                            refused += 1;
-                            log::warn!(device:% = dev, seq = seq, storage = backend.name(); "ledger batch refused");
-                        }
-                        Ok(Ingest::New | Ingest::Known | Ingest::Pending) => {}
-                        Err(e) => {
-                            malformed += 1;
-                            log::warn!(device:% = dev, seq = seq, storage = backend.name(), error:% = e; "ledger batch skipped");
-                        }
-                    }
-                }
-            }
-        }
-        let view = self.view()?;
-        self.observe_clock(view.max_lamport)?;
-        self.watch_freshness(&view, &dir, malformed, refused);
-        Ok(forks.into_iter().collect())
+        self.pull_ledger3()
     }
 
     /// After a pull: which devices' batches this device still lacks while
     /// another full device says (`seen`, in its signed batches) that it
-    /// holds them, or while batches wait here for a predecessor. The pull
-    /// has just asked every storage for them; a gap that stays for
-    /// `WITHHOLD_PULLS` pulls in a row is reported as a storage that may be
-    /// withholding batches (`LedgerHealth::warnings`).
-    fn watch_freshness(
+    /// holds them, a peer proved it (`p2p::v3::heads`), or batches wait here
+    /// for a predecessor. The pull has just asked every storage for them; a
+    /// gap that stays for `WITHHOLD_PULLS` pulls in a row is reported as a
+    /// storage that may be withholding batches (`LedgerHealth::warnings`).
+    pub(super) fn watch_freshness(
         &mut self,
-        view: &LedgerView,
-        dir: &KeyDirectory,
+        view: &crate::ledger3::LedgerView,
         malformed: u64,
         refused: u64,
     ) {
-        let me = self.vault.device_id.clone();
+        let me = self.me3();
+        let known: BTreeSet<crate::record::Id16> =
+            self.f3.members.devices.devices.keys().copied().collect();
+        let cutoff = |d: &crate::record::Id16, seq: u64| match self.f3.members.revocations.get(d) {
+            Some(r) => seq.min(r.cutoff_seq),
+            None => seq,
+        };
         // device -> (held, seen, source)
-        let mut lacking: BTreeMap<DeviceId, (u64, u64, &'static str)> = BTreeMap::new();
+        let mut lacking: BTreeMap<crate::record::Id16, (u64, u64, &'static str)> = BTreeMap::new();
         for (reader, acks) in &view.acks {
-            if reader == &me {
+            if *reader == me || !known.contains(reader) {
                 continue;
             }
             for (dev, seen) in acks {
-                if dev == &me || !dir.contains_key(dev) {
+                if *dev == me || !known.contains(dev) {
                     continue;
                 }
-                // Never beyond a removed device's cut-off.
-                let seen = match self.devices.revoked.get(dev) {
-                    Some(r) => (*seen).min(r.cutoff_seq),
-                    None => *seen,
-                };
-                let held = self.ledger.head(dev).seq;
+                let seen = cutoff(dev, *seen);
+                let held = self.f3.ledger.head(dev).seq;
                 if seen > held {
-                    let e = lacking.entry(dev.clone()).or_insert((held, 0, "acks"));
+                    let e = lacking.entry(*dev).or_insert((held, 0, "acks"));
                     e.1 = e.1.max(seen);
                 }
             }
         }
-        // What a peer says it holds (head statements, section 74).
-        for (dev, reach) in self.peer_reach(dir) {
-            let held = self.ledger.head(&dev).seq;
+        // What peers proved (signed batch envelopes, design section 8).
+        let proved = crate::p2p::v3::heads::Watch::load(&self.home);
+        for dev in known.iter().filter(|d| **d != me) {
+            let Some(p) = proved.get(dev) else {
+                continue;
+            };
+            let reach = cutoff(dev, p.seq);
+            let held = self.f3.ledger.head(dev).seq;
             if reach > held {
-                let e = lacking.entry(dev).or_insert((held, 0, "peer"));
+                let e = lacking.entry(*dev).or_insert((held, 0, "peer"));
                 if reach > e.1 {
                     e.1 = reach;
                     e.2 = "peer";
                 }
             }
         }
-        for dev in dir.keys().filter(|d| **d != me) {
-            if let Some(&waiting) = self.ledger.pending_seqs(dev).last() {
-                let held = self.ledger.head(dev).seq;
-                let e = lacking.entry(dev.clone()).or_insert((held, 0, "pending"));
+        for dev in known.iter().filter(|d| **d != me) {
+            if let Some(&waiting) = self.f3.ledger.pending_seqs(dev).last() {
+                let held = self.f3.ledger.head(dev).seq;
+                let e = lacking.entry(*dev).or_insert((held, 0, "pending"));
                 e.1 = e.1.max(waiting);
             }
         }
+        let names: BTreeMap<crate::record::Id16, String> = view.devices.clone();
         let watch = &mut self.ledger_alarm.watch;
         let before = std::mem::take(&mut watch.behind);
         for (dev, (held, seen, source)) in lacking {
+            let did = DeviceId::from_bytes(&dev);
             let pulls = before
-                .get(&dev)
+                .get(&did)
                 .map(|b| if b.held == held { b.pulls + 1 } else { 1 })
                 .unwrap_or(1);
             if pulls == ledger_recovery::WITHHOLD_PULLS {
-                log::warn!(device:% = dev, held = held, seen = seen; "a storage may be withholding ledger batches");
+                log::warn!(device:% = did, held = held, seen = seen; "a storage may be withholding ledger batches");
             }
-            let name = view
-                .devices
+            let name = names
                 .get(&dev)
                 .cloned()
-                .unwrap_or_else(|| dev.short().to_string());
+                .unwrap_or_else(|| did.short().to_string());
             watch.behind.insert(
-                dev.clone(),
+                did.clone(),
                 ledger_recovery::LedgerBehind {
-                    device: dev.to_string(),
+                    device: did.to_string(),
                     name,
                     held,
                     seen,
@@ -939,60 +450,46 @@ impl Engine {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::ledger3::events::{Event as Event3, PackStored};
+    use crate::ledger3::LedgerObject as Object3;
     use crate::storage::{CallCounts, StorageCalls};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     const PASS: &str = "correct horse battery staple";
 
-    /// A few plausible events for synthetic batch `i` of device number `d`.
-    fn synthetic_events(d: u64, i: u64, folder: &FolderId) -> Vec<Event> {
-        let chunk =
-            ChunkId::from_bytes(&crypto::hash(&[d.to_le_bytes(), i.to_le_bytes()].concat()));
-        let object = ObjectName::from_bytes(&crypto::hash(chunk.as_str().as_bytes()));
-        let mut evs = vec![
-            Event::ChunkStored {
-                folder: folder.clone(),
-                chunk: chunk.clone(),
-                object: object.clone(),
-                storage: "box".into(),
-                size: 4096 + i,
-                pack: None,
-            },
-            Event::ChunkOnDevice {
-                folder: folder.clone(),
-                chunk: chunk.clone(),
-                object: object.clone(),
-                size: 4096 + i,
-            },
-        ];
-        if i % 3 == 0 && i > 0 {
-            // Verify a chunk another device wrote earlier.
-            let other = ChunkId::from_bytes(&crypto::hash(
-                &[((d + 1) % 3).to_le_bytes(), (i - 1).to_le_bytes()].concat(),
-            ));
-            evs.push(Event::ChunkVerified {
-                folder: folder.clone(),
-                object: ObjectName::from_bytes(&crypto::hash(other.as_str().as_bytes())),
-                chunk: other,
-                storage: "box".into(),
-            });
-        }
-        evs
+    /// A plausible event for synthetic batch `i` of device number `d`: a
+    /// claim of a pack of `folder` on the storage "box".
+    fn synthetic_events(d: u64, i: u64, folder: &FolderId) -> Vec<Event3> {
+        vec![Event3::PackStored(PackStored {
+            storage: "box".into(),
+            pack: crypto::hash(&[d.to_le_bytes(), i.to_le_bytes()].concat()),
+            class: 0,
+            folder: crate::record::id16(folder).unwrap_or([0; 16]),
+            map_seq: 0,
+        })]
     }
 
     /// Append `n` synthetic batches to this device's ledger without pushing.
     pub(crate) fn append_synthetic(e: &mut Engine, d: u64, n: u64, folder: &FolderId) {
+        let me = e.me3();
         for i in 0..n {
             let lamport = e.tick().unwrap();
-            let (key_id, key) = e.ledger_key_now();
-            e.ledger
-                .append_own_with(
-                    &e.vault.device_id.clone(),
-                    synthetic_events(d, i, folder),
+            let (key_id, key) = e.ledger_key3().unwrap();
+            let seen = e.f3.ledger.vault_seen(&me);
+            let raw = synthetic_events(d, i, folder)
+                .iter()
+                .map(Event3::to_raw)
+                .collect();
+            e.f3.ledger
+                .append_own(
+                    &me,
+                    raw,
+                    seen,
                     lamport,
                     &key,
                     &key_id,
+                    crate::ledger3::NO_FOLDER,
                     &e.keys.signer,
                 )
                 .unwrap();
@@ -1068,6 +565,14 @@ pub(super) mod tests {
         );
     }
 
+    /// The view kept between calls equals a full replay.
+    fn view_is_replay(e: &Engine) {
+        assert_eq!(
+            e.view3().unwrap().canonical(),
+            e.view3_replayed().unwrap().canonical()
+        );
+    }
+
     /// Measures the mailbox and the view on a vault with many batches:
     /// `VARSTO_BENCH_BATCHES` (default 20000) synthetic batches from three
     /// devices on one local directory. Run with
@@ -1098,117 +603,13 @@ pub(super) mod tests {
         report("pull_ledger, first (ingest all)", took, calls);
         let (_, took, calls) = measure(c, |e| e.pull_ledger().unwrap());
         report("pull_ledger, nothing new", took, calls);
-        let (view, took, calls) = measure(c, |e| e.view().unwrap());
-        report("view()", took, calls);
-        eprintln!(
-            "view: {} batches, {} chunks",
-            view.batches,
-            view.chunks.len()
-        );
-        let (_, took, calls) = measure(c, |e| e.view().unwrap());
-        report("view(), again", took, calls);
-        let (_, took, calls) = measure(c, |e| {
-            e.pending.push(Event::FolderAdded {
-                folder: folder.clone(),
-            });
-            e.commit_batch().unwrap()
-        });
-        report("commit_batch (one event, push)", took, calls);
-        let (_, took, calls) = measure(c, |e| {
-            e.pending.push(Event::FolderAdded {
-                folder: folder.clone(),
-            });
-            e.commit_batch().unwrap()
-        });
-        report("commit_batch, again", took, calls);
-        let home = c.home.clone();
-        let cache_bytes = fs::metadata(c.view_cache_path())
-            .map(|m| m.len())
-            .unwrap_or(0);
-        drop(devs);
-        let mut c = Engine::open(&home, PASS).unwrap();
-        let (_, took, calls) = measure(&mut c, |e| e.view().unwrap());
-        report("view() after a restart", took, calls);
-        eprintln!("ledger/view.enc: {:.1} MB", cache_bytes as f64 / 1e6);
-        let usage = || {
-            let files: Vec<u64> = walkdir::WalkDir::new(lab.root.join("storage/ledger"))
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file())
-                .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
-                .collect();
-            eprintln!(
-                "storage ledger/: {} objects, {:.1} MB",
-                files.len(),
-                files.iter().sum::<u64>() as f64 / 1e6
-            );
-        };
-        usage();
-
-        // Checkpoints with the default policy, acknowledgements, pruning.
-        drop(c);
-        let homes: Vec<PathBuf> = (0..3).map(|i| lab.root.join(format!("dev{i}"))).collect();
-        let mut devs: Vec<Engine> = homes
-            .iter()
-            .map(|h| Engine::open(h, PASS).unwrap())
-            .collect();
-        for e in devs.iter_mut() {
-            // A and B have not read the others' batches yet.
-            e.pull_ledger().unwrap();
-        }
-        let t = Instant::now();
-        for _ in 0..3 {
-            for e in devs.iter_mut() {
-                e.pull_ledger().unwrap();
-                e.ledger_upkeep().unwrap();
-            }
-        }
-        eprintln!(
-            "checkpoints, acknowledgements and pruning: {:.1} s",
-            t.elapsed().as_secs_f64()
-        );
-        for e in &devs {
-            let me = e.vault.device_id.clone();
-            let cp = e.ledger.checkpoint(&me).unwrap().expect("a checkpoint");
-            eprintln!(
-                "checkpoint of {}: through {}, {:.2} MB",
-                e.vault.device_name,
-                cp.seq,
-                cp.body_hex.len() as f64 / 2e6
-            );
-        }
-        usage();
-        let c = &mut devs[2];
-        let (_, took, calls) = measure(c, |e| e.pull_ledger().unwrap());
-        report("pull_ledger, nothing new", took, calls);
-        let (_, took, calls) = measure(c, |e| e.view().unwrap());
-        report("view()", took, calls);
-        let t = Instant::now();
-        let key = devs[0].export_vault_key().unwrap();
-        let mut e = Engine::join(
-            &lab.root.join("late"),
-            "late",
-            PASS,
-            &key,
-            lab.storage.clone(),
-        )
-        .unwrap();
-        eprintln!(
-            "join of a new device (first pull included): {:.1} s",
-            t.elapsed().as_secs_f64()
-        );
-        let (view, took, calls) = measure(&mut e, |e| e.view().unwrap());
-        report("view() on the new device", took, calls);
-        eprintln!(
-            "view: {} batches, {} chunks",
-            view.batches,
-            view.chunks.len()
-        );
+        let (view, took, calls) = measure(c, |e| e.view3().unwrap());
+        report("view3()", took, calls);
+        eprintln!("view: {} batches, {} packs", view.batches, view.packs.len());
     }
 
     /// After the first pull, a pull with nothing new lists one short range
-    /// per device and storage and downloads nothing; a commit lists only
-    /// the newest own batches.
+    /// per device and storage and downloads no batch; a commit writes one.
     #[test]
     fn mailbox_reads_only_what_is_new() {
         let (_tmp, lab) = lab("incremental");
@@ -1220,22 +621,14 @@ pub(super) mod tests {
         }
         let c = &mut devs[2];
         c.pull_ledger().unwrap();
-        let (_, _, calls) = measure(c, |e| {
-            let mut out = Vec::new();
-            for (_, b) in e.metadata_storages(false).unwrap() {
-                for dev in e.key_directory().unwrap().keys() {
-                    out.push(remote_objects(b.as_ref(), dev, e.ledger.head(dev).seq).unwrap());
-                }
-            }
-            out
-        });
-        assert_eq!(calls.listed_keys, 0, "nothing new after the heads");
-        let before = c.view().unwrap().batches;
+        let before = c.view3().unwrap().batches;
         let (forks, _, calls) = measure(c, |e| e.pull_ledger().unwrap());
         assert!(forks.is_empty());
         assert_eq!(calls.ledger_gets, 0, "nothing new to download: {calls:?}");
-        assert_eq!(calls.ledger_listed_keys, 0, "{calls:?}");
-        assert_eq!(c.view().unwrap().batches, before);
+        // The listing starts at the head held here (the rollback judge needs
+        // the storage's own newest): at most that one key per device.
+        assert!(calls.ledger_listed_keys <= 3, "{calls:?}");
+        assert_eq!(c.view3().unwrap().batches, before);
 
         // A new batch of A is the only one B downloads.
         devs[1].pull_ledger().unwrap();
@@ -1244,14 +637,14 @@ pub(super) mod tests {
         });
         let (_, _, calls) = measure(&mut devs[0], |e| e.commit_batch().unwrap());
         assert_eq!(calls.puts, 1, "{calls:?}");
-        assert!(calls.ledger_listed_keys <= 1, "{calls:?}");
+        assert_eq!(calls.ledger_listed_keys, 0, "{calls:?}");
         let ledger_gets = |e: &mut Engine| {
             let calls = Arc::new(StorageCalls::default());
             e.count_storage_calls(calls.clone());
-            let before = e.view().unwrap().batches;
+            let before = e.view3().unwrap().batches;
             e.pull_ledger().unwrap();
             e.storage_calls = None;
-            (e.view().unwrap().batches - before, calls.snapshot())
+            (e.view3().unwrap().batches - before, calls.snapshot())
         };
         let (new, calls) = ledger_gets(&mut devs[1]);
         assert_eq!(new, 1);
@@ -1268,7 +661,7 @@ pub(super) mod tests {
         let a = &mut devs[0];
         append_synthetic(a, 0, 5, &folder);
         a.push_own_batches().unwrap();
-        let head = a.ledger.head(&a.vault.device_id).seq;
+        let head = a.own_head3();
         let dir = lab
             .root
             .join("storage/ledger")
@@ -1280,7 +673,7 @@ pub(super) mod tests {
     }
 
     /// A copy of this device restored from an old backup sees its newer
-    /// batches after its own head and refuses to push.
+    /// batches after its own head and refuses to sign.
     #[test]
     fn restored_copy_is_fenced_by_incremental_listing() {
         let (_tmp, lab) = lab("fence");
@@ -1298,7 +691,8 @@ pub(super) mod tests {
         let forks = restored.pull_ledger().unwrap();
         assert_eq!(forks, vec![restored.vault.device_id.clone()]);
         assert!(restored.forked_self);
-        let _ = folder;
+        restored.pending.push(Event::FolderAdded { folder });
+        assert!(restored.commit_batch().is_err());
     }
 
     /// The view is saved, picked up again after a restart and brought up
@@ -1313,21 +707,20 @@ pub(super) mod tests {
         devs[0].push_own_batches().unwrap();
         let b = &mut devs[1];
         b.pull_ledger().unwrap();
-        let path = b.view_cache_path();
+        let path = b.view3_path();
         assert!(path.exists());
         let home = b.home.clone();
         drop(devs);
         let mut b = Engine::open(&home, PASS).unwrap();
-        assert!(b.load_view_cache().is_some());
-        assert_eq!(b.view().unwrap(), b.view_replayed().unwrap());
+        assert!(b.load_view().is_some());
+        view_is_replay(&b);
         append_synthetic(&mut b, 1, 3, &folder);
-        assert_eq!(b.view().unwrap(), b.view_replayed().unwrap());
+        view_is_replay(&b);
         drop(b);
         fs::write(&path, b"garbage").unwrap();
         let b = Engine::open(&home, PASS).unwrap();
-        let v = b.view().unwrap();
-        assert_eq!(v, b.view_replayed().unwrap());
-        assert!(v.chunks.len() >= 43);
+        view_is_replay(&b);
+        assert!(b.view3().unwrap().packs.len() >= 43);
     }
 
     fn folder_with_files(e: &mut Engine, root: &Path, name: &str, files: &[(&str, &[u8])]) {
@@ -1339,7 +732,7 @@ pub(super) mod tests {
     }
 
     fn own_head(e: &Engine) -> u64 {
-        e.ledger.head(&e.vault.device_id).seq
+        e.own_head3()
     }
 
     /// A sync of several folders seals one batch, not a pull and a push
@@ -1364,13 +757,14 @@ pub(super) mod tests {
         // Nothing changed: no batch at all.
         a.sync(None).unwrap();
         assert_eq!(own_head(a), before + 2);
-        assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
+        view_is_replay(a);
     }
 
-    /// Fetching a file records its blocks with the next batch: kept on disk
-    /// across a restart, counted in this device's view meanwhile.
+    /// Fetching a file makes no batch: the device says it holds the file
+    /// with the `held` flag of its next manifest (format 3 has no
+    /// per-block "on device" event).
     #[test]
-    fn fetch_is_sealed_with_the_next_batch() {
+    fn a_fetch_is_announced_by_the_next_manifest() {
         let (_tmp, lab) = lab("deferred");
         let mut devs = devices(&lab, 2);
         devs[0].chunker = ChunkerParams::SMALL;
@@ -1381,36 +775,30 @@ pub(super) mod tests {
             &[("one.jpg", &[7u8; 20_000])],
         );
         devs[0].sync(None).unwrap();
+        let b_id = devs[1].me3();
+        let req = devs[1].f3_folder_request("photos", "editor").unwrap();
+        devs[0]
+            .f3_approve("photos", "dev1", None, Some(&req.fingerprint))
+            .unwrap();
         let b = &mut devs[1];
         b.pull_ledger().unwrap();
         b.attach_folder("photos", &lab.root.join("b-photos"), true)
             .unwrap();
         b.sync(None).unwrap();
-        let me = b.vault.device_id.clone();
-        let on_b = |e: &Engine| {
-            e.view()
-                .unwrap()
-                .chunks
-                .values()
-                .filter(|c| c.devices.contains(&me))
-                .count()
-        };
-        assert_eq!(on_b(b), 0);
         let head = own_head(b);
         b.fetch_file("photos", "one.jpg").unwrap();
         assert_eq!(own_head(b), head, "no batch for a fetch");
-        assert!(on_b(b) > 0, "the fetch counts in this device's view");
-        assert!(b.home.join(DEFERRED_FILE).exists());
-        let home = b.home.clone();
-        drop(devs);
-        let mut b = Engine::open(&home, PASS).unwrap();
-        assert!(on_b(&b) > 0, "kept across a restart");
         b.sync(None).unwrap();
-        assert_eq!(own_head(&b), head + 1);
-        assert!(!b.home.join(DEFERRED_FILE).exists());
-        assert!(b.pending.is_empty());
-        assert_eq!(b.view().unwrap(), b.view_replayed().unwrap());
-        assert!(on_b(&b) > 0);
+        assert_eq!(own_head(b), head + 1, "the manifest with `held`");
+        let a = &mut devs[0];
+        a.sync(None).unwrap();
+        let folder = crate::record::id16(&a.keyring.find("photos").unwrap().folder_id).unwrap();
+        let held = a.load_manifests(&folder).held_index();
+        let state = a.load_state(&FolderId::from_bytes(&folder)).unwrap();
+        let object = &state.files["one.jpg"].chunks[0].object;
+        let obj = crate::storages3::object_bin(object).unwrap();
+        assert!(held.held_by(&obj, &b_id), "B holds the file now");
+        view_is_replay(a);
     }
 
     /// Events recorded before a failure inside `one_batch` are still sealed.
@@ -1436,10 +824,20 @@ pub(super) mod tests {
         assert!(a.pending.is_empty());
     }
 
-    fn stored(lab: &Lab, device: &DeviceId) -> BTreeSet<LedgerObject> {
+    fn stored(lab: &Lab, device: &DeviceId) -> BTreeSet<Object3> {
         fs::read_dir(lab.root.join("storage/ledger").join(device.as_str()))
             .unwrap()
-            .filter_map(|e| LedgerObject::parse(&e.unwrap().file_name().to_string_lossy()))
+            .filter_map(|e| Object3::parse(&e.unwrap().file_name().to_string_lossy()))
+            .collect()
+    }
+
+    fn batches3(objects: &BTreeSet<Object3>) -> BTreeSet<u64> {
+        objects
+            .iter()
+            .filter_map(|o| match o {
+                Object3::Batch(s) => Some(*s),
+                Object3::Checkpoint(..) => None,
+            })
             .collect()
     }
 
@@ -1459,40 +857,41 @@ pub(super) mod tests {
             };
         }
         let folder = FolderId::random();
-        let a_id = devs[0].vault.device_id.clone();
+        let a_dev = devs[0].vault.device_id.clone();
+        let a_id = devs[0].me3();
         let a_home = devs[0].home.clone();
         let backup = lab.root.join("a-backup");
         copy_tree(&a_home, &backup);
         append_synthetic(&mut devs[0], 0, 30, &folder);
         devs[0].push_own_batches().unwrap();
         devs[0].ledger_upkeep().unwrap();
-        let head = devs[0].ledger.head(&a_id);
+        let head = devs[0].f3.ledger.head(&a_id);
         let n = head.base.as_ref().expect("a checkpoint").seq;
         assert_eq!(n, head.seq);
         // Nobody has acknowledged it: everything stays.
-        assert_eq!(stored(&lab, &a_id).len() as u64, head.seq + 1);
+        assert_eq!(stored(&lab, &a_dev).len() as u64, head.seq + 1);
 
         for e in devs[1..].iter_mut() {
             e.pull_ledger().unwrap();
             e.ledger_upkeep().unwrap();
-            assert_eq!(e.ledger.head(&a_id).base.map(|b| b.seq), Some(n));
+            assert_eq!(e.f3.ledger.head(&a_id).base.map(|b| b.seq), Some(n));
         }
         devs[0].pull_ledger().unwrap();
         devs[0].ledger_upkeep().unwrap();
-        let left = stored(&lab, &a_id);
-        assert!(left.contains(&LedgerObject::Checkpoint(n)));
+        let left = stored(&lab, &a_dev);
+        assert!(left.contains(&Object3::Checkpoint(n, 0)));
         assert_eq!(
-            batches_of(&left),
+            batches3(&left),
             (n - 1..=head.seq).collect::<BTreeSet<u64>>(),
             "the batches before the checkpoint went, except the last two"
         );
-        assert!(devs[0].ledger.get(&a_id, 1).unwrap().is_none());
+        assert!(devs[0].f3.ledger.get(&a_id, 1).unwrap().is_none());
         // B drops its copies of A's old batches as well.
         devs[1].pull_ledger().unwrap();
         devs[1].ledger_upkeep().unwrap();
-        assert!(devs[1].ledger.get(&a_id, n).unwrap().is_none());
+        assert!(devs[1].f3.ledger.get(&a_id, n).unwrap().is_none());
         for e in &devs {
-            assert_eq!(e.view().unwrap(), e.view_replayed().unwrap());
+            view_is_replay(e);
         }
 
         // A device joining now reads the checkpoint, not A's old batches.
@@ -1505,15 +904,13 @@ pub(super) mod tests {
             lab.storage.clone(),
         )
         .unwrap();
-        assert_eq!(d.ledger.head(&a_id).base.map(|b| b.seq), Some(n));
-        assert!(d.ledger.get(&a_id, n - 1).unwrap().is_none());
+        assert_eq!(d.f3.ledger.head(&a_id).base.map(|b| b.seq), Some(n));
+        assert!(d.f3.ledger.get(&a_id, n - 1).unwrap().is_none());
         devs[1].pull_ledger().unwrap();
         d.pull_ledger().unwrap();
-        let (vb, vd) = (devs[1].view().unwrap(), d.view().unwrap());
-        assert_eq!(vb.chunks, vd.chunks);
-        assert_eq!(vb.devices, vd.devices);
-        assert_eq!(vb.batches, vd.batches);
-        assert_eq!(vd, d.view_replayed().unwrap());
+        let (vb, vd) = (devs[1].view3().unwrap(), d.view3().unwrap());
+        assert_eq!(vb.canonical().packs, vd.canonical().packs);
+        view_is_replay(&d);
 
         // A copy of A restored from before the checkpoint is fenced.
         drop(devs);
@@ -1521,7 +918,7 @@ pub(super) mod tests {
         copy_tree(&backup, &a_home);
         let mut restored = Engine::open(&a_home, PASS).unwrap();
         let forks = restored.pull_ledger().unwrap();
-        assert!(forks.contains(&a_id));
+        assert!(forks.contains(&a_dev));
         restored.pending.push(Event::FolderAdded { folder });
         assert!(restored.commit_batch().is_err());
     }

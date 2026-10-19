@@ -10,9 +10,6 @@
 //! Thumbnails are derived data and follow the same rule as content: never
 //! stored in clear text outside the process.
 
-use crate::crypto::{self, SecretKey};
-use crate::ids::{FolderId, VaultId};
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::io::Cursor;
@@ -40,21 +37,6 @@ fn ext(path: &str) -> String {
         .next()
         .map(|e| e.to_ascii_lowercase())
         .unwrap_or_default()
-}
-
-pub fn storage_key(folder: &FolderId, content_hash: &str) -> String {
-    format!("thumbs/{}/{}.enc", folder, content_hash)
-}
-
-fn aad(vault: &VaultId, folder: &FolderId, content_hash: &str) -> Vec<u8> {
-    crypto::aad(
-        "thumbnail",
-        &[
-            vault.as_str().as_bytes(),
-            folder.as_str().as_bytes(),
-            content_hash.as_bytes(),
-        ],
-    )
 }
 
 /// Whether ffmpeg may decode videos on the GPU or another media engine.
@@ -338,26 +320,6 @@ fn encode(img: image::DynamicImage) -> Option<Vec<u8>> {
     Some(buf.into_inner())
 }
 
-pub fn seal(
-    bytes: &[u8],
-    vault: &VaultId,
-    folder: &FolderId,
-    content_hash: &str,
-    meta_key: &SecretKey,
-) -> Result<Vec<u8>> {
-    crypto::encrypt(meta_key, &aad(vault, folder, content_hash), bytes)
-}
-
-pub fn open(
-    blob: &[u8],
-    vault: &VaultId,
-    folder: &FolderId,
-    content_hash: &str,
-    meta_key: &SecretKey,
-) -> Result<Vec<u8>> {
-    crypto::decrypt(meta_key, &aad(vault, folder, content_hash), blob)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn image_thumbnail_roundtrip() {
+    fn image_thumbnail_is_small_and_other_names_make_none() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("big.png");
         let img = image::RgbImage::from_fn(900, 600, |x, y| {
@@ -519,11 +481,6 @@ mod tests {
         let t = make(&p, "big.png").expect("thumbnail");
         let decoded = image::load_from_memory(&t).unwrap();
         assert!(decoded.width() <= MAX_SIDE && decoded.height() <= MAX_SIDE);
-        let key = SecretKey::random();
-        let (v, f) = (VaultId::random(), FolderId::random());
-        let sealed = seal(&t, &v, &f, "abc", &key).unwrap();
-        assert_eq!(open(&sealed, &v, &f, "abc", &key).unwrap(), t);
-        assert!(open(&sealed, &v, &f, "other", &key).is_err());
         assert!(make(&p, "notes.txt").is_none());
         let from_memory = make_from_bytes(&std::fs::read(&p).unwrap(), "big.png").unwrap();
         assert!(image::load_from_memory(&from_memory).unwrap().width() <= MAX_SIDE);

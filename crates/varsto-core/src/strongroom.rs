@@ -26,11 +26,10 @@
 //! free them; malware active during the window sees what you see.
 
 use crate::crypto::{self, SecretKey};
-use crate::ids::{DeviceId, FolderId, VaultId};
+use crate::ids::{FolderId, VaultId};
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -636,95 +635,6 @@ pub fn rewrap_one(
         wrapped_key_hex: hex::encode(wrapped),
         ..k.clone()
     })
-}
-
-/// Published once a folder has been converted into a Strongroom
-/// (`vault/converted/<old folder>.enc`, under the folder-record key). It
-/// names the folder that replaces the old one and how far each device's
-/// changes were included, and carries no key.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ConversionRecord {
-    pub old_folder: FolderId,
-    pub new_folder: FolderId,
-    pub device: DeviceId,
-    pub converted_utc: i64,
-    /// Highest manifest sequence of each device that the converted copy
-    /// includes: a device that published more after that keeps its plain files.
-    pub covered: BTreeMap<DeviceId, u64>,
-    /// The old folder was a Strongroom already: its key was rotated.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub rekey: bool,
-}
-
-impl ConversionRecord {
-    pub const PREFIX: &'static str = "vault/converted/";
-    pub fn storage_key(old: &FolderId) -> String {
-        format!("{}{}.enc", Self::PREFIX, old)
-    }
-    fn aad(vault: &VaultId, old: &FolderId) -> Vec<u8> {
-        crypto::aad(
-            "strongroom-conversion",
-            &[vault.as_str().as_bytes(), old.as_str().as_bytes()],
-        )
-    }
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.old_folder),
-            &serde_json::to_vec(self)?,
-        )
-    }
-    pub fn open(blob: &[u8], vault: &VaultId, old: &FolderId, key: &SecretKey) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, old), blob)?;
-        let rec: ConversionRecord = serde_json::from_slice(&plain)?;
-        if &rec.old_folder != old {
-            bail!("conversion record does not match its name");
-        }
-        Ok(rec)
-    }
-}
-
-/// The current list of enrolled keys of a Strongroom, published when a key
-/// is added or removed (`vault/strongroom-keys/<folder>/<updated>.enc`, under
-/// the folder-record key); the newest list wins.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct KeysRecord {
-    pub folder_id: FolderId,
-    pub device: DeviceId,
-    pub info: StrongroomInfo,
-}
-
-impl KeysRecord {
-    pub const PREFIX: &'static str = "vault/strongroom-keys/";
-    pub fn storage_key(&self) -> String {
-        format!(
-            "{}{}/{:020}.enc",
-            Self::PREFIX,
-            self.folder_id,
-            self.info.updated_utc
-        )
-    }
-    fn aad(vault: &VaultId, folder: &FolderId) -> Vec<u8> {
-        crypto::aad(
-            "strongroom-keys",
-            &[vault.as_str().as_bytes(), folder.as_str().as_bytes()],
-        )
-    }
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.folder_id),
-            &serde_json::to_vec(self)?,
-        )
-    }
-    pub fn open(blob: &[u8], vault: &VaultId, folder: &FolderId, key: &SecretKey) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, folder), blob)?;
-        let rec: KeysRecord = serde_json::from_slice(&plain)?;
-        if &rec.folder_id != folder || rec.info.keys().is_empty() {
-            bail!("strongroom keys record does not match its name");
-        }
-        Ok(rec)
-    }
 }
 
 /// A conversion in progress or awaiting clean-up, kept in this device's

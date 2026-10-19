@@ -1187,22 +1187,28 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     // The typed address first, then the addresses of the scanned link, then
     // a search of the network; the page polls /api/pair/join-status.
     let offered = str_list(input, "addresses");
-    set_join_step(json!({"active": true, "step": "start", "tried": []}));
+    // This device's keys: the other device shows their six words to its
+    // person before it lets this one join, and the page shows them here.
+    let keys = varsto_core::pair::v3::PairingKeys::generate();
+    let words = keys.fingerprint();
+    set_join_step(json!({"active": true, "step": "start", "tried": [], "fingerprint": words}));
     let mut tried: Vec<String> = Vec::new();
     let result = varsto_core::pair::receive_with_progress(
         &code,
-        &name,
+        &keys.join_keys(&name),
         opt(input, "address").as_deref(),
         &offered,
         &mut |step| match step {
             varsto_core::pair::Step::Trying(a) => {
                 tried.push(a.to_string());
                 set_join_step(
-                    json!({"active": true, "step": "trying", "address": a.to_string(), "tried": tried}),
+                    json!({"active": true, "step": "trying", "address": a.to_string(), "tried": tried, "fingerprint": words}),
                 );
             }
             varsto_core::pair::Step::Looking => {
-                set_join_step(json!({"active": true, "step": "looking", "tried": tried}));
+                set_join_step(
+                    json!({"active": true, "step": "looking", "tried": tried, "fingerprint": words}),
+                );
             }
         },
     );
@@ -1223,7 +1229,7 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
         }
     };
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-    let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle)?;
+    let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle, keys)?;
     st.engine = Some(e);
     st.service.request_sync();
     Ok(json!({"ok": true, "from": bundle.from, "storages": notes}))
@@ -1252,9 +1258,6 @@ fn link_info(link: &varsto_core::qr::Link) -> Result<Value> {
             let r = Engine::share_request_info(code)?;
             v["fingerprint"] = json!(r.fingerprint);
             v["name"] = json!(r.name);
-        }
-        Link::ShareToken(t) => {
-            v["folder"] = json!(varsto_core::vault::SealedShareToken::decode(t)?.name);
         }
         Link::Pair { code, addresses } => {
             v["code"] = json!(format!("{}-{}-{}", &code[0..3], &code[3..6], &code[6..9]));
@@ -1634,8 +1637,6 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             "has_vault": has_vault,
             "unlocked": st.engine.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
-            // Folder membership of storage format 3 is in this build.
-            "format3": cfg!(feature = "format3"),
             "platform": std::env::consts::OS,
             // Mobile shells set these so the interface can pick folder locations itself.
             "mobile": mobile(),
@@ -1773,7 +1774,15 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(st.service.summary())
         }
         (Method::Post, "/api/unlock") => {
-            let e = Engine::open(&st.home, &s(input, "passphrase")?)?;
+            let mut e = Engine::open(&st.home, &s(input, "passphrase")?)?;
+            // `varsto unlock --with-recovery-key`: the recovery words stay
+            // in this process's memory until it stops or is locked.
+            if let Some(words) = opt(input, "recovery_words").filter(|w| !w.trim().is_empty()) {
+                varsto_core::logging::register_secret(words.trim());
+                e.set_recovery_key(Some(varsto_core::membership3::RecoveryKey::from_words(
+                    words.trim(),
+                )?));
+            }
             st.engine = Some(e);
             st.service.request_sync();
             Ok(json!({"ok": true}))
@@ -1794,25 +1803,18 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             if let Some(old) = st.pair.take() {
                 old.stop();
             }
-            #[cfg(feature = "format3")]
-            if input.get("format").and_then(|f| f.as_u64()) == Some(3) {
-                let offer = f3_api::start_offer(e)?;
-                let status = offer.status();
-                st.pair = Some(offer);
-                return pair_status(status);
-            }
-            let offer = varsto_core::pair::Offer::start(e.pairing_bundle()?)?;
+            // The joining device's name and six words wait for the person
+            // here (`ask` in the status) before anything is sent.
+            let offer = f3_api::start_offer(e)?;
             let status = offer.status();
             st.pair = Some(offer);
             pair_status(status)
         }
         (Method::Get, "/api/pair/status") => {
-            #[allow(unused_mut)]
             let mut v = match &st.pair {
                 Some(o) => pair_status(o.status())?,
                 None => json!({"open": false}),
             };
-            #[cfg(feature = "format3")]
             f3_api::add_pair_ask(&mut v, st.engine.as_mut());
             Ok(v)
         }
@@ -1888,8 +1890,11 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         }
         (Method::Post, "/api/init") => {
             let (e, key) = Engine::init(&st.home, &s(input, "name")?, &s(input, "passphrase")?)?;
+            // The kit with the vault words and the recovery words, shown once:
+            // a folder's recovery copy (`recovery_words` of /api/folder) needs them.
+            let kit = e.recovery_kit_text()?;
             st.engine = Some(e);
-            Ok(json!({"ok": true, "vault_key": key}))
+            Ok(json!({"ok": true, "vault_key": key, "kit": kit}))
         }
         (Method::Post, "/api/share/request") => {
             let name = opt(input, "name").filter(|n| !n.trim().is_empty());
@@ -1922,12 +1927,9 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             )
         }
         (Method::Post, "/api/share/accept") => {
-            let raw = s(input, "token")?;
-            let token = if varsto_core::vault::SealedShareToken::is_sealed(&raw) {
-                varsto_core::vault::ShareRequest::open_token(&st.home, &raw)?
-            } else {
-                varsto_core::vault::ShareToken::decode(&raw)?
-            };
+            // The owner device's six words, as the person typed them (none:
+            // the only folder shared with this request is taken).
+            let words = opt(input, "owner_words").filter(|w| !w.trim().is_empty());
             let storage_name = opt(input, "storage_name")
                 .filter(|n| !n.trim().is_empty())
                 .unwrap_or_else(|| "shared".into());
@@ -1936,13 +1938,18 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 &st.home,
                 &s(input, "name")?,
                 &s(input, "passphrase")?,
-                &token,
+                words.as_deref(),
                 spec,
                 secret,
             )?;
+            let folder = e
+                .folders()
+                .into_iter()
+                .next()
+                .map(|(r, _)| r.name.clone())
+                .unwrap_or_default();
             st.engine = Some(e);
-            varsto_core::vault::ShareRequest::clear(&st.home);
-            Ok(json!({"ok": true, "folder": token.name, "fingerprint": token.fingerprint}))
+            Ok(json!({"ok": true, "folder": folder}))
         }
         (Method::Post, "/api/join") => {
             // The storage that holds the vault: a directory, or an S3-compatible
@@ -2141,9 +2148,7 @@ fn api_unlocked(
 ) -> Result<Value> {
     match (method, path) {
         (Method::Get, "/api/status") => {
-            #[allow(unused_mut)]
             let mut v = serde_json::to_value(engine.status()?)?;
-            #[cfg(feature = "format3")]
             if let Ok(list) = engine.f3_missing_escrows() {
                 if !list.is_empty() {
                     v["recovery_warnings"] = json!(list.iter().map(|m| &m.warning).collect::<Vec<_>>());
@@ -2169,23 +2174,17 @@ fn api_unlocked(
                 Some(r) => varsto_core::share::ShareRole::parse(&r)?,
                 None => varsto_core::share::ShareRole::Editor,
             };
-            match opt(input, "to").filter(|c| !c.trim().is_empty()) {
-                Some(code) => {
-                    // The interface sends the words the user confirmed; they
-                    // must be the code's.
-                    let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
-                    let (sealed, req) =
-                        engine.share_create_sealed_as(&folder, &code, confirmed.as_deref(), role)?;
-                    Ok(json!({"ok": true, "token": sealed.encode(), "folder": sealed.name, "sealed": true, "fingerprint": req.fingerprint, "name": req.name, "role": role.as_str()}))
-                }
-                None if !role.is_editor() => {
-                    bail!("a viewer's token must be sealed to their request code: paste it (a plain token cannot say what its holder may do)")
-                }
-                None => {
-                    let t = engine.share_create_plain(&folder)?;
-                    Ok(json!({"ok": true, "token": t.encode_plain()?, "folder": t.name, "sealed": false}))
-                }
-            }
+            let code = opt(input, "to")
+                .filter(|c| !c.trim().is_empty())
+                .ok_or_else(|| anyhow!("paste the recipient's request code"))?;
+            // The interface sends the words the user confirmed; they must
+            // be the code's.
+            let confirmed = opt(input, "fingerprint").filter(|f| !f.trim().is_empty());
+            let added = engine.share_add(&folder, &code, confirmed.as_deref(), role)?;
+            service.request_sync();
+            let mut v = serde_json::to_value(&added)?;
+            v["ok"] = json!(true);
+            Ok(v)
         }
         (Method::Get, "/api/share/members") => {
             let folder = query_param(query, "folder")
@@ -2475,7 +2474,16 @@ fn api_unlocked(
                 Some(p) => PathBuf::from(p),
                 None => default_folder_path(engine.home(), &name, plain)?,
             };
-            let id = engine.add_folder(&name, &path)?;
+            // The folder's recovery copy: the words given with the request,
+            // or the session copy (`unlock --with-recovery-key`).
+            let k1 = opt(input, "recovery_words")
+                .filter(|w| !w.trim().is_empty())
+                .map(|w| {
+                    varsto_core::logging::register_secret(w.trim());
+                    varsto_core::membership3::RecoveryKey::from_words(w.trim())
+                })
+                .transpose()?;
+            let id = engine.add_folder_with_recovery(&name, &path, k1)?;
             if !plain {
                 engine.set_encrypted_here(&name, true)?;
             }
@@ -3027,6 +3035,7 @@ fn api_unlocked(
             "peers": service.p2p_peers,
             "lan_peers": service.p2p_lan_peers,
             "chunks_from_peers": service.p2p_chunks,
+            "bytes_from_peers": service.p2p_bytes,
             "nat": service.p2p_nat,
             "public": service.p2p_public,
             "reachable": service.p2p_reachable,
@@ -3568,36 +3577,12 @@ fn api_unlocked(
 
 /// Folder membership of storage format 3 in the local API (work package
 /// 8b): requests, approval, roles, removal, recovery copies and the pairing
-/// question. Without the `format3` feature every route answers that it is
-/// not available in this build.
+/// question.
 mod f3_api {
     use super::*;
 
-    #[cfg(not(feature = "format3"))]
-    pub fn route(
-        _engine: &mut Engine,
-        _service: &mut ServiceState,
-        _method: Method,
-        _path: &str,
-        _query: &str,
-        _input: &Value,
-    ) -> Result<Value> {
-        bail!("folder membership of storage format 3 is not available in this build of Varsto")
-    }
-
-    #[cfg(not(feature = "format3"))]
-    pub fn remove_device(
-        _engine: &mut Engine,
-        _service: &mut ServiceState,
-        _input: &Value,
-    ) -> Result<Value> {
-        bail!("folder membership of storage format 3 is not available in this build of Varsto")
-    }
-
-    #[cfg(feature = "format3")]
     pub use real::*;
 
-    #[cfg(feature = "format3")]
     mod real {
         use super::*;
         use std::sync::{Condvar, Mutex as StdMutex};
@@ -3889,6 +3874,12 @@ mod tests {
         a.add_folder("notes", &t.join("a-notes")).unwrap();
         a.sync(None).unwrap();
         let mut b = Engine::join(&t.join("b"), "laptop", pass, &key, storage).unwrap();
+        // Content comes with an owner's approval of each folder.
+        for f in ["camera", "notes"] {
+            let req = b.f3_folder_request(f, "editor").unwrap();
+            a.f3_approve(f, "laptop", None, Some(&req.fingerprint))
+                .unwrap();
+        }
 
         let refused = attach_request(
             &mut b,
@@ -5032,7 +5023,6 @@ mod tests {
 
     /// A vault of two devices on one directory storage, and the folder
     /// `docs` in the membership records of the first.
-    #[cfg(feature = "format3")]
     fn f3_pair(t: &std::path::Path) -> (Engine, Engine, String) {
         let storage = StorageSpec::LocalDir {
             name: "box".into(),
@@ -5051,7 +5041,6 @@ mod tests {
         (a, b, id)
     }
 
-    #[cfg(feature = "format3")]
     fn f3_call(
         engine: &mut Engine,
         service: &mut ServiceState,
@@ -5063,7 +5052,6 @@ mod tests {
         api_unlocked(engine, service, m, path, query, &input)
     }
 
-    #[cfg(feature = "format3")]
     #[test]
     fn folder_membership_endpoints() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5407,7 +5395,6 @@ mod tests {
     }
 
     /// The service announces requests (`folder.request`) and never answers one.
-    #[cfg(feature = "format3")]
     #[test]
     fn the_service_announces_requests_once() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5441,7 +5428,6 @@ mod tests {
     }
 
     /// A device that joins by pairing, as the offering side sees it.
-    #[cfg(feature = "format3")]
     fn f3_joiner(
         name: &'static str,
         code: String,
@@ -5469,7 +5455,6 @@ mod tests {
     /// The pairing question on the offering side: the joining device's name
     /// and words wait for the person; nothing is sent before the answer;
     /// ticked folders are granted before the vault key goes out.
-    #[cfg(feature = "format3")]
     #[test]
     fn pairing_asks_the_person_and_grants_only_ticked_folders() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5495,14 +5480,7 @@ mod tests {
             }
             panic!("no question");
         };
-        let started = api(
-            &mut st,
-            Method::Post,
-            "/api/pair/start",
-            "",
-            &json!({"format": 3}),
-        )
-        .unwrap();
+        let started = api(&mut st, Method::Post, "/api/pair/start", "", &json!({})).unwrap();
         let code = started["code"].as_str().unwrap().to_string();
         let port = started["port"].as_u64().unwrap() as u16;
 
@@ -5554,14 +5532,7 @@ mod tests {
         assert!(!photos.participants.iter().any(|p| p.device_id == device));
 
         // A second device is declined: no grants, and it learns so.
-        let started = api(
-            &mut st,
-            Method::Post,
-            "/api/pair/start",
-            "",
-            &json!({"format": 3}),
-        )
-        .unwrap();
+        let started = api(&mut st, Method::Post, "/api/pair/start", "", &json!({})).unwrap();
         let code2 = started["code"].as_str().unwrap().to_string();
         let port2 = started["port"].as_u64().unwrap() as u16;
         let (h2, device2) = f3_joiner("tablet", code2, port2);
@@ -5635,57 +5606,5 @@ mod tests {
         ] {
             assert!(APP_JS.contains(k), "script lacks {k}");
         }
-    }
-
-    /// A build without the feature answers every route with the same text.
-    #[cfg(not(feature = "format3"))]
-    #[test]
-    fn folder_membership_routes_say_not_available() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (mut a, _key) = Engine::init(
-            &tmp.path().join("a"),
-            "alpha",
-            "correct horse battery staple",
-        )
-        .unwrap();
-        let mut service = ServiceState::default();
-        for (m, path) in [
-            (Method::Get, "/api/folder/requests"),
-            (Method::Post, "/api/folder/request"),
-            (Method::Post, "/api/folder/approve"),
-            (Method::Post, "/api/folder/deny"),
-            (Method::Get, "/api/folder/members"),
-            (Method::Post, "/api/folder/role"),
-            (Method::Post, "/api/folder/resolve-epoch"),
-            (Method::Get, "/api/recovery/escrow"),
-            (Method::Post, "/api/recovery/escrow"),
-        ] {
-            let e = api_unlocked(
-                &mut a,
-                &mut service,
-                m,
-                path,
-                "",
-                &json!({"folder": "docs", "device": "x"}),
-            )
-            .unwrap_err();
-            assert!(
-                format!("{e:#}").contains("not available in this build"),
-                "{path}: {e:#}"
-            );
-        }
-        let e = api_unlocked(
-            &mut a,
-            &mut service,
-            Method::Post,
-            "/api/folder/remove",
-            "",
-            &json!({"folder": "docs", "device": "x", "confirm": true}),
-        )
-        .unwrap_err();
-        assert!(
-            format!("{e:#}").contains("not available in this build"),
-            "{e:#}"
-        );
     }
 }

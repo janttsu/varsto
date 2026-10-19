@@ -179,6 +179,29 @@ pub struct Task {
 }
 
 impl Task {
+    /// Another device's staged object as a task (for its sentences).
+    pub fn of_board(e: &BoardEntry) -> Task {
+        Task {
+            kind: e.kind,
+            key: e.key.clone(),
+            size: e.size,
+            pool: e.pool.clone(),
+            source_disk: String::new(),
+            source_label: e.source_label.clone(),
+            target: e.target.clone(),
+            places: e.places.clone(),
+            target_disks: e.target_disks.clone(),
+            folder: None,
+            chunk: None,
+            object: None,
+            job: None,
+            state: TaskState::Held,
+            created_utc: 0,
+            staged_utc: 0,
+            updated_utc: 0,
+        }
+    }
+
     /// The task's id in the task file: one per kind, target and object.
     pub fn id(&self) -> String {
         task_id(self.kind, &self.target, &self.key)
@@ -541,12 +564,99 @@ impl BoardEntry {
     }
 }
 
-/// A device's list of staged objects.
+/// One staged object on the wire (postcard: every field written).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Board {
-    pub device: crate::ids::DeviceId,
+pub struct BoardWire {
+    pub kind: TaskKind,
+    pub key: String,
+    pub size: u64,
+    pub pool: String,
+    pub source_label: String,
+    pub target: String,
+    pub target_disks: Vec<String>,
+    pub places: Vec<String>,
+    pub folder: Option<[u8; 16]>,
+    pub staged_utc: i64,
+}
+
+/// The body of a `mailbox` record (kind 28, `vault/mailbox/<device>/`,
+/// under the registry key): what the device holds staged. The newest seq
+/// of each device's stream wins.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BoardBody {
+    pub device: [u8; 16],
+    pub seq: u64,
     pub updated_utc: i64,
-    pub held: Vec<BoardEntry>,
+    pub held: Vec<BoardWire>,
+}
+
+impl BoardBody {
+    pub fn new(device: [u8; 16], seq: u64, updated_utc: i64, held: &[BoardEntry]) -> BoardBody {
+        BoardBody {
+            device,
+            seq,
+            updated_utc,
+            held: held
+                .iter()
+                .map(|e| BoardWire {
+                    kind: e.kind,
+                    key: e.key.clone(),
+                    size: e.size,
+                    pool: e.pool.clone(),
+                    source_label: e.source_label.clone(),
+                    target: e.target.clone(),
+                    target_disks: e.target_disks.clone(),
+                    places: e.places.clone(),
+                    folder: e.folder.as_ref().and_then(crate::record::id16),
+                    staged_utc: e.staged_utc,
+                })
+                .collect(),
+        }
+    }
+
+    /// The entries as the engine keeps them.
+    pub fn entries(&self) -> Vec<BoardEntry> {
+        self.held
+            .iter()
+            .map(|w| BoardEntry {
+                kind: w.kind,
+                key: w.key.clone(),
+                size: w.size,
+                pool: w.pool.clone(),
+                source_label: w.source_label.clone(),
+                target: w.target.clone(),
+                target_disks: w.target_disks.clone(),
+                places: w.places.clone(),
+                folder: w.folder.map(|f| FolderId::from_bytes(&f)),
+                chunk: None,
+                object: None,
+                staged_utc: w.staged_utc,
+            })
+            .collect()
+    }
+}
+
+impl crate::record::RecordBody for BoardBody {
+    fn check(&self, meta: &crate::record::RecordMeta) -> Result<(), String> {
+        if self.device != meta.device {
+            return Err("its device is not the record's writer".into());
+        }
+        if self.seq != meta.seq || self.seq == 0 {
+            return Err("its seq is not the record's".into());
+        }
+        if meta.scope != [0u8; 16] {
+            return Err("a mailbox list is a vault-wide record".into());
+        }
+        if self.held.len() > 1 << 20 {
+            return Err("too many staged objects".into());
+        }
+        Ok(())
+    }
+}
+
+/// The stream of `device`'s mailbox lists.
+pub fn board_stream(device: [u8; 16]) -> crate::record::StreamRef {
+    crate::record::StreamRef::new(crate::record::Kind::Mailbox, [0u8; 16], device)
 }
 
 /// What the disk suggestion (section 40) learns from the mailbox.

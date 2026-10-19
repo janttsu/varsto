@@ -106,6 +106,32 @@ pub fn check_disk_packs(
     Ok((out, events))
 }
 
+/// The events of a disk check that re-hashed packs: `pack_verified` for
+/// every pack in `verified` (keys `packs/<xx>/<id>`) that the ledger shows
+/// held on the pool, `pack_dropped` for packs in `gone` (bad or missing)
+/// that the pool now holds on no disk.
+pub fn disk_check_events(
+    pool: &PoolStorage,
+    view: &LedgerView,
+    verified: &[String],
+    gone: &[String],
+) -> Vec<Event> {
+    let storage = pool.name().to_string();
+    let mut events: Vec<Event> = verified
+        .iter()
+        .filter_map(|k| pack_of_key(k).and_then(pack_id))
+        .filter(|id| view.is_held(id, &storage))
+        .map(|pack| {
+            Event::PackVerified(PackOn {
+                storage: storage.clone(),
+                pack,
+            })
+        })
+        .collect();
+    events.extend(lost_events(pool, view, gone));
+    events
+}
+
 /// The disks of a pool that hold a pack, as policies count them (one copy
 /// per disk, at the disk's place).
 pub fn pool_pack_copies(pool: &PoolStorage, pack: &PackId) -> Vec<DiskCopy> {
@@ -115,6 +141,7 @@ pub fn pool_pack_copies(pool: &PoolStorage, pack: &PackId) -> Vec<DiskCopy> {
             name: l.label,
             place: l.place,
             readable: l.attached,
+            verified_utc: l.last_verified_utc,
         })
         .collect()
 }

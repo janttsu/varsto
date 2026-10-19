@@ -15,9 +15,15 @@
 //! same deterministic chunking and encryption as a push of a plain file), go
 //! into the cache, and are uploaded from there. Peers are served the cached
 //! objects verbatim.
+//!
+//! Storage format 3: whether a block is stored elsewhere (so that its cached
+//! copy may go) is decided by the copies of the block (`block_copies3`: a
+//! live place in the folder's block map whose pack the ledger view shows on
+//! a storage that keeps it), never by per-block ledger claims.
 
 use super::*;
 use crate::chunk_seal::seal_chunk;
+use crate::ledger3::LedgerView as View3;
 use std::io::Read;
 
 /// Block cache directory inside the device directory.
@@ -183,7 +189,7 @@ impl Engine {
         (ObjectName::from_bytes(&crypto::hash(&bytes)) == *object).then_some(bytes)
     }
 
-    fn cache_has(&self, object: &ObjectName) -> bool {
+    pub(super) fn cache_has(&self, object: &ObjectName) -> bool {
         cache_path(&self.block_cache_root(), object).is_file()
     }
 
@@ -482,19 +488,11 @@ impl Engine {
             put_cached(&root, &cref.object, &ct)?;
             if source.starts_with("peer:") {
                 report.chunks_from_peers += 1;
+                report.bytes_from_peers += cref.size;
             }
             report.chunks_downloaded += 1;
             report.bytes_downloaded += cref.size;
             progress.advance(cref.size);
-            // "peer:<id>" is a device, not a storage: only a storage copy is verified.
-            if !source.starts_with("peer:") {
-                self.pending.push(Event::ChunkVerified {
-                    folder: rec.folder_id.clone(),
-                    chunk: cref.chunk.clone(),
-                    object: cref.object.clone(),
-                    storage: source,
-                });
-            }
             self.pending.push(Event::ChunkOnDevice {
                 folder: rec.folder_id.clone(),
                 chunk: cref.chunk.clone(),
@@ -847,24 +845,35 @@ impl Engine {
         n
     }
 
-    /// Storages whose copy lets a device drop its own: every storage that is
-    /// not a transferrer, and replicas.
-    pub(super) fn durable_copy(&self, view: &LedgerView, folder: &FolderId, c: &ChunkRef) -> bool {
-        let durable: HashSet<&str> = self
-            .config
+    /// The storages whose copy lets a device drop its own: every storage
+    /// that is not a transferrer (and replicas, by their `replica:` name).
+    fn durable_storages(&self) -> HashSet<String> {
+        self.config
             .storages
             .iter()
             .filter(|s| !s.is_carrier())
-            .map(|s| s.name())
-            .collect();
-        view.locate(folder, &c.chunk)
-            .filter(|r| r.object == c.object)
-            .map(|r| {
-                r.storages
-                    .keys()
-                    .any(|k| durable.contains(k.as_str()) || k.starts_with("replica:"))
-            })
-            .unwrap_or(false)
+            .map(|s| s.name().to_string())
+            .collect()
+    }
+
+    /// Whether a storage that keeps it holds a live place of `object` of
+    /// `folder` (its pack on that storage in the view, the place not marked
+    /// dead or lost).
+    fn durably_stored(
+        &self,
+        view: &View3,
+        durable: &HashSet<String>,
+        folder: &FolderId,
+        object: &ObjectName,
+    ) -> bool {
+        self.block_copies3(view, folder, object)
+            .iter()
+            .any(|k| durable.contains(k) || k.starts_with("replica:"))
+    }
+
+    /// Every block of `c` is stored where a copy lets a device drop its own.
+    pub(super) fn durable_copy(&self, view: &View3, folder: &FolderId, c: &ChunkRef) -> bool {
+        self.durably_stored(view, &self.durable_storages(), folder, &c.object)
     }
 
     /// Drop the cached blocks of `paths` of a folder kept encrypted here.
@@ -876,7 +885,7 @@ impl Engine {
         rec: &FolderRecord,
         paths: &[String],
     ) -> Result<Vec<(String, String)>> {
-        let view = self.view()?;
+        let view = self.view3()?;
         let mut state = self.load_state(&rec.folder_id)?;
         let mut kept = Vec::new();
         let mut freed = 0usize;
@@ -915,7 +924,7 @@ impl Engine {
                 }
                 self.config.save(&self.home)?;
             }
-            self.gc_block_cache(&view)?;
+            self.gc_block_cache()?;
         }
         Ok(kept)
     }
@@ -924,27 +933,16 @@ impl Engine {
     /// cached files, and every block whose only copy may be this one (no
     /// storage holds it). Objects the ledger does not know at all (an upload
     /// being encrypted) are left alone for a while. Returns objects removed.
-    pub(super) fn gc_block_cache(&self, view: &LedgerView) -> Result<u64> {
+    pub(super) fn gc_block_cache(&self) -> Result<u64> {
         let dir = self.block_cache_root().join("chunks");
         if !dir.is_dir() {
             return Ok(0);
         }
-        // Object name -> some storage that is not a transferrer holds it.
-        let durable_names: HashSet<&str> = self
-            .config
-            .storages
-            .iter()
-            .filter(|s| !s.is_carrier())
-            .map(|s| s.name())
-            .collect();
+        let view = self.view3()?;
+        let durable = self.durable_storages();
+        // Object name -> whether a storage that keeps it holds a live place
+        // of it (through the block maps of the folders that name it).
         let mut stored: HashMap<String, bool> = HashMap::new();
-        for r in view.chunks.values() {
-            let d = r
-                .storages
-                .keys()
-                .any(|k| durable_names.contains(k.as_str()) || k.starts_with("replica:"));
-            *stored.entry(r.object.to_string()).or_insert(false) |= d;
-        }
         let mut keep: HashSet<String> = HashSet::new();
         for m in &self.config.folders {
             let state = self.load_state(&m.folder_id)?;
@@ -957,7 +955,10 @@ impl Engine {
                 let cached = m.encrypted && state.local_index.contains_key(&f.path);
                 for c in &f.chunks {
                     let name = c.object.to_string();
-                    if cached || !stored.get(&name).copied().unwrap_or(false) {
+                    let here = *stored.entry(name.clone()).or_insert_with(|| {
+                        self.durably_stored(&view, &durable, &m.folder_id, &c.object)
+                    });
+                    if cached || !here {
                         keep.insert(name);
                     }
                 }

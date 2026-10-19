@@ -110,7 +110,7 @@ impl PolicyState {
 pub const NEW_DATA_GRACE_SECS: i64 = 24 * 3600;
 
 /// One chunk's standing against the policy.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChunkFacts {
     /// Storage name -> (place, verified by someone other than the writer, newest verification time).
     pub copies: Vec<(String, String, bool, i64)>,

@@ -291,6 +291,21 @@ impl Guard {
     pub fn id(&self) -> u64 {
         self.task.id
     }
+    /// A handle that counts on this task from other threads (the readers
+    /// of a parallel verification); the task ends with the guard.
+    pub fn counter(&self) -> Counter {
+        Counter(self.task.clone())
+    }
+}
+
+/// Counts on a task from any thread (`Guard::counter`).
+#[derive(Clone)]
+pub struct Counter(Arc<Task>);
+
+impl Counter {
+    pub fn advance(&self, n: u64) {
+        self.0.add(n);
+    }
 }
 
 impl Drop for Guard {
@@ -919,14 +934,23 @@ mod tests {
         let cache = PeerCache::default();
         // A peer on a closed port of this machine.
         let addr: std::net::SocketAddr = "127.0.0.1:9".parse().unwrap();
-        let peers = Arc::new(crate::p2p::Peers::new(
-            crate::crypto::SecretKey::random(),
+        let client = crate::p2p::v3::Client::new(
             DeviceId::random(),
-            vec![crate::p2p::PeerAddr {
+            crate::p2p::quic::Identity::generate().unwrap(),
+        );
+        let peers = Arc::new(crate::p2p::Peers::with_infos(
+            client,
+            vec![crate::p2p::PeerInfo {
                 device: DeviceId::random(),
-                addr,
                 name: "desk".into(),
+                tcp: vec![addr],
+                udp: Vec::new(),
+                cert_sha256: "ab".repeat(32),
+                relay_via: Vec::new(),
+                nat: crate::p2p::stun::Nat::Unknown,
+                reachable: false,
             }],
+            None,
         ));
         cache.set_peers(Some(peers.clone()), None);
         assert!(!cache.watched());

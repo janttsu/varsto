@@ -190,6 +190,10 @@ pub(super) fn reconstruct(
                 }
             }
             if opts.verify_named && !verified(input, s, id, class_len, counts) {
+                // Not claimed: the repair queue takes it.
+                counts
+                    .named_corrupt
+                    .push(format!("{}:{}", s.name, hex::encode(id)));
                 continue;
             }
             events.push(Event::PackStored(PackStored {
@@ -254,8 +258,17 @@ pub(super) fn reconstruct(
         }
     }
 
-    // Records of this device that no batch of the ledger announces.
+    // Records of this device that no batch of the ledger announces. The
+    // view keeps a stream from its newest base on: records below it are
+    // superseded (and wait for pruning), not lost announcements.
     for r in records.values() {
+        let newest_base = view
+            .stream(r.kind.code(), &r.folder, &me)
+            .and_then(|s| s.base())
+            .map(|(b, _, _)| b);
+        if newest_base.is_some_and(|b| r.seq < b) {
+            continue;
+        }
         let known = view.announced(r.kind.code(), &r.folder, &me, r.seq);
         match known {
             Some(a) if a.body_hash == r.body_hash => continue,

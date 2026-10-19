@@ -160,6 +160,7 @@ fn device_id_is_the_hash_of_k6() {
             lamport: 9,
             device: fake,
         },
+        details: None,
     };
     Writer {
         vault: VAULT,
@@ -281,6 +282,7 @@ fn grants_and_folder_records_from_non_owners_are_refused() {
             k9,
             k11: grants::k11_of(&f, &SecretKey(k9)).0,
             older: Vec::new(),
+            directory: None,
         };
         Writer {
             vault: VAULT,
@@ -325,6 +327,7 @@ fn grants_and_folder_records_from_non_owners_are_refused() {
             },
         }],
         members: Vec::new(),
+        removed: None,
     };
     Writer {
         vault: VAULT,
@@ -647,10 +650,11 @@ fn fingerprint_is_stable_and_changes_with_either_key() {
     assert_eq!(fp, fingerprint(&k6, &k8));
     assert_ne!(fp, fingerprint(&e.sign.public().to_bytes(), &k8));
     assert_ne!(fp, fingerprint(&k6, &e.kem.public().to_bytes()));
-    // Same derivation as the format-2 request fingerprint, other context.
+    // Same derivation as the request fingerprint of other people's
+    // devices, other context (that one covers the name too).
     let ek = d.kem.public();
-    assert_ne!(fp, crate::share::fingerprint(&ek, ""));
-    // The format-2 fingerprint is unchanged by sharing its derivation.
+    assert_ne!(fp, crate::share::fingerprint(&k6, &k8, ""));
+    // The derivation itself, spelled out.
     let mut ikm = Vec::new();
     for part in [ek.to_bytes().as_slice(), b"Alice".as_slice()] {
         ikm.extend_from_slice(&(part.len() as u32).to_le_bytes());
@@ -665,7 +669,13 @@ fn fingerprint_is_stable_and_changes_with_either_key() {
     let old: Vec<&str> = (0..6)
         .map(|i| words[((bits >> (72 - 11 * (i + 1))) & 0x7ff) as usize])
         .collect();
-    assert_eq!(crate::share::fingerprint(&ek, "Alice"), old.join(" "));
+    assert_eq!(
+        crate::share::fingerprint_words(
+            "varsto share-request fingerprint v1",
+            &[ek.to_bytes().as_slice(), b"Alice".as_slice()]
+        ),
+        old.join(" ")
+    );
 }
 
 /// A meta for the body checks of the fuzz loop.
@@ -740,6 +750,7 @@ fn body_parsers_survive_random_bytes() {
             sign_pub: d.sign.public().to_bytes(),
             kem_pub: d.kem.public().to_bytes()[..64].to_vec(),
             stamp,
+            details: None,
         },
     );
     fuzz_one(
@@ -757,6 +768,7 @@ fn body_parsers_survive_random_bytes() {
                 stamp,
             }],
             members: Vec::new(),
+            removed: None,
         },
     );
     fuzz_one(
@@ -771,6 +783,7 @@ fn body_parsers_survive_random_bytes() {
             k9: [7; 32],
             k11: [8; 32],
             older: vec![(0, [9; 32])],
+            directory: None,
         },
     );
     fuzz_one(
@@ -1046,17 +1059,98 @@ fn a_member_of_another_vault_writes_by_the_member_rows() {
     let names = s
         .list(&format!("vault/grants/{}/", hex::encode(f)))
         .unwrap();
+    // (One grant per change of the folder's participants: each carries
+    // the directory as it was then.)
     let to_m: Vec<&String> = names
         .iter()
         .filter(|n| n.contains(&hex::encode(m)))
         .collect();
-    assert_eq!(to_m.len(), 1);
-    let env = crate::record::SignedRecord::decode(&s.get(to_m[0]).unwrap().unwrap()).unwrap();
+    assert!(!to_m.is_empty());
+    let newest = to_m.iter().max().unwrap();
+    let env = crate::record::SignedRecord::decode(&s.get(newest).unwrap().unwrap()).unwrap();
     let body = env.open_part(&MemberKem(&friend, m)).unwrap();
     let grant: grants::GrantRecord = decode_body(&body).unwrap();
     assert_eq!(
         (grant.folder, grant.recipient, grant.role),
         (f, m, Role::Editor)
     );
+    // The directory names every participant with its keys and role.
+    let dir = grant
+        .directory
+        .clone()
+        .expect("a grant to a member carries the directory");
+    assert_eq!(dir.get(&m).and_then(|e| e.role()), Some(Role::Editor));
+    assert_eq!(dir.get(&w).and_then(|e| e.role()), Some(Role::Viewer));
+    assert!(dir
+        .get(&ma.me)
+        .is_some_and(|e| e.full && e.role() == Some(Role::Owner)));
+    assert!(dir.entries.iter().all(|e| e.id_matches()));
     assert!(env.open_part(&MemberKem(&guest, m)).is_err());
+}
+
+#[test]
+fn a_folder_removal_counts_from_an_owner_and_device_details_travel_in_the_record() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b) = (Dev::new(), Dev::new());
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut mb = Membership::open(VAULT, &st, &b.sign, &b.kem, keys.clone()).unwrap();
+    let details = devices::DeviceDetails {
+        os: "Linux".into(),
+        os_version: "6.11".into(),
+        arch: "x86_64".into(),
+        app_version: "0.0.1".into(),
+        platform: "linux".into(),
+        updated_utc: 1_800_000_000,
+        ..Default::default()
+    };
+    mb.enrol_with("phone", Some(details.clone())).unwrap();
+    ma.refresh().unwrap();
+    assert_eq!(
+        ma.devices.get(&mb.me).unwrap().details.as_ref(),
+        Some(&details)
+    );
+    let f = ma.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    ma.approve(&f, &mb.me.clone(), Role::Editor).unwrap();
+    mb.refresh().unwrap();
+    // An editor cannot remove the folder, and a record it writes anyway
+    // does not count.
+    assert!(mb.remove_folder(&f).is_err());
+    let stamp = Stamp {
+        lamport: 500,
+        device: mb.me,
+    };
+    let rec = FolderRecord {
+        id: f,
+        name: "Docs".into(),
+        settings: BTreeMap::new(),
+        stamp,
+        creation: None,
+        participants: Vec::new(),
+        denied: Vec::new(),
+        members: Vec::new(),
+        removed: Some(stamp),
+    };
+    Writer {
+        vault: VAULT,
+        storages: &st,
+        device: mb.me,
+        key: &b.sign,
+    }
+    .write(
+        &mb.record_keys(),
+        &FolderRegistry::stream(f, mb.me),
+        None,
+        &KeyId::Registry(0),
+        &rec,
+    )
+    .unwrap();
+    ma.refresh().unwrap();
+    assert!(!ma.registry.get(&f).unwrap().is_removed());
+    // The owner's removal counts on every device.
+    ma.remove_folder(&f).unwrap();
+    mb.refresh().unwrap();
+    assert!(mb.registry.get(&f).unwrap().is_removed());
+    assert!(ma.registry.get(&f).unwrap().is_removed());
 }

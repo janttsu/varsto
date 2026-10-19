@@ -267,12 +267,14 @@ struct Group {
 
 /// Everything one read of one content id needs, apart from the engine.
 struct IngestCtx {
-    folder: FolderId,
     vault: VaultId,
     fk: FolderKeys,
     storages: Arc<OpenStorages>,
     targets: WriteTargets,
-    view: LedgerView,
+    /// The pack-level view and the folder's block map (copies of a block).
+    view: crate::ledger3::LedgerView,
+    table: Arc<std::sync::RwLock<crate::blockmap::MapTable>>,
+
     /// Storages left out for the rest of the run (a pool with no disk).
     unavailable: BTreeSet<String>,
     /// (object, storage) written or found during this run.
@@ -628,22 +630,18 @@ fn ingest(
                     (o, e)
                 }
             };
-            let record = ctx_ref
-                .view
-                .locate(&ctx_ref.folder, &chunk_id)
-                .filter(|r| r.object == object);
+            let standing = {
+                let t = ctx_ref.table.read().unwrap_or_else(|e| e.into_inner());
+                super::data_moves::BlockStanding::of(&ctx_ref.view, &t, &object)
+            };
             let targets: Vec<usize> = storages
                 .iter()
                 .enumerate()
                 .filter(|(_, (spec, _))| {
                     !spec.is_carrier()
                         && !ctx_ref.unavailable.contains(spec.name())
-                        && ctx_ref.targets.wants(spec.name(), record)
-                        && !record.is_some_and(|r| {
-                            r.storages
-                                .get(spec.name())
-                                .is_some_and(|l| !l.claimed_by.is_empty())
-                        })
+                        && ctx_ref.targets.wants(spec.name(), Some(&standing))
+                        && !standing.copies.contains(spec.name())
                         && !ctx_ref
                             .stored
                             .contains(&(object.clone(), spec.name().to_string()))
@@ -719,9 +717,12 @@ fn ingest(
     }))
 }
 
-/// A content whose blocks are all written (or refused): the events that
-/// record it, or `None` while a pack with one of its blocks is still being
-/// written. A storage that failed is an error.
+/// A content whose blocks are all written (or refused): `Some` when it may
+/// count as imported, `None` while a pack with one of its blocks is still
+/// being written. A storage that failed is an error. The packs written are
+/// claimed by the map record of the next checkpoint (`import_maps`); a
+/// device keeping a full copy says it holds the blocks through the `held`
+/// flags of its manifest.
 fn settle_content(
     ctx: &mut IngestCtx,
     writer: &PackWriter,
@@ -740,10 +741,14 @@ fn settle_content(
     }
     let chunks = &done.chunks;
     let mut storage_error: Option<anyhow::Error> = None;
-    let mut ok: Vec<(usize, usize)> = Vec::new();
+    let mut held: HashSet<usize> = HashSet::new();
     for (index, t, r) in outcomes {
         match r {
-            Ok(()) => ok.push((index, t)),
+            Ok(()) => {
+                let name = ctx.storages[t].0.name().to_string();
+                ctx.stored.insert((chunks[index].object.clone(), name));
+                held.insert(index);
+            }
             Err(BlockError::Pool(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })) => {
                 ctx.unavailable.insert(ctx.storages[t].0.name().to_string());
             }
@@ -755,47 +760,23 @@ fn settle_content(
     if let Some(e) = storage_error {
         return Err(e);
     }
-    let mut events = Vec::new();
-    let mut held: HashSet<usize> = HashSet::new();
-    for (index, t) in ok {
-        let c = &chunks[index];
-        let name = ctx.storages[t].0.name().to_string();
-        ctx.stored.insert((c.object.clone(), name.clone()));
-        held.insert(index);
-        events.push(Event::ChunkStored {
-            folder: ctx.folder.clone(),
-            chunk: c.chunk.clone(),
-            object: c.object.clone(),
-            size: c.size,
-            storage: name,
-            pack: None,
-        });
-    }
-    for (index, c) in chunks.iter().enumerate() {
-        let elsewhere = held.contains(&index)
-            || ctx
-                .view
-                .locate(&ctx.folder, &c.chunk)
-                .filter(|r| r.object == c.object)
-                .is_some_and(|r| r.storages.values().any(|l| !l.claimed_by.is_empty()))
-            || ctx.storages.iter().any(|(s, _)| {
-                ctx.stored
-                    .contains(&(c.object.clone(), s.name().to_string()))
-            });
-        if ctx.full {
-            events.push(Event::ChunkOnDevice {
-                folder: ctx.folder.clone(),
-                chunk: c.chunk.clone(),
-                object: c.object.clone(),
-                size: c.size,
-            });
-        } else if !elsewhere {
-            bail!("no storage took the blocks: check that a storage is reachable (and that a pool has a disk attached)");
+    if !ctx.full {
+        let t = ctx.table.read().unwrap_or_else(|e| e.into_inner());
+        for (index, c) in chunks.iter().enumerate() {
+            let elsewhere = held.contains(&index)
+                || crate::storages3::object_bin(&c.object)
+                    .is_ok_and(|o| !crate::storages3::block_copies(&ctx.view, &*t, &o).is_empty())
+                || ctx.storages.iter().any(|(s, _)| {
+                    ctx.stored
+                        .contains(&(c.object.clone(), s.name().to_string()))
+                });
+            if !elsewhere {
+                bail!("no storage took the blocks: check that a storage is reachable (and that a pool has a disk attached)");
+            }
         }
     }
-    Ok(Some(events))
+    Ok(Some(Vec::new()))
 }
-
 fn push_example(list: &mut Vec<Note>, count: &mut u64, note: Note) {
     *count += 1;
     if list.len() < EXAMPLES {
@@ -1374,12 +1355,15 @@ impl Engine {
             }
         }
         let mut ctx = IngestCtx {
-            folder: rec.folder_id.clone(),
             vault: self.vault.vault_id.clone(),
             fk,
             storages: Arc::new(self.open_storages(false)?),
             targets: self.write_targets(&rec),
-            view: self.view()?,
+            view: self.view3()?,
+            table: self
+                .folder_table(&rec)?
+                .ok_or_else(|| anyhow!("this device holds no key of folder {}", rec.name))?,
+
             unavailable: BTreeSet::new(),
             stored: HashSet::new(),
             known,
@@ -1586,7 +1570,11 @@ impl Engine {
                                         let publish =
                                             last_publish.elapsed().as_secs() >= PUBLISH_EVERY_SECS;
                                         if let Err(e) =
-                                            self.import_checkpoint(&rec, &mut state, &book, publish)
+                                            self.import_maps(&rec, &ctx).and_then(|_| {
+                                                self.import_checkpoint(
+                                                    &rec, &mut state, &book, publish,
+                                                )
+                                            })
                                         {
                                             stop_error = Some(e);
                                             return Ok(Verdict::Stop);
@@ -1665,7 +1653,10 @@ impl Engine {
             .all(|i| book.imported.contains_key(&i.id));
         run.last_utc = util::now_utc();
         book.runs.insert(instance, run);
-        let saved = self.import_checkpoint(&rec, &mut state, &book, true);
+        let saved = self
+            .import_maps(&rec, &ctx)
+            .and_then(|_| self.import_checkpoint(&rec, &mut state, &book, true));
+
         drop(task);
         if let Some(e) = stop_error {
             saved?;
@@ -1857,8 +1848,12 @@ impl Engine {
         publish: bool,
     ) -> Result<()> {
         if publish {
-            self.publish_manifest(rec, state)?;
-            self.ensure_manifest_everywhere(rec, state)?;
+            let folder = members3::bin(&rec.folder_id)?;
+            let epoch = self.folder_keys(rec)?.epoch;
+            if let Some(seq) = self.publish_manifest(&folder, epoch, state)? {
+                state.published_seq = seq;
+                state.published_hash = Manifest::files_hash(&state.files);
+            }
         }
         self.commit_batch()?;
         self.save_state(&rec.folder_id, state)?;
@@ -1869,6 +1864,50 @@ impl Engine {
         Ok(())
     }
 
+    /// The map record of the packs an import wrote since the last one (they
+    /// are claimed in the batch of the checkpoint that follows).
+    fn import_maps(&mut self, rec: &FolderRecord, ctx: &IngestCtx) -> Result<()> {
+        let mut per_storage = Vec::new();
+        for (spec, backend) in ctx.storages.iter() {
+            let new = backend.take_new_packs();
+            if !new.is_empty() {
+                per_storage.push((spec.name().to_string(), new));
+            }
+        }
+        if per_storage.is_empty() {
+            return Ok(());
+        }
+        let info: HashMap<crate::ledger3::ObjectBin, crate::blockmap::ChunkInfo> = ctx
+            .known
+            .values()
+            .filter_map(|c| {
+                Some((
+                    crate::storages3::object_bin(&c.object).ok()?,
+                    (c.chunk.as_bytes().try_into().ok()?, c.size as u32, c.epoch),
+                ))
+            })
+            .collect();
+        // Blocks of a content that turned out damaged stay in their packs,
+        // listed by no map record (garbage collection takes them).
+        let mut written = Vec::new();
+        for (storage, packs) in per_storage {
+            for p in packs {
+                let known = p.members.iter().all(|(o, _)| {
+                    ObjectName::from_hex(o)
+                        .ok()
+                        .and_then(|o| crate::storages3::object_bin(&o).ok())
+                        .is_some_and(|b| info.contains_key(&b))
+                });
+                if known {
+                    written.push((storage.clone(), vec![p]));
+                }
+            }
+        }
+        let packs = crate::blockmap::written_packs(&written, &|o| info.get(o).copied())?;
+        let view = self.view3()?;
+        let epoch = self.folder_keys(rec)?.epoch;
+        self.publish_map3(&members3::bin(&rec.folder_id)?, epoch, &packs, &view)
+    }
     // ----- what an import left ------------------------------------------------------
 
     fn import_books(&self, folder: Option<&str>) -> Result<Vec<(FolderRecord, ImportBook)>> {
@@ -2039,7 +2078,8 @@ impl Engine {
             .next()
             .expect("one folder");
         let state = self.load_state(&rec.folder_id)?;
-        let view = self.view()?;
+        let view = self.view3()?;
+        let table = self.folder_table(&rec)?;
         let carriers: BTreeSet<String> = self
             .config
             .storages
@@ -2047,6 +2087,16 @@ impl Engine {
             .filter(|s| s.is_carrier())
             .map(|s| s.name().to_string())
             .collect();
+        let copies_of = |o: &ObjectName| -> BTreeSet<String> {
+            let (Some(t), Ok(o)) = (&table, crate::storages3::object_bin(o)) else {
+                return BTreeSet::new();
+            };
+            let t = t.read().unwrap_or_else(|e| e.into_inner());
+            crate::storages3::block_copies(&view, &*t, &o)
+                .into_iter()
+                .filter(|n| !carriers.contains(n))
+                .collect()
+        };
         let mut v = ImportVerify {
             folder: rec.name.clone(),
             complete: false,
@@ -2072,11 +2122,7 @@ impl Engine {
                         if !seen.insert(c.chunk.clone()) {
                             continue;
                         }
-                        let on_storage = view.locate(&rec.folder_id, &c.chunk).is_some_and(|r| {
-                            r.storages
-                                .iter()
-                                .any(|(n, l)| !l.claimed_by.is_empty() && !carriers.contains(n))
-                        });
+                        let on_storage = !copies_of(&c.object).is_empty();
                         if !on_storage {
                             v.blocks_without_storage_copy += 1;
                         }
@@ -2180,8 +2226,10 @@ impl Engine {
         );
         task.set_phase("cleanup");
         let state = self.load_state(&rec.folder_id)?;
-        let view = self.view()?;
+        let view = self.view3()?;
+        let table = self.folder_table(&rec)?;
         let mut pctx = self.policy_ctx();
+
         let policy = rec.effective_policy();
         let storages = self.open_storages(false)?;
         let mut read_back: HashSet<ObjectName> = HashSet::new();
@@ -2255,20 +2303,16 @@ impl Engine {
             let mut problem: Option<String> = None;
             let mut facts = Vec::new();
             for c in &f.chunks {
-                let rec_c = view
-                    .locate(&rec.folder_id, &c.chunk)
-                    .filter(|r| r.object == c.object);
-                let holders: Vec<&String> = rec_c
-                    .map(|r| {
-                        r.storages
-                            .iter()
-                            .filter(|(n, l)| {
-                                !l.claimed_by.is_empty() && !pctx.carriers.contains(*n)
-                            })
-                            .map(|(n, _)| n)
+                let holders: Vec<String> = match (&table, crate::storages3::object_bin(&c.object)) {
+                    (Some(t), Ok(o)) => {
+                        let t = t.read().unwrap_or_else(|e| e.into_inner());
+                        crate::storages3::block_copies(&view, &*t, &o)
+                            .into_iter()
+                            .filter(|n| !pctx.carriers.contains(n))
                             .collect()
-                    })
-                    .unwrap_or_default();
+                    }
+                    _ => Vec::new(),
+                };
                 if holders.is_empty() {
                     problem =
                         Some("not on a storage yet (only on devices or a transferrer)".into());
@@ -2278,7 +2322,7 @@ impl Engine {
                     let key = chunk_storage_key(&c.object);
                     let ok = storages
                         .iter()
-                        .filter(|(s, _)| holders.contains(&&s.name().to_string()))
+                        .filter(|(s, _)| holders.iter().any(|h| h == s.name()))
                         .any(|(_, b)| {
                             b.get(&key).ok().flatten().is_some_and(|ct| {
                                 ObjectName::from_bytes(&crypto::hash(&ct)) == c.object
@@ -2290,7 +2334,10 @@ impl Engine {
                     }
                     read_back.insert(c.object.clone());
                 }
-                facts.push(self.chunk_facts(&mut pctx, &view, &rec.folder_id, &c.chunk));
+                if let Some(t) = &table {
+                    let t = t.read().unwrap_or_else(|e| e.into_inner());
+                    facts.push(self.chunk_facts(&mut pctx, &view, &t, &c.object));
+                }
             }
             if problem.is_none() {
                 if let Some(p) = &policy {

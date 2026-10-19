@@ -12,13 +12,9 @@ mod common;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::engine::{JobRunLimits, MailboxOptions, MoveJobRequest};
 use varsto_core::mailbox::MailboxSettings;
-use varsto_core::p2p;
 use varsto_core::placement::Placement;
 use varsto_core::policy::{Policy, PolicyState};
 use varsto_core::pool::{self, DiskSpace};
@@ -500,17 +496,12 @@ fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
     )
     .unwrap();
     e.push("docs").unwrap();
-    let claims = |e: &Engine, s: &str| {
-        e.view()
-            .unwrap()
-            .chunks
-            .values()
-            .filter(|r| r.storages.get(s).is_some_and(|l| !l.claimed_by.is_empty()))
-            .count()
-    };
+    // Packs (the mailbox stages and moves whole packs) and blocks claimed.
+    let claims = |e: &Engine, s: &str| e.packs_on_storage(s).unwrap().len();
     let blocks = claims(&e, "old");
-    assert!(blocks > 1);
-
+    assert!(blocks >= 1);
+    let objects = e.objects_on_storage("old").unwrap().len();
+    assert!(objects > 1);
     // The job cannot write to B: it waits.
     let (job, _) = e
         .move_job_start(&MoveJobRequest {
@@ -531,27 +522,31 @@ fn a_move_drops_the_source_on_a_only_after_the_copy_on_b_is_checked() {
     // Nothing is dropped from A yet, nothing is on B.
     assert_eq!(claims(&e, "old"), blocks);
     assert_eq!(claims(&e, "new"), 0);
-    assert!(e
-        .view()
-        .unwrap()
-        .chunks
-        .values()
-        .all(|r| r.dropped.is_empty()));
-
+    let view = e.ledger_view().unwrap();
+    assert!(view.packs.keys().all(|p| !view.dropped_from(p, "old")));
     // A away, B docked: the job reads the outbox, writes B, checks, drops A.
     lab.undock("disk-a");
     lab.dock_at("dock-1", "disk-b");
     let runs = e.move_jobs_run_ready(false, &JobRunLimits::default());
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].job.state, JobState::Done, "{:?}", runs[0].job);
-    assert_eq!(runs[0].report.blocks_verified as usize, blocks);
+    assert_eq!(runs[0].report.blocks_verified as usize, objects);
     assert_eq!(claims(&e, "new"), blocks);
     assert_eq!(claims(&e, "old"), 0);
-    let me = e.device_id().clone();
-    for r in e.view().unwrap().chunks.values() {
-        let l = &r.storages["new"];
-        assert!(l.verified_by.contains(&me), "the copy on B was read back");
-        assert!(r.dropped.contains_key("old"));
+    let me: [u8; 16] = hex::decode(e.device_id().as_str())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let view = e.ledger_view().unwrap();
+    for id in e.packs_on_storage("new").unwrap().keys() {
+        let id: [u8; 32] = hex::decode(id).unwrap().try_into().unwrap();
+        let c = view.copies(&id);
+        assert!(
+            c.iter()
+                .any(|c| c.storage == "new" && c.verified_by.contains(&me)),
+            "the copy on B was read back"
+        );
+        assert!(view.dropped_from(&id, "old"));
     }
     // A is away: its copies are deleted at its next insert.
     let rows = e.disks().unwrap();
@@ -677,44 +672,11 @@ fn two_dock_hosts_stage_each_block_once() {
     assert_eq!(r.busy.as_deref(), Some("dock-1"), "{r:?}");
 }
 
-/// `from` serves its blocks (and its outbox) over TCP to `to`.
-struct Served {
-    stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl Drop for Served {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-    }
-}
-
-fn serve(from: &Engine, name: &str, to: &mut Engine) -> Served {
-    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let addr = server.addr;
-    let snap = Arc::new(Mutex::new(Some(Arc::new(from.peer_snapshot().unwrap()))));
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop2 = stop.clone();
-    let thread = std::thread::spawn(move || {
-        server.run(snap, stop2);
-    });
-    let peers = p2p::Peers::new(
-        to.peer_key(),
-        to.device_id().clone(),
-        vec![p2p::PeerAddr {
-            device: from.device_id().clone(),
-            addr,
-            name: name.into(),
-        }],
-    );
-    to.set_peers(Some(Arc::new(peers)));
-    Served {
-        stop,
-        thread: Some(thread),
-    }
+/// `from` serves its blocks (and its outbox) over TLS on TCP to `to`.
+fn serve(from: &mut Engine, _name: &str, to: &mut Engine) -> common::p2p::Serving {
+    let serving = common::p2p::Serving::start(from);
+    common::p2p::connect(from, &serving, &mut [to]);
+    serving
 }
 
 #[test]
@@ -758,7 +720,9 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     )
     .unwrap();
     x.push("docs").unwrap();
-    let blocks = x.view().unwrap().chunks.len();
+    // The mailbox stages whole packs.
+    let blocks = x.packs_on_storage("home-pool").unwrap().len();
+
     assert_eq!(docs_policy(&x).state, PolicyState::Violated);
 
     // dock-1 stages the blocks for off-pool (its disk B is away).
@@ -773,7 +737,7 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     // dock-2 knows off-pool and B, keeps the folder selective; B is docked there.
     let home_z = lab.p("dock-2-home");
     roomy(&home_z);
-    let mut z = Engine::join(&home_z, "dock-2", PASS, &key, lab.hub()).unwrap();
+    let mut z = common::join_approved(&home_z, "dock-2", PASS, &key, lab.hub(), &mut x);
     z.chunker = ChunkerParams::SMALL;
     z.add_storage(pool_spec("off-pool", "offsite", 1, &lab.dock("dock-2")))
         .unwrap();
@@ -794,15 +758,25 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
     );
 
     // dock-1 is online: dock-2 takes the staged blocks from its outbox.
-    let served = serve(&x, "dock-1", &mut z);
+    let served = serve(&mut x, "dock-1", &mut z);
     let r = run(&mut z);
     assert_eq!(r.pulled_from_peers as usize, blocks, "{r:?}");
     assert_eq!(r.delivered_to.get("off-pool"), Some(&(blocks as u64)));
     drop(served);
     let mut by: BTreeMap<String, usize> = BTreeMap::new();
-    for rec in z.view().unwrap().chunks.values() {
-        if let Some(l) = rec.storages.get("off-pool") {
-            assert!(l.claimed_by.contains(z.device_id()));
+    let zid: [u8; 16] = hex::decode(z.device_id().as_str())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let view = z.ledger_view().unwrap();
+    for id in z.packs_on_storage("off-pool").unwrap().keys() {
+        let id: [u8; 32] = hex::decode(id).unwrap().try_into().unwrap();
+        for c in view
+            .copies(&id)
+            .into_iter()
+            .filter(|c| c.storage == "off-pool")
+        {
+            assert!(c.claimed_by.contains(&zid));
             *by.entry("off-pool".into()).or_default() += 1;
         }
     }

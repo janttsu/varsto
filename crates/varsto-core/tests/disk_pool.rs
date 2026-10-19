@@ -81,6 +81,21 @@ fn engine(home: &Path, name: &str) -> (Engine, String) {
     (e, key)
 }
 
+/// Folder `docs` at `docs` whose blocks go to the pool only: the vault's
+/// records live on `box` (a pool holds packs, never records).
+fn pool_folder(a: &mut Engine, lab: &Lab, docs: &Path) {
+    a.add_storage(lab.box_spec()).unwrap();
+    a.add_folder("docs", docs).unwrap();
+    a.set_placement(
+        "docs",
+        Some(varsto_core::placement::Placement {
+            storages: vec!["shelf".into()],
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+}
+
 /// The packs on a disk (every block is in one, `varsto_core::packs`).
 fn objects_under(mount: &Path) -> Vec<PathBuf> {
     common::pack_files(&mount.join(pool::DATA_DIR))
@@ -194,12 +209,11 @@ fn detached_disk_is_reported_and_recognised_again_elsewhere() {
     let idx = DiskIndex::read(&d1).expect("eject writes the disk index");
     assert!(!idx.objects.is_empty());
     assert_eq!(idx.label, "data-01");
-    drop(a);
-
     // Device B joins through the box, adds a pool of the same name and adopts
     // the attached disk from its index.
     let b_home = lab.root.join("b-home");
-    let mut b = Engine::join(&b_home, "desk", PASS, &vault_key, lab.box_spec()).unwrap();
+    let mut b = common::join_approved(&b_home, "desk", PASS, &vault_key, lab.box_spec(), &mut a);
+    drop(a);
     b.chunker = ChunkerParams::SMALL;
     b.add_storage(lab.pool_spec("shelf")).unwrap();
     let disks = b.disks().unwrap();
@@ -299,7 +313,7 @@ fn delete_while_detached_is_queued_and_applied_by_check() {
     let docs = lab.root.join("a-docs");
     fs::create_dir_all(&docs).unwrap();
     fs::write(docs.join("one.bin"), pseudo_random(100_000, 11)).unwrap();
-    a.add_folder("docs", &docs).unwrap();
+    pool_folder(&mut a, &lab, &docs);
     a.push("docs").unwrap();
     let files = objects_under(&d1);
     assert!(!files.is_empty());
@@ -361,7 +375,7 @@ fn retired_disk_receives_nothing() {
     let docs = lab.root.join("a-docs");
     fs::create_dir_all(&docs).unwrap();
     fs::write(docs.join("one.bin"), pseudo_random(120_000, 5)).unwrap();
-    a.add_folder("docs", &docs).unwrap();
+    pool_folder(&mut a, &lab, &docs);
     a.push("docs").unwrap();
     assert!(
         objects_under(&d1).is_empty(),
@@ -390,7 +404,7 @@ fn index_files_are_written_and_eject_says_where() {
     let docs = lab.root.join("a-docs");
     fs::create_dir_all(&docs).unwrap();
     fs::write(docs.join("one.bin"), pseudo_random(100_000, 9)).unwrap();
-    a.add_folder("docs", &docs).unwrap();
+    pool_folder(&mut a, &lab, &docs);
     a.push("docs").unwrap();
     // The pool index in the device directory maps every object to the disk.
     let marker = DiskMarker::read(&d1).unwrap();

@@ -33,6 +33,18 @@ pub enum Kind {
     Access = 20,
     Notes = 21,
     Thumbs = 22,
+    /// A replica enrolled by a full device (its K6 public key and name).
+    Replica = 23,
+    /// A Strongroom folder's K13 wraps per FIDO2 credential (and the
+    /// optional K2 escrow of K13).
+    Strongroom = 24,
+    /// An organization's manifest, roster and log: today's signed bodies
+    /// inside a signed record.
+    OrgManifest = 25,
+    OrgRoster = 26,
+    OrgLog = 27,
+    /// A device's mailbox board: what it holds staged for pool disks.
+    Mailbox = 28,
 }
 
 /// One segment of a stream's storage path.
@@ -54,7 +66,7 @@ enum Seg {
 use Seg::*;
 
 impl Kind {
-    pub const ALL: [Kind; 22] = [
+    pub const ALL: [Kind; 28] = [
         Kind::Manifest,
         Kind::BlockMap,
         Kind::Trash,
@@ -77,6 +89,12 @@ impl Kind {
         Kind::Access,
         Kind::Notes,
         Kind::Thumbs,
+        Kind::Replica,
+        Kind::Strongroom,
+        Kind::OrgManifest,
+        Kind::OrgRoster,
+        Kind::OrgLog,
+        Kind::Mailbox,
     ];
 
     pub fn code(self) -> u8 {
@@ -112,6 +130,12 @@ impl Kind {
             Kind::Access => "access",
             Kind::Notes => "notes",
             Kind::Thumbs => "thumbs",
+            Kind::Replica => "replica",
+            Kind::Strongroom => "strongroom",
+            Kind::OrgManifest => "org-manifest",
+            Kind::OrgRoster => "org-roster",
+            Kind::OrgLog => "org-log",
+            Kind::Mailbox => "mailbox",
         }
     }
 
@@ -168,6 +192,12 @@ impl Kind {
             Kind::Access => &[Lit("access"), Scope, Device],
             Kind::Notes => &[Lit("notes"), Scope, Device],
             Kind::Thumbs => &[Lit("thumbs"), Scope, Device],
+            Kind::Replica => &[Lit("vault"), Lit("replicas"), Device],
+            Kind::Strongroom => &[Lit("vault"), Lit("strongroom"), Scope, Device],
+            Kind::OrgManifest => &[Lit("vault"), Lit("org"), Lit("manifest"), Device],
+            Kind::OrgRoster => &[Lit("vault"), Lit("org"), Lit("roster"), Device],
+            Kind::OrgLog => &[Lit("vault"), Lit("org"), Lit("log"), Device],
+            Kind::Mailbox => &[Lit("vault"), Lit("mailbox"), Device],
         }
     }
 
@@ -201,9 +231,19 @@ impl Kind {
                 folder == scope && u64::from(*epoch) == seq
             }
             (
-                Kind::Peer | Kind::Policy | Kind::Settings | Kind::StorageNames | Kind::Device,
+                Kind::Peer
+                | Kind::Policy
+                | Kind::Settings
+                | Kind::StorageNames
+                | Kind::Device
+                | Kind::Replica
+                | Kind::OrgManifest
+                | Kind::OrgRoster
+                | Kind::OrgLog
+                | Kind::Mailbox,
                 KeyId::Registry(_),
             ) => zero,
+            (Kind::Strongroom, KeyId::Registry(_)) => !zero,
             (Kind::Request | Kind::Placement | Kind::Folder, KeyId::Registry(_)) => true,
             (Kind::Request, KeyId::None) => true,
             (Kind::Revocation, KeyId::Registry(0)) => true,

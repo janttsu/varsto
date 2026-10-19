@@ -822,6 +822,7 @@ impl Engine {
             passphrase,
             &approval.bundle,
             Some(signer),
+            None,
         );
         let (engine, notes) = match joined {
             Ok(j) => j,

@@ -4,6 +4,8 @@
 //! (`git annex get/drop` run on the fixture clones only); the import itself
 //! never runs git-annex. Skipped when git-annex is not installed.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -339,17 +341,17 @@ fn import_annex_from_two_disks() {
     // A sync now changes nothing (placeholders are not deletions).
     let push = a.push("photos").unwrap();
     assert_eq!(push.files_changed, 0);
-    drop(a);
-
-    // Another device continues with disk two, keeping a full copy.
-    let mut b = Engine::join(
+    // Another device continues with disk two, keeping a full copy (the
+    // first device approves its request for the folder).
+    let mut b = common::join_approved(
         &root.join("b-home"),
         "desktop",
         PASS,
         &vault_key,
         storage(root),
-    )
-    .unwrap();
+        &mut a,
+    );
+    drop(a);
     b.chunker = ChunkerParams::SMALL;
     let st = &b.import_status(Some("photos")).unwrap()[0];
     assert_eq!(st.ids_missing, 3, "the book came through the storage");
@@ -386,14 +388,14 @@ fn import_annex_from_two_disks() {
     let st = &a.import_status(Some("photos")).unwrap()[0];
     assert_eq!(st.ids_missing, 0);
     assert_eq!(st.files_awaiting, 0);
-    let mut c = Engine::join(
+    let mut c = common::join_approved(
         &root.join("c-home"),
         "phone",
         PASS,
         &vault_key,
         storage(root),
-    )
-    .unwrap();
+        &mut a,
+    );
     c.attach_folder("photos", &root.join("c-photos"), false)
         .unwrap();
     c.pull("photos").unwrap();

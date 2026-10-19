@@ -29,7 +29,7 @@ fn set_version(path: &std::path::Path, version: u16) {
 
 #[test]
 fn an_older_or_newer_vault_is_refused_with_a_clear_message() {
-    assert_eq!(varsto_core::FORMAT_VERSION, 2);
+    assert_eq!(varsto_core::FORMAT_VERSION, 3);
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     let (mut e, key) = Engine::init(&home, "laptop", PASS).unwrap();
@@ -38,48 +38,50 @@ fn an_older_or_newer_vault_is_refused_with_a_clear_message() {
     drop(e);
 
     // On this device.
-    set_version(&home.join("vault.json"), 1);
+    for old in [1, 2] {
+        set_version(&home.join("vault.json"), old);
+        let err = format!(
+            "{:#}",
+            Engine::open(&home, PASS)
+                .err()
+                .expect("an older format must be refused")
+        );
+        assert!(
+            err.contains("Recreate the vault") && err.contains("alpha.15"),
+            "{err}"
+        );
+    }
+    set_version(&home.join("vault.json"), 4);
     let err = format!(
         "{:#}",
         Engine::open(&home, PASS)
             .err()
-            .expect("format 1 must be refused")
-    );
-    assert!(
-        err.contains("Recreate the vault") && err.contains("alpha.14"),
-        "{err}"
-    );
-    set_version(&home.join("vault.json"), 3);
-    let err = format!(
-        "{:#}",
-        Engine::open(&home, PASS)
-            .err()
-            .expect("format 3 must be refused")
+            .expect("format 4 must be refused")
     );
     assert!(err.contains("Update Varsto"), "{err}");
-    set_version(&home.join("vault.json"), 2);
+    set_version(&home.join("vault.json"), 3);
     Engine::open(&home, PASS).unwrap();
 
-    // Joining through a storage that holds an alpha.14 vault.
+    // Joining through a storage that holds an alpha.15 vault.
     let meta = tmp.path().join("storage/vault/meta.json");
-    set_version(&meta, 1);
+    set_version(&meta, 2);
     let other = tmp.path().join("other");
     let err = format!(
         "{:#}",
         Engine::join(&other, "desktop", PASS, &key, storage.clone())
             .err()
-            .expect("a format 1 vault must not be joined")
+            .expect("a format 2 vault must not be joined")
     );
     assert!(err.contains("Recreate the vault"), "{err}");
-    set_version(&meta, 2);
+    set_version(&meta, 3);
     Engine::join(&other, "desktop", PASS, &key, storage).unwrap();
 }
 
 #[test]
 fn the_messages_tell_what_to_do() {
-    let old = varsto_core::format_mismatch(1);
+    let old = varsto_core::format_mismatch(2);
     assert!(
-        old.contains("Recreate the vault") && old.contains("alpha.14"),
+        old.contains("Recreate the vault") && old.contains("alpha.15"),
         "{old}"
     );
     let new = varsto_core::format_mismatch(varsto_core::FORMAT_VERSION + 1);

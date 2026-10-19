@@ -34,6 +34,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import secrets
 import shlex
 import shutil
@@ -106,7 +107,7 @@ class Rig:
 
     def purge_chunks(self):
         env, _, _ = self.s3()
-        subprocess.run(["rclone", "purge", f"scw:{self.state['bucket']}/chunks"], env=env, capture_output=True)
+        subprocess.run(["rclone", "purge", f"scw:{self.state['bucket']}/packs"], env=env, capture_output=True)
 
     # ----- machines -----------------------------------------------------------
 
@@ -199,6 +200,22 @@ class Rig:
             raise SystemExit(f"home: varsto {a[0]} failed: {p.stderr[-1500:]}")
         return p.stdout
 
+    def approve(self, dev, name):
+        """Format 3: the joined device `dev` (named `name`) asks for the folder,
+        the owner (ams) approves it and the device reads its grant."""
+        _, _, secret = self.s3()
+        sec = f"VARSTO_S3_SECRET={shlex.quote(secret)}"
+        if dev == "home":
+            self.local("folder", "request", FOLDER, env={"VARSTO_S3_SECRET": secret})
+        else:
+            self.remote(dev, "folder", "request", FOLDER, env=sec)
+        self.remote("ams", "sync", env=sec)
+        self.remote("ams", "folder", "approve", FOLDER, name, "--yes", env=sec)
+        if dev == "home":
+            self.local("sync", env={"VARSTO_S3_SECRET": secret})
+        else:
+            self.remote(dev, "sync", env=sec)
+
     def vault(self):
         _, _, secret = self.s3()
         self.state.setdefault("pass", "nat-" + secrets.token_hex(12))
@@ -209,13 +226,16 @@ class Rig:
         # Amsterdam: owner, public and reachable, so it relays for the others.
         if "vault_key" not in self.state:
             out = self.remote("ams", "init", "--name", "ams", "--json")
-            self.state["vault_key"] = json.loads(out)["vault_key"]
+            init = json.loads(out)
+            self.state["vault_key"] = init["vault_key"]
+            # The kit's recovery words make the folder's recovery copy (format 3).
+            words = " ".join(re.findall(r"\d+\.\s+([a-z]+)", init["kit"].split("RECOVERY WORDS")[1]))
             self.save()
             _, access, _ = self.s3()
             self.remote("ams", "storage", "add-s3", "cloud", "--endpoint", "https://s3.fr-par.scw.cloud", "--region", "fr-par",
                         "--bucket", self.state["bucket"], "--access-key-id", access, env=sec)
             self.ssh("ams", "mkdir -p /nat/f-ams")
-            self.remote("ams", "folder", "add", FOLDER, "/nat/f-ams")
+            self.remote("ams", "folder", "add", FOLDER, "/nat/f-ams", env=f"VARSTO_RECOVERY_WORDS={shlex.quote(words)}")
             self.remote("ams", "p2p", "enable", "--port", str(PORT), "--public", f"{self.ip('ams')}:{PORT}")
             self.start_remote("ams")
             log("ams: vault, storage, folder, p2p with its public address; service started")
@@ -225,6 +245,7 @@ class Rig:
                 continue
             self.remote(dev, "join", "--name", dev, *self.s3_flags(), env=f"{sec} VARSTO_VAULT_KEY={shlex.quote(self.state['vault_key'])}")
             self.ssh(m, f"mkdir -p /nat/f-{dev}")
+            self.approve(dev, dev)
             self.remote(dev, "folder", "attach", FOLDER, f"/nat/f-{dev}")
             self.remote(dev, "p2p", "enable", "--port", str(PORT))
             self.start_remote(dev)
@@ -235,6 +256,7 @@ class Rig:
             files = pathlib.Path(self.args.home_folder).expanduser()
             files.mkdir(parents=True, exist_ok=True)
             self.local("join", "--name", "home", *self.s3_flags(), env={"VARSTO_S3_SECRET": secret, "VARSTO_VAULT_KEY": self.state["vault_key"]})
+            self.approve("home", "home")
             self.local("folder", "attach", FOLDER, str(files))
             self.local("p2p", "enable", "--port", str(PORT))
             self.state["home_joined"] = True
@@ -352,6 +374,10 @@ class Rig:
         if not (h / "vault.json").exists():
             files.mkdir(parents=True, exist_ok=True)
             v("join", "--name", "home-s3", *self.s3_flags())
+            v("folder", "request", FOLDER)
+            self.remote("ams", "sync", env=f"VARSTO_S3_SECRET={shlex.quote(secret)}")
+            self.remote("ams", "folder", "approve", FOLDER, "home-s3", "--yes")
+            v("sync")
             v("folder", "attach", FOLDER, str(files))
             v("p2p", "disable")
             v("verify", "set", "--off")

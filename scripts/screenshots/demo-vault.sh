@@ -27,13 +27,22 @@ truncate -s 900M "$H/Documents/Archive-2024.zip"
 touch -d "150 days ago" "$H/Documents/Backup-2024.tar" "$H/Documents/Archive-2024.zip" "$H/Documents/Contract-draft.txt"
 export VARSTO_PASSPHRASE=demo-passphrase-123
 v() { "$bin" --home "$@"; }
-key="$(v "$laptop" init --name laptop --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["vault_key"])')"
+init="$(v "$laptop" init --name laptop --json)"
+key="$(echo "$init" | python3 -c 'import json,sys; print(json.load(sys.stdin)["vault_key"])')"
+# The recovery words of the kit make each folder's recovery copy (format 3).
+recovery="$(echo "$init" | python3 -c 'import json,re,sys; k=json.load(sys.stdin)["kit"].split("RECOVERY WORDS")[1]; print(" ".join(re.findall(r"\d+\.\s+([a-z]+)", k)))')"
 v "$laptop" storage add-local box "$H/Varsto-box" --place home
-v "$laptop" folder add Documents "$H/Documents"
-v "$laptop" folder add Photos "$H/Photos"
+VARSTO_RECOVERY_WORDS="$recovery" v "$laptop" folder add Documents "$H/Documents"
+VARSTO_RECOVERY_WORDS="$recovery" v "$laptop" folder add Photos "$H/Photos"
 v "$laptop" sync
 v "$laptop" policy set Photos --min-copies 1 --place home=1
 VARSTO_VAULT_KEY="$key" v "$phone" join --name phone --storage-path "$H/Varsto-box"
+# Format 3: the phone asks for Photos and the laptop (an owner) approves; the
+# phone reads its grant with its next sync, then attaches.
+v "$phone" folder request Photos
+v "$laptop" sync
+v "$laptop" folder approve Photos phone --yes
+v "$phone" sync
 v "$phone" folder attach Photos "$H/phone/Photos" --selective
 v "$phone" pull Photos
 v "$phone" folder fetch Photos lake.jpg

@@ -2,6 +2,8 @@
 //! The in-app viewer reads a file of a folder kept encrypted on a phone
 //! without writing its plaintext anywhere on that device.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 use varsto_core::chunking::ChunkerParams;
@@ -70,7 +72,7 @@ fn view_decrypts_ranges_in_memory_only() {
     a.push("photos").unwrap();
 
     // The phone keeps the folder encrypted: only a placeholder is on disk.
-    let mut b = Engine::join(&b_home, "phone", PASS, &key, storage).unwrap();
+    let mut b = common::join_approved(&b_home, "phone", PASS, &key, storage, &mut a);
     b.attach_folder("photos", &b_dir, true).unwrap();
     b.set_encrypted_here("photos", true).unwrap();
     b.pull("photos").unwrap();

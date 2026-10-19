@@ -40,6 +40,47 @@ pub struct DeviceRecord {
     /// K8 public key (X25519 + ML-KEM-768, `EncapsKey::to_bytes`).
     pub kem_pub: Vec<u8>,
     pub stamp: Stamp,
+    /// The system and version the device runs (shown in the device list;
+    /// an organization's platform policy is checked against `platform`).
+    /// A device publishes a new record when they change.
+    pub details: Option<DeviceDetails>,
+}
+
+/// Longest text of one field of [`DeviceDetails`] (bytes).
+pub const MAX_DETAIL: usize = 256;
+
+/// What a device says about itself in its device record (the format-2
+/// `vault/devinfo/` record folded into the device record).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceDetails {
+    /// "Linux", "macOS", "Windows", "Android", "iOS".
+    pub os: String,
+    pub os_version: String,
+    pub model: String,
+    pub arch: String,
+    pub app_version: String,
+    /// `linux`, `macos`, `windows`, `android` or `ios` (`org::platform_id`).
+    pub platform: String,
+    pub updated_utc: i64,
+    pub last_sync_utc: Option<i64>,
+}
+
+impl DeviceDetails {
+    fn check(&self) -> Result<(), String> {
+        for f in [
+            &self.os,
+            &self.os_version,
+            &self.model,
+            &self.arch,
+            &self.app_version,
+            &self.platform,
+        ] {
+            if f.len() > MAX_DETAIL {
+                return Err(format!("a device detail longer than {MAX_DETAIL} bytes"));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl RecordBody for DeviceRecord {
@@ -63,6 +104,9 @@ impl RecordBody for DeviceRecord {
         EncapsKey::from_bytes(&self.kem_pub).map_err(|e| e.to_string())?;
         if self.stamp.device != self.device {
             return Err("the stamp names another device".into());
+        }
+        if let Some(d) = &self.details {
+            d.check()?;
         }
         Ok(())
     }

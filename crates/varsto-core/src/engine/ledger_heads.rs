@@ -1,169 +1,285 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Ledger heads between peers (`docs/spec/alpha-0-format.md` section 74):
-//! signing this device's statement, taking in the ones peers send, and the
-//! numbers that `watch_freshness` compares after a pull.
+//! Ledger heads between peers in storage format 3 (`format-3-design.md`
+//! section 8, `alpha-0-format.md` sections 75 and 77.8): this device's head
+//! list, the catch-up that asks the peers what they can **prove** (batch
+//! envelopes signed by their writers, and the writers' own peer records)
+//! and fetches the batches this device lacks from them, and the rollback
+//! judge that compares what each storage shows with what was proved.
+//!
+//! The pull calls [`Engine::p2p_catch_up`] before it reads the storages and
+//! [`Engine::p2p_judge_rollback`] after; both are safe to call without
+//! peers. Proofs are kept in `ledger/proofs.json` (`p2p::v3::heads::Watch`).
 
 use super::*;
-use crate::ledger_heads::{HeadEntry, HeadStatement};
+use crate::ledger3::events::Batch as Batch3;
+use crate::p2p::v3::heads::{
+    self, BatchSink, CatchUp, Expectation, Proof, Proved, RollbackWarning, StorageView, Watch,
+};
+use crate::record::{Acceptor, Id16, SignedRecord};
 
-/// Peers are asked for their statement at most this often.
-const ASK_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
-/// A peer that does not answer within this long is left to answer in the
-/// background; its statement is taken at the next pull.
-const ASK_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+/// A fetched batch is opened like any record (acceptance steps 1 to 4);
+/// the ledger store checks its body and chain when it takes it in.
+impl crate::record::RecordBody for Batch3 {}
+
+/// Batches fetched from peers, held until the catch-up ends; the heads
+/// are this device's before it started.
+struct Fetched {
+    heads: BTreeMap<Id16, u64>,
+    got: Vec<(String, Vec<u8>)>,
+}
+
+impl BatchSink for Fetched {
+    fn head(&self, device: &Id16) -> u64 {
+        let have = self.heads.get(device).copied().unwrap_or(0);
+        // Batches fetched this round count too (fetches run in order).
+        let fetched = self
+            .got
+            .iter()
+            .filter_map(|(_, b)| SignedRecord::decode(b).ok())
+            .filter(|r| r.device == *device)
+            .map(|r| r.seq)
+            .max()
+            .unwrap_or(0);
+        have.max(fetched)
+    }
+    fn ingest(&mut self, name: &str, record: &[u8]) -> Result<()> {
+        self.got.push((name.to_string(), record.to_vec()));
+        Ok(())
+    }
+}
 
 impl Engine {
-    /// The statement of what this device holds of every device's ledger,
-    /// signed with the device key. `None` for a device that signs no ledger
-    /// batches of the vault (a removed one, a member of shared folders).
-    pub fn head_statement(&self) -> Option<HeadStatement> {
-        self.signed_heads(false)
-    }
-
-    /// Only this device's own head, for its rendezvous record.
-    pub(super) fn own_head_statement(&self) -> Option<HeadStatement> {
-        self.signed_heads(true)
-    }
-
-    fn signed_heads(&self, own_only: bool) -> Option<HeadStatement> {
-        if self.removal.is_some() || self.vault.member {
-            return None;
+    /// Head exchange with every peer (design section 8): the peers answer
+    /// this device's head list with proofs of newer batches; the proofs and
+    /// the writers' own heads in their peer records are kept in
+    /// `ledger/proofs.json`, and the batches this device lacks up to a proof
+    /// are fetched from the peer that proved it (or from the writer whose
+    /// record proved it), checked as from a storage and taken into the
+    /// ledger. They are not pushed: only their writers push them.
+    pub fn p2p_catch_up(&mut self) -> Result<CatchUp> {
+        if self.vault.member || self.removal.is_some() {
+            return Ok(CatchUp::default());
         }
-        let me = &self.vault.device_id;
-        let mut entries = Vec::new();
-        for dev in self.ledger.devices() {
-            let own = &dev == me;
-            if own_only && !own {
-                continue;
-            }
-            let head = self.ledger.head(&dev);
-            let mut checkpoint = head.base.as_ref().map(|b| b.seq).unwrap_or(0);
-            let (seq, hash) = if own {
-                // Only what a storage is known to hold: a batch not pushed
-                // yet is not one a storage withheld.
-                let pushed = head.seq.min(self.ledger.pushed_max());
-                checkpoint = checkpoint.min(pushed);
-                let hash = match self.ledger.get(me, pushed) {
-                    Ok(Some(b)) => b.hash,
-                    _ => String::new(),
-                };
-                (pushed, hash)
-            } else {
-                (head.seq, head.hash.clone().unwrap_or_default())
-            };
-            if seq == 0 && checkpoint == 0 {
-                continue;
-            }
-            entries.push(HeadEntry {
-                device: dev,
-                seq,
-                hash,
-                checkpoint,
-            });
-        }
-        Some(HeadStatement::sign(
-            &self.vault.vault_id,
-            me,
-            self.clock.lamport,
-            util::now_utc(),
-            entries,
-            &self.keys.signer,
-        ))
-    }
-
-    /// Take in a statement a peer sent: it must be of this vault, by a
-    /// trusted full device other than this one, signed with that device's
-    /// key, not from the future and newer than the one kept. It changes
-    /// nothing but `ledger/heads-seen.json`. True when it was kept.
-    pub fn accept_head_statement(&mut self, st: HeadStatement) -> bool {
-        let me = self.vault.device_id.clone();
-        if st.sender == me || !self.trusted(&st.sender) {
-            return false;
-        }
-        let Some(pk) = self.device_key(&st.sender) else {
-            return false;
-        };
-        if st.verify(&self.vault.vault_id, &pk).is_err() {
-            return false;
-        }
-        if st.lamport > self.clock.lamport.saturating_add(Self::CLOCK_LEAP)
-            || st.utc > util::now_utc() + 86_400
-        {
-            return false;
-        }
-        let kept = self.ledger_alarm.heads.keep(st);
-        if kept {
-            self.ledger_alarm.heads.save(&self.home);
-        }
-        kept
-    }
-
-    /// Before a pull: ask the peers for their statements (at most every few
-    /// seconds, never for long) and take in the ones heard since, on
-    /// `/p2p/changed`, `/p2p/heads` and in rendezvous records.
-    pub(super) fn exchange_heads(&mut self) {
-        if let Some(peers) = self.peers.clone() {
-            let due = self
-                .ledger_alarm
-                .heads_asked
-                .is_none_or(|t| t.elapsed() >= ASK_EVERY);
-            if due {
-                self.ledger_alarm.heads_asked = Some(std::time::Instant::now());
-                let (tx, rx) = std::sync::mpsc::channel();
-                std::thread::spawn(move || {
-                    peers.exchange_heads();
-                    let _ = tx.send(());
-                });
-                let _ = rx.recv_timeout(ASK_WAIT);
-            }
-        }
-        for st in crate::ledger_heads::take_heard(&self.vault.vault_id, &self.vault.device_id) {
-            self.accept_head_statement(st);
-        }
-        // What a sender that does not count any more said is forgotten.
-        let gone: Vec<DeviceId> = self
-            .ledger_alarm
-            .heads
-            .statements
-            .keys()
-            .filter(|d| !self.trusted(d))
-            .cloned()
-            .collect();
-        if !gone.is_empty() {
-            for d in gone {
-                self.ledger_alarm.heads.forget(&d);
-            }
-            self.ledger_alarm.heads.save(&self.home);
-        }
-    }
-
-    /// Per device: how far a trusted full device says it holds that
-    /// device's ledger. Beyond a removed device's cut-off nothing counts;
-    /// statements older than two weeks or of senders that no longer count
-    /// are left out.
-    pub(super) fn peer_reach(&self, dir: &KeyDirectory) -> BTreeMap<DeviceId, u64> {
-        let me = &self.vault.device_id;
         let now = util::now_utc();
-        let mut out: BTreeMap<DeviceId, u64> = BTreeMap::new();
-        for (sender, st) in &self.ledger_alarm.heads.statements {
-            if sender == me
-                || !self.trusted(sender)
-                || now - st.utc > crate::ledger_heads::MAX_AGE_SECS
-            {
+        let vault = members3::bin(&self.vault.vault_id)?;
+        let key_map = self.full_device_keys();
+        let mut watch = Watch::load(&self.home);
+        let dir = self.peer_directory().unwrap_or_default();
+        let mut by_record: Vec<(DeviceId, Proof)> = Vec::new();
+        for b in dir.bodies() {
+            if !key_map.contains_key(&b.device) {
                 continue;
             }
-            for e in &st.heads {
-                if &e.device == me || !dir.contains_key(&e.device) {
-                    continue;
-                }
-                let reach = match self.devices.revoked.get(&e.device) {
-                    Some(r) => e.reach().min(r.cutoff_seq),
-                    None => e.reach(),
-                };
-                let slot = out.entry(e.device.clone()).or_insert(0);
-                *slot = (*slot).max(reach);
+            watch.note_peer_record(b, now);
+            if let Some(h) = b.heads.iter().find(|h| h.device == b.device) {
+                by_record.push((
+                    DeviceId::from_bytes(&b.device),
+                    Proof {
+                        device: h.device,
+                        seq: h.seq,
+                        hash: h.hash,
+                    },
+                ));
             }
+        }
+        let mut sink = Fetched {
+            heads: key_map
+                .keys()
+                .map(|d| (*d, self.f3.ledger.head(d).seq))
+                .collect(),
+            got: Vec::new(),
+        };
+        let mut out = CatchUp::default();
+        if let Some(peers) = self.peers.clone() {
+            let mine = self.head_list();
+            let vault_keys = self.vault_keys3();
+            let keys = self.keys3(&vault_keys);
+            let trust = self.f3.members.trust();
+            let acceptor = Acceptor {
+                vault,
+                keys: &keys,
+                trust: &trust,
+            };
+            let key_of = |d: &Id16| key_map.get(d).cloned();
+            out = heads::catch_up::<Batch3>(
+                &peers, &mine, &vault, &acceptor, &key_of, &mut watch, &mut sink, now,
+            );
+            // A writer's own record proves its head: it hands its batches
+            // over itself.
+            for (writer, p) in &by_record {
+                heads::fetch_proved::<Batch3>(&peers, writer, p, &acceptor, &mut sink, &mut out);
+            }
+        }
+        let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
+        for (name, bytes) in std::mem::take(&mut sink.got) {
+            let Ok(rec) = SignedRecord::decode(&bytes) else {
+                continue;
+            };
+            let Some(pk) = key_map.get(&rec.device) else {
+                continue;
+            };
+            let key = self.key_for3(&rec.key_id);
+            if let Err(e) = self
+                .f3
+                .ledger
+                .ingest_named(&name, rec, pk, key.as_ref(), limit)
+            {
+                log::warn!("ledger batch from a peer skipped: {e:#}");
+                out.refused += 1;
+            }
+        }
+        // What senders that do not count any more proved is forgotten.
+        let me = self.me3();
+        watch.proved.retain(|k, _| {
+            crate::record::kinds::parse_id16(k).is_some_and(|d| d != me && key_map.contains_key(&d))
+        });
+        watch.save(&self.home);
+        if out.fetched > 0 {
+            let view = self.view3()?;
+            self.observe_clock(view.max_lamport)?;
+        }
+        Ok(out)
+    }
+
+    /// What each hot metadata storage shows of every full device's ledger
+    /// (the newest batch or checkpoint listed), for the rollback judge when
+    /// the pull does not hand its own listing over.
+    pub fn storage_views(&self) -> Vec<StorageView> {
+        let mut devices: Vec<Id16> = self.full_device_keys().keys().copied().collect();
+        devices.push(self.me3());
+        let mut out = Vec::new();
+        let Ok(storages) = self.record_storages() else {
+            return out;
+        };
+        for (spec, backend) in storages {
+            let Some(storage) = verify::storage_identity(backend.as_ref())
+                .ok()
+                .and_then(|id| crate::record::kinds::parse_id16(&id))
+            else {
+                continue;
+            };
+            let mut view = StorageView {
+                storage,
+                name: spec.name().to_string(),
+                reachable: true,
+                shown: BTreeMap::new(),
+            };
+            for d in &devices {
+                let prefix = format!("ledger/{}/", hex::encode(d));
+                match backend.list(&prefix) {
+                    Ok(names) => {
+                        let top = names
+                            .iter()
+                            .filter_map(|n| n.strip_prefix(&prefix))
+                            .filter_map(crate::ledger3::LedgerObject::parse)
+                            .map(|o| match o {
+                                crate::ledger3::LedgerObject::Batch(s) => s,
+                                crate::ledger3::LedgerObject::Checkpoint(s, _) => s,
+                            })
+                            .max()
+                            .unwrap_or(0);
+                        view.shown.insert(*d, top);
+                    }
+                    Err(_) => {
+                        view.reachable = false;
+                        break;
+                    }
+                }
+            }
+            out.push(view);
         }
         out
+    }
+
+    /// The rollback warning (design section 8): after a pull that started
+    /// at `pull_utc`, a storage that the writing device confirmed in its
+    /// peer record (`pushed`), or that this device pushed its own batches
+    /// to, and that shows less than a proof older than the pull, is
+    /// suspect; two such pulls in a row give the warning. `views` is what
+    /// the pull's listing showed (read here when `None`).
+    pub fn p2p_judge_rollback(
+        &mut self,
+        pull_utc: i64,
+        views: Option<Vec<StorageView>>,
+    ) -> Result<Vec<RollbackWarning>> {
+        if self.vault.member || self.removal.is_some() {
+            return Ok(Vec::new());
+        }
+        let views = views.unwrap_or_else(|| self.storage_views());
+        let key_map = self.full_device_keys();
+        let me = self.me3();
+        let mut expected = Vec::new();
+        for b in self.peer_directory().unwrap_or_default().bodies() {
+            if !key_map.contains_key(&b.device) {
+                continue;
+            }
+            for p in &b.pushed {
+                expected.push(Expectation {
+                    storage: p.storage,
+                    device: b.device,
+                    seq: p.seq,
+                });
+            }
+        }
+        let mut watch = Watch::load(&self.home);
+        let mut proofs = watch.proved.clone();
+        // This device's own batches: what it pushed to each storage it
+        // knows itself.
+        let mut own_top = 0;
+        for (spec, backend) in self.record_storages()? {
+            let seq = self.f3.ledger.pushed(spec.name());
+            let Some(storage) = verify::storage_identity(backend.as_ref())
+                .ok()
+                .and_then(|id| crate::record::kinds::parse_id16(&id))
+            else {
+                continue;
+            };
+            if seq > 0 {
+                own_top = own_top.max(seq);
+                expected.push(Expectation {
+                    storage,
+                    device: me,
+                    seq,
+                });
+            }
+        }
+        if own_top > 0 {
+            proofs.insert(
+                hex::encode(me),
+                Proved {
+                    seq: own_top,
+                    hash: String::new(),
+                    peer: hex::encode(me),
+                    source: "this device".into(),
+                    utc: 0,
+                },
+            );
+        }
+        let names = |d: &Id16| -> String {
+            self.f3
+                .members
+                .devices
+                .get(d)
+                .map(|r| r.name.clone())
+                .unwrap_or_else(|| hex::encode(&d[..4]))
+        };
+        let warnings = watch.rollback.after_pull(
+            pull_utc,
+            &views,
+            &expected,
+            &proofs,
+            &names,
+            util::now_utc(),
+        );
+        watch.save(&self.home);
+        for w in &warnings {
+            log::warn!("{}", w.text);
+        }
+        Ok(warnings)
+    }
+
+    /// The suspect (storage, device) pairs the rollback judge keeps.
+    pub fn rollback_suspects(&self) -> BTreeMap<String, heads::Suspect> {
+        Watch::load(&self.home).rollback.suspects
     }
 }

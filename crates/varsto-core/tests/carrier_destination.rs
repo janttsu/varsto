@@ -48,11 +48,13 @@ fn transferrer_carries_what_its_destination_lacks() {
     laptop.sync(None).unwrap();
 
     // The work PC uses the folder (it attached it once, online) ...
-    let mut work = Engine::join(&p("work"), "work-pc", PASS, &key, nas.clone()).unwrap();
+    let mut work =
+        common::join_approved(&p("work"), "work-pc", PASS, &key, nas.clone(), &mut laptop);
     work.attach_folder("docs", &p("dirs/c"), false).unwrap();
     work.sync(None).unwrap();
     // ... and the phone holds everything that comes next.
-    let mut phone = Engine::join(&p("phone"), "phone", PASS, &key, nas.clone()).unwrap();
+    let mut phone =
+        common::join_approved(&p("phone"), "phone", PASS, &key, nas.clone(), &mut laptop);
     phone.attach_folder("docs", &p("dirs/b"), false).unwrap();
 
     fs::write(p("dirs/a/two.bin"), vec![9u8; 60_000]).unwrap();

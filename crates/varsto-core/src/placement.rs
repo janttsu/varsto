@@ -3,7 +3,7 @@
 //! By default a block goes to every storage of the device; a placement names
 //! storages ("box", "glacier") or places ("home", "cloud", "offsite"), and
 //! pushes then write only there. A placement belongs to the folder and is
-//! published like its policy (`PlacementRecord`), so every device writes the
+//! published like its policy (a `placement` record, kind 12), so every device writes the
 //! folder the same way; policies still count every copy the ledger records.
 //!
 //! Storage names are local to a device. A placement therefore also carries
@@ -11,8 +11,6 @@
 //! device that set it could read one, and a device that calls the same
 //! bucket by another name still matches it.
 
-use crate::crypto::{self, SecretKey};
-use crate::ids::{DeviceId, FolderId, VaultId};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -91,113 +89,6 @@ impl Placement {
             }
         }
         Ok(())
-    }
-}
-
-/// A placement change for a folder, published append-only at
-/// `vault/placement/<folder>/<device>/<updated_utc>.enc` under the folder
-/// record key; every device adopts the newest one it can read. `None`
-/// returns the folder to every storage.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PlacementRecord {
-    pub folder_id: FolderId,
-    pub device: DeviceId,
-    pub updated_utc: i64,
-    pub placement: Option<Placement>,
-}
-
-impl PlacementRecord {
-    pub const PREFIX: &'static str = "vault/placement/";
-
-    pub fn storage_key(&self) -> String {
-        format!(
-            "{}{}/{}/{:020}.enc",
-            Self::PREFIX,
-            self.folder_id,
-            self.device,
-            self.updated_utc
-        )
-    }
-
-    fn aad(vault: &VaultId, folder: &FolderId) -> Vec<u8> {
-        crypto::aad(
-            "placement-record",
-            &[vault.as_str().as_bytes(), folder.as_str().as_bytes()],
-        )
-    }
-
-    pub fn seal(&self, vault: &VaultId, key: &SecretKey) -> Result<Vec<u8>> {
-        crypto::encrypt(
-            key,
-            &Self::aad(vault, &self.folder_id),
-            &serde_json::to_vec(self)?,
-        )
-    }
-
-    pub fn open(blob: &[u8], vault: &VaultId, folder: &FolderId, key: &SecretKey) -> Result<Self> {
-        let plain = crypto::decrypt(key, &Self::aad(vault, folder), blob)?;
-        let rec: PlacementRecord = serde_json::from_slice(&plain)?;
-        if &rec.folder_id != folder {
-            bail!("placement record folder mismatch");
-        }
-        Ok(rec)
-    }
-    /// Seal and sign (alpha.10), see `PolicyRecord::seal_signed`.
-    pub fn seal_signed(
-        &self,
-        vault: &VaultId,
-        key: &SecretKey,
-        signer: &crate::crypto::SigningKey,
-    ) -> Result<Vec<u8>> {
-        let ct = self.seal(vault, key)?;
-        crate::vault::SignedRecord::wrap(
-            "placement-record-signature",
-            vault,
-            &self.folder_id,
-            &self.device,
-            self.updated_utc,
-            ct,
-            signer,
-        )
-    }
-    /// See `PolicyRecord::open_any`.
-    pub fn open_any(
-        blob: &[u8],
-        vault: &VaultId,
-        folder: &FolderId,
-        named_device: &DeviceId,
-        keys: &[SecretKey],
-        verify: &dyn Fn(&DeviceId) -> Option<crate::crypto::VerifyingKey>,
-        allow_unsigned: bool,
-    ) -> Result<Self> {
-        match crate::vault::SignedRecord::parse(blob) {
-            Some(env) => {
-                let pk = verify(&env.device).ok_or_else(|| anyhow::anyhow!("unknown writer"))?;
-                let ct = env.verify("placement-record-signature", vault, folder, &pk)?;
-                let rec = keys
-                    .iter()
-                    .find_map(|k| Self::open(&ct, vault, folder, k).ok())
-                    .ok_or_else(|| anyhow::anyhow!("placement record does not open"))?;
-                if rec.device != env.device
-                    || &rec.device != named_device
-                    || rec.updated_utc != env.updated_utc
-                {
-                    bail!("placement record does not match its envelope");
-                }
-                Ok(rec)
-            }
-            None if allow_unsigned => {
-                let rec = keys
-                    .iter()
-                    .find_map(|k| Self::open(blob, vault, folder, k).ok())
-                    .ok_or_else(|| anyhow::anyhow!("placement record does not open"))?;
-                if &rec.device != named_device {
-                    bail!("placement record does not match its name");
-                }
-                Ok(rec)
-            }
-            None => bail!("unsigned placement record"),
-        }
     }
 }
 
@@ -333,24 +224,5 @@ mod tests {
         assert!(p.needs_identities(&["primary"]));
         assert!(!p.needs_identities(&["box"]));
         assert_eq!(p.describe(), "storage box and place offsite");
-    }
-
-    #[test]
-    fn record_round_trip() {
-        let key = SecretKey::random();
-        let vault = VaultId::random();
-        let rec = PlacementRecord {
-            folder_id: FolderId::random(),
-            device: DeviceId::from_bytes(&[1; 16]),
-            updated_utc: 5,
-            placement: Some(Placement {
-                places: vec!["cloud".into()],
-                ..Default::default()
-            }),
-        };
-        let blob = rec.seal(&vault, &key).unwrap();
-        let back = PlacementRecord::open(&blob, &vault, &rec.folder_id, &key).unwrap();
-        assert_eq!(back.placement, rec.placement);
-        assert!(PlacementRecord::open(&blob, &vault, &FolderId::random(), &key).is_err());
     }
 }

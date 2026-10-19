@@ -59,101 +59,97 @@ impl Engine {
         if specs.is_empty() {
             return Ok(Vec::new());
         }
-        let view = self.view()?;
+        let view = self.view3()?;
         let repair = self.repair_queue_objects();
         let plan = self.load_fetch_plan();
-        let carriers: BTreeSet<String> = self
-            .config
-            .storages
-            .iter()
-            .filter(|s| s.is_carrier())
-            .map(|s| s.name().to_string())
-            .collect();
         let mut out = Vec::new();
         for spec in specs {
             let name = spec.name().to_string();
             let pool = self.open_pool(&spec)?;
-            // What the ledger still wants on this pool, and what has a copy elsewhere.
-            let mut wanted: HashSet<String> = HashSet::new();
-            let mut elsewhere: HashSet<String> = HashSet::new();
-            for r in view.chunks.values() {
-                let obj = r.object.as_str().to_ascii_lowercase();
-                if r.storages
-                    .keys()
-                    .any(|s| s != &name && !carriers.contains(s))
-                {
-                    elsewhere.insert(obj.clone());
-                }
-                if !r.dropped_from(&name) {
-                    wanted.insert(obj);
-                }
-            }
-            // The disks hold packs: a pack is wanted when a block in it is,
-            // elsewhere when every block in it is.
-            super::pack_upkeep::with_pack_ids(&view, &name, &mut wanted, false);
-            super::pack_upkeep::with_pack_ids(&view, &name, &mut elsewhere, true);
-            let mut repair = repair.clone();
-            super::pack_upkeep::with_pack_ids(&view, &name, &mut repair, false);
-            // Blocks of current files placed on this pool: the ones it holds
-            // on no disk, and every key (further copies under a disk group rule).
+            // Blocks of current files placed on this pool: the packs that
+            // hold them there, and the bytes of those it holds on no disk.
             let have = pool.objects();
-            let mut current: HashSet<String> = HashSet::new();
-            let mut first_copy_bytes = 0u64;
+            let mut current_packs: HashSet<crate::ledger3::PackId> = HashSet::new();
+            let mut lacking_bytes = 0u64;
+            let mut fetch: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            let mut pack_of_object: HashMap<String, String> = HashMap::new();
             for (rec, _) in self.folders() {
                 let Ok(rec) = self.with_key(&rec) else {
                     continue; // a locked Strongroom
                 };
+                let Some(table) = self.folder_table(&rec)? else {
+                    continue;
+                };
+                let t = table.read().unwrap_or_else(|e| e.into_inner());
                 let targets = self.write_targets(&rec);
                 let Ok(state) = self.load_state(&rec.folder_id) else {
                     continue;
                 };
+                let mut seen: HashSet<&ObjectName> = HashSet::new();
                 for f in state.files.values().filter(|f| !f.deleted) {
                     for c in &f.chunks {
-                        let record = view.locate(&rec.folder_id, &c.chunk);
-                        if !targets.wants(&name, record) {
+                        if !seen.insert(&c.object) {
                             continue;
                         }
-                        let key = record
-                            .map(|r| super::pack_upkeep::held_key(r, &name))
-                            .unwrap_or_else(|| chunk_storage_key(&c.object));
-                        if !have.contains_key(&key) && !current.contains(&key) {
-                            // Ciphertext is a little larger than the chunk.
-                            first_copy_bytes += c.size + 64;
+                        let standing = super::data_moves::BlockStanding::of(&view, &t, &c.object);
+                        if !targets.wants(&name, Some(&standing)) {
+                            continue;
                         }
-                        current.insert(key);
+                        let on_pool = crate::storages3::object_bin(&c.object).ok().and_then(|o| {
+                            view.block_places(&o, &*t)
+                                .into_iter()
+                                .filter(|p| !p.marked)
+                                .find(|p| p.storages.contains(&name))
+                                .map(|p| p.place.pack)
+                        });
+                        match on_pool {
+                            Some(p)
+                                if have.contains_key(&crate::packs::pack_key(&hex::encode(p))) =>
+                            {
+                                pack_of_object.insert(
+                                    chunk_storage_key(&c.object),
+                                    crate::packs::pack_key(&hex::encode(p)),
+                                );
+                                current_packs.insert(p);
+                            }
+                            // Ciphertext is a little larger than the chunk.
+                            _ => lacking_bytes += c.size + 64,
+                        }
                     }
                 }
             }
-            let mut fetch: BTreeMap<String, Vec<String>> = BTreeMap::new();
             // A fetch plan names blocks; the disk holds their packs.
-            let mut pack_key_of: HashMap<String, String> = HashMap::new();
-            for r in view.chunks.values() {
-                if let Some(p) = r.storages.get(&name).and_then(|l| l.pack.as_ref()) {
-                    pack_key_of.insert(
-                        chunk_storage_key(&r.object),
-                        crate::packs::pack_key(&p.pack),
-                    );
-                }
-            }
             for step in plan.iter().flat_map(|p| p.steps.iter()) {
                 if step.pool == name && step.state == "pending" {
                     let keys = fetch.entry(step.disk_id.clone()).or_default();
                     for k in &step.objects {
-                        let k = pack_key_of.get(k).cloned().unwrap_or_else(|| k.clone());
+                        let k = pack_of_object.get(k).cloned().unwrap_or_else(|| k.clone());
                         if !keys.contains(&k) {
                             keys.push(k);
                         }
                     }
                 }
             }
-            let input = pool::BookInput {
-                wanted: Some(&wanted),
-                elsewhere: Some(&elsewhere),
-                repair: Some(&repair),
-                fetch: Some(&fetch),
-                first_copy_bytes,
-                current: Some(&current),
-            };
+            let mut sets = crate::storages3::book_sets(&view, &name, &[], Some(&current_packs));
+            sets.first_copy_bytes = lacking_bytes;
+            // A pack is elsewhere only on a storage that keeps it: a
+            // transferrer empties itself.
+            let carriers: BTreeSet<String> = self
+                .config
+                .storages
+                .iter()
+                .filter(|s| s.is_carrier())
+                .map(|s| s.name().to_string())
+                .collect();
+            sets.elsewhere.retain(|p| {
+                let mut id = [0u8; 32];
+                hex::decode_to_slice(p, &mut id).is_ok()
+                    && view
+                        .holders(&id)
+                        .iter()
+                        .any(|h| *h != name && !carriers.contains(*h))
+            });
+            let input = sets.input(Some(&repair), Some(&fetch));
             out.extend(pool.statuses_with(Some(&input)));
             let disks = pool.disks();
             drop(pool);

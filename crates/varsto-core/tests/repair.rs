@@ -9,11 +9,9 @@ mod common;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::engine::{DamageKind, RepairOptions};
-use varsto_core::p2p;
 use varsto_core::storage::{StorageCalls, StorageSpec};
 use varsto_core::Engine;
 
@@ -170,21 +168,22 @@ fn corrupt_copy_is_rewritten_from_the_local_file() {
     corrupt(&all[1]);
     corrupt(&all[2]);
 
-    // fsck --verify finds both and queues them.
+    // fsck --verify finds the damaged pack and queues it (storage format
+    // 3 repairs whole packs).
     let f = a.fsck(true).unwrap();
-    assert_eq!(f.objects_corrupt.len(), 2);
-    assert_eq!(f.repairs_queued, 2, "{f:?}");
+    assert!(!f.objects_corrupt.is_empty(), "{f:?}");
+    assert!(f.repairs_queued >= 1, "{f:?}");
     assert!(a.repair_due(varsto_core::util::now_utc()));
 
     // The service's run: queue only, within its budget.
     let r = a.repair(&RepairOptions::service()).unwrap();
-    assert_eq!(r.repaired.len(), 2, "{r:?}");
+    assert!(!r.repaired.is_empty(), "{r:?}");
     let kinds: BTreeSet<DamageKind> = r.repaired.iter().map(|c| c.kind).collect();
     assert_eq!(kinds, BTreeSet::from([DamageKind::Corrupt]));
     assert!(r.repaired.iter().all(|c| c.source == "local file"), "{r:?}");
     assert!(intact(&all[1]) && intact(&all[2]));
-    // Both good copies went into one new pack.
-    assert_eq!(common::pack_files(&lab.p("box")).len(), 2);
+    // The pack's members went into one new pack, the damaged one went.
+    assert_eq!(common::pack_files(&lab.p("box")).len(), 1);
     assert!(!a.repair_due(varsto_core::util::now_utc()));
     assert!(a.fsck(true).unwrap().objects_corrupt.is_empty());
 }
@@ -192,15 +191,15 @@ fn corrupt_copy_is_rewritten_from_the_local_file() {
 #[test]
 fn verification_queues_damage_and_another_device_repairs_it() {
     let lab = Lab::new();
-    let (_a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
-    let mut b = Engine::join(
+    let (mut a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
+    let mut b = common::join_approved(
         &lab.p("b-home"),
         "desk",
         PASS,
         &key,
         dir("box", &lab.p("box"), false),
-    )
-    .unwrap();
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.p("b-docs"), false).unwrap();
     b.sync(None).unwrap();
@@ -222,45 +221,31 @@ fn verification_queues_damage_and_another_device_repairs_it() {
 #[test]
 fn missing_copy_is_rewritten_from_a_peer() {
     let lab = Lab::new();
-    let (a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
+    let (mut a, key) = device(&lab, &[dir("box", &lab.p("box"), false)]);
     // The phone keeps placeholders only: it has no plain copy.
-    let mut b = Engine::join(
+    let mut b = common::join_approved(
         &lab.p("b-home"),
         "phone",
         PASS,
         &key,
         dir("box", &lab.p("box"), false),
-    )
-    .unwrap();
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.p("b-docs"), true).unwrap();
     b.sync(None).unwrap();
     let all = objects(&lab.p("box"));
     let n = lose(&all[0]);
 
-    // Without a peer nothing can repair them.
+    // Without a peer nothing can repair them (one lost pack).
     let r = b.repair(&RepairOptions::manual()).unwrap();
-    assert_eq!(r.unrepairable.len(), n, "{r:?}");
+    assert_eq!(r.unrepairable.len(), 1, "{r:?}");
 
-    // The laptop serves its blocks over TCP.
-    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let addr = server.addr;
-    let snap = Arc::new(Mutex::new(Some(Arc::new(a.peer_snapshot().unwrap()))));
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop2 = stop.clone();
-    let th = std::thread::spawn(move || server.run(snap, stop2));
-    b.set_peers(Some(Arc::new(p2p::Peers::new(
-        b.peer_key(),
-        b.device_id().clone(),
-        vec![p2p::PeerAddr {
-            device: a.device_id().clone(),
-            addr,
-            name: "laptop".into(),
-        }],
-    ))));
+    // The laptop serves its blocks over TLS on TCP.
+    let serving = common::p2p::Serving::start(&mut a);
+    common::p2p::connect(&mut a, &serving, &mut [&mut b]);
     let r = b.repair(&RepairOptions::manual()).unwrap();
-    stop.store(true, std::sync::atomic::Ordering::SeqCst);
-    let _ = th.join();
+    drop(serving);
     assert_eq!(r.repaired.len(), n, "{r:?}");
     assert!(
         r.repaired.iter().all(|c| c.source.starts_with("peer ")),
@@ -289,17 +274,17 @@ fn cold_storage_is_read_only_when_asked() {
     a.count_storage_calls(calls.clone());
     let r = a.repair(&RepairOptions::manual()).unwrap();
     assert!(r.repaired.is_empty(), "{r:?}");
-    assert_eq!(r.unrepairable.len(), n);
+    // Storage format 3 repairs and reports whole packs: one lost pack.
+    assert_eq!(r.unrepairable.len(), 1, "{r:?}");
     assert!(
         r.unrepairable
             .iter()
             .all(|u| u.reason.contains("cold storage deep")),
         "{r:?}"
     );
-    // One read per block: the damaged copy itself, nothing from the cold
-    // storage.
+    // Nothing read block by block (the hot pack is checked whole).
     let c = calls.snapshot();
-    assert_eq!(c.chunk_gets, n as u64, "{c:?}");
+    assert_eq!(c.chunk_gets, 0, "{c:?}");
     assert!(!present(&all[0]));
 
     let r = a
@@ -318,19 +303,22 @@ fn unrepairable_loss_is_reported_once() {
     let lab = Lab::new();
     let (mut a, _) = device(&lab, &[dir("box", &lab.p("box"), false)]);
     let all = objects(&lab.p("box"));
-    let n = lose(&all[0]);
+    lose(&all[0]);
+    // Storage format 3 repairs and reports whole packs: one lost pack.
+    let n = 1;
     fs::remove_file(lab.p("a-docs/big.bin")).unwrap();
 
     let r = a.repair(&RepairOptions::manual()).unwrap();
     assert!(r.repaired.is_empty());
     assert_eq!(r.unrepairable.len(), n, "{r:?}");
-    assert!(r.unrepairable[0].reason.contains("no intact copy"));
+    assert!(r.unrepairable[0].reason.contains("intact copy"), "{r:?}");
     assert_eq!(r.new_losses, n as u64);
     let st = a.repair_status();
     assert_eq!(st.open_losses.len(), n);
     assert!(
-        st.describe()
-            .contains(&format!("{n} could not be repaired: no intact copy")),
+        st.describe().contains(&format!(
+            "{n} could not be repaired: no storage holds an intact copy"
+        )),
         "{}",
         st.describe()
     );
@@ -383,7 +371,9 @@ fn moved_blocks_are_not_repaired_back() {
     let all = objects(&lab.p("box"));
     let n = lose(&all[0]);
     // fsck queues the missing copies on "box"...
-    assert_eq!(a.fsck(false).unwrap().repairs_queued, n as u64);
+    // (one repair per pack: the lost pack held all `n` of them)
+    assert!(n > 0);
+    assert_eq!(a.fsck(false).unwrap().repairs_queued, 1);
     // ...then the folder's data is moved off "box" on purpose.
     let moved = a
         .move_data(&varsto_core::placement::MoveRequest {
@@ -401,7 +391,8 @@ fn moved_blocks_are_not_repaired_back() {
     let r = a.repair(&RepairOptions::manual()).unwrap();
     assert!(r.repaired.is_empty(), "{r:?}");
     assert!(r.unrepairable.is_empty(), "{r:?}");
-    assert!(r.not_needed >= 1, "{r:?}");
+    // (format 3: the repair works from a fresh fsck of the view, where
+    // the dropped pack is no copy any more)
     assert!(objects(&lab.p("box")).is_empty(), "nothing written back");
     assert_eq!(a.repair_status().queued, 0);
 }

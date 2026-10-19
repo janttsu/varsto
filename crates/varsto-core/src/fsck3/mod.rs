@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! `fsck` on the pack-level format (`docs/spec/format-3-design.md`
-//! sections 3, 4, 5, 12; work package 10b). Built behind the `format3`
-//! feature; nothing in the format-2 engine calls it (the switch is WP12).
+//! sections 3, 4, 5, 12; work package 10b).
 //!
 //! The check is a function over what an engine already holds, so it has no
 //! engine dependency: the ledger view, the opened storages, per folder the

@@ -1370,7 +1370,7 @@ fn cached_view_equals_full_replay() {
                 EventScope::Full => ids[..3].contains(d),
                 EventScope::Member(_) => d == &ids[3],
                 EventScope::Replica => d == &ids[4],
-                EventScope::Viewer(_) => false,
+                EventScope::Viewer(_) | EventScope::Owner(_) => false,
             };
             ok.then_some(s)
         };

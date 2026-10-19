@@ -266,7 +266,9 @@ impl Engine {
         {
             return Ok(());
         }
-        let view = self.view()?;
+        // Format 3: a block is readable when a storage holds a live place
+        // of it (block map and pack-level view).
+        let view = self.view3()?;
         let me = self.vault.device_id.clone();
         let now = util::now_utc();
         let mut out = Vec::new();
@@ -275,8 +277,9 @@ impl Engine {
                 continue;
             }
             let readable = prev.chunks.iter().all(|c| {
-                view.locate(&rec.folder_id, &c.chunk)
-                    .is_some_and(|r| r.object == c.object && !r.storages.is_empty())
+                !self
+                    .block_copies3(&view, &rec.folder_id, &c.object)
+                    .is_empty()
                     || self.cached_object(&c.object).is_some()
             });
             if !readable {
@@ -545,7 +548,7 @@ impl Engine {
         util::private_dir(&self.home.join("trash"))?;
         fs::create_dir_all(&tmp_dir)?;
         let tmp = tmp_dir.join(format!("{}-v{}", std::process::id(), e.id));
-        let got = self.restore_from_blocks(&rec, &fk, &e, &tmp, &storages);
+        let got = self.restore_from_blocks(&fk, &e, &tmp, &storages);
         if let Err(err) = got {
             let _ = fs::remove_file(&tmp);
             return Err(err.context(format!("restore a version of {path}")));
@@ -638,7 +641,7 @@ impl Engine {
     fn history_status_at(&mut self, now: i64) -> Result<HistoryStatus> {
         self.trash_refresh(true)?;
         let settings = self.trash_settings();
-        let view = self.view()?;
+        let view = self.view3()?;
         let mut st = HistoryStatus {
             days: settings.history_days,
             schedule: schedule_words(),
@@ -683,10 +686,8 @@ impl Engine {
                         continue;
                     }
                     fh.extra_bytes += c.size;
-                    if let Some(r) = view.locate(&rec.folder_id, &c.chunk) {
-                        for n in r.storages.keys() {
-                            *fh.by_storage.entry(n.clone()).or_default() += c.size;
-                        }
+                    for n in self.block_copies3(&view, &rec.folder_id, &c.object) {
+                        *fh.by_storage.entry(n).or_default() += c.size;
                     }
                 }
             }

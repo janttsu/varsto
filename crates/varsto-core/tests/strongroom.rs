@@ -95,7 +95,7 @@ fn two_devices_with_docs(lab: &Lab) -> (Engine, Engine) {
     fs::remove_file(lab.a_dir.join("gone.txt")).unwrap();
     a.push("docs").unwrap();
 
-    let mut b = Engine::join(&lab.b_home, "desk", PASS, &key, lab.storage.clone()).unwrap();
+    let mut b = common::join_approved(&lab.b_home, "desk", PASS, &key, lab.storage.clone(), &mut a);
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     b.pull("docs").unwrap();
@@ -130,17 +130,13 @@ fn converting_a_folder_re_encrypts_it_and_removes_the_old_copies() {
         "nothing left to clean"
     );
 
-    // The old copies are gone from the storage: chunks, manifests, the
-    // folder record that held the old key under the vault key.
+    // The old copies are gone from the storage: blocks, manifests, block
+    // maps (the old folder's record carries `removed`; it holds no key).
     let now = objects(&storage, "chunks");
     assert!(now.is_disjoint(&old_chunks), "old chunks remain");
     assert!(!now.is_empty());
     assert!(objects(&storage, &format!("manifests/{old_id}")).is_empty());
-    let records = objects(&storage, "vault/folders");
-    assert!(
-        records.iter().all(|k| !k.contains(old_id.as_str())),
-        "{records:?}"
-    );
+    assert!(objects(&storage, &format!("maps/{old_id}")).is_empty());
 
     // On A: a Strongroom, unlocked, files intact, no key at rest.
     let (rec, _) = a.folders().into_iter().next().unwrap();
@@ -402,7 +398,7 @@ fn rekeying_a_strongroom_re_encrypts_it_under_a_new_key_for_every_enrolled_key()
     let storage = lab.root.join("storage");
     let old_id = a.folders()[0].0.folder_id.clone();
     let old_chunks = objects(&storage, "chunks");
-    let old_wraps = objects(&storage, &format!("vault/strongroom-keys/{old_id}"));
+    let old_wraps = objects(&storage, &format!("vault/strongroom/{old_id}"));
     assert!(!old_wraps.is_empty());
 
     // Re-key with the software keys in A's directory (both enrolled keys).
@@ -419,7 +415,7 @@ fn rekeying_a_strongroom_re_encrypts_it_under_a_new_key_for_every_enrolled_key()
     // Old ciphertext and old key wraps are gone from the storage.
     assert!(objects(&storage, "chunks").is_disjoint(&old_chunks));
     assert!(objects(&storage, &format!("manifests/{old_id}")).is_empty());
-    assert!(objects(&storage, &format!("vault/strongroom-keys/{old_id}")).is_empty());
+    assert!(objects(&storage, &format!("vault/strongroom/{old_id}")).is_empty());
     // A keeps working under the new key.
     assert_eq!(fs::read(lab.a_dir.join("deed.pdf")).unwrap(), b"title deed");
     fs::write(lab.a_dir.join("after.txt"), b"after the re-key").unwrap();
@@ -488,8 +484,8 @@ fn a_wrong_folder_key_is_refused_by_unlock_convert_and_rekey() {
         (r, i)
     };
     assert!(!info.check_hex.is_empty());
-    let new_id = varsto_core::ids::FolderId::random();
     let fk = varsto_core::crypto::SecretKey::random();
+    let new_id = a.strongroom_id_for(&fk);
     let new_info =
         varsto_core::strongroom::rewrap_enrolled(&lab.a_home, a.vault_id(), &new_id, &fk, &info)
             .unwrap();

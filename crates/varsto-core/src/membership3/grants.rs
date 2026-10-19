@@ -9,7 +9,7 @@
 //! epoch) is decided by `Membership`, which holds the folder records and
 //! folder epochs; this module has the bodies and the keys they give.
 
-use super::{derive3, store, Role, VAULT_SCOPE};
+use super::{derive3, store, Role, Stamp, VAULT_SCOPE};
 use crate::crypto::SecretKey;
 use crate::record::{
     Id16, KeyId, Kind, Record, RecordBody, RecordKeys, RecordMeta, RecordTrust, RecordsRefused,
@@ -23,9 +23,81 @@ use zeroize::Zeroize;
 
 /// Most older epochs one grant carries.
 pub const MAX_OLDER: usize = 65_536;
+/// Most role changes one directory entry carries.
+pub const MAX_HISTORY: usize = 1024;
+
+/// One participant of a shared folder as a member device learns it
+/// (`Directory`): who it is, its keys, and its role over time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryEntry {
+    pub device: Id16,
+    pub name: String,
+    /// K6 public key; BLAKE3 of it gives `device`.
+    pub k6: Vec<u8>,
+    /// K8 public key.
+    pub k8: Vec<u8>,
+    /// A device of the owner's vault (not another person's member device).
+    pub full: bool,
+    /// Every accepted change of its role in stamp order (`None`: removed
+    /// or denied); the last one is the current role.
+    pub history: Vec<(Stamp, Option<Role>)>,
+    /// Removed from the vault or the folder: its newest ledger batch that
+    /// counts.
+    pub cutoff: Option<u64>,
+}
+
+impl DirectoryEntry {
+    pub fn role(&self) -> Option<Role> {
+        self.history.last().and_then(|(_, r)| *r)
+    }
+
+    /// Whether the keys belong to the id (BLAKE3(K6)[..16]).
+    pub fn id_matches(&self) -> bool {
+        crate::crypto::hash(&self.k6)[..16] == self.device
+    }
+}
+
+/// What a member device of another vault cannot read from this vault's
+/// registry (it holds no vault key): the folder's name, its creator and
+/// every participant with its keys and roles. Carried in the grants to
+/// member devices, and written again (a new grant of the same epoch) when
+/// the participants change; the one with the largest stamp counts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Directory {
+    pub stamp: Stamp,
+    pub name: String,
+    pub creator: Id16,
+    pub entries: Vec<DirectoryEntry>,
+}
+
+impl Directory {
+    pub fn get(&self, device: &Id16) -> Option<&DirectoryEntry> {
+        self.entries.iter().find(|e| e.device == *device)
+    }
+
+    fn check(&self) -> Result<(), String> {
+        if self.name.len() > super::MAX_NAME || self.entries.len() > super::MAX_PARTICIPANTS {
+            return Err("directory too large".into());
+        }
+        for e in &self.entries {
+            if e.name.len() > super::MAX_NAME
+                || e.k6.len() > 4096
+                || e.k8.len() > 4096
+                || e.history.len() > MAX_HISTORY
+            {
+                return Err("a directory entry is too large".into());
+            }
+            if !e.id_matches() {
+                return Err("a directory entry's keys do not give its device id".into());
+            }
+        }
+        Ok(())
+    }
+}
 
 /// The body of a folder grant: K9ₑ, K11 and every older K9 the recipient
-/// should read, and the role it was granted with.
+/// should read, and the role it was granted with. A grant to a member
+/// device of another vault also carries the folder's [`Directory`].
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantRecord {
     pub folder: Id16,
@@ -36,9 +108,10 @@ pub struct GrantRecord {
     pub k9: [u8; 32],
     pub k11: [u8; 32],
     pub older: Vec<(u32, [u8; 32])>,
+    pub directory: Option<Directory>,
 }
 
-crate::redacted_debug!(GrantRecord { folder, epoch, recipient, issuer, role ; k9, k11, older });
+crate::redacted_debug!(GrantRecord { folder, epoch, recipient, issuer, role, directory ; k9, k11, older });
 
 impl Drop for GrantRecord {
     fn drop(&mut self) {
@@ -66,6 +139,9 @@ impl RecordBody for GrantRecord {
         }
         if self.older.len() > MAX_OLDER {
             return Err("too many older epochs".into());
+        }
+        if let Some(d) = &self.directory {
+            d.check()?;
         }
         let mut last = None;
         for (e, _) in &self.older {

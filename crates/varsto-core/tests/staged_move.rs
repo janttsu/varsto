@@ -77,9 +77,6 @@ impl Lab {
         let docs = root.join("docs");
         fs::create_dir_all(docs.join("sub")).unwrap();
         fs::create_dir_all(docs.join("other")).unwrap();
-        fs::write(docs.join("sub/x.bin"), pseudo_random(6_000_000, 1)).unwrap();
-        fs::write(docs.join("sub/y.bin"), pseudo_random(6_000_000, 2)).unwrap();
-        fs::write(docs.join("other/z.bin"), pseudo_random(6_000_000, 3)).unwrap();
         a.add_folder("docs", &docs).unwrap();
         a.set_policy("docs", None).unwrap();
         // The pool is not written by pushes or disk fills: only the job fills it.
@@ -91,7 +88,12 @@ impl Lab {
             }),
         )
         .unwrap();
-        a.push("docs").unwrap();
+        // One push per file: a pack of its own each, so a job has several
+        // packs (groups) to work through.
+        for (path, seed) in [("sub/x.bin", 1), ("sub/y.bin", 2), ("other/z.bin", 3)] {
+            fs::write(docs.join(path), pseudo_random(6_000_000, seed)).unwrap();
+            a.push("docs").unwrap();
+        }
         (lab, a)
     }
 
@@ -121,38 +123,43 @@ impl Lab {
     }
 }
 
-/// Blocks (and bytes) of the folder the ledger shows on a storage.
+/// Blocks (and bytes) of the folder the ledger shows on a storage: a live
+/// place of each in a pack held there.
 fn on(e: &Engine, storage: &str) -> (usize, u64) {
-    let v = e.view().unwrap();
-    let hits: Vec<_> = v
-        .chunks
-        .values()
-        .filter(|c| {
-            c.storages
-                .get(storage)
-                .is_some_and(|l| !l.claimed_by.is_empty())
-        })
-        .collect();
-    (hits.len(), hits.iter().map(|c| c.size).sum())
+    (
+        e.objects_on_storage(storage).unwrap().len(),
+        e.block_bytes_on_storage(storage).unwrap(),
+    )
 }
 
+/// Every block of the folder (all on "box" at the start).
 fn total_blocks(e: &Engine) -> (usize, u64) {
-    let v = e.view().unwrap();
-    (v.chunks.len(), v.chunks.values().map(|c| c.size).sum())
+    on(e, "box")
 }
 
 /// Every block of the folder is physically on a storage the ledger names.
 fn every_block_present(e: &Engine) {
-    let v = e.view().unwrap();
-    for r in v.chunks.values() {
-        let key = format!("chunks/{}/{}", &r.object.as_str()[..2], r.object.as_str());
-        let there = r.storages.iter().any(|(n, l)| {
-            !l.claimed_by.is_empty() && e.open_storage(n).unwrap().exists(&key).unwrap_or(false)
+    let names: Vec<String> = e.storages().iter().map(|s| s.name().to_string()).collect();
+    let mut all: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for n in &names {
+        for o in e.objects_on_storage(n).unwrap() {
+            all.entry(o).or_default().push(n.clone());
+        }
+    }
+    assert!(!all.is_empty());
+    for (o, holders) in all {
+        let key = format!("chunks/{}/{}", &o[..2], o);
+        let there = holders.iter().any(|n| {
+            e.open_storage(n)
+                .unwrap()
+                .get(&key)
+                .ok()
+                .flatten()
+                .is_some_and(|b| hex::encode(varsto_core::crypto::hash(&b)) == o)
         });
-        assert!(there, "block {} has no readable copy", r.object.short());
+        assert!(there, "block {} has no readable copy", &o[..8]);
     }
 }
-
 fn request(folder: &str) -> MoveJobRequest {
     MoveJobRequest {
         folder: folder.into(),
@@ -197,10 +204,13 @@ fn a_folder_moves_to_the_pool_one_disk_at_a_time() {
         on_shelf > 0 && shelf_bytes <= third,
         "{on_shelf} blocks, {shelf_bytes} bytes"
     );
+    // About a third of the room is usable once packs are padded to their
+    // size classes.
     assert!(
-        shelf_bytes * 4 > bytes,
+        shelf_bytes * 5 > bytes,
         "about a third moved: {shelf_bytes} of {bytes}"
     );
+
     // What moved left the box; the rest is still there.
     assert_eq!(on(&a, "box"), (blocks - on_shelf, bytes - shelf_bytes));
     assert_eq!(r.job.state, JobState::Open);
@@ -254,7 +264,7 @@ fn a_folder_moves_to_the_pool_one_disk_at_a_time() {
     assert!(a.move_jobs_ready(true).is_empty());
 
     // Disk 3 holds the rest.
-    let d3 = lab.mount("d3", bytes);
+    let d3 = lab.mount("d3", bytes * 4);
     a.disk_add(&d3, "shelf", "data-03").unwrap();
     let runs = a.move_jobs_run_ready(false, &JobRunLimits::default());
     assert_eq!(runs.len(), 1);
@@ -300,7 +310,7 @@ fn keep_source_copies_without_dropping() {
     // The box keeps everything.
     assert_eq!(on(&a, "box"), (blocks, bytes));
     assert_eq!(r.job.bytes_done, shelf_bytes);
-    let d2 = lab.mount("d2", bytes);
+    let d2 = lab.mount("d2", bytes * 4);
     a.disk_add(&d2, "shelf", "data-02").unwrap();
     let runs = a.move_jobs_run_ready(false, &JobRunLimits::default());
     assert_eq!(runs[0].job.state, JobState::Done);
@@ -317,7 +327,7 @@ fn keep_source_copies_without_dropping() {
 fn paths_limit_the_job_to_files_under_them() {
     let (lab, mut a) = Lab::new(1);
     let (blocks, bytes) = total_blocks(&a);
-    let d1 = lab.mount("d1", bytes * 2);
+    let d1 = lab.mount("d1", bytes * 4);
     a.disk_add(&d1, "shelf", "data-01").unwrap();
     // A missing path is refused; an absolute path inside the folder works.
     let mut bad = request("docs");
@@ -359,7 +369,7 @@ fn paths_limit_the_job_to_files_under_them() {
 fn a_disk_group_rule_needs_two_places_before_the_source_is_dropped() {
     let (lab, mut a) = Lab::new(2);
     let (blocks, bytes) = total_blocks(&a);
-    let d1 = lab.mount("d1", bytes * 2);
+    let d1 = lab.mount("d1", bytes * 4);
     a.disk_add_at(&d1, "shelf", "home-01", "home").unwrap();
     let (job, _) = a.move_job_start(&request("docs")).unwrap();
     let r = run(&mut a, &job.id);
@@ -374,7 +384,7 @@ fn a_disk_group_rule_needs_two_places_before_the_source_is_dropped() {
     // Nothing to do until another disk is docked.
     assert!(a.move_jobs_ready(true).is_empty());
 
-    let d2 = lab.mount("d2", bytes * 2);
+    let d2 = lab.mount("d2", bytes * 4);
     a.disk_add_at(&d2, "shelf", "off-01", "offsite").unwrap();
     // `disk add` fills nothing for this folder: the job places the copies.
     let runs = a.move_jobs_run_ready(false, &JobRunLimits::default());
@@ -394,7 +404,7 @@ fn a_disk_group_rule_needs_two_places_before_the_source_is_dropped() {
 fn pause_resume_and_cancel_leave_the_data_consistent() {
     let (lab, mut a) = Lab::new(1);
     let (blocks, bytes) = total_blocks(&a);
-    let d1 = lab.mount("d1", bytes * 2);
+    let d1 = lab.mount("d1", bytes * 4);
     a.disk_add(&d1, "shelf", "data-01").unwrap();
     let (job, _) = a.move_job_start(&request("docs")).unwrap();
 
@@ -442,7 +452,7 @@ fn pause_resume_and_cancel_leave_the_data_consistent() {
 fn a_job_resumes_after_the_engine_is_dropped_between_groups() {
     let (lab, mut a) = Lab::new(1);
     let (blocks, bytes) = total_blocks(&a);
-    let d1 = lab.mount("d1", bytes * 2);
+    let d1 = lab.mount("d1", bytes * 4);
     a.disk_add(&d1, "shelf", "data-01").unwrap();
     let (job, _) = a.move_job_start(&request("docs")).unwrap();
     let r = a

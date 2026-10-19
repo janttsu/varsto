@@ -11,12 +11,8 @@ mod common;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::engine::ForwardOptions;
-use varsto_core::p2p;
 use varsto_core::policy::{Policy, PolicyState};
 use varsto_core::storage::StorageSpec;
 use varsto_core::strongroom::{Method, SoftwareKey};
@@ -87,8 +83,13 @@ fn cloud_copy() -> Policy {
 /// A phone with the camera folder and three pictures that went nowhere
 /// (its only storage is at its quota). Returns the phone and the vault key.
 fn phone(lab: &Lab) -> (Engine, String) {
+    phone_with(lab, ChunkerParams::SMALL)
+}
+
+/// `phone` with the given block sizes.
+fn phone_with(lab: &Lab, chunker: ChunkerParams) -> (Engine, String) {
     let (mut phone, key) = Engine::init(&lab.p("phone-home"), "phone", PASS).unwrap();
-    phone.chunker = ChunkerParams::SMALL;
+    phone.chunker = chunker;
     phone.add_storage(lab.hub()).unwrap();
     phone.set_storage_quota("hub", None, Some(Some(1))).unwrap();
     let files = lab.p("phone-camera");
@@ -97,6 +98,14 @@ fn phone(lab: &Lab) -> (Engine, String) {
     phone.set_policy("camera", Some(cloud_copy())).unwrap();
     for (i, name) in ["a.jpg", "b.jpg", "c.mp4"].iter().enumerate() {
         fs::write(files.join(name), pseudo_random(150_000, i as u64 + 1)).unwrap();
+        // One second apart: forwarding takes the newest first.
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000 + i as u64);
+        fs::File::options()
+            .write(true)
+            .open(files.join(name))
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
     }
     phone.sync(None).unwrap();
     assert_eq!(
@@ -109,9 +118,9 @@ fn phone(lab: &Lab) -> (Engine, String) {
 
 /// A laptop that joins with the shared storage, adds the bucket and
 /// attaches the camera folder with selective sync.
-fn laptop(lab: &Lab, name: &str, key: &str) -> Engine {
+fn laptop(lab: &Lab, name: &str, key: &str, owner: &mut Engine) -> Engine {
     let home = lab.p(&format!("{name}-home"));
-    let mut l = Engine::join(&home, name, PASS, key, lab.hub()).unwrap();
+    let mut l = common::join_approved(&home, name, PASS, key, lab.hub(), owner);
     l.chunker = ChunkerParams::SMALL;
     l.add_storage(lab.bucket()).unwrap();
     l.attach_folder("camera", &lab.p(&format!("{name}-camera")), true)
@@ -120,46 +129,11 @@ fn laptop(lab: &Lab, name: &str, key: &str) -> Engine {
     l
 }
 
-/// The phone serves its blocks over TCP to `to`.
-struct Served {
-    stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl Drop for Served {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-    }
-}
-
-fn serve(phone: &Engine, to: &mut [&mut Engine]) -> Served {
-    let server = p2p::Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let addr = server.addr;
-    let snap = Arc::new(Mutex::new(Some(Arc::new(phone.peer_snapshot().unwrap()))));
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop2 = stop.clone();
-    let thread = std::thread::spawn(move || {
-        server.run(snap, stop2);
-    });
-    for e in to.iter_mut() {
-        let peers = p2p::Peers::new(
-            e.peer_key(),
-            e.device_id().clone(),
-            vec![p2p::PeerAddr {
-                device: phone.device_id().clone(),
-                addr,
-                name: "phone".into(),
-            }],
-        );
-        e.set_peers(Some(Arc::new(peers)));
-    }
-    Served {
-        stop,
-        thread: Some(thread),
-    }
+/// The phone serves its blocks over TLS on TCP to `to`.
+fn serve(phone: &mut Engine, to: &mut [&mut Engine]) -> common::p2p::Serving {
+    let serving = common::p2p::Serving::start(phone);
+    common::p2p::connect(phone, &serving, to);
+    serving
 }
 
 fn camera_state(e: &Engine) -> PolicyState {
@@ -199,7 +173,7 @@ fn leases(root: &Path) -> usize {
 fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
     let lab = Lab::new();
     let (mut phone, key) = phone(&lab);
-    let mut laptop = laptop(&lab, "laptop", &key);
+    let mut laptop = laptop(&lab, "laptop", &key, &mut phone);
     assert_eq!(
         common::object_count(&lab.p("bucket")),
         0,
@@ -215,7 +189,7 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
     assert_eq!(common::object_count(&lab.p("bucket")), 0);
 
     // The phone is online.
-    let served = serve(&phone, &mut [&mut laptop]);
+    let served = serve(&mut phone, &mut [&mut laptop]);
     let r = laptop.forward(&ForwardOptions::manual()).unwrap();
     let f = &r.folders[0];
     assert_eq!(f.blocks, waiting, "{r:?}");
@@ -260,18 +234,21 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
 
     // The copies are the laptop's claims, and its own read-back is not a
     // verification by another device.
-    let view = laptop.view().unwrap();
-    let mut claimed = 0;
-    for rec in view.chunks.values() {
-        if let Some(loc) = rec.storages.get("bucket") {
-            claimed += 1;
-            assert_eq!(
-                loc.claimed_by.iter().collect::<Vec<_>>(),
-                vec![laptop.device_id()]
-            );
-            assert!(!loc.independently_verified("bucket"));
+    let view = laptop.ledger_view().unwrap();
+    let me: [u8; 16] = hex::decode(laptop.device_id().as_str())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let packs = laptop.packs_on_storage("bucket").unwrap();
+    assert!(!packs.is_empty());
+    for id in packs.keys() {
+        let id: [u8; 32] = hex::decode(id).unwrap().try_into().unwrap();
+        for c in view.copies(&id) {
+            assert_eq!(c.claimed_by, vec![me]);
+            assert!(!c.independently_verified);
         }
     }
+    let claimed = laptop.objects_on_storage("bucket").unwrap().len();
     assert_eq!(claimed as u64, waiting);
 
     // Nothing is left to do.
@@ -280,7 +257,14 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
 
     // Another device reads the pictures from the bucket alone, with the
     // phone offline: they are complete and intact there.
-    let mut desk = Engine::join(&lab.p("desk-home"), "desk", PASS, &key, lab.hub()).unwrap();
+    let mut desk = common::join_approved(
+        &lab.p("desk-home"),
+        "desk",
+        PASS,
+        &key,
+        lab.hub(),
+        &mut phone,
+    );
     desk.add_storage(lab.bucket()).unwrap();
     desk.attach_folder("camera", &lab.p("desk-camera"), false)
         .unwrap();
@@ -293,19 +277,16 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
     }
     // The phone learns of the copies too.
     phone.sync(None).unwrap();
-    let pv = phone.view().unwrap();
-    assert!(pv
-        .chunks
-        .values()
-        .any(|r| r.storages.contains_key("bucket")));
+    let pv = phone.ledger_view().unwrap();
+    assert!(pv.packs.keys().any(|p| pv.is_held(p, "bucket")));
 }
 
 #[test]
 fn turned_off_it_forwards_nothing() {
     let lab = Lab::new();
-    let (phone, key) = phone(&lab);
-    let mut laptop = laptop(&lab, "laptop", &key);
-    let _served = serve(&phone, &mut [&mut laptop]);
+    let (mut phone, key) = phone(&lab);
+    let mut laptop = laptop(&lab, "laptop", &key, &mut phone);
+    let _served = serve(&mut phone, &mut [&mut laptop]);
     laptop.set_forwarding(false).unwrap();
     let r = laptop.forward(&ForwardOptions::manual()).unwrap();
     assert!(!r.enabled && r.blocks == 0, "{r:?}");
@@ -313,6 +294,61 @@ fn turned_off_it_forwards_nothing() {
     assert_eq!(laptop.forward_status().describe(), "forwarding: off");
     laptop.set_forwarding(true).unwrap();
     assert!(laptop.forward(&ForwardOptions::manual()).unwrap().blocks > 0);
+}
+
+#[test]
+fn room_taken_for_a_block_that_is_not_written_goes_to_the_next_one() {
+    let lab = Lab::new();
+    // The default block sizes: each picture is one block.
+    let (mut phone, key) = phone_with(&lab, ChunkerParams::DEFAULT);
+    let mut laptop = laptop(&lab, "laptop", &key, &mut phone);
+    // The bucket has room for one more pack of the smallest class (256
+    // KiB): one picture (150 kB), not two.
+    let used = laptop.quota_status("bucket").unwrap().used_bytes;
+    let quota = (used + 300_000) * 100 / 99 + 1;
+    laptop
+        .set_storage_quota("bucket", Some(Some(quota)), None)
+        .unwrap();
+    // The newest picture (c.mp4, the same bytes as b.jpg), which
+    // forwarding takes first, is gone from the phone's disk with b.jpg
+    // (the phone has not noticed yet): no source has its block. The block
+    // takes room before it is asked for; the room must come back when the
+    // fetch finds nothing, or a.jpg finds the bucket full.
+    fs::remove_file(lab.p("phone-camera").join("c.mp4")).unwrap();
+    fs::remove_file(lab.p("phone-camera").join("b.jpg")).unwrap();
+    let _served = serve(&mut phone, &mut [&mut laptop]);
+    let r = laptop.forward(&ForwardOptions::manual()).unwrap();
+    let f = &r.folders[0];
+    assert_eq!(f.unavailable, 1, "c.mp4 has no source: {r:?}");
+    assert_eq!(f.blocks, 1, "a.jpg takes the room c.mp4 left: {r:?}");
+    assert_eq!(f.waiting_for_target, 0, "{r:?}");
+    assert_eq!(f.to_storages.get("bucket"), Some(&1), "{r:?}");
+    // One pack of the smallest class went there, and nothing more fits:
+    // b.jpg back on the phone waits for room.
+    assert_eq!(
+        laptop
+            .packs_on_storage("bucket")
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>(),
+        vec![&0u8]
+    );
+    let served = serve(&mut phone, &mut [&mut laptop]);
+    fs::write(
+        lab.p("phone-camera").join("b.jpg"),
+        pseudo_random(150_000, 2),
+    )
+    .unwrap();
+    served.refresh(&mut phone);
+    let r = laptop.forward(&ForwardOptions::manual()).unwrap();
+    let f = &r.folders[0];
+    assert_eq!((f.blocks, f.waiting_for_target), (0, 1), "{r:?}");
+    assert!(
+        r.storages_full
+            .iter()
+            .any(|m| m.contains("storage bucket is at its quota")),
+        "{r:?}"
+    );
 }
 
 #[test]
@@ -343,7 +379,7 @@ fn a_locked_strongroom_is_not_forwarded() {
         .attach_folder("vault", &lab.p("laptop-vault"), true)
         .unwrap();
     let _ = laptop.sync(None);
-    let _served = serve(&phone, &mut [&mut laptop]);
+    let _served = serve(&mut phone, &mut [&mut laptop]);
 
     // Locked: the laptop holds no key for the folder and forwards nothing.
     let r = laptop.forward(&ForwardOptions::manual()).unwrap();
@@ -365,10 +401,10 @@ fn a_locked_strongroom_is_not_forwarded() {
 #[test]
 fn two_laptops_with_one_bucket_write_every_block_once() {
     let lab = Lab::new();
-    let (phone, key) = phone(&lab);
-    let mut one = laptop(&lab, "laptop1", &key);
-    let mut two = laptop(&lab, "laptop2", &key);
-    let _served = serve(&phone, &mut [&mut one, &mut two]);
+    let (mut phone, key) = phone(&lab);
+    let mut one = laptop(&lab, "laptop1", &key, &mut phone);
+    let mut two = laptop(&lab, "laptop2", &key, &mut phone);
+    let _served = serve(&mut phone, &mut [&mut one, &mut two]);
 
     // The first stops after one block (its budget) and keeps the lease.
     let small = ForwardOptions {

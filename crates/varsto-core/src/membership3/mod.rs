@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Folder membership of storage format 3 (`docs/spec/format-3-design.md`,
-//! sections 1, 5, 6 and 9; work package 8a). Built behind the `format3`
-//! feature; nothing in the format-2 code path calls it yet.
+//! sections 1, 5, 6 and 9; work package 8a).
 //!
 //! Every object here is a [`crate::record::SignedRecord`]:
 //!
@@ -56,10 +55,12 @@ pub mod escrow;
 pub mod folders;
 pub mod grants;
 pub mod keys;
+pub mod member_view;
 pub mod members;
 pub mod requests;
 mod session;
 mod store;
+pub mod strongrooms;
 pub mod trust;
 
 #[cfg(test)]
@@ -71,8 +72,11 @@ pub use epochs::{
 };
 pub use escrow::{EscrowRecord, MissingEscrow, RecoveryKey};
 pub use folders::{Denied, FolderRecord, FolderRegistry, FolderState, Participant};
-pub use grants::{FolderKeys, GrantRecord, GrantedKeys, VaultGrantRecord};
+pub use grants::{
+    Directory, DirectoryEntry, FolderKeys, GrantRecord, GrantedKeys, VaultGrantRecord,
+};
 pub use keys::{KeyRing, VaultKeys};
+pub use member_view::MemberView;
 pub use members::{MemberDevice, MemberRegistry};
 pub use requests::{fingerprint, PendingRequest, RequestRecord};
 pub use session::{EpochStart, Membership};

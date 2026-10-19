@@ -119,8 +119,9 @@ impl Engine {
     /// durability policy state. One pass over the ledger view.
     pub fn protection(&self) -> Result<BTreeMap<String, Protection>> {
         let view = self.view()?;
+        let view3 = self.view3()?;
         let reports = self
-            .policy_reports(&view, util::now_utc(), |id| {
+            .policy_reports(&view3, util::now_utc(), |id| {
                 self.load_state(id).map(std::borrow::Cow::Owned)
             })
             .ok();
@@ -133,13 +134,17 @@ impl Engine {
     /// the caller already has (`status` reads each of them once).
     pub(super) fn protection_with<'s, F>(
         &self,
-        view: &LedgerView,
+        _view: &LedgerView,
         reports: Option<&[PolicyReport]>,
         state_of: F,
     ) -> Result<BTreeMap<String, Protection>>
     where
         F: Fn(&FolderId) -> Result<std::borrow::Cow<'s, FolderState>>,
     {
+        // Format 3: copies of a block are the storages holding a live
+        // place of it (`storages3::block_copy_details`); "another device
+        // holds it" is the `held` flag of that device's manifest.
+        let view = self.view3()?;
         let policy_states: BTreeMap<String, String> = reports
             .unwrap_or_default()
             .iter()
@@ -162,55 +167,66 @@ impl Engine {
         let mut out = BTreeMap::new();
         for (rec, mount) in self.folders() {
             let state = state_of(&rec.folder_id)?;
-            let mut chunks: BTreeMap<&ChunkId, u64> = BTreeMap::new();
+            let Ok(folder) = members3::bin(&rec.folder_id) else {
+                continue;
+            };
+            let has_keys = !rec.key_hex.is_empty() || !rec.epoch_keys.is_empty();
+            let table = if has_keys {
+                Some(self.table3(&folder)?)
+            } else {
+                None
+            };
+            let held = self.load_manifests(&folder).held_index();
+            let mut chunks: BTreeMap<&ObjectName, u64> = BTreeMap::new();
             for f in state.files.values().filter(|f| !f.deleted) {
                 for c in &f.chunks {
-                    chunks.entry(&c.chunk).or_insert(c.size);
+                    chunks.entry(&c.object).or_insert(c.size);
                 }
             }
-            let here: HashSet<&ChunkId> = match &mount {
+            let here: HashSet<&ObjectName> = match &mount {
                 Some(_) => state
                     .files
                     .values()
                     .filter(|f| !f.deleted && state.local_index.contains_key(&f.path))
-                    .flat_map(|f| f.chunks.iter().map(|c| &c.chunk))
+                    .flat_map(|f| f.chunks.iter().map(|c| &c.object))
                     .collect(),
                 None => HashSet::new(),
             };
-            let me = &self.vault.device_id;
+            let me = self.me3();
             let mut p = Protection::empty();
             p.policy_state = policy_states.get(&rec.name).cloned();
             // (bytes, blocks, verified bytes) per class
             let mut acc = [(0u64, 0u64, 0u64); 3];
-            for (chunk, manifest_size) in chunks {
-                let record = view.locate(&rec.folder_id, chunk);
+            for (object, manifest_size) in chunks {
                 // Plaintext bytes, as the folder's own size counts them.
                 let size = manifest_size;
                 p.total_bytes += size;
                 p.total_blocks += 1;
                 // (has a copy, has a verified copy) per class
                 let mut has = [(false, false); 3];
-                if let Some(r) = record {
-                    for (name, loc) in &r.storages {
-                        if loc.claimed_by.is_empty() || carriers.contains(name.as_str()) {
+                let obj = crate::storages3::object_bin(object)?;
+                if let Some(t) = &table {
+                    let t = t.read().unwrap_or_else(|e| e.into_inner());
+                    for c in crate::storages3::block_copy_details(&view, &*t, &obj) {
+                        if carriers.contains(c.storage.as_str()) {
                             continue;
                         }
-                        let class = if name.starts_with("replica:") {
+                        let class = if c.storage.starts_with("replica:") {
                             Class::Device
                         } else {
                             // A storage only other devices know of: not
                             // counted as external, the safe reading.
-                            classes.get(name).copied().unwrap_or(Class::Device)
+                            classes.get(&c.storage).copied().unwrap_or(Class::Device)
                         };
                         let e = &mut has[class as usize];
                         e.0 = true;
-                        e.1 |= loc.independently_verified(name);
-                    }
-                    if r.devices.iter().any(|d| d != me) {
-                        has[Class::Device as usize].0 = true;
+                        e.1 |= c.independently_verified;
                     }
                 }
-                if here.contains(chunk) {
+                if held.held_elsewhere(&obj, &me) {
+                    has[Class::Device as usize].0 = true;
+                }
+                if here.contains(object) {
                     has[Class::Device as usize].0 = true;
                 }
                 for (i, (any, checked)) in has.iter().enumerate() {

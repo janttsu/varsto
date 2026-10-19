@@ -3,6 +3,8 @@
 //! and the same blocks come out again when a storage added later needs
 //! copies of them.
 
+mod common;
+
 use rand::RngCore;
 use std::fs;
 use std::path::Path;
@@ -23,13 +25,29 @@ fn dir(name: &str, path: &Path) -> StorageSpec {
     }
 }
 
-fn on_storage(e: &Engine, storage: &str) -> usize {
-    e.view()
-        .unwrap()
-        .chunks
-        .values()
-        .filter(|c| c.storages.contains_key(storage))
-        .count()
+/// The blocks a storage directory holds.
+fn on_storage(root: &Path) -> usize {
+    common::object_count(root)
+}
+
+/// The sizes of the blocks (stored bytes) of one folder's packs in a
+/// storage directory, ascending.
+fn block_sizes(e: &Engine, root: &Path, folder: &varsto_core::ids::FolderId) -> Vec<u64> {
+    let view = e.ledger_view().unwrap();
+    let fb: [u8; 16] = hex::decode(folder.as_str()).unwrap().try_into().unwrap();
+    let mut out = Vec::new();
+    for (_, id) in common::pack_files(root) {
+        let pack: [u8; 32] = hex::decode(&id).unwrap().try_into().unwrap();
+        if view.pack_folder(&pack) == Some(fb) {
+            out.extend(
+                varsto_core::packs::debug_registry::members_on(root, &id)
+                    .into_iter()
+                    .map(|(_, loc)| loc.len),
+            );
+        }
+    }
+    out.sort();
+    out
 }
 
 #[test]
@@ -61,13 +79,13 @@ fn big_files_get_big_blocks_and_are_cut_again_the_same_way() {
     fs::write(files.join("note.txt"), b"small").unwrap();
     a.sync(None).unwrap();
     // 40 MiB: blocks of about 4 MiB (1 to 16 MiB), and the small note one.
-    let blocks = on_storage(&a, "one");
+    let blocks = on_storage(&s1);
     assert!((4..=40).contains(&blocks), "{blocks} blocks");
 
     // A storage added later gets every block, cut again from the file.
     a.add_storage(dir("two", &s2)).unwrap();
     a.sync(None).unwrap();
-    assert_eq!(on_storage(&a, "two"), blocks);
+    assert_eq!(on_storage(&s2), blocks);
 }
 
 #[test]
@@ -90,18 +108,7 @@ fn the_same_file_is_cut_differently_in_two_folders() {
     let first = a.add_folder("first", &f1).unwrap();
     let second = a.add_folder("second", &f2).unwrap();
     a.sync(None).unwrap();
-    let sizes = |e: &Engine, folder: &varsto_core::ids::FolderId| {
-        let mut s: Vec<u64> = e
-            .view()
-            .unwrap()
-            .chunks
-            .iter()
-            .filter(|((f, _), _)| f == folder)
-            .map(|(_, r)| r.size)
-            .collect();
-        s.sort();
-        s
-    };
+    let sizes = |e: &Engine, folder: &varsto_core::ids::FolderId| block_sizes(e, &s1, folder);
     let (one, two) = (sizes(&a, &first), sizes(&a, &second));
     assert!(one.len() >= 3 && two.len() >= 3, "{one:?} {two:?}");
     // Keyed Gear tables: other cut points, so other block sizes.

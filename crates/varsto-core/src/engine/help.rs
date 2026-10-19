@@ -308,7 +308,13 @@ impl Engine {
             .partition(|b| b.source == "peer");
         inputs.ledger_withheld = acks_told.iter().map(|b| b.name.clone()).collect();
         inputs.ledger_rolled_back = peer_told.iter().map(|b| b.name.clone()).collect();
-        let view = self.view()?;
+        // Storages a writer confirmed that show less than a peer proved.
+        for d in self.ledger_rollback_devices() {
+            if !inputs.ledger_rolled_back.contains(&d) {
+                inputs.ledger_rolled_back.push(d);
+            }
+        }
+        let view = self.view3()?;
         inputs.forked = self.forked_self || !view.forked.is_empty();
         let repair = observed
             .repair

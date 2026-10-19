@@ -11,7 +11,9 @@ case "$VARSTO_IT_ROLE" in
   owner)
     "$bin" --home $H init --name linux --json > /it/init.json
     "$bin" --home $H storage add-s3 cloud --endpoint "$S3_ENDPOINT" --region "$S3_REGION" --bucket "$S3_BUCKET" --access-key-id "$S3_KEY" --secret-access-key "$S3_SECRET"
-    "$bin" --home $H folder add shared /it/files
+    # The recovery words of the kit make the folder's recovery copy (format 3).
+    VARSTO_RECOVERY_WORDS="$(python3 -c 'import json,re; k=json.load(open("/it/init.json"))["kit"].split("RECOVERY WORDS")[1]; print(" ".join(re.findall(r"\d+\.\s+([a-z]+)", k)))')" \
+      "$bin" --home $H folder add shared /it/files
     head -c 2000000 /dev/urandom > /it/files/from-linux.bin; sha256sum /it/files/from-linux.bin | cut -c1-64 > /it/from-linux.sha
     "$bin" --home $H sync
     "$bin" --home $H p2p enable --port 17893 --public "$PUBLIC_IP:17893"
@@ -19,6 +21,14 @@ case "$VARSTO_IT_ROLE" in
     ;;
   peer)
     VARSTO_VAULT_KEY="$VAULT_KEY" "$bin" --home $H join --name linux-peer --storage-name cloud --s3-endpoint "$S3_ENDPOINT" --s3-region "$S3_REGION" --s3-bucket "$S3_BUCKET" --s3-access-key-id "$S3_KEY"
+    # Format 3: ask for the folder; an owner approves it, then
+    # VARSTO_IT_ROLE=peer-finish carries on.
+    "$bin" --home $H folder request shared
+    echo "PEER_REQUESTED"
+    exit 0
+    ;;
+  peer-finish)
+    "$bin" --home $H sync
     "$bin" --home $H folder attach shared /it/files
     "$bin" --home $H p2p enable --port 17893 --public "$PUBLIC_IP:17893"
     ;;

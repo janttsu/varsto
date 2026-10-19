@@ -182,6 +182,7 @@ impl World {
                     sign_pub: sk.public().to_bytes(),
                     kem_pub: Vec::new(),
                     stamp: Default::default(),
+                    details: None,
                 },
                 0,
             );
@@ -209,6 +210,8 @@ impl World {
             FolderState {
                 id: FOLDER,
                 name: "photos".into(),
+                shown: "photos".into(),
+                created_utc: 0,
                 settings: BTreeMap::new(),
                 creator: devs[0].id,
                 history: entries
@@ -219,6 +222,7 @@ impl World {
                 entries_refused: 0,
                 max_lamport: 0,
                 members: BTreeMap::new(),
+                removed: None,
             },
         );
         World {

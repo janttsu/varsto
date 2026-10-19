@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Automatic verification by another device (see `crate::autoverify`): pick
 //! copies that other devices wrote, download them within the budget, check
-//! the content hash and record `ChunkVerified` in the ledger, the same event
+//! the content hash and record `pack_verified` in the ledger, the same event
 //! `fsck --verify` records.
 //!
 //! The ledger names a storage by the writer's local name, and two devices may
@@ -9,7 +9,7 @@
 //! there). Every storage therefore carries a random identity object
 //! (`vault/storage-id.json`), and every device publishes, sealed under the
 //! registry key, which of its storage names has which identity
-//! (`vault/storage-names/<device>/<time>.enc`). A copy the writer calls "box"
+//! (`storage-names` records, kind 19, `storages3_ops`). A copy the writer calls "box"
 //! is read from whichever local storage has the same identity, and the check
 //! is recorded under the writer's name so that it meets the writer's claim.
 
@@ -19,8 +19,6 @@ use crate::autoverify::{
 };
 use crate::crypto;
 use crate::ids::DeviceId;
-use crate::ids::{ChunkId, FolderId, ObjectName};
-use crate::ledger::Event;
 use crate::pool::{self, PoolError};
 use crate::storage::Storage;
 use crate::util;
@@ -30,27 +28,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 pub(super) const STORAGE_ID_KEY: &str = "vault/storage-id.json";
-const NAMES_PREFIX: &str = "vault/storage-names/";
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct StorageIdentity {
     pub(super) storage_id: String,
-}
-
-/// One device's storage names and the identity of each storage.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-struct StorageNames {
-    device: DeviceId,
-    updated_utc: i64,
-    /// Local storage name -> storage identity.
-    names: BTreeMap<String, String>,
-}
-
-fn names_aad(vault: &crate::ids::VaultId, device: &DeviceId) -> Vec<u8> {
-    crypto::aad(
-        "storage-names",
-        &[vault.as_str().as_bytes(), device.as_str().as_bytes()],
-    )
 }
 
 /// The identity of a storage, created by the first device that asks.
@@ -107,50 +88,6 @@ impl NameResolver {
             .iter()
             .map(|(id, n)| (n.clone(), id.clone()))
             .collect()
-    }
-
-    /// Other devices' storage names that match a storage here by
-    /// identity: device -> (their name -> local name).
-    pub(super) fn aliases(&self) -> BTreeMap<DeviceId, BTreeMap<String, String>> {
-        self.theirs
-            .iter()
-            .map(|(d, names)| {
-                (
-                    d.clone(),
-                    names
-                        .iter()
-                        .filter_map(|(n, id)| {
-                            self.local_by_id.get(id).map(|l| (n.clone(), l.clone()))
-                        })
-                        .collect::<BTreeMap<_, _>>(),
-                )
-            })
-            .filter(|(_, m)| !m.is_empty())
-            .collect()
-    }
-
-    /// Like `resolve`, with every configured storage (`configured`) as a
-    /// candidate for an equal name, readable now or not; replicas are
-    /// their own storages.
-    pub(super) fn resolve_any(
-        &self,
-        name: &str,
-        claimers: &BTreeSet<DeviceId>,
-        configured: &BTreeSet<String>,
-    ) -> Option<String> {
-        if name.starts_with("replica:") {
-            return Some(name.to_string());
-        }
-        let mut known = false;
-        for d in claimers {
-            if let Some(id) = self.theirs.get(d).and_then(|n| n.get(name)) {
-                known = true;
-                if let Some(local) = self.local_by_id.get(id) {
-                    return Some(local.clone());
-                }
-            }
-        }
-        (!known && configured.contains(name)).then(|| name.to_string())
     }
 }
 
@@ -227,85 +164,6 @@ impl Engine {
         result
     }
 
-    /// Publish this device's storage names with their identities (when they
-    /// changed) and read every other device's newest list.
-    fn exchange_storage_names(
-        &self,
-        mine: &BTreeMap<String, String>,
-        backends: &BTreeMap<String, Box<dyn Storage>>,
-    ) -> BTreeMap<DeviceId, BTreeMap<String, String>> {
-        let key = self.registry_key_now();
-        let reg_keys: Vec<crate::crypto::SecretKey> =
-            self.registry_keys().into_iter().map(|(_, k)| k).collect();
-        let vault = &self.vault.vault_id;
-        let me = &self.vault.device_id;
-        let mut out: BTreeMap<DeviceId, (i64, BTreeMap<String, String>)> = BTreeMap::new();
-        let metadata: Vec<&String> = self
-            .config
-            .storages
-            .iter()
-            .filter(|s| !s.is_data_only())
-            .map(|s| s.name())
-            .filter_map(|n| backends.get_key_value(n).map(|(k, _)| k))
-            .collect();
-        for name in metadata {
-            let backend = &backends[name];
-            let Ok(keys) = backend.list(NAMES_PREFIX) else {
-                continue;
-            };
-            // Newest object per device (keys sort by time within a device).
-            let mut newest: BTreeMap<&str, &String> = BTreeMap::new();
-            for k in &keys {
-                if let Some((dev, _)) = k[NAMES_PREFIX.len()..].split_once('/') {
-                    newest.insert(dev, k);
-                }
-            }
-            let mut mine_published = false;
-            let mut mine_newest = 0i64;
-            for (dev, k) in newest {
-                let Ok(dev) = DeviceId::from_hex(dev) else {
-                    continue;
-                };
-                let rec = backend
-                    .get(k)
-                    .ok()
-                    .flatten()
-                    .and_then(|blob| {
-                        reg_keys
-                            .iter()
-                            .find_map(|k| crypto::decrypt(k, &names_aad(vault, &dev), &blob).ok())
-                    })
-                    .and_then(|plain| serde_json::from_slice::<StorageNames>(&plain).ok())
-                    .filter(|r| r.device == dev);
-                let Some(rec) = rec else { continue };
-                if &dev == me {
-                    mine_published = rec.names == *mine;
-                    mine_newest = rec.updated_utc;
-                    continue;
-                }
-                if out.get(&dev).is_none_or(|(t, _)| *t < rec.updated_utc) {
-                    out.insert(dev, (rec.updated_utc, rec.names));
-                }
-            }
-            if !mine_published && !self.vault.member && !mine.is_empty() {
-                // Newer than the list it replaces, even within the same second.
-                let rec = StorageNames {
-                    device: me.clone(),
-                    updated_utc: util::now_utc().max(mine_newest + 1),
-                    names: mine.clone(),
-                };
-                let sealed = serde_json::to_vec(&rec)
-                    .ok()
-                    .and_then(|plain| crypto::encrypt(&key, &names_aad(vault, me), &plain).ok());
-                if let Some(blob) = sealed {
-                    let k = format!("{NAMES_PREFIX}{me}/{:020}.enc", rec.updated_utc);
-                    let _ = backend.put_if_absent(&k, &blob);
-                }
-            }
-        }
-        out.into_iter().map(|(d, (_, n))| (d, n)).collect()
-    }
-
     /// Storage identities: ours (published when they changed), and the
     /// other devices' names for them, read from the storages in `readable`.
     pub(super) fn storage_resolver(
@@ -325,17 +183,30 @@ impl Engine {
                 }
             }
         }
+        // Kind 19 records (`storages3_ops`): ours published when they
+        // changed, the other devices' newest read back.
+        let theirs = Engine::their_names(&self.exchange_storage_names(&mine))
+            .into_iter()
+            .map(|(d, names)| (DeviceId::from_bytes(&d), names))
+            .collect();
         NameResolver {
-            theirs: self.exchange_storage_names(&mine, readable),
+            theirs,
             local_by_id,
             readable: readable.keys().cloned().collect(),
         }
     }
 
+    /// One run over the pack-level view (design section 3, "Verification
+    /// and repair"): the packs other devices claimed on the storages this
+    /// device reads without asking, due by their last independent
+    /// verification, are read whole (one request each) and hashed against
+    /// their id; a good pack is recorded with `pack_verified` under the
+    /// claimers' name of the storage. No folder key is needed. Missing and
+    /// damaged packs go to the repair queue.
     fn run_auto_verify(&mut self, now_utc: i64) -> Result<VerifyRunReport> {
         let _ = self.pull_ledger()?;
-        let view = self.view()?;
-        let me = self.vault.device_id.clone();
+        let view = self.view3()?;
+        let me = self.me3();
         let schedule = self.config.verify.clone();
         let mut report = VerifyRunReport {
             started_utc: util::now_utc(),
@@ -361,52 +232,60 @@ impl Engine {
             }
         }
         let names = self.storage_resolver(&readable);
-        // Verification window of every folder this device holds a key record for.
-        let windows: BTreeMap<FolderId, Option<u32>> = self
+        // Verification window of every folder whose record is here.
+        let windows: BTreeMap<crate::record::Id16, Option<u32>> = self
             .keyring
             .folders
             .iter()
-            .map(|(id, r)| {
-                (
-                    id.clone(),
+            .filter_map(|(id, r)| {
+                Some((
+                    super::members3::bin(id).ok()?,
                     r.effective_policy().and_then(|p| p.verified_within_days),
-                )
+                ))
             })
             .collect();
-        // (folder, chunk, object, storage name in the ledger, local storage to read).
-        let mut items: Vec<(FolderId, ChunkId, ObjectName, String, String)> = Vec::new();
+        // (pack, storage name in the ledger, local storage to read, class bytes).
+        let mut items: Vec<([u8; 32], String, String, u64)> = Vec::new();
         let mut candidates = Vec::new();
-        for ((folder, chunk), rec) in &view.chunks {
-            let Some(window) = windows.get(folder) else {
+        let mut packs: Vec<&[u8; 32]> = view.packs.keys().collect();
+        packs.sort();
+        for id in packs {
+            let Some(size) = view
+                .pack(id)
+                .and_then(|p| crate::ledger3::events::class_bytes(p.class))
+            else {
                 continue;
             };
-            for (storage, loc) in &rec.storages {
-                // Only copies another device wrote: our own check of our own
-                // write does not count for a policy.
-                if loc.claimed_by.is_empty() || loc.claimed_by.contains(&me) {
+            let window = view
+                .pack_folder(id)
+                .and_then(|f| windows.get(&f).copied())
+                .flatten();
+            for c in view.copies(id) {
+                // Only copies another device wrote: our own check of our
+                // own write does not count for a policy.
+                if c.claimed_by.is_empty() || c.claimed_by.contains(&me) {
                     continue;
                 }
-                let Some(local) = names.resolve(storage, &loc.claimed_by) else {
+                let claimers: BTreeSet<DeviceId> = c
+                    .claimed_by
+                    .iter()
+                    .map(|d| DeviceId::from_bytes(d))
+                    .collect();
+                let Some(local) = names.resolve(&c.storage, &claimers) else {
                     continue;
                 };
-                let last = if loc.independently_verified(storage) {
-                    loc.verified_utc
+                let last = if c.independently_verified {
+                    c.verified_utc
                 } else {
                     0
                 };
                 candidates.push(Candidate {
-                    due_utc: autoverify::due_utc(last, *window, schedule.reverify_days),
+                    due_utc: autoverify::due_utc(last, window, schedule.reverify_days),
                     has_window: window.is_some(),
-                    size: rec.size,
+                    size,
                     index: items.len(),
                 });
-                items.push((
-                    folder.clone(),
-                    chunk.clone(),
-                    rec.object.clone(),
-                    storage.clone(),
-                    local,
-                ));
+                items.push((*id, c.storage.clone(), local, size));
             }
         }
         let (order, due, left) =
@@ -414,20 +293,6 @@ impl Engine {
         report.due = due;
         report.left_for_next_run = left;
         let mut damage: Vec<Damage> = Vec::new();
-        let damaged = |i: usize, kind: DamageKind| {
-            let (folder, chunk, object, _, local) = &items[i];
-            Damage {
-                folder: folder.clone(),
-                chunk: chunk.clone(),
-                object: object.clone(),
-                storage: local.clone(),
-                kind,
-                found_by: "verify".to_string(),
-                found_utc: now_utc,
-                retry_utc: 0,
-                reason: None,
-            }
-        };
         let task = crate::activity::start(
             crate::activity::VERIFY,
             "",
@@ -436,59 +301,40 @@ impl Engine {
         );
         // One lane per local storage, read ahead in parallel where its
         // medium allows; the results come back here in the planned order.
-        // The blocks due in one pack are read together, with one request
-        // (`packs::read_members`).
         let lane_names: Vec<String> = lanes.keys().cloned().collect();
         let plans: Vec<crate::parverify::LanePlan> = lanes.values().copied().collect();
-        let groups = crate::packs::group_by_pack(order.into_iter().map(|i| {
-            let local = items[i].4.clone();
-            let loc = readable[&local].pack_location(items[i].2.as_str());
-            (i, local, items[i].2.as_str().to_string(), loc)
-        }));
-        let jobs: Vec<crate::parverify::Job<usize>> = groups
+        let jobs: Vec<crate::parverify::Job<usize>> = order
             .iter()
-            .enumerate()
-            .map(|(g, (local, members))| crate::parverify::Job {
-                item: g,
-                lane: lane_names.iter().position(|n| n == local).unwrap_or(0),
-                size: members
+            .map(|&i| crate::parverify::Job {
+                item: i,
+                lane: lane_names
                     .iter()
-                    .map(|(i, _, _)| {
-                        view.locate(&items[*i].0, &items[*i].1)
-                            .map_or(0, |r| r.size)
-                    })
-                    .sum(),
+                    .position(|n| *n == items[i].2)
+                    .unwrap_or(0),
+                size: items[i].3,
             })
             .collect();
         let mut failed: Option<anyhow::Error> = None;
-        let (groups_ref, readable_ref) = (&groups, &readable);
+        let mut verified: Vec<crate::ledger3::events::Event> = Vec::new();
+        let (items_ref, readable_ref) = (&items, &readable);
         crate::parverify::run_ordered(
             &jobs,
             &plans,
-            |&g| {
-                let (local, members) = &groups_ref[g];
-                let wanted: Vec<(String, Option<crate::packs::PackLoc>)> = members
-                    .iter()
-                    .map(|(_, o, l)| (o.clone(), l.clone()))
-                    .collect();
+            |&i| {
+                let (pack, _, local, size) = &items_ref[i];
                 crate::storage::guarded(local, || {
-                    crate::packs::read_members(readable_ref[local].as_ref(), &wanted)
+                    readable_ref[local]
+                        .get_bounded(&crate::packs::pack_key(&hex::encode(pack)), *size)
                 })
             },
-            |_, got| {
-                got.map(|all| {
-                    all.into_iter()
-                        .map(|ct| ct.map(|ct| (ct.len() as u64, crypto::hash(&ct))))
-                        .collect::<Vec<_>>()
-                })
-            },
-            |_, &g, got| {
-                let members = &groups[g].1;
+            |_, got| got.map(|b| b.map(|b| (b.len() as u64, crypto::hash(&b)))),
+            |_, &i, got| {
+                task.advance(1);
+                let (pack, storage, local, size) = &items[i];
                 let got = match got {
                     Ok(got) => got,
                     Err(e) if matches!(pool::pool_error(&e), Some(PoolError::NeedsDisk { .. })) => {
-                        report.offline += members.len() as u64;
-                        task.advance(members.len() as u64);
+                        report.offline += 1;
                         return true;
                     }
                     Err(e) => {
@@ -496,33 +342,36 @@ impl Engine {
                         return false;
                     }
                 };
-                for ((i, _, _), got) in members.iter().zip(got) {
-                    let i = *i;
-                    task.advance(1);
-                    let (folder, chunk, object, storage, _) = &items[i];
-                    report.blocks_checked += 1;
-                    let Some((len, hash)) = got else {
-                        report.missing.push(format!("{storage}:{}", object.short()));
-                        damage.push(damaged(i, DamageKind::Missing));
-                        continue;
-                    };
-                    report.bytes_downloaded += len;
-                    if ObjectName::from_bytes(&hash) == *object {
-                        report.blocks_verified += 1;
-                        self.pending.push(Event::ChunkVerified {
-                            folder: folder.clone(),
-                            chunk: chunk.clone(),
-                            object: object.clone(),
-                            storage: storage.clone(),
-                        });
-                    } else {
-                        report.corrupt.push(format!("{storage}:{}", object.short()));
-                        damage.push(damaged(i, DamageKind::Corrupt));
+                report.blocks_checked += 1;
+                let short = &hex::encode(pack)[..12];
+                let kind = match got {
+                    None => {
+                        report.missing.push(format!("{storage}:{short}"));
+                        DamageKind::Missing
                     }
-                }
+                    Some((len, hash)) => {
+                        report.bytes_downloaded += len;
+                        if len == *size && hash == *pack {
+                            report.blocks_verified += 1;
+                            verified.push(crate::ledger3::events::Event::PackVerified(
+                                crate::ledger3::events::PackOn {
+                                    storage: storage.clone(),
+                                    pack: *pack,
+                                },
+                            ));
+                            return true;
+                        }
+                        report.corrupt.push(format!("{storage}:{short}"));
+                        DamageKind::Corrupt
+                    }
+                };
+                damage.push(super::repair::pack_damage(
+                    &view, pack, local, kind, "verify", now_utc,
+                ));
                 true
             },
         );
+        self.f3.pending.extend(verified);
         if let Some(e) = failed {
             // Keep what was checked so far.
             self.commit_batch()?;

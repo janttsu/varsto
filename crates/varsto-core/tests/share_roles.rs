@@ -5,10 +5,11 @@
 //! editor writes; the owner changes roles and the change takes effect; a
 //! member cannot give itself a role.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use varsto_core::chunking::ChunkerParams;
-use varsto_core::engine::ManifestPolicy;
 use varsto_core::share::ShareRole;
 use varsto_core::storage::StorageSpec;
 use varsto_core::vault::ShareRequest;
@@ -66,13 +67,20 @@ fn invite(lab: &Lab, owner: &mut Engine, who: &str, role: ShareRole) -> Engine {
     let home = lab.home(who);
     let code = ShareRequest::code_for_named(&home, Some(who)).unwrap();
     let words = ShareRequest::fingerprint_for(&home).unwrap();
-    let (sealed, _) = owner
-        .share_create_sealed_as("project", &code, Some(&words), role)
+    let added = owner
+        .share_add("project", &code, Some(&words), role)
         .unwrap();
-    let token = ShareRequest::open_token(&home, &sealed.encode()).unwrap();
-    assert_eq!(token.role, role);
-    let mut m = small(Engine::accept_share(&home, who, PASS, &token, lab.storage.clone()).unwrap());
-    ShareRequest::clear(&home);
+    assert_eq!(added.role, role.as_str());
+    let mut m = small(
+        Engine::accept_share(
+            &home,
+            who,
+            PASS,
+            Some(&added.owner_fingerprint),
+            lab.storage.clone(),
+        )
+        .unwrap(),
+    );
     m.attach_folder("project", &lab.dir(who), false).unwrap();
     m.sync(None).unwrap();
     m
@@ -92,8 +100,7 @@ fn role_of(e: &Engine, name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Owner, an editor and a viewer; everyone synced twice so that role
-/// records and join proofs went around.
+/// Owner, an editor and a viewer; everyone synced twice.
 fn three(lab: &Lab) -> (Engine, Engine, Engine) {
     let mut a = owner(lab);
     let mut b = invite(lab, &mut a, "bea", ShareRole::Editor);
@@ -114,7 +121,7 @@ fn a_viewer_reads_and_its_own_changes_stay_here() {
         read(&lab.dir("vic"), "plan.txt").as_deref(),
         Some(&b"the plan"[..])
     );
-    // Everyone sees the roles; the owner listed the members by their join proofs.
+    // Everyone sees the roles.
     assert_eq!(role_of(&a, "vic"), "viewer");
     assert_eq!(role_of(&a, "bea"), "editor");
     assert_eq!(role_of(&b, "vic"), "viewer");
@@ -222,17 +229,14 @@ fn what_a_modified_viewer_client_publishes_is_refused() {
     let r = v.sync(None).unwrap();
     assert!(r[0].1.manifest_seq.is_some(), "it did publish");
 
-    // The owner's device does not count the viewer's ledger batches, so it
-    // learns of the manifest only from a full listing: list in full now.
-    a.set_manifest_policy(ManifestPolicy {
-        sweep_secs: 0,
-        prune: true,
-    });
-    let r = a.sync(None).unwrap();
+    // Every reader refuses what the viewer announces in its batches (its
+    // records then wait for an announcement that never counts), and the
+    // records themselves by the acceptance rule.
+    let refused_before = a.ledger_view().unwrap().events_refused;
+    a.sync(None).unwrap();
     assert!(
-        r[0].0.writes_refused.iter().any(|n| n == "vic"),
-        "{:?}",
-        r[0].0
+        a.ledger_view().unwrap().events_refused > refused_before,
+        "the viewer's announcements are refused"
     );
     b.sync(None).unwrap();
     for d in ["a", "bea"] {
@@ -283,8 +287,14 @@ fn role_changes_take_effect_and_only_the_owner_makes_them() {
     // A fresh device of the owner reads the older change too (it was made
     // while the member was an editor).
     let key = a.export_vault_key().unwrap();
-    let mut a2 =
-        small(Engine::join(&lab.home("a2"), "desk", PASS, &key, lab.storage.clone()).unwrap());
+    let mut a2 = small(common::join_approved(
+        &lab.home("a2"),
+        "desk",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    ));
     a2.attach_folder("project", &lab.dir("a2"), false).unwrap();
     a2.sync(None).unwrap();
     a2.sync(None).unwrap();
@@ -297,15 +307,16 @@ fn role_changes_take_effect_and_only_the_owner_makes_them() {
     a.sync(None).unwrap();
     assert!(read(&lab.dir("a"), "still.txt").is_some());
 
-    // A role record not signed by the owner's devices is ignored.
+    // A folder record not signed by the owner's devices is ignored.
     let folder = a.folders()[0].0.folder_id.clone();
     let forged = lab
         .root
-        .join("storage/vault/share-roles")
+        .join("storage/vault/folders")
         .join(folder.as_str())
-        .join(format!("{:010}-{}.json", 999, v.device_id()));
+        .join(v.device_id().as_str())
+        .join("0000000000000999-0000.rec");
     fs::create_dir_all(forged.parent().unwrap()).unwrap();
-    fs::write(&forged, br#"{"format_version":1,"folder":"00","seq":999}"#).unwrap();
+    fs::write(&forged, b"a folder record that makes vic an editor").unwrap();
     a.sync(None).unwrap();
     b.sync(None).unwrap();
     assert_eq!(role_of(&a, "vic"), "viewer");
@@ -313,14 +324,12 @@ fn role_changes_take_effect_and_only_the_owner_makes_them() {
 }
 
 #[test]
-fn plain_tokens_are_refused_once_a_folder_has_viewers() {
+fn a_folder_with_a_viewer_lists_roles_in_use() {
     let lab = Lab::new();
     let mut a = owner(&lab);
-    assert!(a.share_create_plain("project").is_ok());
+    assert!(!a.share_members("project").unwrap().roles_in_use);
     let _v = invite(&lab, &mut a, "vic", ShareRole::Viewer);
-    let err = a.share_create_plain("project").unwrap_err();
-    assert!(format!("{err:#}").contains("request code"), "{err:#}");
-    // The pending token lists its role.
     let list = a.share_members("project").unwrap();
     assert!(list.roles_in_use);
+    assert_eq!(role_of(&a, "vic"), "viewer");
 }

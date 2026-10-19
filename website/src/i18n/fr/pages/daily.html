@@ -9,7 +9,7 @@ description: Versions de développement de Varsto, issues de la branche principa
       <p><strong>Ce sont des versions de développement issues de la branche principale, pas des versions officielles.</strong></p>
       <ul>
         <li>Ce ne sont pas des versions officielles et elles n’ont subi aucun test de publication. Elles n’ont ni signature de version ni signature de code Apple ou Microsoft. Ne les utilisez pas pour des données de production.</li>
-        <li>Le format de stockage peut changer d’une version à l’autre sans aucune migration. Le format 2 exigera de recréer les coffres.</li>
+        <li>Le format de stockage peut changer d’une version à l’autre sans aucune migration. Ces versions écrivent le format de stockage 3 : un coffre créé par 0.0.1-alpha.15 ou plus ancien est refusé et doit être recréé (<code>varsto reset --yes</code>, <code>varsto init</code>, puis resynchroniser les fichiers), et 0.0.1-alpha.15 refuse un coffre au format 3. Un appareil qui rejoint demande chaque dossier et un propriétaire l’approuve ; <code>varsto init</code> affiche un second jeu de 24 mots de récupération que <code>varsto folder add</code> demande.</li>
         <li><code>varsto update --daily</code> installe la dernière version quotidienne de votre plateforme (les versions en ligne de commande pour Linux et Windows ; l’application macOS et l’APK Android s’installent à la main). <code>varsto update</code> seul reste sur les versions officielles et n’installe jamais une version quotidienne.</li>
         <li>Conservez vos propres sauvegardes.</li>
       </ul>

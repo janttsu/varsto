@@ -3,6 +3,8 @@
 //! cloud place), two folders of which only one is on both devices. The bytes
 //! per storage, device and folder and the copy counts must add up.
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use varsto_core::chunking::ChunkerParams;
@@ -57,18 +59,31 @@ fn data_locations_add_up_across_storages_and_devices() {
     a.push("music").unwrap();
 
     // The phone shares only the home storage and only the docs folder.
-    let mut b = Engine::join(&root.join("b-home"), "phone", PASS, &key, shelf.clone()).unwrap();
+    let mut b = common::join_approved(
+        &root.join("b-home"),
+        "phone",
+        PASS,
+        &key,
+        shelf.clone(),
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &root.join("b-docs"), false)
         .unwrap();
+    b.sync(Some("docs")).unwrap();
+    // The phone reads the packs on the shelf back whole and checks them
+    // (a download reads blocks, which verifies no pack).
+    b.fsck(true).unwrap();
     b.sync(Some("docs")).unwrap();
     a.sync(None).unwrap();
 
     let loc = a.data_locations().unwrap();
     let plain = 90_000 + 40_000 + 250_000u64;
+    // Format 3 counts the unique blocks by their plaintext sizes (the
+    // manifests' `ChunkRef::size`).
     assert!(
-        loc.total_bytes > plain && loc.total_bytes < plain + plain / 10,
-        "ciphertext of the unique blocks, got {}",
+        loc.total_bytes == plain,
+        "plaintext of the unique blocks, got {}",
         loc.total_bytes
     );
     let folder = |n: &str| loc.folders.iter().find(|f| f.name == n).unwrap();
@@ -91,8 +106,9 @@ fn data_locations_add_up_across_storages_and_devices() {
     }
     assert_eq!(storage("shelf").place, "home");
     assert_eq!(storage("cloud").place, "cloud");
-    // The phone fetched the docs blocks from the shelf and checked them.
-    assert_eq!(storage("shelf").verified_bytes, docs.bytes);
+    // The phone read the packs on the shelf back whole and checked them:
+    // every pack there, the music folder's too (no folder key is needed).
+    assert_eq!(storage("shelf").verified_bytes, loc.total_bytes);
     assert_eq!(storage("cloud").verified_bytes, 0);
     let stick = storage("stick");
     assert!(stick.carrier && stick.kind == "transferrer");

@@ -32,7 +32,7 @@ fn folders_are_unique_detachable_and_removable() {
     fs::write(a_spare.join("x.txt"), b"spare").unwrap();
     a.sync(None).unwrap();
 
-    let mut b = Engine::join(&t.path().join("b"), "phone", PASS, &key, spec).unwrap();
+    let mut b = common::join_approved(&t.path().join("b"), "phone", PASS, &key, spec, &mut a);
     // The same top-level name, in any case, is refused on another device.
     let e = b.add_folder("photos", &t.path().join("b-new")).unwrap_err();
     assert!(

@@ -1364,7 +1364,7 @@ fn pruning_waits_for_every_reader() {
 
 /// The design's worst case: a base of 1 M files (700 k small, 280 k of
 /// 1-32 MiB, 20 k large: ~4.3 M blocks) with realistic paths. Run with
-/// `cargo test --release -p varsto-core --features format3 --lib
+/// `cargo test --release -p varsto-core --lib
 /// manifest3::tests::a_million_file_base -- --ignored --nocapture`.
 #[test]
 #[ignore]

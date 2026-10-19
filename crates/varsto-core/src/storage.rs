@@ -4,13 +4,15 @@
 //! removable disks and network mounts); S3 and rclone remotes follow, and a
 //! pool of removable disks (`crate::pool`) that holds chunk objects only.
 //!
-//! Object keys use forward slashes. Layout written by the engine:
+//! Object keys use forward slashes. Layout written by the engine (storage
+//! format 3, `docs/spec/format-3-design.md`):
 //! - `vault/meta.json`                       vault identity (not secret)
-//! - `vault/devices/<device>.enc`            device record (encrypted)
-//! - `vault/folders/<device>/<folder>.enc`   folder record (encrypted)
-//! - `ledger/<device>/<seq>.json`            signed, encrypted ledger batches
-//! - `manifests/<folder>/<device>/<seq>.enc` encrypted folder manifests
-//! - `chunks/<xx>/<objectname>`              encrypted chunks
+//! - `<kind path>/<seq 16>-<part 4>.rec`     signed records (`crate::record`):
+//!   devices, folders, grants, ledger batches, manifests, block maps, ...
+//! - `packs/<xx>/<id>`                       packs of encrypted blocks
+//!
+//! `chunks/<xx>/<objectname>` is the name of one block inside a pack: a
+//! `crate::packs::PackStore` answers it from the packs and the block maps.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -43,16 +45,12 @@ pub const MAX_RECORD: u64 = 256 << 20;
 /// How many bytes a read of `key` may return: nothing a storage holds can
 /// make the program allocate more.
 pub fn read_limit(key: &str) -> u64 {
-    #[cfg(feature = "format3")]
     if key.ends_with(".rec") {
         return crate::record::MAX_PART_READ;
     }
     if key.starts_with("chunks/") {
         MAX_BLOCK_OBJECT
-    } else if key.starts_with(crate::packs::PREFIX)
-        && !key.starts_with(crate::packs::INDEX_PREFIX)
-        && !key.starts_with(crate::packs::TOMBSTONE_PREFIX)
-    {
+    } else if key.starts_with(crate::packs::PREFIX) {
         MAX_PACK
     } else {
         MAX_RECORD
@@ -164,21 +162,10 @@ pub trait Storage: Send + Sync {
     fn pack_location(&self, _object: &str) -> Option<crate::packs::PackLoc> {
         None
     }
-    /// The packs written since the last call, for the pack index.
+    /// The packs written since the last call, for the writer's block map
+    /// delta.
     fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
         Vec::new()
-    }
-    /// Write the tombstones of the pack members deleted since the last call.
-    fn flush_deletions(&self) -> Result<()> {
-        Ok(())
-    }
-    /// Rewrite the packs here that are mostly dead (`packs::PackStore`):
-    /// the new location of every moved block.
-    fn collect_pack_garbage(
-        &self,
-        _keep: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
-        Ok(Vec::new())
     }
     /// Whether the storage honours a conditional write (S3 `If-None-Match:
     /// *`): known (true or false) once the backend has probed it, `None`
@@ -241,17 +228,80 @@ impl Storage for SharedStorage {
     fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
         self.0.take_new_packs()
     }
-    fn flush_deletions(&self) -> Result<()> {
-        self.0.flush_deletions()
-    }
-    fn collect_pack_garbage(
-        &self,
-        keep: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
-        self.0.collect_pack_garbage(keep)
-    }
     fn conditional_writes(&self) -> Option<bool> {
         self.0.conditional_writes()
+    }
+}
+
+/// Tests: called with the storage's name before every pack write; an error
+/// fails the write (`Engine::set_pack_write_hook`).
+pub type PackWriteHook = Arc<dyn Fn(&str) -> Result<()> + Send + Sync>;
+
+/// A storage whose pack writes go through a `PackWriteHook` first (a slow
+/// or failing storage in tests).
+pub struct HookedStorage {
+    inner: Box<dyn Storage>,
+    hook: PackWriteHook,
+}
+
+impl HookedStorage {
+    pub fn new(inner: Box<dyn Storage>, hook: PackWriteHook) -> Self {
+        HookedStorage { inner, hook }
+    }
+}
+
+impl Storage for HookedStorage {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        self.inner.put_if_absent(key, data)
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.inner.get(key)
+    }
+    fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        self.inner.get_bounded(key, max)
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        self.inner.exists(key)
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.inner.list(prefix)
+    }
+    fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
+        self.inner.list_after(prefix, start_after)
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        self.inner.delete(key)
+    }
+    fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Option<Vec<u8>>> {
+        self.inner.get_range(key, offset, len)
+    }
+    fn put_pack(&self, members: &[(String, &[u8])]) -> Result<Vec<bool>> {
+        (self.hook)(self.inner.name())?;
+        self.inner.put_pack(members)
+    }
+    fn put_built_pack(
+        &self,
+        id: &str,
+        data: &[u8],
+        members: &[(String, crate::packs::PackLoc)],
+    ) -> Result<Option<Vec<bool>>> {
+        (self.hook)(self.inner.name())?;
+        self.inner.put_built_pack(id, data, members)
+    }
+    fn pack_target(&self) -> usize {
+        self.inner.pack_target()
+    }
+    fn pack_location(&self, object: &str) -> Option<crate::packs::PackLoc> {
+        self.inner.pack_location(object)
+    }
+    fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
+        self.inner.take_new_packs()
+    }
+    fn conditional_writes(&self) -> Option<bool> {
+        self.inner.conditional_writes()
     }
 }
 
@@ -963,15 +1013,6 @@ impl Storage for CountingStorage {
     fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
         self.inner.take_new_packs()
     }
-    fn flush_deletions(&self) -> Result<()> {
-        self.inner.flush_deletions()
-    }
-    fn collect_pack_garbage(
-        &self,
-        keep: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
-        self.inner.collect_pack_garbage(keep)
-    }
     fn conditional_writes(&self) -> Option<bool> {
         self.inner.conditional_writes()
     }
@@ -994,6 +1035,12 @@ impl Storage for CountingStorage {
     }
     fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
         self.calls.gets.fetch_add(1, Ordering::Relaxed);
+        if key.starts_with("ledger/") {
+            self.calls.ledger_gets.fetch_add(1, Ordering::Relaxed);
+        }
+        if key.starts_with("manifests/") {
+            self.calls.manifest_gets.fetch_add(1, Ordering::Relaxed);
+        }
         if key.starts_with("chunks/") {
             self.calls.chunk_gets.fetch_add(1, Ordering::Relaxed);
         }
@@ -1169,15 +1216,6 @@ impl Storage for LoggedStorage {
     }
     fn take_new_packs(&self) -> Vec<crate::packs::NewPack> {
         self.inner.take_new_packs()
-    }
-    fn flush_deletions(&self) -> Result<()> {
-        self.inner.flush_deletions()
-    }
-    fn collect_pack_garbage(
-        &self,
-        keep: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<(String, crate::packs::PackLoc)>> {
-        self.inner.collect_pack_garbage(keep)
     }
     fn conditional_writes(&self) -> Option<bool> {
         self.inner.conditional_writes()

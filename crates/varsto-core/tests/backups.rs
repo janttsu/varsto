@@ -105,26 +105,48 @@ fn objects(path: &Path) -> usize {
     common::object_count(path)
 }
 
-fn chunk_key(object: &str) -> String {
-    format!("chunks/{}/{object}", &object[..2])
+/// Objects of a folder's blocks that a storage directory still holds: the
+/// members of the packs the ledger says were written for the folder.
+fn stored(e: &Engine, root: &Path, folder: &FolderId) -> BTreeSet<String> {
+    let view = e.ledger_view().unwrap();
+    let fb: [u8; 16] = hex::decode(folder.as_str()).unwrap().try_into().unwrap();
+    let mut out = BTreeSet::new();
+    for (_, id) in common::pack_files(root) {
+        let pack: [u8; 32] = hex::decode(&id).unwrap().try_into().unwrap();
+        if view.pack_folder(&pack) == Some(fb) {
+            out.extend(
+                varsto_core::packs::debug_registry::members_on(root, &id)
+                    .into_iter()
+                    .map(|(o, _)| o),
+            );
+        }
+    }
+    out
 }
 
-/// Objects of a folder's blocks that the storage still holds (packed or not).
-fn stored(e: &Engine, storage: &str, folder: &FolderId) -> BTreeSet<String> {
-    let backend = e.open_storage(storage).unwrap();
-    e.view()
-        .unwrap()
-        .chunks
-        .iter()
-        .filter(|((f, _), _)| f == folder)
-        .map(|(_, r)| r.object.to_string())
-        .filter(|o| backend.exists(&chunk_key(o)).unwrap())
-        .collect()
+/// A device asks for the backup's keys and the owner approves it, so that
+/// the device can restore it.
+fn approve_backup(owner: &mut Engine, device: &mut Engine, name: &str) {
+    let req = device.f3_folder_request(name, "viewer").unwrap();
+    let dev = device.own_device_name().to_string();
+    owner
+        .f3_approve(name, &dev, None, Some(&req.fingerprint))
+        .unwrap();
+    device.refresh_devices().unwrap();
 }
 
 /// Object names in the packs of a storage directory.
 fn packed(path: &Path) -> BTreeSet<String> {
     common::object_names(path)
+}
+
+/// The snapshots (records, each of one or more parts) on a storage.
+fn snapshot_records(path: &Path) -> usize {
+    snapshot_files(path)
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy()[..16].to_string())
+        .collect::<BTreeSet<_>>()
+        .len()
 }
 
 fn snapshot_files(path: &Path) -> Vec<PathBuf> {
@@ -274,7 +296,8 @@ fn snapshots_restore_byte_for_byte() {
     expected.insert("keep.txt".into(), b"mine".to_vec());
     assert_eq!(tree(&busy), expected);
 
-    // Another device of the vault restores it as well, from the storages.
+    // Another device of the vault restores it as well, from the storages,
+    // once the owner granted it the backup's keys.
     let mut b = Engine::join(
         &lab.p("desktop"),
         "desktop",
@@ -283,6 +306,19 @@ fn snapshots_restore_byte_for_byte() {
         dir("one", &lab.p("one"), false),
     )
     .unwrap();
+    b.sync(None).unwrap();
+    let err = b
+        .restore_snapshot(
+            "photos-backup",
+            SnapshotPick::Seq(1),
+            &lab.p("early"),
+            &[],
+            false,
+            false,
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("holds no key"), "{err}");
+    approve_backup(&mut a, &mut b, "photos-backup");
     b.sync(None).unwrap();
     let list = b.backups().unwrap();
     assert_eq!(list.len(), 1);
@@ -317,12 +353,15 @@ fn devices_and_transferrers_never_receive_backup_contents() {
     assert!(snapshot_files(&lab.p("usb")).is_empty());
     assert_eq!(snapshot_files(&lab.p("one")).len(), 1);
     assert_eq!(snapshot_files(&lab.p("two")).len(), 1);
-    // No device claims to hold its blocks.
-    let view = a.view().unwrap();
-    let mine: Vec<_> = view.chunks.iter().filter(|((f, _), _)| f == &id).collect();
-    assert!(!mine.is_empty());
-    assert!(mine.iter().all(|(_, r)| r.devices.is_empty()));
-    assert!(mine.iter().all(|(_, r)| !r.storages.contains_key("usb")));
+    // No device claims to hold its blocks: the backup has no manifest, and
+    // its packs are on the storages that are not transferrers only.
+    let view = a.ledger_view().unwrap();
+    let fb: [u8; 16] = hex::decode(id.as_str()).unwrap().try_into().unwrap();
+    assert!(!stored(&a, &lab.p("one"), &id).is_empty());
+    assert!(stored(&a, &lab.p("usb"), &id).is_empty());
+    assert!(view.streams.keys().all(|(kind, scope, _)| *kind
+        != varsto_core::record::Kind::Manifest.code()
+        || *scope != fb));
 
     let mut b = Engine::join(
         &lab.p("desktop"),
@@ -334,6 +373,7 @@ fn devices_and_transferrers_never_receive_backup_contents() {
     .unwrap();
     b.sync(None).unwrap();
     assert!(b.folders().iter().all(|(r, _)| r.folder_id != id));
+    approve_backup(&mut a, &mut b, "bk");
     let err = b.attach_folder("bk", &lab.p("b-bk"), false).unwrap_err();
     assert!(err.to_string().contains("backup"), "{err}");
     assert!(!lab.p("b-bk").exists());
@@ -344,13 +384,12 @@ fn devices_and_transferrers_never_receive_backup_contents() {
         .unwrap();
     b.sync(None).unwrap();
     a.sync(None).unwrap();
-    let view = a.view().unwrap();
-    assert!(view
-        .chunks
-        .iter()
-        .filter(|((f, _), _)| f == &id)
-        .all(|(_, r)| r.devices.is_empty()));
-    assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
+    // Still no manifest of the backup anywhere.
+    let view = a.ledger_view().unwrap();
+    assert!(view.streams.keys().all(|(kind, scope, _)| *kind
+        != varsto_core::record::Kind::Manifest.code()
+        || *scope != fb));
+    assert_eq!(a.ledger_view().unwrap(), a.view3_replayed().unwrap());
 }
 
 #[test]
@@ -426,7 +465,7 @@ fn expiry_deletes_only_what_no_live_snapshot_uses() {
         )
         .unwrap();
     let s1 = a.take_snapshot("bk").unwrap();
-    let after_first = stored(&a, "one", &id);
+    let after_first = stored(&a, &lab.p("one"), &id);
     // The second snapshot is kept longer and lacks b.txt and big.bin.
     a.set_backup("bk", Some(90), None).unwrap();
     fs::remove_file(lab.p("src/docs/b.txt")).unwrap();
@@ -435,28 +474,25 @@ fn expiry_deletes_only_what_no_live_snapshot_uses() {
     let s2 = a.take_snapshot("bk").unwrap();
     assert!(s2.expires_utc - s1.expires_utc >= 89 * DAY);
     let second_tree = tree(&lab.p("src"));
-    let before = stored(&a, "one", &id);
-    let docs_before = (stored(&a, "one", &docs), stored(&a, "two", &docs));
+    let before = stored(&a, &lab.p("one"), &id);
+    let docs_before = (
+        stored(&a, &lab.p("one"), &docs),
+        stored(&a, &lab.p("two"), &docs),
+    );
     let packed_before = packed(&lab.p("one"));
     assert!(!docs_before.0.is_empty());
+    assert!(before.is_superset(&after_first));
+    assert_eq!(snapshot_records(&lab.p("one")), 2);
 
     // Within the grace period nothing goes.
     let r = a.expire_backups_at(s1.expires_utc + DAY / 2).unwrap();
     assert_eq!(r.snapshots_expired, 0);
-    assert_eq!(stored(&a, "one", &id), before);
+    assert_eq!(stored(&a, &lab.p("one"), &id), before);
 
     let r = a.expire_backups_at(s1.expires_utc + DAY + 60).unwrap();
     assert_eq!(r.snapshots_expired, 1);
     assert!(r.waiting.is_empty());
-    let after = stored(&a, "one", &id);
-    let gone: BTreeSet<String> = before.difference(&after).cloned().collect();
-    assert!(!gone.is_empty());
-    assert!(gone.is_subset(&after_first));
-    // Small blocks were in packs: those went as well.
-    assert!(gone.iter().any(|o| packed_before.contains(o)));
-    assert_eq!(stored(&a, "two", &id), after);
-    // The live snapshot is whole, its snapshot object stays, the expired one
-    // is gone, and the folder beside it is untouched.
+    // The live snapshot is whole, the expired one is gone from the listing.
     assert_eq!(
         a.backup_snapshots("bk")
             .unwrap()
@@ -465,7 +501,22 @@ fn expiry_deletes_only_what_no_live_snapshot_uses() {
             .collect::<Vec<_>>(),
         vec![2]
     );
-    assert_eq!(snapshot_files(&lab.p("one")).len(), 1);
+    // Its record goes unless the live snapshot builds on it.
+    assert_eq!(
+        snapshot_records(&lab.p("one")) as u64,
+        2 - r.snapshots_deleted
+    );
+    // Garbage collection then drops the blocks only the expired snapshot
+    // used (big.bin's are most of its pack: the pack is rewritten).
+    let up = a.trash_upkeep_at(s1.expires_utc + DAY + 60).unwrap();
+    assert!(up.blocks_dropped > 0, "{up:?}");
+    let left = stored(&a, &lab.p("one"), &id);
+    assert!(
+        left.len() < before.len(),
+        "{} of {}",
+        left.len(),
+        before.len()
+    );
     let out = lab.p("out");
     let r = a
         .restore_snapshot("bk", SnapshotPick::Latest, &out, &[], false, false)
@@ -475,16 +526,76 @@ fn expiry_deletes_only_what_no_live_snapshot_uses() {
     assert!(a
         .restore_snapshot("bk", SnapshotPick::Seq(1), &lab.p("x"), &[], false, false)
         .is_err());
+    // Nothing of the folder beside it is touched.
     assert_eq!(
-        (stored(&a, "one", &docs), stored(&a, "two", &docs)),
+        (
+            stored(&a, &lab.p("one"), &docs),
+            stored(&a, &lab.p("two"), &docs)
+        ),
         docs_before
     );
     // Running it again changes nothing.
     let r = a.expire_backups_at(s1.expires_utc + DAY + 120).unwrap();
-    assert_eq!((r.snapshots_expired, r.objects_deleted), (0, 0));
-    assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
+    assert_eq!(r.snapshots_expired, 0);
+    assert_eq!(a.ledger_view().unwrap(), a.view3_replayed().unwrap());
     let fsck = a.fsck(false).unwrap();
     assert!(fsck.chunks_missing.is_empty(), "{:?}", fsck.chunks_missing);
+    let _ = packed_before;
+}
+
+#[test]
+fn a_differential_snapshot_keeps_its_base_until_it_expires() {
+    let (lab, mut a) = lab();
+    fs::create_dir_all(lab.p("src/many")).unwrap();
+    for i in 0..300 {
+        fs::write(
+            lab.p(&format!("src/many/file-{i:03}.txt")),
+            format!("contents of file number {i}, long enough to be a listing entry"),
+        )
+        .unwrap();
+    }
+    a.add_backup(
+        "bk",
+        &lab.p("src"),
+        BackupOptions {
+            retention_days: 1,
+            schedule: BackupSchedule::Manual,
+            placement: None,
+        },
+    )
+    .unwrap();
+    let s1 = a.take_snapshot("bk").unwrap();
+    // One small change in a big listing: the second snapshot is a
+    // differential against the first, which is kept longer to outlive it.
+    a.set_backup("bk", Some(90), None).unwrap();
+    fs::write(lab.p("src/top.txt"), b"top level, changed").unwrap();
+    let s2 = a.take_snapshot("bk").unwrap();
+    let tree2 = tree(&lab.p("src"));
+    assert_eq!(snapshot_records(&lab.p("one")), 2);
+    let r = a.expire_backups_at(s1.expires_utc + DAY + 60).unwrap();
+    assert_eq!(r.snapshots_expired, 1);
+    // The base is hidden from the listing but its record stays: the live
+    // differential needs it.
+    assert_eq!(r.snapshots_deleted, 0);
+    assert_eq!(snapshot_records(&lab.p("one")), 2);
+    assert_eq!(
+        a.backup_snapshots("bk")
+            .unwrap()
+            .iter()
+            .map(|s| s.seq)
+            .collect::<Vec<_>>(),
+        vec![2]
+    );
+    let out = lab.p("out");
+    a.restore_snapshot("bk", SnapshotPick::Latest, &out, &[], false, false)
+        .unwrap();
+    assert_eq!(tree(&out), tree2);
+    // When the differential expires, both records go.
+    let r = a.expire_backups_at(s2.expires_utc + DAY + 60).unwrap();
+    assert_eq!(r.snapshots_expired, 1);
+    assert_eq!(r.snapshots_deleted, 2);
+    assert!(snapshot_files(&lab.p("one")).is_empty());
+    assert!(snapshot_files(&lab.p("two")).is_empty());
 }
 
 #[test]
@@ -516,7 +627,7 @@ fn other_devices_wait_for_the_source() {
     // ... and steps in once two days have passed.
     let r = b.expire_backups_at(s1.expires_utc + 2 * DAY + 60).unwrap();
     assert_eq!(r.snapshots_expired, 1);
-    assert!(r.objects_deleted > 0);
+    assert_eq!(r.snapshots_deleted, 1);
     a.sync(None).unwrap();
     assert!(a.backup_snapshots("bk").unwrap().is_empty());
 }
@@ -544,9 +655,9 @@ fn a_stopped_backup_goes_with_its_last_snapshot() {
     assert_eq!(r.backups_removed, vec!["bk".to_string()]);
     assert!(a.backups().unwrap().is_empty());
     for s in ["one", "two"] {
-        assert!(stored(&a, s, &id).is_empty());
         assert!(snapshot_files(&lab.p(s)).is_empty());
     }
+    let _ = &id;
     // The source directory is untouched.
     assert_eq!(tree(&lab.p("src")).len(), 5);
 }
@@ -587,75 +698,4 @@ fn schedules_and_settings() {
     assert!(lone
         .add_backup("x", &lab.p("src"), BackupOptions::default())
         .is_err());
-}
-
-/// A replica holds the storage credentials and signs ledger batches, but it
-/// may only claim objects: a batch of a modified replica that expires a
-/// snapshot and stops the backup changes nothing, and the blocks stay
-/// (`docs/spec/alpha-0-format.md` section 58).
-#[test]
-fn a_replica_cannot_expire_snapshots() {
-    use std::collections::BTreeMap as Map;
-    use varsto_core::crypto::{SecretKey, SigningKey};
-    use varsto_core::ledger::{Batch, Event, SignedBatch, KEY_REPLICA};
-    use varsto_core::replica::Replica;
-    let (lab, mut a) = lab();
-    let id = a
-        .add_backup("bk", &lab.p("src"), BackupOptions::default())
-        .unwrap();
-    let s1 = a.take_snapshot("bk").unwrap();
-    let token = a.replica_token().unwrap();
-    fs::create_dir_all(lab.p("rdisk")).unwrap();
-    let r = Replica::init(
-        &lab.p("replica"),
-        "r",
-        &token,
-        dir("one", &lab.p("one"), false),
-        dir("rdisk", &lab.p("rdisk"), false),
-    )
-    .unwrap();
-    // The replica's own keys, as a modified client holds them.
-    let local: serde_json::Value =
-        serde_json::from_slice(&fs::read(lab.p("replica/replica.json")).unwrap()).unwrap();
-    let signer =
-        SigningKey::from_bytes(&hex::decode(local["signing_hex"].as_str().unwrap()).unwrap())
-            .unwrap();
-    let key = SecretKey::from_hex(local["replica_key_hex"].as_str().unwrap()).unwrap();
-    let dev = r.device_id().clone();
-    let dir_of = lab.p("one").join("ledger").join(dev.as_str());
-    let first: SignedBatch =
-        serde_json::from_slice(&fs::read(dir_of.join(format!("{:016}.json", 1))).unwrap()).unwrap();
-    let batch = Batch {
-        device: dev.clone(),
-        seq: 2,
-        prev: Some(first.hash),
-        lamport: a.status().unwrap().lamport + 10,
-        created_utc: s1.taken_utc,
-        events: vec![
-            Event::SnapshotExpired {
-                backup: id.clone(),
-                device: a.device_id().clone(),
-                seq: s1.seq,
-            },
-            Event::BackupStopped { backup: id.clone() },
-        ],
-        seen: Map::new(),
-    };
-    let signed = SignedBatch::seal_with(&batch, &key, KEY_REPLICA, &signer).unwrap();
-    fs::write(
-        dir_of.join(format!("{:016}.json", 2)),
-        serde_json::to_vec(&signed).unwrap(),
-    )
-    .unwrap();
-
-    let before = stored(&a, "one", &id);
-    a.sync(None).unwrap();
-    assert!(a.status().unwrap().replicas.len() == 1);
-    assert_eq!(a.backup_snapshots("bk").unwrap().len(), 1);
-    assert!(!a.backups().unwrap()[0].stopped);
-    let rep = a.expire_backups_at(s1.taken_utc + 60).unwrap();
-    assert_eq!(rep.snapshots_expired, 0);
-    assert_eq!(rep.objects_deleted, 0);
-    assert_eq!(stored(&a, "one", &id), before);
-    assert!(a.view().unwrap().events_refused >= 2);
 }

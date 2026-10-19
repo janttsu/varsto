@@ -101,6 +101,9 @@ pub struct DiskCopy {
     pub place: String,
     /// The disk is attached.
     pub readable: bool,
+    /// When the pool last checked the disk (UTC seconds, 0: never): a copy
+    /// on a disk that is away counts as verified then.
+    pub verified_utc: i64,
 }
 
 /// How the copies of a block are classified.
@@ -156,11 +159,36 @@ pub fn block_facts(
             stored_utc = c.stored_utc;
         }
         if let Some(disks) = (env.disks_of)(&c.storage, &c.pack) {
+            if disks.is_empty() {
+                // The ledger says the pool holds it, but no disk is known to.
+                let name = format!("{}:unknown disk", c.storage);
+                unreadable.push((place.clone(), name.clone()));
+                copies.push((name, place, false, 0));
+                continue;
+            }
+            // One copy per disk that holds the pack, at the disk's place;
+            // the first attached one keeps the pool's name, as the ledger
+            // names it, and a disk that is away counts at its last check.
+            let mut named_pool = false;
             for d in disks {
-                if !d.readable {
-                    unreadable.push((d.place.clone(), d.name.clone()));
+                if d.readable {
+                    let name = if named_pool {
+                        format!("{}:{}", c.storage, d.name)
+                    } else {
+                        named_pool = true;
+                        c.storage.clone()
+                    };
+                    copies.push((
+                        name,
+                        d.place,
+                        c.independently_verified || d.verified_utc > 0,
+                        c.verified_utc.max(d.verified_utc),
+                    ));
+                } else {
+                    let name = format!("{}:{}", c.storage, d.name);
+                    unreadable.push((d.place.clone(), name.clone()));
+                    copies.push((name, d.place, d.verified_utc > 0, d.verified_utc));
                 }
-                copies.push((d.name, d.place, c.independently_verified, c.verified_utc));
             }
             continue;
         }

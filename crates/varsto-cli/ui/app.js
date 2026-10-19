@@ -490,7 +490,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("version").textContent = st.version; $("version2").textContent = st.version;
       appState.mobile = !!st.mobile; appState.folder_root = st.folder_root || ""; appState.platform = st.platform || ""; joinKindForDevice();
       appState.plain_root = st.plain_root || ""; appState.plain_root_writable = st.plain_root_writable !== false;
-      appState.format3 = !!st.format3; if (appState.format3) { f3Reload(); }
+      f3Reload();
       applyMobile();
       refreshAllFiles();
       if (st.removal && !removalShown) {
@@ -960,21 +960,20 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function shareFolder(f) {
     dialog({
-      title: (f.shared ? "New token for " : "Share ") + f.name,
-      text: (f.shared ? "" : "An editor reads and writes this folder; a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors. ") + "Paste the recipient's request code or scan its QR code to seal the token to their device, or leave it empty for a plain token that carries the folder key itself (editors only).",
+      title: "Share " + f.name,
+      text: "Paste the recipient's request code or scan its QR code. An editor reads and writes this folder, a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors.",
       fields: [
-        { name: "to", label: "Recipient's request code (optional)", placeholder: "vsr1…" },
+        { name: "to", label: "Recipient's request code", placeholder: "vsr1…" },
         { name: "role", label: "Role", options: [["editor", "Editor: read and write"], ["viewer", "Viewer: read only"]], value: "editor", hint: "A viewer can still copy what it reads; a key cannot prevent that." }
       ],
-      ok: f.shared ? "Create token" : "Share",
+      ok: "Share",
       extra: "Scan QR code…"
     }).then(function (r) {
       if (!r) { return; }
       var role = r.values.role || "editor";
       if (r.action === "extra") { return scanQr("request").then(function (info) { if (info) { return sealTo(f, info.text, role); } }); }
       var code = (r.values.to || "").trim();
-      if (!code && role === "viewer") { return alertBox("A viewer's token must be sealed to their request code: paste it or scan it. A plain token cannot say what its holder may do."); }
-      if (!code) { return createToken(f, "", "", role); }
+      if (!code) { return alertBox("Paste the recipient's request code or scan it."); }
       return sealTo(f, code, role);
     }).catch(function (e) { alertBox(e.message); });
   }
@@ -991,10 +990,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function createToken(f, code, fingerprint, role) {
     return api("POST", "/api/share/create", { folder: f.name, to: code, fingerprint: fingerprint, role: role || "editor" }).then(function (t) {
-      $("sharetoken").textContent = (t.sealed ? (t.role === "viewer" ? "Sealed share token for a viewer of " : "Sealed share token for an editor of ") + t.folder + " (only the requesting device can open it; fingerprint " + t.fingerprint + "): " : "Share token for " + t.folder + " (contains the folder key; send over a secure channel): ") + t.token;
-      $("sharetoken").classList.remove("hidden"); nav("shared"); refreshStatus();
-      // A sealed token is safe to show: only the requesting device opens it. A plain one never becomes a QR code.
-      return renderQr($("sharetokenqr"), t.sealed ? t.token : "");
+      // Nothing secret to send: the grant waits on the storage. The other
+      // person compares this device's six words when they accept.
+      var box = $("sharetoken"); box.textContent = "";
+      box.appendChild(el("div", "", "The folder is shared. Tell the other person which storage to accept it through and the six words of this device, which they compare when they accept."));
+      box.appendChild(el("pre", "", t.owner_fingerprint));
+      box.classList.remove("hidden"); $("sharetokenqr").classList.add("hidden"); nav("shared"); refreshStatus();
+      log("shared " + t.folder + " with " + t.name + " (" + t.role + ")");
     });
   }
 
@@ -1033,7 +1035,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // Scanning: the camera through getUserMedia; frames are read by BarcodeDetector where the browser has it,
   // else by the service (POST /api/qr/scan, nothing kept). Parts of a split code are collected until complete.
   var scan = null, scanCanvas = null;
-  var NOT_KIND = { request: "This is not a share request code.", token: "This is not a sealed share token.", pair: "This is not a pairing code." };
+  var NOT_KIND = { request: "This is not a share request code.", pair: "This is not a pairing code." };
   function rawPost(path, body, type) {
     return fetch(path, { method: "POST", headers: { "X-Varsto-Token": token, "Content-Type": type || "application/octet-stream" }, body: body }).then(function (r) {
       return r.json().then(function (j) { if (!r.ok) { throw new Error(j.error || ("The Varsto service answered " + r.status)); } return j; });
@@ -1143,11 +1145,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       fillPair(info); log("pairing code filled in from the QR code; give this device a name and a passphrase, then Pair");
       return;
     }
-    if (info.kind === "token") {
-      if (view !== "setup") { return alertBox("This device already has a vault of its own. Open the sealed token on the device that made the request code."); }
-      $("acceptshare").querySelector("input[name=token]").value = info.text;
-      return alertBox("The sealed share token for " + info.folder + " is filled in under Accept a shared folder. Fill in the rest and choose Accept.");
-    }
+
     var folders = lastStatus && !lastStatus.member ? lastStatus.folders.filter(function (f) { return !f.member; }) : [];
     if (view !== "app" || !folders.length) { return alertBox("This is a share request. Open it on the device of the folder's owner."); }
     return dialog({
@@ -1168,21 +1166,21 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (l.this_role === "viewer") { box.appendChild(el("li", "notice", "This device may only read " + f.name + ": changes made here are not published. Files you change are moved aside and the shared version comes back.")); }
       l.members.forEach(function (m) {
         var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", m.name);
-        var kind = m.kind === "owner-device" ? ["grey", "Owner's device"] : m.kind === "invite" ? (m.status === "pending" ? ["accent", "Token not accepted yet"] : ["grey", "Token revoked"]) : m.status === "removed" ? ["risk", "Removed"] : ["accent", "Member"];
+        var kind = m.kind === "owner-device" ? ["grey", "Owner's device"] : m.status === "removed" ? ["risk", "Removed"] : ["accent", "Member"];
         title.appendChild(pill(kind[0], kind[1]));
-        if (m.kind !== "owner-device" && m.status !== "removed" && m.status !== "revoked") { title.appendChild(m.role === "viewer" ? pill("grey", "Viewer") : pill("ok", "Editor")); }
+        if (m.kind !== "owner-device" && m.status !== "removed") { title.appendChild(m.role === "viewer" ? pill("grey", "Viewer") : pill("ok", "Editor")); }
         if (m.this_device) { title.appendChild(pill("grey", "This device")); }
         body.appendChild(title);
         var sub = [];
         if (m.fingerprint) { sub.push("fingerprint " + m.fingerprint); }
         if (m.status === "removed") { sub.push("removed" + (m.removed_by ? " by " + m.removed_by : "") + (m.removed_utc ? " " + fmtDate(m.removed_utc) : "")); }
-        else if (m.since_utc) { sub.push((m.kind === "invite" ? "issued " : "since ") + fmtDate(m.since_utc)); }
+        else if (m.since_utc) { sub.push("since " + fmtDate(m.since_utc)); }
         if (sub.length) { body.appendChild(el("div", "li-sub", sub.join(" · "))); }
         li.appendChild(body);
-        var removable = owner && ((m.kind === "member" && m.status === "active") || (m.kind === "invite" && m.status === "pending"));
+        var removable = owner && m.kind === "member" && m.status === "active";
         if (removable) {
           var a = el("div", "li-actions");
-          if (m.kind === "member") {
+          {
             // The role: only the owner's devices sign a change of it.
             var rs = el("select"); rs.setAttribute("aria-label", "Role");
             [["editor", "Editor"], ["viewer", "Viewer"]].forEach(function (o) { var x = el("option", null, o[1]); x.value = o[0]; rs.appendChild(x); });
@@ -1190,12 +1188,12 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
             rs.onchange = function () { setMemberRole(f, m, rs.value, box); };
             a.appendChild(rs);
           }
-          var b = el("button", "secondary danger", m.kind === "invite" ? "Revoke…" : "Remove…"); b.type = "button";
+          var b = el("button", "secondary danger", "Remove…"); b.type = "button";
           b.onclick = function () { removeMember(f, m, box); }; a.appendChild(b); li.appendChild(a);
         }
         box.appendChild(li);
       });
-      if (owner && l.members.some(function (m) { return (m.kind === "member" && m.status === "active") || (m.kind === "invite" && m.status === "pending"); })) {
+      if (owner && l.members.some(function (m) { return m.kind === "member" && m.status === "active"; })) {
         var li = el("li"); var a = el("div", "li-actions"); var b = el("button", "secondary danger", "Remove everyone…"); b.type = "button";
         b.onclick = function () { removeMember(f, { id: "all", name: "everyone", kind: "all" }, box); }; a.appendChild(b); li.appendChild(a); box.appendChild(li);
       }
@@ -1217,21 +1215,20 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }).catch(function (e) { alertBox(e.message, "Nothing was changed"); showMembers(f, box, true); }).then(function () { busy(false); });
   }
   function removeMember(f, m, box) {
-    var invite = m.kind === "invite";
     dialog({
-      title: (invite ? "Revoke the token for " : "Remove ") + m.name + (invite ? "?" : " from " + f.name + "?"),
-      text: (invite ? "The token was not accepted yet. " : "") + f.name + " gets a new key: your devices and the members who stay receive it, and everything written from now on is unreadable to " + (m.kind === "all" ? "the people removed" : m.name) + ". Their changes from now on are ignored. " +
-        "Everything they already received stays readable to them: a key cannot be recalled, and they can still reach the storage you shared until you change its access. " + (invite ? "If the token is accepted later, it brings nothing written from now on. " : "") + "This cannot be undone; share again with a new token.",
+      title: "Remove " + m.name + " from " + f.name + "?",
+      text: f.name + " gets a new key: your devices and the members who stay receive it, and everything written from now on is unreadable to " + (m.kind === "all" ? "the people removed" : m.name) + ". Their changes from now on are ignored. " +
+        "Everything they already received stays readable to them: a key cannot be recalled, and they can still reach the storage you shared until you change its access. This cannot be undone; share again with a new request code.",
       fields: [{ name: "confirm", label: "Type " + (m.kind === "all" ? "the folder name" : "the name") + " to confirm", placeholder: m.kind === "all" ? f.name : m.name, required: true }],
-      ok: invite ? "Revoke" : "Remove", danger: true
+      ok: "Remove", danger: true
     }).then(function (r) {
       if (!r) { return; }
       if (r.values.confirm.trim() !== (m.kind === "all" ? f.name : m.name)) { return alertBox("The name does not match, so nothing was changed."); }
       busy(true);
       return api("POST", "/api/share/revoke", { folder: f.name, member: m.id, confirm: true }).then(function (rep) {
-        log(f.name + ": new key (share epoch " + rep.share_epoch + ")" + (rep.removed.length ? ", removed " + rep.removed.join(", ") : "") + (rep.invites_revoked.length ? ", " + rep.invites_revoked.length + " token(s) revoked" : ""));
-        var text = f.name + " has a new key." + (rep.removed.length ? " Removed: " + rep.removed.join(", ") + "." : "") + (rep.invites_revoked.length ? " Tokens revoked: " + rep.invites_revoked.length + "." : "");
-        if (rep.grants_pending.length) { text += " Waiting for " + rep.grants_pending.join(", ") + ": they receive the new key once they run this version."; }
+        log(f.name + ": new key (folder epoch " + rep.share_epoch + ")" + (rep.removed.length ? ", removed " + rep.removed.join(", ") : ""));
+        var text = f.name + " has a new key." + (rep.removed.length ? " Removed: " + rep.removed.join(", ") + "." : "");
+        if (rep.grants_pending.length) { text += " Waiting for " + rep.grants_pending.join(", ") + ": no key of theirs is known here."; }
         return alertBox(text, "Access changed").then(function () { showMembers(f, box, true); });
       });
     }).catch(function (e) { alertBox(e.message, "Nothing was changed"); }).then(function () { busy(false); });
@@ -1510,7 +1507,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           var smb = el("button", "secondary", "Members"); smb.type = "button";
           smb.onclick = function () { var hidden = smw.classList.toggle("hidden"); if (!hidden) { showMembers(f, sm, !s.member); } };
           sa.appendChild(smb);
-          if (!s.member) { var sb = el("button", "secondary", "New token"); sb.type = "button"; sb.onclick = function () { shareFolder(f); }; sa.appendChild(sb); }
+          if (!s.member) { var sb = el("button", "secondary", "Share"); sb.type = "button"; sb.onclick = function () { shareFolder(f); }; sa.appendChild(sb); }
           sli.appendChild(sa);
           shl.appendChild(sli); shl.appendChild(smw);
         }
@@ -3589,7 +3586,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       // The key is shown once: in a dialog now, and on the overview until the user confirms.
       $("vaultkey-text").textContent = "Vault key (shown once, write it down and keep it offline): " + r.vault_key;
       $("vaultkey").classList.remove("hidden");
-      return dialog({ title: "Your vault key", text: "Write it down and keep it offline: it is the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. It is shown once.", code: r.vault_key, ok: "Continue", cancel: false }).then(function () { return refreshState(); });
+      return dialog({ title: "Your vault key and recovery words", text: "Write both word sets down and keep them offline: they are the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. The recovery words also make each new folder's recovery copy. They are shown once.", code: r.kit || r.vault_key, ok: "I have written them down", cancel: false }).then(function () { return refreshState(); });
     }).catch(function (e) { alertBox(e.message); });
   };
   $("vaultkey-done").onclick = function () { $("vaultkey").classList.add("hidden"); $("vaultkey-text").textContent = ""; };
@@ -3612,11 +3609,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     // The service tells which address it is trying while the request runs.
     var shown = ""; var prog = $("pairprogress");
     function showStep(v) {
+      // The other device shows this device's six words to its person before it lets this one join.
+      var words = v.active && v.fingerprint ? "This device's six words: " + v.fingerprint + ". The other device shows the same words before it lets this one join." : "";
+      if ($("pairwords").textContent !== words) { $("pairwords").textContent = words; }
       var msg = !v.active ? "" : v.step === "trying" ? "Trying " + v.address + " …" : v.step === "looking" ? "Looking for the device on the network …" : "";
       if (msg !== shown) { shown = msg; prog.textContent = msg; if (msg) { log(msg.charAt(0).toLowerCase() + msg.slice(1)); } }
     }
     var poll = setInterval(function () { api("GET", "/api/pair/join-status").then(showStep).catch(function () {}); }, 500);
-    api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); pairOffered = []; log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(pairFailed).then(function () { clearInterval(poll); prog.textContent = ""; busy(false); });
+    api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); pairOffered = []; log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(pairFailed).then(function () { clearInterval(poll); prog.textContent = ""; $("pairwords").textContent = ""; busy(false); });
   };
   // Nothing answered: name every address tried and what the user can check.
   function pairFailed(e) {
@@ -3644,11 +3644,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   function pollPair() { api("GET", "/api/pair/status").then(function (s) { if (s.code) { renderPair(s); if (s.open && !pairTimer) { pairTimer = setInterval(pollPair, 1500); } } if (s.ask) { f3PairAsk(s); } }).catch(function () {}); }
   if (token) { pollPair(); }
-  $("pairstart").onclick = function () { api("POST", "/api/pair/start", f3Owned > 0 ? { format: 3 } : {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
+  $("pairstart").onclick = function () { api("POST", "/api/pair/start", {}).then(function (s) { renderPair(s); if (!pairTimer) { pairTimer = setInterval(pollPair, 1500); } }).catch(function (e) { alertBox(e.message); }); };
   $("pairscan").onclick = function () { scanQr("pair").then(function (info) { if (info) { fillPair(info); } }); };
-  $("sharetokenscan").onclick = function () {
-    scanQr("token").then(function (info) { if (info) { $("acceptshare").querySelector("input[name=token]").value = info.text; log("scanned the sealed share token for " + info.folder); } });
-  };
+
   $("pairstop").onclick = function () { api("POST", "/api/pair/stop", {}).then(function () { if (pairTimer) { clearInterval(pairTimer); pairTimer = null; } $("pairbox").classList.add("hidden"); pairButtons(false); }).catch(function (e) { alertBox(e.message); }); };
   $("join").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/join", formData(ev.target)).then(function () { ev.target.reset(); log("joined the vault; attach folders under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };
@@ -4205,7 +4203,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // exists. Nothing is approved without the person ticking that the words
   // match; the background service only lists requests.
   var f3Owned = 0, f3Busy = false, f3Soon = null, f3Asked = "";
-  function f3Wanted() { return !!appState.format3 && document.body.dataset.view === "app"; }
+  function f3Wanted() { return document.body.dataset.view === "app"; }
   function f3Reload() { if (f3Soon) { return; } f3Soon = setTimeout(function () { f3Soon = null; loadF3(); }, 250); }
   function f3Role(r) { return r === "owner" ? "owner" : r === "viewer" ? "viewer" : "editor"; }
   function f3Words(t) { var c = el("code", "f3-words", t); c.setAttribute("data-no-i18n", ""); return c; }
@@ -4706,7 +4704,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   };
   // The kit holds the vault key: it is printed on the command line, which asks for the passphrase.
   $("rg-kit").onclick = function () {
-    dialog({ title: "Print the recovery kit", text: appState.format3 ? "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key." : "The kit is the vault key as 24 words. For safety it is printed on the command line of this computer, which asks for your passphrase: run the command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.", code: "varsto recovery kit\nvarsto recovery kit --shares" + (appState.format3 ? "\nvarsto recovery kit --recovery-words\nvarsto recovery kit --new-recovery-key" : ""), ok: "Close", cancel: false }).then(function () { loadGuide(); });
+    dialog({ title: "Print the recovery kit", text: "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.", code: "varsto recovery kit\nvarsto recovery kit --shares\nvarsto recovery kit --recovery-words\nvarsto recovery kit --new-recovery-key", ok: "Close", cancel: false }).then(function () { loadGuide(); });
   };
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
   // The service answers it without waiting for a sync, so it stays live during long transfers.
@@ -5118,7 +5116,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   window.addEventListener("resize", function () { if (lastWhere && currentPage === "overview" && $("wd-chart").clientWidth !== whereWidth) { renderWhere(lastWhere); } });
   $("p2pform").onsubmit = function (ev) { ev.preventDefault(); var d = formData(ev.target); d.port = +d.port || 17893; api("POST", "/api/p2p", d).then(function (r) { log("p2p settings saved; " + r.note); loadP2p(); }).catch(function (e) { alertBox(e.message); }); };
   $("storagekind").onchange = function () { var k = this.value; document.querySelectorAll("#addstorage [data-kind]").forEach(function (d) { d.classList.toggle("hidden", d.getAttribute("data-kind") !== k); }); };
-  $("acceptshare").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/share/accept", formData(ev.target)).then(function (r) { ev.target.reset(); log("accepted shared folder " + r.folder + (r.fingerprint ? " (the owner confirmed fingerprint " + r.fingerprint + ")" : "") + "; attach it under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
+  $("acceptshare").onsubmit = function (ev) { ev.preventDefault(); busy(true); api("POST", "/api/share/accept", formData(ev.target)).then(function (r) { ev.target.reset(); log("accepted shared folder " + r.folder + "; attach it under Files"); nav("files"); return refreshState(); }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); }); };
 
   // Folder forms: on desktop the directory is pre-filled from the folder root as you type the name;
   // on phones no directory is asked and the service picks <folder_root>/<name> (or the shared

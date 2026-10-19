@@ -3,6 +3,8 @@
 //! metadata (permissions, symbolic links, extended attributes, ownership)
 //! between two devices through one storage.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use varsto_core::chunking::ChunkerParams;
@@ -46,7 +48,14 @@ fn two(files: &[(&str, &[u8])]) -> (Lab, Engine, Engine) {
         write(&lab.a_dir, p, b);
     }
     a.push("docs").unwrap();
-    let mut b = Engine::join(&lab.root.join("b-home"), "desk", PASS, &vault_key, storage).unwrap();
+    let mut b = common::join_approved(
+        &lab.root.join("b-home"),
+        "desk",
+        PASS,
+        &vault_key,
+        storage,
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     b.attach_folder("docs", &lab.b_dir, false).unwrap();
     (lab, a, b)

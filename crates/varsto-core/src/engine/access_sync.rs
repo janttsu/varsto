@@ -1,40 +1,31 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Last-accessed times across devices (`docs/spec/alpha-0-format.md`
-//! section 13).
+//! section 13, format 3: section 77).
 //!
 //! Each device records when it last used a file (fetch, open, read, the
 //! access time seen at scan) in its folder state. To make "idle for 90
-//! days" mean idle on every device, each device publishes that map as one
-//! *access record* per folder, replaced as a whole:
-//! `vault/access/<folder>/<device>/<written utc, 20 digits>.enc`, zstd JSON
-//! sealed with XChaCha20-Poly1305 under a key derived from the folder's
-//! current metadata key (associated data: vault, folder, device, time). A
-//! device writes a new record only when its map changed, at most once per
-//! [`ACCESS_INTERVAL_SECS`] from the background sync, and deletes its older
-//! ones; readers keep the newest record per device. The merged time of a
-//! file is the newest over this device and every other device that is not
-//! removed.
+//! days" mean idle on every device, each device publishes that map as an
+//! *access record* per folder (record kind 20, stream
+//! `access/<folder>/<device>/`, sealed under the folder's metadata key of
+//! its epoch), replaced as a whole: a device writes a new record only when
+//! its map changed, at most once per [`ACCESS_INTERVAL_SECS`] from the
+//! background sync, and deletes its older ones; readers keep the newest
+//! accepted record per device. The merged time of a file is the newest
+//! over this device and every other device that is not removed.
 //!
 //! Why not ledger events: access times change with every use, and the
-//! ledger is append-only and replicated to every device forever (checkpoints
-//! bound it, they do not erase it). One replaceable object per device and
-//! folder costs O(files) bytes regardless of how often files are used, and
-//! needs no ledger format change. The ledger keeps facts about data; this is
-//! a hint for advice.
+//! ledger is append-only and replicated to every device forever
+//! (checkpoints bound it, they do not erase it). One replaceable record per
+//! device and folder costs O(files) bytes regardless of how often files are
+//! used, and is not announced. The ledger keeps facts about data; this is a
+//! hint for advice.
 
 use super::*;
+use crate::record::{Id16, KeyId, RecordStore};
+use crate::records3::{self, AccessBody};
 
 /// Least time between two access exchanges started by a sync.
 pub const ACCESS_INTERVAL_SECS: i64 = 3600;
-const PREFIX: &str = "vault/access/";
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-struct AccessBody {
-    device: DeviceId,
-    folder: FolderId,
-    written_utc: i64,
-    accessed: BTreeMap<String, i64>,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 struct RemoteAccess {
@@ -61,26 +52,6 @@ pub struct AccessExchangeReport {
     pub published: usize,
     /// Records of other devices read now.
     pub received: usize,
-}
-
-fn record_key(meta: &SecretKey, folder: &FolderId) -> SecretKey {
-    meta.derive("access-record", &[folder.as_str().as_bytes()])
-}
-
-fn aad(vault: &VaultId, folder: &FolderId, device: &DeviceId, written: i64) -> Vec<u8> {
-    crypto::aad(
-        "access-record",
-        &[
-            vault.as_str().as_bytes(),
-            folder.as_str().as_bytes(),
-            device.as_str().as_bytes(),
-            &written.to_le_bytes(),
-        ],
-    )
-}
-
-fn storage_key(folder: &FolderId, device: &DeviceId, written: i64) -> String {
-    format!("{PREFIX}{folder}/{device}/{written:020}.enc")
 }
 
 impl Engine {
@@ -193,31 +164,39 @@ impl Engine {
         if hash == cache.published_hash {
             return Ok(false);
         }
-        let me = &self.vault.device_id;
-        let written = now.max(cache.published_utc + 1);
-        let body = AccessBody {
-            device: me.clone(),
-            folder: fk.folder.clone(),
-            written_utc: written,
-            accessed: state.accessed.clone(),
+        let folder = members3::bin(&fk.folder)?;
+        let me = self.me3();
+        let stream = records3::access_stream(folder, me);
+        let key = KeyId::Meta {
+            folder,
+            epoch: fk.epoch,
         };
-        let packed = zstd::bulk::compress(&serde_json::to_vec(&body)?, 3)?;
-        let blob = crypto::encrypt(
-            &record_key(&fk.meta, &fk.folder),
-            &aad(&self.vault.vault_id, &fk.folder, me, written),
-            &packed,
-        )?;
-        let key = storage_key(&fk.folder, me, written);
-        let own = format!("{PREFIX}{}/{me}/", fk.folder);
-        for (_, b) in storages {
-            b.put_if_absent(&key, &blob)?;
-            // Only the newest record of a device is ever read.
-            for old in b.list(&own)? {
-                if old != key {
-                    b.delete(&old)?;
+        let written = now.max(cache.published_utc + 1);
+        let accessed: Vec<(String, i64)> = state
+            .accessed
+            .iter()
+            .filter(|(p, _)| crate::names::check_synced_path(p).is_ok())
+            .map(|(p, t)| (p.clone(), *t))
+            .collect();
+        let published = self.write_record3(storages, &stream, &key, |seq| AccessBody {
+            folder,
+            device: me,
+            seq,
+            updated_utc: written,
+            accessed: accessed.clone(),
+        })?;
+        // Only the newest record of a device is ever read.
+        let view = self.view3()?;
+        self.each_store(storages, &view, |_, store, _| {
+            for l in store.list_after(&stream, 0)? {
+                if l.seq < published.seq {
+                    for n in &l.names {
+                        store.storage.delete(n)?;
+                    }
                 }
             }
-        }
+            Ok(())
+        })?;
         cache.published_utc = written;
         cache.published_hash = hash;
         Ok(true)
@@ -229,67 +208,42 @@ impl Engine {
         fk: &FolderKeys,
         cache: &mut AccessCache,
     ) -> Result<usize> {
-        let prefix = format!("{PREFIX}{}/", fk.folder);
-        let mut newest: BTreeMap<DeviceId, (i64, usize, String)> = BTreeMap::new();
-        for (i, (_, b)) in storages.iter().enumerate() {
-            for key in b.list(&prefix)? {
-                let Some((dev, file)) = key.strip_prefix(&prefix).and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let (Ok(dev), Some(t)) = (
-                    DeviceId::from_hex(dev),
-                    file.strip_suffix(".enc")
-                        .and_then(|t| t.parse::<i64>().ok()),
-                ) else {
-                    continue;
-                };
-                if newest.get(&dev).is_none_or(|(n, _, _)| t > *n) {
-                    newest.insert(dev, (t, i, key));
+        let folder = members3::bin(&fk.folder)?;
+        let me = self.me3();
+        let writers: Vec<Id16> = self
+            .stream_writers()
+            .into_iter()
+            .filter(|d| *d != me && !self.is_revoked(&DeviceId::from_bytes(d)))
+            .collect();
+        let streams: Vec<crate::record::StreamRef> = writers
+            .iter()
+            .map(|d| records3::access_stream(folder, *d))
+            .collect();
+        let view = self.view3()?;
+        let mut newest: BTreeMap<Id16, AccessBody> = BTreeMap::new();
+        self.each_store(storages, &view, |_, store: &RecordStore<'_>, counter| {
+            for b in records3::read_newest::<AccessBody>(store, &streams, counter)? {
+                if newest.get(&b.device).is_none_or(|n| n.seq < b.seq) {
+                    newest.insert(b.device, b);
                 }
             }
-        }
-        let metas = fk.meta_keys();
+            Ok(())
+        })?;
         let mut read = 0;
-        for (dev, (t, i, key)) in newest {
-            let known =
-                self.devices.devices.contains_key(&dev) || self.devices.members.contains_key(&dev);
-            // Read-only members of a shared folder: their records are not
-            // taken (`share_roles`).
-            if dev == self.vault.device_id
-                || !known
-                || self.is_revoked(&dev)
-                || !self.share_role_of(&fk.folder, &dev).is_editor()
+        for (dev, body) in newest {
+            let dev = DeviceId::from_bytes(&dev);
+            if cache
+                .remote
+                .get(&dev)
+                .is_some_and(|r| r.written_utc >= body.updated_utc)
             {
-                continue;
-            }
-            if cache.remote.get(&dev).is_some_and(|r| r.written_utc >= t) {
-                continue;
-            }
-            let Some(blob) = storages[i].1.get(&key)? else {
-                continue;
-            };
-            let a = aad(&self.vault.vault_id, &fk.folder, &dev, t);
-            let Some(packed) = metas
-                .iter()
-                .find_map(|m| crypto::decrypt(&record_key(m, &fk.folder), &a, &blob).ok())
-            else {
-                continue;
-            };
-            let Ok(json) = zstd::bulk::decompress(&packed, 256 << 20) else {
-                continue;
-            };
-            let Ok(body) = serde_json::from_slice::<AccessBody>(&json) else {
-                continue;
-            };
-            if body.device != dev || body.folder != fk.folder || body.written_utc != t {
                 continue;
             }
             cache.remote.insert(
                 dev,
                 RemoteAccess {
-                    written_utc: t,
-                    accessed: body.accessed,
+                    written_utc: body.updated_utc,
+                    accessed: body.accessed.into_iter().collect(),
                 },
             );
             read += 1;

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Shared folders between users (`docs/spec/alpha-0-format.md` section 23):
-//! the request fingerprint both sides compare, removing a member (a new
-//! share epoch: the members that stay read on, the removed one reads
-//! nothing new and its later changes are ignored), revoking a token that was
-//! not accepted, sharing a folder that was re-keyed with the vault key, and
-//! last-accessed times merged across devices.
+//! Shared folders between people on storage format 3
+//! (`docs/spec/format-3-design.md` section 6; `alpha-0-format.md` section
+//! 77.6): the request fingerprint both sides compare, the owner's words the
+//! member compares, removing a member (a new folder epoch: the members that
+//! stay read on, the removed one reads nothing new and its later changes
+//! are ignored), removing a member before it accepted, sharing a folder
+//! that a device removal re-keyed, last-accessed times merged across
+//! devices, and a member's batches confined to its folder.
 
 mod common;
 
@@ -13,9 +15,10 @@ use std::path::{Path, PathBuf};
 use varsto_core::chunking::ChunkerParams;
 use varsto_core::crypto::{self, SecretKey};
 use varsto_core::ids::ChunkId;
-use varsto_core::manifest::Manifest;
+use varsto_core::record::{KeyId, RecordKeys, SignedRecord};
+use varsto_core::share::ShareRole;
 use varsto_core::storage::StorageSpec;
-use varsto_core::vault::{FolderKeys, ShareRequest, ShareToken};
+use varsto_core::vault::{FolderKeys, ShareRequest};
 use varsto_core::Engine;
 
 const PASS: &str = "correct horse battery staple";
@@ -67,19 +70,30 @@ fn owner(lab: &Lab) -> (Engine, String) {
     (a, key)
 }
 
-/// `who` asks for a share with a request code, the owner checks the
-/// fingerprint and seals a token, `who` accepts it and syncs the folder.
+/// `who` asks with a request code, the owner checks the fingerprint and
+/// adds it; `who` accepts with the owner device's words and syncs.
 fn invite(lab: &Lab, owner: &mut Engine, who: &str) -> Engine {
     let home = lab.home(who);
     let code = ShareRequest::code_for_named(&home, Some(who)).unwrap();
     let words = ShareRequest::fingerprint_for(&home).unwrap();
-    let (sealed, req) = owner
-        .share_create_sealed("project", &code, Some(&words))
+    let added = owner
+        .share_add("project", &code, Some(&words), ShareRole::Editor)
         .unwrap();
-    assert_eq!(req.fingerprint, words);
-    let token = ShareRequest::open_token(&home, &sealed.encode()).unwrap();
-    let mut m = small(Engine::accept_share(&home, who, PASS, &token, lab.storage.clone()).unwrap());
-    ShareRequest::clear(&home);
+    assert_eq!(added.fingerprint, words);
+    let mut m = small(
+        Engine::accept_share(
+            &home,
+            who,
+            PASS,
+            Some(&added.owner_fingerprint),
+            lab.storage.clone(),
+        )
+        .unwrap(),
+    );
+    assert!(
+        !home.join(ShareRequest::FILE).exists(),
+        "the request is used up"
+    );
     m.attach_folder("project", &lab.dir(who), false).unwrap();
     m.sync(None).unwrap();
     m
@@ -89,53 +103,78 @@ fn read(dir: &Path, f: &str) -> Option<Vec<u8>> {
     fs::read(dir.join(f)).ok()
 }
 
+/// Opens every body with one key.
+struct Only(SecretKey);
+impl RecordKeys for Only {
+    fn symmetric(&self, _: &KeyId) -> Option<SecretKey> {
+        Some(self.0.clone())
+    }
+}
+
 #[test]
 fn request_fingerprint_matches_on_both_sides() {
     let lab = Lab::new();
     let (mut a, _) = owner(&lab);
     let home = lab.home("robin");
     let code = ShareRequest::code_for_named(&home, Some("Robin")).unwrap();
-    // The code carries the name; both sides derive the same six words.
+    // The code carries the keys and the name; both sides derive the same six words.
     let mine = ShareRequest::fingerprint_for(&home).unwrap();
     let seen = Engine::share_request_info(&code).unwrap();
     assert_eq!(seen.fingerprint, mine);
     assert_eq!(seen.name, "Robin");
     assert_eq!(mine.split(' ').count(), 6);
-    // Asking again keeps the key and the words.
+    // Asking again keeps the keys and the words.
     assert_eq!(ShareRequest::code_for(&home).unwrap(), code);
 
     // Someone swaps the name on the way: the owner sees other words.
-    let (hex, _) = code.split_once(".Robin").unwrap();
-    let swapped = format!("{hex}.Mallory");
+    let (keys, _) = code.rsplit_once(".Robin").unwrap();
+    let swapped = format!("{keys}.Mallory");
     let other = Engine::share_request_info(&swapped).unwrap();
     assert_ne!(other.fingerprint, mine);
     // Confirming the words the requester read out refuses the swapped code.
     assert!(a
-        .share_create_sealed("project", &swapped, Some(&mine))
+        .share_add("project", &swapped, Some(&mine), ShareRole::Editor)
         .is_err());
-    // An owner who sealed to the swapped code anyway: the requester's device
-    // sees that the confirmed words are not its own and refuses the token.
-    let (bad, _) = a.share_create_sealed("project", &swapped, None).unwrap();
-    let err = ShareRequest::open_token(&home, &bad.encode()).unwrap_err();
-    assert!(format!("{err:#}").contains("fingerprint"), "{err:#}");
 
-    // The right code: the token names the confirmed words, and they match.
-    let (good, _) = a
-        .share_create_sealed("project", &code, Some(&mine.to_uppercase()))
+    // The right code: the owner adds the member, and tells its own words.
+    let added = a
+        .share_add(
+            "project",
+            &code,
+            Some(&mine.to_uppercase()),
+            ShareRole::Editor,
+        )
         .unwrap();
-    let t = ShareRequest::open_token(&home, &good.encode()).unwrap();
-    assert_eq!(t.fingerprint, mine);
-    assert!(t.owners.contains(a.device_id()));
-    // The owner lists the token as pending, with its words and name.
+    assert_eq!(added.fingerprint, mine);
+    assert_eq!(added.owner_fingerprint, a.f3_own_fingerprint().unwrap());
+    // The member compares them: other words find nothing to accept.
+    let Err(err) = Engine::accept_share(
+        &home,
+        "robin",
+        PASS,
+        Some("abandon ability able about above absent"),
+        lab.storage.clone(),
+    ) else {
+        panic!("accepted with the wrong words");
+    };
+    assert!(format!("{err:#}").contains("no owner device"), "{err:#}");
+    assert!(!home.join("vault.json").exists());
+    // The owner lists the member with its words and name.
     let list = a.share_members("project").unwrap();
-    let pending: Vec<_> = list
+    assert!(list
         .members
         .iter()
-        .filter(|m| m.kind == "invite" && m.status == "pending")
-        .collect();
-    assert!(pending
-        .iter()
-        .any(|m| m.fingerprint == mine && m.name == "Robin"));
+        .any(|m| m.kind == "member" && m.fingerprint == mine && m.name == "Robin"));
+    // Without the words, the only offer is taken.
+    let offers = Engine::share_offers(&home, &lab.storage, None).unwrap();
+    assert_eq!(offers.len(), 1);
+    assert_eq!(offers[0].owner_fingerprint, added.owner_fingerprint);
+    let mut m =
+        small(Engine::accept_share(&home, "robin", PASS, None, lab.storage.clone()).unwrap());
+    m.attach_folder("project", &lab.dir("robin"), false)
+        .unwrap();
+    m.sync(None).unwrap();
+    assert!(read(&lab.dir("robin"), "plan.txt").is_some());
 }
 
 #[test]
@@ -143,8 +182,14 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
     let lab = Lab::new();
     let (mut a, key) = owner(&lab);
     // A second device of the owner.
-    let mut a2 =
-        small(Engine::join(&lab.home("a2"), "desk", PASS, &key, lab.storage.clone()).unwrap());
+    let mut a2 = small(common::join_approved(
+        &lab.home("a2"),
+        "desk",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    ));
     a2.attach_folder("project", &lab.dir("a2"), false).unwrap();
     a2.sync(None).unwrap();
     let mut b = invite(&lab, &mut a, "bea");
@@ -229,14 +274,16 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
         .join("storage/manifests")
         .join(crec.folder_id.as_str())
         .join(a.device_id().as_str());
-    let seq = fs::read_dir(&mdir)
+    let newest = fs::read_dir(&mdir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter_map(|e| e.path().file_stem()?.to_string_lossy().parse::<u64>().ok())
+        .map(|e| e.path())
+        .filter(|p| p.to_string_lossy().ends_with("-0000.rec"))
         .max()
         .unwrap();
-    let blob = fs::read(mdir.join(format!("{seq:016}.enc"))).unwrap();
-    assert!(Manifest::open(&blob, &vault, &crec.folder_id, a.device_id(), seq, &ck.meta).is_err());
+    let m = SignedRecord::decode(&fs::read(newest).unwrap()).unwrap();
+    assert_eq!(m.key_id, format!("meta:{}@1", crec.folder_id.as_str()));
+    assert!(m.open_part(&Only(ck.meta.clone())).is_err());
     // Its later changes are ignored by everyone.
     fs::write(lab.dir("cai").join("late.txt"), b"after removal").unwrap();
     fs::write(lab.dir("cai").join("plan.txt"), b"overwritten by C").unwrap();
@@ -270,44 +317,19 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
     c.sync(None).unwrap();
     assert!(read(&lab.dir("cai"), "from-a2.txt").is_none());
 
-    // C cannot come back as a new device with the key it kept.
-    let old = ShareToken {
-        vault_id: a.vault_id().clone(),
-        folder_id: a.folders()[0].0.folder_id.clone(),
-        key_hex: a.folders()[0].0.key_hex.clone(),
-        name: "project".into(),
-        epoch_keys: Default::default(),
-        fingerprint: String::new(),
-        owners: Vec::new(),
-        role: Default::default(),
-        invite: String::new(),
-        join_secret_hex: String::new(),
-    };
-    let mut c2 = small(
-        Engine::accept_share(
-            &lab.home("c2"),
-            "cai-again",
-            PASS,
-            &old,
-            lab.storage.clone(),
-        )
-        .unwrap(),
-    );
-    c2.attach_folder("project", &lab.dir("c2"), false).unwrap();
-    c2.sync(None).unwrap();
-    assert!(read(&lab.dir("c2"), "after.txt").is_none());
-    fs::write(lab.dir("c2").join("sneak.txt"), b"new device of C").unwrap();
-    c2.sync(None).unwrap();
-    a.sync(None).unwrap();
-    b.sync(None).unwrap();
-    assert!(read(&lab.dir("a"), "sneak.txt").is_none());
-    assert!(read(&lab.dir("bea"), "sneak.txt").is_none());
-    assert!(!a
-        .share_members("project")
-        .unwrap()
-        .members
-        .iter()
-        .any(|m| m.name == "cai-again"));
+    // C cannot come back as a new device: nothing is shared with a new
+    // request, and the owner's words do not change that.
+    let c2 = lab.home("c2");
+    ShareRequest::code_for_named(&c2, Some("cai-again")).unwrap();
+    let owner_words = a.f3_own_fingerprint().unwrap();
+    assert!(Engine::accept_share(
+        &c2,
+        "cai-again",
+        PASS,
+        Some(&owner_words),
+        lab.storage.clone()
+    )
+    .is_err());
 
     // Sharing again after the change: a new member reads old and new files.
     let mut d = invite(&lab, &mut a, "dee");
@@ -324,85 +346,87 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
     d.sync(None).unwrap();
     a.sync(None).unwrap();
     assert!(read(&lab.dir("a"), "from-d.txt").is_some());
-    let _ = d;
 }
 
 #[test]
-fn a_token_not_accepted_yet_can_be_revoked() {
+fn a_member_removed_before_it_accepted_gets_nothing_new() {
     let lab = Lab::new();
     let (mut a, _) = owner(&lab);
     let mut b = invite(&lab, &mut a, "bea");
     let home = lab.home("eve");
     let code = ShareRequest::code_for_named(&home, Some("eve")).unwrap();
     let words = ShareRequest::fingerprint_for(&home).unwrap();
-    let (sealed, _) = a
-        .share_create_sealed("project", &code, Some(&words))
+    let added = a
+        .share_add("project", &code, Some(&words), ShareRole::Editor)
         .unwrap();
-    // A second token, kept: it keeps working after the first is revoked.
+    // A second one, kept: it keeps working after the first is removed.
     let fhome = lab.home("fay");
     let fcode = ShareRequest::code_for_named(&fhome, Some("fay")).unwrap();
-    let (fsealed, _) = a.share_create_sealed("project", &fcode, None).unwrap();
+    a.share_add("project", &fcode, None, ShareRole::Editor)
+        .unwrap();
 
     let r = a.share_revoke("project", &words).unwrap();
-    assert!(r.removed.is_empty());
-    assert_eq!(r.invites_revoked.len(), 1);
+    assert_eq!(r.removed, vec!["eve".to_string()]);
     let list = a.share_members("project").unwrap();
     assert!(list
         .members
         .iter()
-        .any(|m| m.kind == "invite" && m.status == "revoked" && m.name == "eve"));
+        .any(|m| m.kind == "member" && m.status == "removed" && m.name == "eve"));
     fs::write(
         lab.dir("a").join("after.txt"),
-        b"after the token was revoked",
+        b"after the member was removed",
     )
     .unwrap();
     a.sync(None).unwrap();
     b.sync(None).unwrap();
     assert!(read(&lab.dir("bea"), "after.txt").is_some());
 
-    // The revoked token still opens (a key cannot be recalled) but brings
-    // nothing written since (the owner's manifests are under the new key
-    // now), and what that device writes is ignored.
-    let t = ShareRequest::open_token(&home, &sealed.encode()).unwrap();
-    let mut e = small(Engine::accept_share(&home, "eve", PASS, &t, lab.storage.clone()).unwrap());
+    // The removed member's grant still opens (a key cannot be recalled)
+    // but brings nothing written since, and what that device writes is
+    // ignored.
+    let mut e = small(
+        Engine::accept_share(
+            &home,
+            "eve",
+            PASS,
+            Some(&added.owner_fingerprint),
+            lab.storage.clone(),
+        )
+        .unwrap(),
+    );
     e.attach_folder("project", &lab.dir("eve"), false).unwrap();
     e.sync(None).unwrap();
+    assert!(read(&lab.dir("eve"), "plan.txt").is_some());
     assert!(read(&lab.dir("eve"), "after.txt").is_none());
     assert!(e.share_members("project").unwrap().access_lost);
-    fs::write(lab.dir("eve").join("eve.txt"), b"from a revoked token").unwrap();
+    fs::write(lab.dir("eve").join("eve.txt"), b"from a removed member").unwrap();
     e.sync(None).unwrap();
     a.sync(None).unwrap();
     assert!(read(&lab.dir("a"), "eve.txt").is_none());
 
-    // The token that was kept got the new key sealed to its request.
-    let ft = ShareRequest::open_token(&fhome, &fsealed.encode()).unwrap();
-    let mut f = small(Engine::accept_share(&fhome, "fay", PASS, &ft, lab.storage.clone()).unwrap());
-    ShareRequest::clear(&fhome);
+    // The member that was kept got the new key in a new grant.
+    let mut f =
+        small(Engine::accept_share(&fhome, "fay", PASS, None, lab.storage.clone()).unwrap());
     f.attach_folder("project", &lab.dir("fay"), false).unwrap();
     f.sync(None).unwrap();
     assert!(read(&lab.dir("fay"), "after.txt").is_some());
-    fs::write(lab.dir("fay").join("fay.txt"), b"kept token").unwrap();
+    fs::write(lab.dir("fay").join("fay.txt"), b"kept member").unwrap();
     f.sync(None).unwrap();
     a.sync(None).unwrap();
     assert!(read(&lab.dir("a"), "fay.txt").is_some());
 }
 
 #[test]
-fn removing_every_member_and_plain_tokens() {
+fn removing_every_member() {
     let lab = Lab::new();
     let (mut a, _) = owner(&lab);
     let mut b = invite(&lab, &mut a, "bea");
-    let plain = a.share_create_plain("project").unwrap();
     let r = a.share_revoke("project", "all").unwrap();
     assert_eq!(r.removed, vec!["bea".to_string()]);
-    assert_eq!(r.invites_revoked.len(), 1, "{r:?}");
     fs::write(lab.dir("a").join("after.txt"), b"nobody else").unwrap();
     a.sync(None).unwrap();
     b.sync(None).unwrap();
     assert!(read(&lab.dir("bea"), "after.txt").is_none());
-    // A plain token cannot carry the new key.
-    assert!(a.share_create_plain("project").is_err());
-    assert!(plain.encode_plain().is_ok());
     // Nobody left to remove.
     assert!(a.share_revoke("project", "bea").is_err());
 }
@@ -411,22 +435,31 @@ fn removing_every_member_and_plain_tokens() {
 fn a_folder_re_keyed_by_a_device_removal_can_be_shared() {
     let lab = Lab::new();
     let (mut a, key) = owner(&lab);
-    let mut lost =
-        small(Engine::join(&lab.home("lost"), "lost", PASS, &key, lab.storage.clone()).unwrap());
+    let mut lost = small(common::join_approved(
+        &lab.home("lost"),
+        "lost",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    ));
     lost.attach_folder("project", &lab.dir("lost"), false)
         .unwrap();
     lost.sync(None).unwrap();
     a.revoke_device("lost", false).unwrap();
-    fs::write(lab.dir("a").join("rekeyed.txt"), b"under the new vault key").unwrap();
+    fs::write(
+        lab.dir("a").join("rekeyed.txt"),
+        b"under the new folder key",
+    )
+    .unwrap();
     a.sync(None).unwrap();
-    // Sharing used to be refused here.
     let mut b = invite(&lab, &mut a, "bea");
     assert_eq!(
         read(&lab.dir("bea"), "rekeyed.txt").as_deref(),
-        Some(&b"under the new vault key"[..])
+        Some(&b"under the new folder key"[..])
     );
     assert!(read(&lab.dir("bea"), "plan.txt").is_some());
-    // What is written from now on is under a share key the removed device
+    // What is written from now on is under a folder key the removed device
     // never had.
     fs::write(lab.dir("a").join("shared-later.txt"), b"later").unwrap();
     a.sync(None).unwrap();
@@ -440,8 +473,14 @@ fn last_access_is_merged_across_devices() {
     let lab = Lab::new();
     let (mut a, key) = owner(&lab);
     // B keeps placeholders only: it never used plan.txt itself.
-    let mut b =
-        small(Engine::join(&lab.home("b"), "phone", PASS, &key, lab.storage.clone()).unwrap());
+    let mut b = small(common::join_approved(
+        &lab.home("b"),
+        "phone",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    ));
     b.attach_folder("project", &lab.dir("b"), true).unwrap();
     b.sync(None).unwrap();
     let used_on_a = a.list_files("project").unwrap()[0]
@@ -455,17 +494,11 @@ fn last_access_is_merged_across_devices() {
     // Nothing new: an exchange reads nothing.
     assert_eq!(b.exchange_access_records().unwrap().received, 0);
 
-    // One record per device and folder: a new one replaces the old.
+    // A new record of a device replaces its older one.
     a.read_file("project", "plan.txt").unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1100));
     a.read_file("project", "plan.txt").unwrap();
     a.exchange_access_records().unwrap();
-    let count = walkdir::WalkDir::new(lab.root.join("storage").join("vault/access"))
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .count();
-    assert_eq!(count, 1);
     b.exchange_access_records().unwrap();
     assert!(
         b.list_files("project").unwrap()[0]
@@ -483,44 +516,56 @@ fn folder_id(e: &Engine, name: &str) -> varsto_core::ids::FolderId {
 }
 
 /// A member's ledger batches count only inside its shared folder: a
-/// modified client that retires the owner's storage and announces a
-/// manifest of the owner's private folder (and plants it on the storage)
-/// changes nothing for the owner, whose pull of that folder does not stop
-/// at the planted manifest (`docs/spec/alpha-0-format.md` section 58).
+/// modified client that retires the owner's storage, claims a pack for the
+/// owner's private folder and announces a manifest of it (and plants it on
+/// the storage) changes nothing for the owner, whose pull of that folder
+/// does not stop at the planted manifest.
 #[test]
 fn a_members_batch_cannot_reach_outside_its_folder() {
-    use varsto_core::ledger::Event;
+    use varsto_core::ledger3::events::{
+        Announcement, Event, FolderAdded, PackStored, StorageRetired,
+    };
     let lab = Lab::new();
     let (mut a, _) = owner(&lab);
     a.add_folder("private", &lab.dir("a-private")).unwrap();
     fs::write(lab.dir("a-private").join("secret.txt"), b"mine alone").unwrap();
     a.sync(None).unwrap();
     let mut m = invite(&lab, &mut a, "robin");
-    let private = folder_id(&a, "private");
+    let private = varsto_core::record::id16(&folder_id(&a, "private")).unwrap();
+    let refused_before = a.ledger_view().unwrap().events_refused;
     let clock = a.status().unwrap().lamport;
-    m.seal_batch_unchecked(
-        None,
+    m.seal_batch3_unchecked(
         vec![
-            Event::StorageRetired {
+            Event::StorageRetired(StorageRetired {
                 storage: "box".into(),
-            },
-            Event::ManifestPublished {
-                folder: private.clone(),
+            }),
+            Event::RecordPublished(Announcement {
+                kind: varsto_core::record::Kind::Manifest.code(),
+                scope: private,
                 seq: 7,
-                manifest_hash: String::new(),
-                files: 1,
-            },
-            Event::FolderAdded {
-                folder: private.clone(),
-            },
+                base: 7,
+                parts: 1,
+                body_hash: [7; 32],
+                size: 1,
+            }),
+            Event::FolderAdded(FolderAdded { folder: private }),
+            Event::PackStored(PackStored {
+                storage: "box".into(),
+                pack: [9; 32],
+                class: 0,
+                folder: private,
+                map_seq: 1,
+            }),
         ],
-        Some(clock + 1000),
+        clock + 1000,
     )
     .unwrap();
     let planted = lab
         .root
-        .join("storage")
-        .join(Manifest::storage_key(&private, m.device_id(), 7));
+        .join("storage/manifests")
+        .join(hex::encode(private))
+        .join(m.device_id().as_str())
+        .join("0000000000000007-0000.rec");
     fs::create_dir_all(planted.parent().unwrap()).unwrap();
     fs::write(&planted, b"junk that opens with no key").unwrap();
 
@@ -535,7 +580,7 @@ fn a_members_batch_cannot_reach_outside_its_folder() {
             f.name
         );
     }
-    assert!(a.view().unwrap().events_refused >= 3);
+    assert!(a.ledger_view().unwrap().events_refused >= refused_before + 4);
     // The member's own folder still takes its legitimate events.
     fs::write(lab.dir("robin").join("note.txt"), b"from robin").unwrap();
     m.sync(None).unwrap();
@@ -546,20 +591,20 @@ fn a_members_batch_cannot_reach_outside_its_folder() {
     );
 }
 
-/// A name under the folder's share epochs that no owner sealed a key for
-/// (junk anyone with the storage credentials can write) does not make a
-/// member believe it was removed, which would silence its errors.
+/// A name under the folder's epochs that no owner signed (junk anyone with
+/// the storage credentials can write) does not make a member believe it
+/// was removed, which would silence its errors.
 #[test]
-fn junk_share_epoch_does_not_cut_a_member_off() {
-    use varsto_core::share::{ShareEpochRecord, SHARE_EPOCH_BASE};
+fn junk_folder_epoch_does_not_cut_a_member_off() {
     let lab = Lab::new();
     let (mut a, _) = owner(&lab);
     let mut m = invite(&lab, &mut a, "robin");
     let project = folder_id(&a, "project");
-    let junk = lab.root.join("storage").join(ShareEpochRecord::storage_key(
-        &project,
-        SHARE_EPOCH_BASE + 5,
-    ));
+    let junk = lab
+        .root
+        .join("storage/vault/folder-epochs")
+        .join(project.as_str())
+        .join("0000000000000005-0000.rec");
     fs::create_dir_all(junk.parent().unwrap()).unwrap();
     fs::write(&junk, b"junk").unwrap();
     m.sync(None).unwrap();

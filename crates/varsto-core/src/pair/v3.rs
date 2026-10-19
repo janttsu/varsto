@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Pairing of format 3 (design sections 6 and 8), behind the `format3`
-//! feature. The SPAKE2 exchange is the one of section 68, with three
-//! changes:
+//! Pairing of format 3 (design sections 6 and 8). The SPAKE2 exchange is
+//! the one of section 68, with three changes:
 //!
 //! - the joining device's hello carries its K6 (signing) and K8 (KEM)
 //!   public keys and its name, and both key confirmations bind them, so a
@@ -22,7 +21,7 @@ use super::{
 };
 use crate::crypto::{self, SecretKey, VerifyingKey};
 use crate::kem::{DecapsKey, EncapsKey};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use spake2::{Ed25519Group, Password, Spake2};
 use std::io::BufReader;
@@ -214,6 +213,43 @@ fn offer_exchange(
     Ok(name)
 }
 
+/// The keys a joining device makes before it pairs: K6 (signing) and K8
+/// (KEM). Their public halves go into the hello, the person at the other
+/// device compares their six words, and they become this device's keys
+/// when it joins (`Engine::join_paired`).
+pub struct PairingKeys {
+    pub signer: crate::crypto::SigningKey,
+    pub kem: DecapsKey,
+}
+
+crate::redacted_opaque!(PairingKeys);
+
+impl PairingKeys {
+    pub fn generate() -> PairingKeys {
+        PairingKeys {
+            signer: crate::crypto::SigningKey::generate(),
+            kem: DecapsKey::generate(),
+        }
+    }
+
+    /// The six words the offering device shows for this device.
+    pub fn fingerprint(&self) -> String {
+        crate::fingerprint::of_keys(
+            &self.signer.public().to_bytes(),
+            &self.kem.public().to_bytes(),
+        )
+    }
+
+    /// The keys of the hello of a device called `name`.
+    pub fn join_keys<'a>(&'a self, name: &'a str) -> JoinKeys<'a> {
+        JoinKeys {
+            name,
+            signing_pub: self.signer.public().to_bytes(),
+            kem: &self.kem,
+        }
+    }
+}
+
 /// The keys a joining device brings.
 pub struct JoinKeys<'a> {
     pub name: &'a str,
@@ -303,43 +339,6 @@ pub fn discover(code: &str, timeout: Duration) -> Result<Vec<SocketAddr>> {
     discover_rv(code, &rendezvous(&digits), timeout)
 }
 
-/// Join: the typed address first, then the search of the network.
-pub fn receive(
-    code: &str,
-    keys: &JoinKeys<'_>,
-    address: Option<&str>,
-) -> Result<(Bundle, SecretKey)> {
-    use std::net::ToSocketAddrs;
-    let mut addrs: Vec<SocketAddr> = Vec::new();
-    if let Some(t) = address.map(str::trim).filter(|t| !t.is_empty()) {
-        addrs.extend(t.to_socket_addrs()?);
-    }
-    let mut last = None;
-    for a in &addrs {
-        match fetch(code, keys, *a) {
-            Ok(x) => return Ok(x),
-            Err(e) if e.downcast_ref::<WrongCode>().is_some() => return Err(e),
-            Err(e) if e.downcast_ref::<Declined>().is_some() => return Err(e),
-            Err(e) => last = Some(e),
-        }
-    }
-    for a in discover(code, super::DISCOVER_TIMEOUT)? {
-        if addrs.contains(&a) {
-            continue;
-        }
-        match fetch(code, keys, a) {
-            Ok(x) => return Ok(x),
-            Err(e) if e.downcast_ref::<WrongCode>().is_some() => return Err(e),
-            Err(e) if e.downcast_ref::<Declined>().is_some() => return Err(e),
-            Err(e) => last = Some(e),
-        }
-    }
-    match last {
-        Some(e) => Err(e),
-        None => bail!("no device offering this code answered"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,6 +355,7 @@ mod tests {
 
     #[test]
     fn the_hello_shows_name_and_fingerprint_and_the_vault_key_opens_only_with_k8() {
+        let _port = super::super::tests::port_lock();
         let k6 = SigningKey::generate();
         let k8 = DecapsKey::generate();
         let vault_key = SecretKey::random();
@@ -406,6 +406,7 @@ mod tests {
 
     #[test]
     fn a_declined_device_gets_nothing_and_the_offer_closes() {
+        let _port = super::super::tests::port_lock();
         let k8 = DecapsKey::generate();
         let o =
             Offer::start_v3(bundle(), SecretKey::random(), Arc::new(|_: &Joiner| false)).unwrap();
@@ -424,6 +425,7 @@ mod tests {
 
     #[test]
     fn a_wrong_code_is_refused_before_anything_is_shown() {
+        let _port = super::super::tests::port_lock();
         let asked = Arc::new(Mutex::new(0));
         let asked2 = asked.clone();
         let o = Offer::start_v3(
@@ -453,6 +455,30 @@ mod tests {
     }
 
     #[test]
+    fn the_joining_side_shows_the_same_words_as_the_offering_side() {
+        let _port = super::super::tests::port_lock();
+        let keys = PairingKeys::generate();
+        let seen: Arc<Mutex<Option<String>>> = Arc::default();
+        let seen2 = seen.clone();
+        let o = Offer::start_v3(
+            bundle(),
+            SecretKey::random(),
+            Arc::new(move |j: &Joiner| {
+                *seen2.lock().unwrap() = Some(j.fingerprint.clone());
+                true
+            }),
+        )
+        .unwrap();
+        fetch(&o.status().code, &keys.join_keys("tablet"), addr(&o)).unwrap();
+        assert_eq!(
+            seen.lock().unwrap().as_deref(),
+            Some(keys.fingerprint().as_str())
+        );
+        assert_eq!(keys.fingerprint().split(' ').count(), 6);
+        assert_ne!(PairingKeys::generate().fingerprint(), keys.fingerprint());
+    }
+
+    #[test]
     fn the_rendezvous_tag_is_not_the_digits() {
         let t = rendezvous("123456789");
         assert_eq!(t, rendezvous("123456789"));
@@ -466,6 +492,7 @@ mod tests {
 
     #[test]
     fn discovery_finds_a_v3_offer_by_its_tag() {
+        let _port = super::super::tests::port_lock();
         let o =
             Offer::start_v3(bundle(), SecretKey::random(), Arc::new(|_: &Joiner| true)).unwrap();
         let code = o.status().code;

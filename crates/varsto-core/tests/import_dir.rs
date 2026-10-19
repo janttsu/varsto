@@ -2,6 +2,8 @@
 //! Importing a local directory, and removing its files once they are
 //! safely stored and the folder's durability policy is met.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use varsto_core::chunking::ChunkerParams;
@@ -178,18 +180,20 @@ fn files_wait_until_another_device_verified_them() {
     assert!(plan.removed.is_empty());
     assert_eq!(plan.waiting_count, 3);
     assert!(plan.waiting[0].reason.contains("waiting for the policy"));
-    // Another device fetches (and so checks) every block.
-    let mut b = Engine::join(
+    // Another device reads every pack back whole and checks it.
+    let key = lab.vault_key.clone();
+    let mut b = common::join_approved(
         &lab.root.join("b-home"),
         "desktop",
         PASS,
-        &lab.vault_key,
+        &key,
         storage(&lab.root),
-    )
-    .unwrap();
+        &mut lab.a,
+    );
     b.attach_folder("archive", &lab.root.join("b-archive"), false)
         .unwrap();
     b.pull("archive").unwrap();
+    b.fsck(true).unwrap();
     b.push("archive").unwrap();
     drop(b);
     lab.a.pull("archive").unwrap();

@@ -38,14 +38,10 @@ fn objects(path: &Path) -> usize {
     common::object_count(path)
 }
 
-/// Blocks of a folder the ledger shows on a storage.
+/// Blocks the ledger shows on a storage: a live place of each in a pack
+/// held there.
 fn on_storage(e: &Engine, storage: &str) -> usize {
-    e.view()
-        .unwrap()
-        .chunks
-        .values()
-        .filter(|c| c.storages.contains_key(storage))
-        .count()
+    e.objects_on_storage(storage).unwrap().len()
 }
 
 fn pseudo_random(len: usize, seed: u64) -> Vec<u8> {
@@ -130,17 +126,17 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
                 .append_own(&da, vec![stored("hot"), stored("cold")], 1, &key, &a)
                 .unwrap(),
         ),
-        // b verifies the hot copy before it is dropped (Lamport 2) ...
+        // b holds the plaintext (Lamport 5): no storage copy ...
         (
             1,
             own_b
                 .append_own(
                     &db,
-                    vec![Event::ChunkVerified {
+                    vec![Event::ChunkOnDevice {
                         folder: folder.clone(),
                         chunk: chunk.clone(),
                         object: object.clone(),
-                        storage: "hot".into(),
+                        size: 10,
                     }],
                     5,
                     &key,
@@ -148,7 +144,7 @@ fn a_drop_removes_earlier_claims_and_later_claims_count_again() {
                 )
                 .unwrap(),
         ),
-        // ... a drops it at Lamport 3 (b's verification at 5 does not bring it back).
+        // ... a drops the hot copy at Lamport 3 (b's later event does not bring it back).
         (
             0,
             own_a
@@ -277,14 +273,14 @@ fn placement_writes_only_to_the_chosen_storages_on_every_device() {
 
     // A second device names the storages differently; the placement record
     // (with storage identities) makes it write the same way.
-    let mut b = Engine::join(
+    let mut b = common::join_approved(
         &p("b"),
         "desk",
         PASS,
         &key,
         dir("first", &p("s1"), false, "home"),
-    )
-    .unwrap();
+        &mut a,
+    );
     b.chunker = ChunkerParams::SMALL;
     // The same storages must keep the name the vault knows them by; only
     // the one B joined through may be called differently.
@@ -324,7 +320,10 @@ fn placement_writes_only_to_the_chosen_storages_on_every_device() {
     a.set_placement("docs", None).unwrap();
     a.sync(None).unwrap();
     assert_eq!(objects(&p("s2")), objects(&p("s3")));
-    assert_eq!(a.view().unwrap(), a.view_replayed().unwrap());
+    assert_eq!(
+        a.ledger_view().unwrap().canonical(),
+        a.view3_replayed().unwrap().canonical()
+    );
 }
 
 // ----- moving data ----------------------------------------------------------------
@@ -477,14 +476,15 @@ fn moving_keeps_the_policy_and_lowers_the_bill() {
 
     // A second device sees the moves, keeps reading the active file from a
     // hot storage, and does not upload the moved blocks again.
-    let mut b = Engine::join(
+    let key = lab.key.clone();
+    let mut b = common::join_approved(
         &lab.p("b"),
         "desk",
         PASS,
-        &lab.key,
+        &key,
         dir("hot1", &lab.p("h1"), false, "cloud"),
-    )
-    .unwrap();
+        &mut lab.a,
+    );
     b.add_storage(dir("hot2", &lab.p("h2"), false, "cloud"))
         .unwrap();
     b.add_storage(dir("cold", &lab.p("c"), true, "cloud"))
@@ -495,7 +495,10 @@ fn moving_keeps_the_policy_and_lowers_the_bill() {
     b.sync(None).unwrap();
     assert!(lab.p("docs-b").join("new.bin").exists());
     assert_eq!(objects(&lab.p("h1")), blocks - plan.blocks as usize);
-    assert_eq!(b.view().unwrap(), b.view_replayed().unwrap());
+    assert_eq!(
+        b.ledger_view().unwrap().canonical(),
+        b.view3_replayed().unwrap().canonical()
+    );
     assert_eq!(on_storage(&b, "hot1"), blocks - plan.blocks as usize);
 }
 
@@ -585,7 +588,10 @@ fn moving_a_whole_folder_changes_its_placement_and_never_drops_the_last_copy() {
     assert_eq!(back.blocks_kept, 0, "{:?}", back.kept);
     assert!(objects(&lab.p("h1")) > 0);
     assert_eq!(objects(&lab.p("c")), 0);
-    assert_eq!(lab.a.view().unwrap(), lab.a.view_replayed().unwrap());
+    assert_eq!(
+        lab.a.ledger_view().unwrap().canonical(),
+        lab.a.view3_replayed().unwrap().canonical()
+    );
 }
 
 #[cfg(unix)]
@@ -598,8 +604,8 @@ fn a_pack_that_cannot_be_deleted_is_collected_later() {
     lab.a
         .add_storage(dir("spare", &spare, false, "cloud"))
         .unwrap();
-    // The pack files of hot1 cannot be deleted: a deleted block is a
-    // tombstone all the same, and the emptied pack stays as garbage.
+    // The pack files of hot1 cannot be deleted: a dropped pack is dropped
+    // in the ledger all the same, and stays on the storage as garbage.
     let chunk_dirs: Vec<PathBuf> = ["chunks", "packs"]
         .iter()
         .filter_map(|d| fs::read_dir(lab.p("h1").join(d)).ok())
@@ -625,17 +631,16 @@ fn a_pack_that_cannot_be_deleted_is_collected_later() {
     assert_eq!(first.blocks_copied as usize, blocks);
     assert_eq!(first.blocks_dropped as usize, blocks);
     assert_eq!(on_storage(&lab.a, "hot1"), 0, "the drops are recorded");
-    assert_eq!(objects(&lab.p("h1")), 0, "every block in it is dead");
-    // Unless permissions are ignored (root), the dead pack is still there;
-    // garbage collection removes it once it can.
-    if !common::pack_files(&lab.p("h1")).is_empty() {
-        lab.a.pack_upkeep().unwrap();
-    }
-    assert!(common::pack_files(&lab.p("h1")).is_empty());
-    // Run again: nothing is left to move or copy.
+    // Unless permissions are ignored (root), the dropped pack is still
+    // there. Run again: nothing is left to move or copy, and the pack the
+    // ledger shows dropped from hot1 but still there is deleted now.
+    let left = common::pack_files(&lab.p("h1")).len() as u64;
     let second = lab.a.move_data(&req).unwrap();
     assert_eq!(second.blocks, 0);
     assert_eq!(second.blocks_copied, 0);
+    assert_eq!(second.leftovers_removed, left);
+    assert!(common::pack_files(&lab.p("h1")).is_empty());
+    assert_eq!(objects(&lab.p("h1")), 0, "no block is left there");
     assert_eq!(objects(&spare), blocks);
     assert_eq!(on_storage(&lab.a, "spare"), blocks);
 }

@@ -78,13 +78,6 @@ jobs:
         run: cargo deny check
       - name: Tests
         run: cargo test --workspace 2>&1 | tee test.log
-      # Storage format 3 is built up behind the `format3` feature
-      # (docs/spec/format-3-design.md): keep it compiling, lint-free and
-      # tested until it becomes the default.
-      - name: Clippy with the format3 feature
-        run: cargo clippy --workspace --all-targets --features varsto-core/format3,varsto-cli/format3,varsto-ffi/format3 -- -D warnings
-      - name: Tests of varsto-core with the format3 feature
-        run: cargo test -p varsto-core --features format3 --lib
       - name: Site tooling (daily-sync.py against a fake release)
         run: python3 -I -m unittest discover -s ops/site -p 'test_*.py'
       - name: Linux package and Windows programs
@@ -118,6 +111,18 @@ jobs:
           ONLY=viz-tv-4k VIZ_SCENE="$RUNNER_TEMP/viz-tv-scene.json" python3 scripts/screenshots/viz-shots.py "$RUNNER_TEMP/demo" dist/shots-viz
       - name: Screenshots of the Linux desktop (tray, own window)
         run: scripts/screenshots/linux-desktop.sh "$VARSTO_BIN" "$RUNNER_TEMP/demo" dist/shots
+      - name: Demo service logs (after a failed screenshot step)
+        if: failure()
+        run: |
+          # A flaky timeout in ui-shots.py or the desktop shots is diagnosable
+          # only with what the demo services said: print the last lines of
+          # each log (svc-laptop.log, svc-phone.log, ...) as a folded group.
+          for f in "$RUNNER_TEMP"/demo/*.log; do
+            [ -f "$f" ] || continue
+            echo "::group::$(basename "$f") (last 300 lines)"
+            tail -n 300 "$f" || true
+            echo "::endgroup::"
+          done
       - name: Stop the demo
         if: always()
         run: |
@@ -268,6 +273,10 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: rclone (the phone's S3 bucket for the screenshot vault)
+        run: |
+          curl -fsS https://rclone.org/install.sh | sudo bash >/dev/null 2>&1 || true
+          rclone version | head -1
       - name: Emulator - install, start, vault, screenshots
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -325,10 +334,11 @@ jobs:
           home="$HOME/Library/Application Support/Varsto"
           bin=smoke/Varsto.app/Contents/Helpers/varsto
           export VARSTO_PASSPHRASE=ci-finder-passphrase-1
-          "$bin" --home "$home" init --name ci-mac >/dev/null
+          init="$("$bin" --home "$home" init --name ci-mac --json)"
+          rw="$(echo "$init" | python3 -c 'import json,re,sys; k=json.load(sys.stdin)["kit"].split("RECOVERY WORDS")[1]; print(" ".join(re.findall(r"\d+\.\s+([a-z]+)", k)))')"
           mkdir -p "$RUNNER_TEMP/storage" "$RUNNER_TEMP/files"
           "$bin" --home "$home" storage add-local box "$RUNNER_TEMP/storage"
-          "$bin" --home "$home" folder add docs "$RUNNER_TEMP/files"
+          VARSTO_RECOVERY_WORDS="$rw" "$bin" --home "$home" folder add docs "$RUNNER_TEMP/files"
           echo "hello from finder" > "$RUNNER_TEMP/files/note.txt"
           echo "second file" > "$RUNNER_TEMP/files/other.txt"
           "$bin" --home "$home" sync

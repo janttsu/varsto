@@ -6,22 +6,27 @@
 //! group and the broadcast address, answered by unicast) or at an address the
 //! user types, and the two run SPAKE2 keyed by the code. A wrong code yields a
 //! different key, so each connection is one online guess and nothing a
-//! listener records can be checked against guesses offline. After key
-//! confirmation in both directions the offering device sends the vault key
-//! and its storage settings, secrets included, sealed under the shared key.
-//! An offer serves one device, lasts ten minutes and closes after three
-//! failed attempts.
+//! listener records can be checked against guesses offline. The exchange is
+//! that of storage format 3 (`v3`): the joining device's hello carries its
+//! K6 and K8 public keys and name, bound into both key confirmations; the
+//! offering device shows the name and the six-word fingerprint of the keys,
+//! asks its person, writes the grants of the folders they ticked, and only
+//! then sends its storage settings, secrets included, sealed under the
+//! shared key, with the vault key sealed to the joiner's K8 inside. An offer
+//! serves one device, lasts ten minutes and closes after three failed
+//! attempts.
 //!
-//! The first three digits are the rendezvous id that discovery matches on; it
-//! only tells concurrent offers apart. The password is all nine digits.
+//! Discovery matches on a 10-bit tag derived from the code
+//! (`v3::rendezvous`); it only tells concurrent offers apart. The password is
+//! all nine digits.
 
 use crate::crypto::{self, SecretKey};
 use crate::storage::StorageSpec;
 use anyhow::{anyhow, bail, Context, Result};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use spake2::{Ed25519Group, Identity, Password, Spake2};
-use std::io::{BufRead, BufReader, Read, Write};
+use spake2::Identity;
+use std::io::{BufRead, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -42,7 +47,9 @@ const MAX_LINE: u64 = 1 << 20;
 const QUERY: &str = "VARSTO-PAIR?";
 const ANSWER: &str = "VARSTO-PAIR!";
 
-/// What a new device receives: everything it needs to join.
+/// What a new device receives: everything it needs to join. Pairing sends
+/// it with `vault_key` empty (the vault key travels sealed to the joiner's
+/// K8, `v3`); the joining side puts the opened key back in.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Bundle {
     pub vault_id: String,
@@ -108,13 +115,6 @@ fn spake_ids() -> (Identity, Identity) {
     )
 }
 
-fn confirm(key: &SecretKey, side: &str) -> String {
-    hex::encode(crypto::keyed_hash(
-        key,
-        format!("varsto-pair confirm {side}").as_bytes(),
-    ))
-}
-
 fn session_key(raw: &[u8]) -> Result<SecretKey> {
     SecretKey::from_bytes(&crypto::hash(raw))
 }
@@ -169,16 +169,10 @@ pub struct Offer {
 }
 
 impl Offer {
-    /// Open an offer for `bundle`. Discovery is best effort: when the UDP
-    /// port is taken the offer still works through a typed address.
-    pub fn start(bundle: Bundle) -> Result<Offer> {
-        Self::start_with(&|digits| digits[0..3].to_string(), move |stream, digits| {
-            offer_exchange(stream, digits, &bundle)
-        })
-    }
-
     /// An offer whose discovery answers to `rendezvous(digits)` and whose
-    /// connections run `exchange` (format 2 or format 3 pairing).
+    /// connections run `exchange` (`Offer::start_v3`). Discovery is best
+    /// effort: when the UDP port is taken the offer still works through a
+    /// typed address.
     fn start_with(
         rendezvous: &dyn Fn(&str) -> String,
         exchange: impl Fn(TcpStream, &str) -> Result<String, Attempt> + Send + 'static,
@@ -343,60 +337,8 @@ fn serve(
 enum Attempt {
     Wrong,
     Broken,
-    /// The person at the offering device said no to this device (format 3).
-    #[cfg_attr(not(feature = "format3"), allow(dead_code))]
+    /// The person at the offering device said no to this device.
     Declined(String),
-}
-
-fn offer_exchange(stream: TcpStream, digits: &str, bundle: &Bundle) -> Result<String, Attempt> {
-    let broken = |_| Attempt::Broken;
-    stream.set_nonblocking(false).map_err(broken)?;
-    stream.set_read_timeout(Some(IO_TIMEOUT)).map_err(broken)?;
-    stream.set_write_timeout(Some(IO_TIMEOUT)).map_err(broken)?;
-    let mut w = stream.try_clone().map_err(broken)?;
-    let mut r = BufReader::new(stream);
-    let hello = read_line(&mut r).map_err(|_| Attempt::Broken)?;
-    let name = field(&hello, "name").map_err(|_| Attempt::Broken)?;
-    let msg_b = hex::decode(field(&hello, "spake").map_err(|_| Attempt::Broken)?)
-        .map_err(|_| Attempt::Broken)?;
-    let (ida, idb) = spake_ids();
-    let (spake, msg_a) = Spake2::<Ed25519Group>::start_a(&Password::new(digits), &ida, &idb);
-    let key = spake
-        .finish(&msg_b)
-        .ok()
-        .and_then(|k| session_key(&k).ok())
-        .ok_or(Attempt::Broken)?;
-    write_line(
-        &mut w,
-        &serde_json::json!({"spake": hex::encode(msg_a), "confirm": confirm(&key, "offer")}),
-    )
-    .map_err(|_| Attempt::Broken)?;
-    // Past this point the joining device has made its guess: anything but
-    // the right confirmation (a wrong one, an error line, silence) counts.
-    let theirs = read_line(&mut r)
-        .ok()
-        .and_then(|reply| field(&reply, "confirm").ok());
-    if !theirs
-        .as_deref()
-        .is_some_and(|t| crypto::ct_eq(t.as_bytes(), confirm(&key, "join").as_bytes()))
-    {
-        return Err(Attempt::Wrong);
-    }
-    let plain = serde_json::to_vec(bundle).map_err(|_| Attempt::Broken)?;
-    let sealed = crypto::encrypt(
-        &key.derive("pair-bundle", &[]),
-        b"varsto-pair-bundle",
-        &plain,
-    )
-    .map_err(|_| Attempt::Broken)?;
-    write_line(&mut w, &serde_json::json!({"bundle": hex::encode(sealed)}))
-        .map_err(|_| Attempt::Broken)?;
-    // Wait for the receipt so the offer only closes on a delivered bundle.
-    let done = read_line(&mut r).map_err(|_| Attempt::Broken)?;
-    if done.get("ok").and_then(|v| v.as_bool()) != Some(true) {
-        return Err(Attempt::Broken);
-    }
-    Ok(name)
 }
 
 // ----- joining device -------------------------------------------------------
@@ -406,8 +348,7 @@ fn offer_exchange(stream: TcpStream, digits: &str, bundle: &Bundle) -> Result<St
 /// directed broadcast), not only the one the OS prefers: with a VPN on the
 /// default route the Wi-Fi would otherwise never hear it.
 pub fn discover(code: &str, timeout: Duration) -> Result<Vec<SocketAddr>> {
-    let digits = normalize(code)?;
-    discover_rv(code, &digits[0..3], timeout)
+    v3::discover(code, timeout)
 }
 
 /// `discover` for the rendezvous id `rv`.
@@ -501,50 +442,6 @@ fn discover_rv(code: &str, rv: &str, timeout: Duration) -> Result<Vec<SocketAddr
     Ok(found)
 }
 
-/// Run the exchange with an offering device and return what it sent.
-pub fn fetch(code: &str, my_name: &str, addr: SocketAddr) -> Result<Bundle> {
-    let digits = normalize(code)?;
-    let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
-        .with_context(|| format!("cannot reach {addr}"))?;
-    stream.set_read_timeout(Some(IO_TIMEOUT))?;
-    stream.set_write_timeout(Some(IO_TIMEOUT))?;
-    let mut w = stream.try_clone()?;
-    let mut r = BufReader::new(stream);
-    let (ida, idb) = spake_ids();
-    let (spake, msg_b) = Spake2::<Ed25519Group>::start_b(&Password::new(&digits), &ida, &idb);
-    write_line(
-        &mut w,
-        &serde_json::json!({"v": 1, "name": my_name, "spake": hex::encode(msg_b)}),
-    )?;
-    let answer = read_line(&mut r)?;
-    let msg_a = hex::decode(field(&answer, "spake")?)?;
-    let key = session_key(
-        &spake
-            .finish(&msg_a)
-            .map_err(|e| anyhow!("pairing failed: {e}"))?,
-    )?;
-    if !crypto::ct_eq(
-        field(&answer, "confirm")?.as_bytes(),
-        confirm(&key, "offer").as_bytes(),
-    ) {
-        let _ = write_line(&mut w, &serde_json::json!({"error": "wrong code"}));
-        return Err(WrongCode.into());
-    }
-    write_line(
-        &mut w,
-        &serde_json::json!({"confirm": confirm(&key, "join")}),
-    )?;
-    let sealed = hex::decode(field(&read_line(&mut r)?, "bundle")?)?;
-    let plain = crypto::decrypt(
-        &key.derive("pair-bundle", &[]),
-        b"varsto-pair-bundle",
-        &sealed,
-    )?;
-    let bundle: Bundle = serde_json::from_slice(&plain)?;
-    write_line(&mut w, &serde_json::json!({"ok": true}))?;
-    Ok(bundle)
-}
-
 /// The offering device answered and the code did not match. Retrying with
 /// other addresses would only burn the offer's three attempts.
 #[derive(Debug)]
@@ -608,7 +505,8 @@ pub enum Step {
 
 /// The network side of joining, so that the order of attempts can be tested.
 pub trait Connector {
-    fn fetch(&self, code: &str, my_name: &str, addr: SocketAddr) -> Result<Bundle>;
+    /// The bundle with the opened vault key in `vault_key`.
+    fn fetch(&self, code: &str, keys: &v3::JoinKeys<'_>, addr: SocketAddr) -> Result<Bundle>;
     fn discover(&self, code: &str, timeout: Duration) -> Result<Vec<SocketAddr>>;
     fn own_interfaces(&self) -> Vec<crate::netif::Iface>;
 }
@@ -617,8 +515,11 @@ pub trait Connector {
 pub struct Lan;
 
 impl Connector for Lan {
-    fn fetch(&self, code: &str, my_name: &str, addr: SocketAddr) -> Result<Bundle> {
-        fetch(code, my_name, addr)
+    fn fetch(&self, code: &str, keys: &v3::JoinKeys<'_>, addr: SocketAddr) -> Result<Bundle> {
+        let (mut bundle, key) = v3::fetch(code, keys, addr)?;
+        bundle.vault_key = key.to_hex();
+        crate::logging::register_secret(&bundle.vault_key);
+        Ok(bundle)
     }
     fn discover(&self, code: &str, timeout: Duration) -> Result<Vec<SocketAddr>> {
         discover(code, timeout)
@@ -647,11 +548,12 @@ fn why(e: &anyhow::Error) -> &'static str {
 /// Join: the typed address first (when given), then the addresses of the
 /// pairing link (those on a subnet this device is on first), then the other
 /// device is looked for on the local network by its code. Each attempt has a
-/// short timeout; `progress` is told before each. A wrong code ends it at
-/// once. When nothing works the error is a [`NotFound`] naming every attempt.
+/// short timeout; `progress` is told before each. A wrong code, or the
+/// person at the other device saying no, ends it at once. When nothing
+/// works the error is a [`NotFound`] naming every attempt.
 pub fn join(
     code: &str,
-    my_name: &str,
+    keys: &v3::JoinKeys<'_>,
     typed: Option<&str>,
     offered: &[String],
     progress: &mut dyn FnMut(Step),
@@ -680,9 +582,10 @@ pub fn join(
         }
         seen.push(a);
         progress(Step::Trying(a));
-        match net.fetch(code, my_name, a) {
+        match net.fetch(code, keys, a) {
             Ok(b) => Ok(Some(b)),
             Err(e) if e.downcast_ref::<WrongCode>().is_some() => Err(e),
+            Err(e) if e.downcast_ref::<v3::Declined>().is_some() => Err(e),
             Err(e) => {
                 tried.push(Tried {
                     what: a.to_string(),
@@ -712,23 +615,23 @@ pub fn join(
 }
 
 /// Join with the address the user typed (if any) and the addresses of a
-/// pairing link, reporting each step.
+/// pairing link, reporting each step. The bundle carries the opened vault
+/// key in `vault_key`.
 pub fn receive_with_progress(
     code: &str,
-    my_name: &str,
+    keys: &v3::JoinKeys<'_>,
     address: Option<&str>,
     offered: &[String],
     progress: &mut dyn FnMut(Step),
 ) -> Result<Bundle> {
-    join(code, my_name, address, offered, progress, &Lan)
+    join(code, keys, address, offered, progress, &Lan)
 }
 
 /// Join: the typed address if any, then the search of the network.
-pub fn receive(code: &str, my_name: &str, address: Option<&str>) -> Result<Bundle> {
-    receive_with_progress(code, my_name, address, &[], &mut |_| {})
+pub fn receive(code: &str, keys: &v3::JoinKeys<'_>, address: Option<&str>) -> Result<Bundle> {
+    receive_with_progress(code, keys, address, &[], &mut |_| {})
 }
 
-#[cfg(feature = "format3")]
 pub mod v3;
 
 #[cfg(test)]
@@ -758,6 +661,32 @@ mod tests {
         SocketAddr::from(([127, 0, 0, 1], o.status().port))
     }
 
+    /// Every offer binds the discovery port (UDP `PAIR_PORT`, shared with
+    /// SO_REUSEPORT, which hands each unicast query to one of the sockets
+    /// by the sender's address): an offer of a test running alongside
+    /// would get the queries meant for another and ignore them. The tests
+    /// that start an offer here and in `v3` take turns.
+    pub(super) fn port_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// An offer whose person lets every device join.
+    fn open_offer() -> Offer {
+        Offer::start_v3(
+            bundle(),
+            SecretKey::random(),
+            std::sync::Arc::new(|_: &v3::Joiner| true),
+        )
+        .unwrap()
+    }
+
+    /// A joining device called `name` with fresh keys.
+    fn fetch(code: &str, name: &str, addr: SocketAddr) -> Result<Bundle> {
+        let keys = v3::PairingKeys::generate();
+        Lan.fetch(code, &keys.join_keys(name), addr)
+    }
+
     #[test]
     fn bundle_debug_hides_the_vault_key_and_storage_secret() {
         let b = bundle();
@@ -781,10 +710,13 @@ mod tests {
 
     #[test]
     fn right_code_delivers_and_closes_the_offer() {
-        let o = Offer::start(bundle()).unwrap();
+        let _port = port_lock();
+        let o = open_offer();
         let code = o.status().code;
         let b = fetch(&code, "phone", addr(&o)).unwrap();
         assert_eq!(b.from, "laptop");
+        // The vault key arrived sealed to this device's K8 and is opened.
+        assert_eq!(b.vault_key.len(), 64);
         assert_eq!(b.storages[0].secret.as_deref(), Some("s3cret"));
         std::thread::sleep(Duration::from_millis(300));
         let s = o.status();
@@ -796,7 +728,8 @@ mod tests {
 
     #[test]
     fn wrong_codes_fail_and_burn_the_offer() {
-        let o = Offer::start(bundle()).unwrap();
+        let _port = port_lock();
+        let o = open_offer();
         let code = o.status().code;
         let wrong = if code.starts_with('0') {
             "111-111-111"
@@ -816,14 +749,16 @@ mod tests {
 
     #[test]
     fn discovery_finds_the_offer_on_this_host() {
-        let o = Offer::start(bundle()).unwrap();
+        let _port = port_lock();
+        let o = open_offer();
         let code = o.status().code;
         let found = discover(&code, Duration::from_secs(5)).unwrap();
         assert!(
             found.iter().any(|a| a.port() == o.status().port),
             "{found:?}"
         );
-        let b = receive(&code, "phone", None).unwrap();
+        let keys = v3::PairingKeys::generate();
+        let b = receive(&code, &keys.join_keys("phone"), None).unwrap();
         assert_eq!(b.from, "laptop");
     }
 
@@ -833,6 +768,8 @@ mod tests {
         good: Option<SocketAddr>,
         /// An address that answers but with the wrong code.
         wrong: Option<SocketAddr>,
+        /// An address whose person says no.
+        declined: Option<SocketAddr>,
         /// What the search of the network finds.
         found: Vec<SocketAddr>,
         own: Vec<crate::netif::Iface>,
@@ -844,6 +781,7 @@ mod tests {
             FakeNet {
                 good: None,
                 wrong: None,
+                declined: None,
                 found: Vec::new(),
                 own: vec![crate::netif::Iface {
                     name: "en0".into(),
@@ -861,8 +799,11 @@ mod tests {
     }
 
     impl Connector for FakeNet {
-        fn fetch(&self, _code: &str, _name: &str, addr: SocketAddr) -> Result<Bundle> {
+        fn fetch(&self, _code: &str, _keys: &v3::JoinKeys<'_>, addr: SocketAddr) -> Result<Bundle> {
             self.log.lock().unwrap().push(format!("fetch {addr}"));
+            if Some(addr) == self.declined {
+                return Err(v3::Declined.into());
+            }
             if Some(addr) == self.wrong {
                 return Err(WrongCode.into());
             }
@@ -891,9 +832,10 @@ mod tests {
     fn run(net: &FakeNet, typed: Option<&str>, offered: &[&str]) -> (Result<Bundle>, Vec<Step>) {
         let offered: Vec<String> = offered.iter().map(|s| s.to_string()).collect();
         let mut steps = Vec::new();
+        let keys = v3::PairingKeys::generate();
         let r = join(
             "123-456-789",
-            "phone",
+            &keys.join_keys("phone"),
             typed,
             &offered,
             &mut |s| steps.push(s),
@@ -963,6 +905,17 @@ mod tests {
     }
 
     #[test]
+    fn a_device_declined_by_the_other_side_stops_at_once() {
+        let mut net = FakeNet::new();
+        net.declined = Some(sa("192.168.1.23:4000"));
+        net.found = vec![sa("192.168.1.99:4000")];
+        let (r, _) = run(&net, Some("192.168.1.23:4000"), &["192.168.1.24:4000"]);
+        let e = r.err().unwrap();
+        assert!(e.downcast_ref::<v3::Declined>().is_some(), "{e}");
+        assert_eq!(net.log(), ["fetch 192.168.1.23:4000"]);
+    }
+
+    #[test]
     fn a_wrong_code_stops_at_once() {
         let mut net = FakeNet::new();
         net.wrong = Some(sa("192.168.1.23:4000"));
@@ -1006,18 +959,20 @@ mod tests {
 
     #[test]
     fn a_refused_address_is_skipped_for_the_next_one() {
+        let _port = port_lock();
         // A real port nobody listens on: connection refused is not fatal.
         let gone = {
             let l = TcpListener::bind(("127.0.0.1", 0)).unwrap();
             l.local_addr().unwrap()
         };
-        let o = Offer::start(bundle()).unwrap();
+        let o = open_offer();
         let code = o.status().code;
         let mut steps = Vec::new();
         let offered = [addr(&o).to_string()];
+        let keys = v3::PairingKeys::generate();
         let b = receive_with_progress(
             &code,
-            "phone",
+            &keys.join_keys("phone"),
             Some(&gone.to_string()),
             &offered,
             &mut |s| steps.push(s),
@@ -1029,7 +984,8 @@ mod tests {
 
     #[test]
     fn the_offer_lists_usable_addresses_only() {
-        let o = Offer::start(bundle()).unwrap();
+        let _port = port_lock();
+        let o = open_offer();
         for a in o.status().addresses {
             let ip: Ipv4Addr = a.rsplit_once(':').unwrap().0.parse().unwrap();
             assert!(!ip.is_loopback() && !ip.is_link_local(), "{a}");

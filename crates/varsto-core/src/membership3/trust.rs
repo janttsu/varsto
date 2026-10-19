@@ -41,10 +41,35 @@ impl Trust<'_> {
                 kind,
                 Kind::Folder | Kind::ShareEpoch | Kind::Grant | Kind::Escrow
             )
+            || Self::announced(kind)
     }
 
+    /// Kinds a batch announces: a removed device's records of them count
+    /// up to its cut-off (their announcements in its batches after it do
+    /// not count).
+    fn announced(kind: Kind) -> bool {
+        matches!(
+            kind,
+            Kind::Manifest | Kind::BlockMap | Kind::Trash | Kind::Snapshot
+        )
+    }
+
+    /// The role a record of `device` is judged with (`writer_role`). A
+    /// device removed from the vault is denied in its folders by the
+    /// removal; what it wrote before is judged with the role it held
+    /// (spec 77.20: its manifests, maps, trash and snapshots count up to
+    /// its cut-off, which step 5 enforces through the announcements). A
+    /// device that has not read the folder epoch the removal made (it
+    /// joined later and is no participant of it) has only the denial to
+    /// go on, so the role cannot come from the epochs.
     fn role(&self, device: &Id16, folder: &Id16, epoch: u32) -> Option<Role> {
-        self.folders.and_then(|f| f.role(device, folder, epoch))
+        let f = self.folders?;
+        f.writer_role(device, folder, epoch).or_else(|| {
+            self.revoked
+                .contains(device)
+                .then(|| f.former_role(device, folder))
+                .flatten()
+        })
     }
 
     /// The section 9 row of `device` in `folder` at `epoch`.
@@ -126,6 +151,15 @@ impl RecordTrust for Trust<'_> {
             Kind::Folder | Kind::ShareEpoch | Kind::Escrow => true,
             Kind::Grant => *scope != VAULT_SCOPE || !revoked,
             Kind::Request | Kind::Placement => !revoked,
+            // A Strongroom's key wraps are its owners' to write.
+            Kind::Strongroom => {
+                !revoked
+                    && self
+                        .folders
+                        .and_then(|f| f.get(scope))
+                        .and_then(|s| s.role(device))
+                        == Some(Role::Owner)
+            }
             Kind::Manifest
             | Kind::BlockMap
             | Kind::Trash
@@ -135,7 +169,8 @@ impl RecordTrust for Trust<'_> {
                 let KeyId::Meta { epoch, .. } = key_id else {
                     return false;
                 };
-                !revoked && section9_allows(self.class(device, scope, *epoch), kind)
+                (!revoked || Self::announced(kind))
+                    && section9_allows(self.class(device, scope, *epoch), kind)
             }
             Kind::Batch => match key_id {
                 KeyId::ShareLedger { folder, epoch } => {

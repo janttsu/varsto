@@ -55,8 +55,8 @@ fn init(home: &Path, name: &str) -> (Engine, String) {
     (e, key)
 }
 
-fn join(home: &Path, name: &str, key: &str, storage: StorageSpec) -> Engine {
-    let mut e = Engine::join(home, name, PASS, key, storage).unwrap();
+fn join(owner: &mut Engine, home: &Path, name: &str, key: &str, storage: StorageSpec) -> Engine {
+    let mut e = common::join_approved(home, name, PASS, key, storage, owner);
     e.chunker = ChunkerParams::SMALL;
     e
 }
@@ -99,7 +99,7 @@ fn an_overwrite_on_one_device_is_restored_on_another() {
     let v1 = pseudo_random(120_000, 1);
     fs::write(a_dir.join("report.bin"), &v1).unwrap();
     a.sync(None).unwrap();
-    let mut b = join(&lab.p("b"), "phone", &key, store.clone());
+    let mut b = join(&mut a, &lab.p("b"), "phone", &key, store.clone());
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.sync(None).unwrap();
     assert!(b
@@ -437,7 +437,7 @@ fn a_trash_storage_takes_the_blocks_only_versions_use() {
     assert!(!st.by_storage.contains_key("one"));
 
     // On another device restoring needs the confirmed cold read.
-    let mut b = join(&lab.p("b"), "phone", &key, dir("one", &one, false));
+    let mut b = join(&mut a, &lab.p("b"), "phone", &key, dir("one", &one, false));
     b.add_storage(dir("glacier", &cold, true)).unwrap();
     b.attach_folder("docs", &b_dir, false).unwrap();
     b.sync(None).unwrap();
@@ -502,7 +502,7 @@ fn a_folder_kept_encrypted_here_keeps_versions_too() {
     let v1 = pseudo_random(60_000, 50);
     fs::write(lab.p("a-docs").join("n.bin"), &v1).unwrap();
     a.sync(None).unwrap();
-    let mut b = join(&lab.p("b"), "phone", &key, store);
+    let mut b = join(&mut a, &lab.p("b"), "phone", &key, store);
     b.attach_folder("docs", &lab.p("b-docs"), false).unwrap();
     b.set_encrypted_here("docs", true).unwrap();
     b.sync(None).unwrap();

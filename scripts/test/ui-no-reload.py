@@ -16,6 +16,7 @@ import http.client
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -36,10 +37,16 @@ def main():
         subprocess.run([binary, "--home", str(home), *a], env=env, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not (home / "vault.json").exists():
-        v("init", "--name", "laptop")
+        out = subprocess.run([binary, "--home", str(home), "--json", "init", "--name", "laptop"],
+                             env=env, check=True, capture_output=True, text=True).stdout
+        # The recovery words of the kit make the folder's recovery copy.
+        kit = json.loads(out)["kit"].split("RECOVERY WORDS")[1]
+        words = " ".join(re.findall(r"\d+\.\s+([a-z]+)", kit))
         (work / "box").mkdir(exist_ok=True)
         v("storage", "add-local", "box", str(work / "box"))
-        v("folder", "add", "Docs", str(docs))
+        subprocess.run([binary, "--home", str(home), "folder", "add", "Docs", str(docs)],
+                       env=dict(env, VARSTO_RECOVERY_WORDS=words), check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         v("sync")
 
     def start():

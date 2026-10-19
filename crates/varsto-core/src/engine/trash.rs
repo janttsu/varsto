@@ -21,13 +21,13 @@
 //! moves of a whole folder take them along, a storage is not removed while
 //! they would lose their last copy, and `fsck` counts them as referenced.
 //! Once an entry has gone, its blocks that no current file, no other entry
-//! and no other folder (backups included) uses are dropped
-//! (`Event::ChunkDropped`, sealed and pushed before anything is deleted)
-//! from this device's storages, except from a cold storage before its
-//! minimum storage duration has passed; those wait in a local queue.
+//! and no other folder (backups included) uses are marked dead and
+//! collected by garbage collection in the trash upkeep (`pack_upkeep`,
+//! `crate::gc3`); a cold storage keeps its packs until its minimum storage
+//! duration has passed.
 //!
 //! A vault may name a *trash storage* (vault-wide setting, published as
-//! `vault/trash-settings/<device>/<utc>.enc` under the folder-record key):
+//! the `settings` record `vault/settings/<device>/`, `crate::trash3::settings`):
 //! blocks only trash entries use are copied there, checked, and dropped from
 //! this device's other warm storages, so warm storage is not paid for
 //! deleted data. The trash storage takes no other blocks. Restoring from a
@@ -41,8 +41,6 @@ const DAY: i64 = 86_400;
 pub const DEFAULT_TRASH_DAYS: u32 = 30;
 /// Longest retention that can be set (ten years).
 pub const MAX_TRASH_DAYS: u32 = 3650;
-const RECORD_PREFIX: &str = "vault/trash/";
-const SETTINGS_PREFIX: &str = "vault/trash-settings/";
 /// A record keeps an entry (and a removal) this long after the entry
 /// expired, so every device sees it go and drops its blocks.
 const KEEP_LISTED_SECS: i64 = 7 * DAY;
@@ -80,19 +78,9 @@ pub struct TrashRemoval {
     pub restored: bool,
     /// When the entry was deleted (decides when the removal can be forgotten).
     pub deleted_utc: i64,
-}
-
-#[derive(Serialize, Deserialize)]
-struct TrashBody {
-    device: DeviceId,
-    folder: FolderId,
-    written_utc: i64,
-    entries: Vec<TrashEntry>,
+    /// Lamport time of the removal (format 3: orders concurrent removals).
     #[serde(default)]
-    removed: BTreeMap<String, TrashRemoval>,
-    /// Replaced versions (the version history, `history`).
-    #[serde(default)]
-    versions: Vec<TrashEntry>,
+    pub lamport: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -133,6 +121,12 @@ struct TrashCache {
     /// device first saw it. They stay listed for a while, then are forgotten.
     #[serde(default)]
     versions_gone: BTreeMap<String, i64>,
+    /// Format 3: this device's trash stream as last published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) writer3: Option<trash3_io::Writer3>,
+    /// Format 3: how far each other device's stream was applied.
+    #[serde(default)]
+    pub(super) remote3: BTreeMap<DeviceId, trash3_io::Applied3>,
 }
 
 /// Vault-wide trash settings (newest wins).
@@ -165,6 +159,65 @@ fn default_history_days() -> u32 {
     super::history::DEFAULT_HISTORY_DAYS
 }
 
+impl TrashSettings {
+    /// From the body of a `settings` record (`crate::trash3::settings`).
+    fn from_record(b: &crate::trash3::SettingsBody) -> TrashSettings {
+        let folders = |list: &[(crate::record::Id16, u32)]| {
+            list.iter()
+                .map(|(f, d)| (FolderId::from_bytes(f), *d))
+                .collect()
+        };
+        TrashSettings {
+            days: b.trash_days,
+            folder_days: folders(&b.folder_trash_days),
+            storage: b.trash_storage.clone(),
+            storage_id: b.storage_id.clone(),
+            updated_utc: b.updated_utc,
+            device: Some(DeviceId::from_bytes(&b.device)),
+            history_days: b.history_days,
+            folder_history: folders(&b.folder_history_days),
+        }
+    }
+
+    /// The body of this device's next `settings` record (its `seq` is set
+    /// by the writer). A folder at 0 trash days follows the vault and is
+    /// not written.
+    fn to_record(
+        &self,
+        device: crate::record::Id16,
+        lamport: u64,
+        updated_utc: i64,
+    ) -> Result<crate::trash3::SettingsBody> {
+        let folders = |m: &BTreeMap<FolderId, u32>, keep_zero: bool| -> Result<Vec<_>> {
+            let mut out: Vec<(crate::record::Id16, u32)> = Vec::new();
+            for (f, d) in m {
+                if *d == 0 && !keep_zero {
+                    continue;
+                }
+                out.push((members3::bin(f)?, (*d).min(MAX_TRASH_DAYS)));
+            }
+            out.sort();
+            out.dedup_by_key(|(f, _)| *f);
+            Ok(out)
+        };
+        let body = crate::trash3::SettingsBody {
+            device,
+            seq: 1,
+            lamport,
+            updated_utc,
+            trash_days: self.days.clamp(1, MAX_TRASH_DAYS),
+            history_days: self.history_days.min(MAX_TRASH_DAYS),
+            trash_storage: self.storage.clone(),
+            storage_id: self.storage_id.clone(),
+            folder_trash_days: folders(&self.folder_days, false)?,
+            folder_history_days: folders(&self.folder_history, true)?,
+        };
+        body.validate()
+            .map_err(|e| anyhow!("trash settings: {e}"))?;
+        Ok(body)
+    }
+}
+
 impl Default for TrashSettings {
     fn default() -> Self {
         TrashSettings {
@@ -192,14 +245,6 @@ struct SettingsCache {
     read_utc: i64,
     #[serde(default)]
     upkeep_utc: i64,
-}
-
-/// A block whose trash entry has gone, waiting to be dropped.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-struct DropItem {
-    folder: FolderId,
-    chunk: ChunkId,
-    object: ObjectName,
 }
 
 /// One entry as listed.
@@ -305,67 +350,13 @@ pub struct TrashUpkeepReport {
     pub notes: Vec<String>,
 }
 
-#[derive(Default)]
-struct DropCounts {
-    dropped: u64,
-    bytes: u64,
-    waiting: u64,
-}
-
-fn record_key(meta: &SecretKey, folder: &FolderId) -> SecretKey {
-    meta.derive("trash-record", &[folder.as_str().as_bytes()])
-}
-
-fn record_aad(vault: &VaultId, folder: &FolderId, device: &DeviceId, written: i64) -> Vec<u8> {
-    crypto::aad(
-        "trash-record",
-        &[
-            vault.as_str().as_bytes(),
-            folder.as_str().as_bytes(),
-            device.as_str().as_bytes(),
-            &written.to_le_bytes(),
-        ],
-    )
-}
-
-fn record_storage_key(folder: &FolderId, device: &DeviceId, written: i64) -> String {
-    format!("{RECORD_PREFIX}{folder}/{device}/{written:020}.enc")
-}
-
-/// Every trash record of a folder (removing a folder deletes them).
-pub(super) fn record_prefix(folder: &FolderId) -> String {
-    format!("{RECORD_PREFIX}{folder}/")
-}
-
-fn settings_key(base: &SecretKey) -> SecretKey {
-    base.derive("trash-settings", &[])
-}
-
-fn settings_aad(vault: &VaultId, device: &DeviceId, written: i64) -> Vec<u8> {
-    crypto::aad(
-        "trash-settings",
-        &[
-            vault.as_str().as_bytes(),
-            device.as_str().as_bytes(),
-            &written.to_le_bytes(),
-        ],
-    )
-}
-
 pub(super) fn entry_id(folder: &FolderId, path: &str, device: &DeviceId, clock: u64) -> String {
-    let h = crypto::hash(
-        &[
-            b"varsto-trash-entry".as_slice(),
-            folder.as_str().as_bytes(),
-            &[0],
-            path.as_bytes(),
-            &[0],
-            device.as_str().as_bytes(),
-            &clock.to_le_bytes(),
-        ]
-        .concat(),
-    );
-    hex::encode(&h[..16])
+    // Format 3: over the binary ids (`trash3::entry_id`), so a reader of
+    // the trash record recomputes it.
+    match (members3::bin(folder), members3::bin(device)) {
+        (Ok(f), Ok(d)) => hex::encode(crate::trash3::entry_id(&f, path, &d, clock)),
+        _ => String::new(),
+    }
 }
 
 /// An entry from another device's record that could have come from an
@@ -461,10 +452,6 @@ impl Engine {
 
     fn save_settings_cache(&self, c: &SettingsCache) -> Result<()> {
         util::write_json(&self.settings_cache_path(), c)
-    }
-
-    fn drops_path(&self) -> PathBuf {
-        self.trash_state_dir().join("drops.json")
     }
 
     /// The vault's trash settings as this device knows them.
@@ -636,8 +623,8 @@ impl Engine {
     // ----- records on the storages -----------------------------------------------
 
     /// Publish this device's trash record of a folder when it changed,
-    /// forgetting entries long expired (their blocks are queued for
-    /// dropping first). Returns whether a record was written.
+    /// forgetting entries long expired. Returns whether a record was
+    /// written.
     pub(super) fn trash_publish(&mut self, rec: &FolderRecord, now: i64) -> Result<bool> {
         if rec.is_backup() {
             return Ok(false);
@@ -683,9 +670,9 @@ impl Engine {
             .filter(|(id, _)| listed.contains(id.as_str()))
             .collect();
         old.extend(forget);
-        if !old.is_empty() {
-            self.trash_enqueue(&rec.folder_id, &old)?;
-        }
+        // Their blocks go through garbage collection once nothing
+        // references them (`pack_upkeep`).
+        drop(old);
         let json = serde_json::to_vec(&(&cache.own, &cache.own_removed, &cache.own_versions))?;
         let hash = hex::encode(crypto::hash(&json));
         if hash == cache.published_hash
@@ -697,43 +684,97 @@ impl Engine {
             self.save_trash_cache(&rec.folder_id, &cache)?;
             return Ok(false);
         }
-        let storages = self.metadata_storages(true)?;
-        let storages: OpenStorages = storages
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier())
-            .collect();
+        let storages = self.record_storages()?;
         if storages.is_empty() {
             self.save_trash_cache(&rec.folder_id, &cache)?;
             return Ok(false);
         }
+        // Format 3: this device's `trash` stream (base + delta, announced
+        // in its next batch; `trash3`).
         let fk = self.folder_keys(rec)?;
-        let me = self.vault.device_id.clone();
-        let written = now.max(cache.published_utc + 1);
-        let body = TrashBody {
-            device: me.clone(),
-            folder: rec.folder_id.clone(),
-            written_utc: written,
-            entries: cache.own.clone(),
-            removed: cache.own_removed.clone(),
-            versions: cache.own_versions.clone(),
-        };
-        let packed = zstd::bulk::compress(&serde_json::to_vec(&body)?, 3)?;
-        let blob = crypto::encrypt(
-            &record_key(&fk.meta, &rec.folder_id),
-            &record_aad(&self.vault.vault_id, &rec.folder_id, &me, written),
-            &packed,
-        )?;
-        let key = record_storage_key(&rec.folder_id, &me, written);
-        let own = format!("{}{me}/", record_prefix(&rec.folder_id));
-        for (_, b) in &storages {
-            b.put_if_absent(&key, &blob)?;
-            // Only the newest record of a device is read.
-            for old in b.list(&own)? {
-                if old != key {
-                    b.delete(&old)?;
-                }
+        let folder = members3::bin(&rec.folder_id)?;
+        let me = self.me3();
+        let vault = members3::bin(&self.vault.vault_id)?;
+        let current = trash3_io::snapshot_of(&cache.own, &cache.own_removed, &cache.own_versions)?;
+        let mut writer = cache.writer3.clone().unwrap_or_default().writer(folder, me);
+        let lamport = self.tick()?;
+        let vault_keys = self.vault_keys3();
+        let refs: Vec<&dyn Storage> = storages.iter().map(|(_, b)| &**b).collect();
+        let published = {
+            let keys = self.keys3(&vault_keys);
+            let signer = crate::record::DeviceSigner {
+                device: me,
+                key: &self.keys.signer,
+            };
+            let rw = crate::record::RecordWriter {
+                vault,
+                signer: &signer,
+                keys: &keys,
+            };
+            let no_trust = crate::membership3::Trust {
+                devices: &self.f3.members.devices,
+                revoked: &self.f3.members.revoked,
+                folders: None,
+                members: None,
+            };
+            let highest = crate::record::RecordStore {
+                storage: refs[0],
+                acceptor: crate::record::Acceptor {
+                    vault,
+                    keys: &keys,
+                    trust: &no_trust,
+                },
             }
+            .highest_seq(&crate::trash3::stream(folder, me))?;
+            writer.resume(highest);
+            let key = crate::record::KeyId::Meta {
+                folder,
+                epoch: fk.epoch,
+            };
+            let mut out = None;
+            for _ in 0..4 {
+                let Some(p) = writer.seal(&rw, &key, &current, lamport, now)? else {
+                    break;
+                };
+                let mut taken = false;
+                for (name, bytes) in &p.sealed.parts {
+                    if !refs[0].put_if_absent(name, bytes)? {
+                        taken = true;
+                        break;
+                    }
+                }
+                if taken {
+                    writer.abandon(p);
+                    continue;
+                }
+                for s in &refs[1..] {
+                    for (name, bytes) in &p.sealed.parts {
+                        s.put_if_absent(name, bytes)?;
+                    }
+                }
+                out = Some(p.sealed.published.clone());
+                writer.commit(p);
+                break;
+            }
+            out
+        };
+        cache.writer3 = Some(trash3_io::Writer3::of(&writer));
+        if let Some(a) = published {
+            self.f3
+                .pending
+                .push(crate::ledger3::events::Event::RecordPublished(
+                    crate::ledger3::events::Announcement {
+                        kind: a.kind,
+                        scope: a.scope,
+                        seq: a.seq,
+                        base: a.base,
+                        parts: a.parts,
+                        body_hash: a.body_hash,
+                        size: a.size,
+                    },
+                ));
         }
+        let written = now.max(cache.published_utc + 1);
         cache.published_utc = written;
         cache.published_hash = hash;
         self.save_trash_cache(&rec.folder_id, &cache)?;
@@ -747,76 +788,78 @@ impl Engine {
         fk: &FolderKeys,
         cache: &mut TrashCache,
     ) -> Result<usize> {
-        let prefix = record_prefix(&fk.folder);
-        let mut newest: BTreeMap<DeviceId, (i64, usize, String)> = BTreeMap::new();
-        for (i, (_, b)) in storages.iter().enumerate() {
-            for key in b.list(&prefix)? {
-                let Some((dev, file)) = key.strip_prefix(&prefix).and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let (Ok(dev), Some(t)) = (
-                    DeviceId::from_hex(dev),
-                    file.strip_suffix(".enc")
-                        .and_then(|t| t.parse::<i64>().ok()),
-                ) else {
-                    continue;
-                };
-                if newest.get(&dev).is_none_or(|(n, _, _)| t > *n) {
-                    newest.insert(dev, (t, i, key));
-                }
+        // Format 3: the `trash` streams the view announces past what was
+        // applied, through the acceptance rule (`trash3::FolderTrash`).
+        let folder = members3::bin(&fk.folder)?;
+        let me = self.me3();
+        let view = self.view3()?;
+        let mut ft = crate::trash3::FolderTrash::new(folder);
+        for (dev, applied) in &cache.remote3 {
+            let Ok(d) = members3::bin(dev) else {
+                continue;
+            };
+            let r = cache.remote.get(dev).cloned().unwrap_or_default();
+            ft.insert(applied.device_trash(d, &r.entries, &r.versions)?);
+        }
+        let vault = members3::bin(&self.vault.vault_id)?;
+        let vault_keys = self.vault_keys3();
+        let keys = self.keys3(&vault_keys);
+        let trust = members3::EngineTrust {
+            inner: self.f3.members.trust(),
+            view: &view,
+        };
+        let mut refused = crate::record::RecordsRefused::default();
+        for (_, backend) in storages {
+            let store = crate::record::RecordStore {
+                storage: backend.as_ref(),
+                acceptor: crate::record::Acceptor {
+                    vault,
+                    keys: &keys,
+                    trust: &trust,
+                },
+            };
+            let r = ft.pull(&store, &view, &me, &mut refused)?;
+            for x in &r.refused {
+                log::warn!("trash record refused: {x}");
             }
         }
-        let metas = fk.meta_keys();
         let mut read = 0;
-        for (dev, (t, i, key)) in newest {
-            let known =
-                self.devices.devices.contains_key(&dev) || self.devices.members.contains_key(&dev);
-            if dev == self.vault.device_id || !known || self.is_revoked(&dev) {
+        for (d, dt) in &ft.devices {
+            let did = DeviceId::from_bytes(d);
+            if cache.remote3.get(&did).is_some_and(|a| a.seq == dt.seq) {
                 continue;
             }
-            if cache.remote.get(&dev).is_some_and(|r| r.written_utc >= t) {
-                continue;
-            }
-            let Some(blob) = storages[i].1.get(&key)? else {
-                continue;
-            };
-            let a = record_aad(&self.vault.vault_id, &fk.folder, &dev, t);
-            let Some(packed) = metas
-                .iter()
-                .find_map(|m| crypto::decrypt(&record_key(m, &fk.folder), &a, &blob).ok())
-            else {
-                continue;
-            };
-            let Ok(json) = zstd::bulk::decompress(&packed, 256 << 20) else {
-                continue;
-            };
-            let Ok(body) = serde_json::from_slice::<TrashBody>(&json) else {
-                continue;
-            };
-            if body.device != dev || body.folder != fk.folder || body.written_utc != t {
-                continue;
-            }
-            let entries = body
+            read += 1;
+            let entries = dt
+                .state
                 .entries
-                .into_iter()
-                .filter(|e| entry_valid(e, &fk.folder, &dev))
+                .values()
+                .map(trash3_io::entry_from3)
+                .filter(|e| entry_valid(e, &fk.folder, &did))
                 .collect();
-            let versions = body
+            let versions = dt
+                .state
                 .versions
-                .into_iter()
-                .filter(|e| entry_valid(e, &fk.folder, &dev))
+                .values()
+                .map(trash3_io::entry_from3)
+                .filter(|e| entry_valid(e, &fk.folder, &did))
+                .collect();
+            let removed = dt
+                .state
+                .removals
+                .values()
+                .map(|r| trash3_io::removal_from(r, &did))
                 .collect();
             cache.remote.insert(
-                dev,
+                did.clone(),
                 RemoteTrash {
-                    written_utc: t,
+                    written_utc: dt.created_utc,
                     entries,
-                    removed: body.removed,
+                    removed,
                     versions,
                 },
             );
-            read += 1;
+            cache.remote3.insert(did, trash3_io::Applied3::of(dt));
         }
         Ok(read)
     }
@@ -836,6 +879,10 @@ impl Engine {
             .collect();
         if storages.is_empty() {
             return Ok(());
+        }
+        if force {
+            // Format 3: trash records count once a batch announces them.
+            self.pull_ledger_once()?;
         }
         self.trash_read_settings(&storages, force, now)?;
         let folders: Vec<FolderRecord> = self.folders().into_iter().map(|(r, _)| r).collect();
@@ -869,45 +916,41 @@ impl Engine {
             return Ok(());
         }
         let known = cache.settings.as_ref().map(|s| s.updated_utc).unwrap_or(0);
-        let mut best: Option<(i64, DeviceId, usize, String)> = None;
-        for (i, (_, b)) in storages.iter().enumerate() {
-            for key in b.list(SETTINGS_PREFIX)? {
-                let Some((dev, file)) = key
-                    .strip_prefix(SETTINGS_PREFIX)
-                    .and_then(|r| r.split_once('/'))
-                else {
-                    continue;
-                };
-                let (Ok(dev), Some(t)) = (
-                    DeviceId::from_hex(dev),
-                    file.strip_suffix(".enc")
-                        .and_then(|t| t.parse::<i64>().ok()),
-                ) else {
-                    continue;
-                };
-                if t <= known || !self.trusted(&dev) {
-                    continue;
-                }
-                if best.as_ref().is_none_or(|(n, d, _, _)| (t, &dev) > (*n, d)) {
-                    best = Some((t, dev, i, key));
-                }
-            }
-        }
-        if let Some((t, dev, i, key)) = best {
-            if let Some(blob) = storages[i].1.get(&key)? {
-                let a = settings_aad(&self.vault.vault_id, &dev, t);
-                let opened = self
-                    .folder_record_keys()
-                    .iter()
-                    .find_map(|k| crypto::decrypt(&settings_key(k), &a, &blob).ok())
-                    .and_then(|j| serde_json::from_slice::<TrashSettings>(&j).ok())
-                    .filter(|s| s.updated_utc == t && s.device.as_ref() == Some(&dev));
-                if let Some(mut s) = opened {
-                    s.days = s.days.clamp(1, MAX_TRASH_DAYS);
-                    cache.local_storage = self.resolve_trash_storage(&s);
-                    cache.settings = Some(s);
+        // The newest `settings` record of every trusted device of the vault.
+        let streams: Vec<crate::record::StreamRef> = self
+            .f3
+            .members
+            .devices
+            .devices
+            .keys()
+            .copied()
+            .chain([self.me3()])
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter(|d| self.trusted(&DeviceId::from_bytes(d)))
+            .map(crate::trash3::settings::settings_stream)
+            .collect();
+        let view = self.view3()?;
+        let mut newest: BTreeMap<crate::record::Id16, crate::trash3::SettingsBody> =
+            BTreeMap::new();
+        self.each_store(storages, &view, |_, store, counter| {
+            for b in crate::records3::read_newest::<crate::trash3::SettingsBody>(
+                store, &streams, counter,
+            )? {
+                if newest.get(&b.device).is_none_or(|n| n.seq < b.seq) {
+                    newest.insert(b.device, b);
                 }
             }
+            Ok(())
+        })?;
+        let best = newest
+            .into_values()
+            .max_by_key(|b| (b.updated_utc, b.lamport, b.device, b.seq));
+        if let Some(b) = best.filter(|b| b.updated_utc > known) {
+            let mut s = TrashSettings::from_record(&b);
+            s.days = s.days.clamp(1, MAX_TRASH_DAYS);
+            cache.local_storage = self.resolve_trash_storage(&s);
+            cache.settings = Some(s);
         }
         cache.read_utc = now;
         self.save_settings_cache(&cache)
@@ -1004,192 +1047,30 @@ impl Engine {
             .collect()
     }
 
-    /// Chunks of a folder that must stay: current files (and versions still
-    /// to download) and entries in the trash.
-    fn chunks_in_use(&self, folder: &FolderId, state: &FolderState, now: i64) -> HashSet<ChunkId> {
-        let mut out: HashSet<ChunkId> = state
-            .files
-            .values()
-            .chain(state.pending_remote.values())
-            .filter(|f| !f.deleted)
-            .flat_map(|f| f.chunks.iter().map(|c| c.chunk.clone()))
+    /// How far each device's trash stream of `folder` was applied here
+    /// (this device's own: as far as it published): garbage collection
+    /// waits for a writer whose announced trash records are not applied.
+    pub(super) fn trash_applied(&self, folder: &FolderId) -> Vec<(crate::record::Id16, u64)> {
+        let cache = self.load_trash_cache(folder);
+        let mut out: Vec<(crate::record::Id16, u64)> = cache
+            .remote3
+            .iter()
+            .filter_map(|(d, a)| Some((members3::bin(d).ok()?, a.seq)))
             .collect();
-        let sets = self.trash_sets(folder, now);
-        for e in sets.visible.into_iter().chain(sets.versions) {
-            out.extend(e.chunks.into_iter().map(|c| c.chunk));
+        if let Some(w) = &cache.writer3 {
+            out.push((self.me3(), w.seq));
         }
         out
     }
 
-    // ----- dropping blocks ------------------------------------------------------
-
-    fn trash_enqueue(&self, folder: &FolderId, entries: &[TrashEntry]) -> Result<()> {
-        let mut queue: Vec<DropItem> =
-            util::read_json_or_default(&self.drops_path()).unwrap_or_default();
-        let mut have: HashSet<(FolderId, ChunkId)> = queue
-            .iter()
-            .map(|d| (d.folder.clone(), d.chunk.clone()))
-            .collect();
-        for e in entries {
-            for c in &e.chunks {
-                if have.insert((folder.clone(), c.chunk.clone())) {
-                    queue.push(DropItem {
-                        folder: folder.clone(),
-                        chunk: c.chunk.clone(),
-                        object: c.object.clone(),
-                    });
-                }
-            }
-        }
-        util::write_json(&self.drops_path(), &queue)
-    }
-
-    /// Seal and push the pending events now, also inside a sync.
-    fn commit_now(&mut self) -> Result<()> {
-        let cycle = self.cycle.take();
-        let committed = self.commit_batch();
-        self.cycle = cycle;
-        committed.map(|_| ())
-    }
-
-    /// The minimum storage duration of a storage, in seconds, if known.
-    fn minimum_secs(&self, storage: &str) -> Option<i64> {
-        self.storage_price(storage)
-            .and_then(|p| p.minimum_storage_days)
-            .map(|d| d as i64 * DAY)
-    }
-
-    /// Drop the queued blocks that nothing uses any more from this device's
-    /// storages: the drops are sealed and pushed before anything is deleted.
-    fn trash_drop_queued(
-        &mut self,
-        now: i64,
-        stale: &BTreeSet<FolderId>,
-        counts: &mut DropCounts,
-    ) -> Result<()> {
-        if self.vault.member || self.forked_self {
-            return Ok(());
-        }
-        let mut queue: Vec<DropItem> =
-            util::read_json_or_default(&self.drops_path()).unwrap_or_default();
-        if queue.is_empty() {
-            return Ok(());
-        }
-        let view = self.view()?;
-        let mut in_use: BTreeMap<FolderId, Option<HashSet<ChunkId>>> = BTreeMap::new();
-        let mut keep: Vec<DropItem> = Vec::new();
-        let mut deletes: Vec<(String, ObjectName, u64)> = Vec::new();
-        let local: BTreeMap<&str, &StorageSpec> = self
-            .config
-            .storages
-            .iter()
-            .filter(|s| !s.is_carrier())
-            .map(|s| (s.name(), s))
-            .collect();
-        // Objects other folders (backups too) name: never dropped here.
-        let mut elsewhere: HashMap<&ObjectName, BTreeSet<&FolderId>> = HashMap::new();
-        for ((f, _), r) in &view.chunks {
-            elsewhere.entry(&r.object).or_default().insert(f);
-        }
-        for item in std::mem::take(&mut queue) {
-            if stale.contains(&item.folder) {
-                // Its state could not be brought up to date: judged later.
-                keep.push(item);
-                continue;
-            }
-            let used = in_use.entry(item.folder.clone()).or_insert_with(|| {
-                let attached = self
-                    .config
-                    .folders
-                    .iter()
-                    .any(|m| m.folder_id == item.folder);
-                let removed = self
-                    .keyring
-                    .folders
-                    .get(&item.folder)
-                    .is_none_or(|r| r.is_removed());
-                if !attached || removed || !self.state_path(&item.folder).exists() {
-                    return None;
-                }
-                self.load_state(&item.folder)
-                    .ok()
-                    .map(|st| self.chunks_in_use(&item.folder, &st, now))
-            });
-            // Not judged here (folder not attached): left alone.
-            let Some(used) = used else { continue };
-            if used.contains(&item.chunk) {
-                continue;
-            }
-            if elsewhere
-                .get(&item.object)
-                .is_some_and(|fs| fs.iter().any(|f| *f != &item.folder))
-            {
-                continue;
-            }
-            let Some(r) = view
-                .locate(&item.folder, &item.chunk)
-                .filter(|r| r.object == item.object)
-            else {
-                continue;
-            };
-            let mut waiting = false;
-            for (storage, loc) in &r.storages {
-                let Some(spec) = local.get(storage.as_str()) else {
-                    continue;
-                };
-                if spec.is_cold() {
-                    if let Some(min) = self.minimum_secs(storage) {
-                        if now < loc.claimed_utc + min {
-                            waiting = true;
-                            counts.waiting += 1;
-                            continue;
-                        }
-                    }
-                }
-                self.pending.push(Event::ChunkDropped {
-                    folder: item.folder.clone(),
-                    chunk: item.chunk.clone(),
-                    object: item.object.clone(),
-                    storage: storage.clone(),
-                });
-                deletes.push((storage.clone(), item.object.clone(), r.size));
-            }
-            if waiting {
-                keep.push(item);
-            }
-        }
-        self.commit_now()?;
-        let mut claimed: BTreeMap<String, HashSet<ObjectName>> = BTreeMap::new();
-        let mut opened: BTreeMap<String, Box<dyn Storage>> = BTreeMap::new();
-        for (storage, object, size) in deletes {
-            if !claimed.contains_key(&storage) {
-                claimed.insert(storage.clone(), self.objects_claimed_on(&storage)?);
-            }
-            if claimed[&storage].contains(&object) {
-                continue;
-            }
-            if !opened.contains_key(&storage) {
-                match self.open_storage(&storage) {
-                    Ok(b) => {
-                        opened.insert(storage.clone(), b);
-                    }
-                    Err(_) => continue,
-                }
-            }
-            let b = &opened[&storage];
-            let key = chunk_storage_key(&object);
-            if b.exists(&key).unwrap_or(false) && b.delete(&key).is_ok() {
-                counts.dropped += 1;
-                counts.bytes += size;
-            }
-        }
-        util::write_json(&self.drops_path(), &keep)
-    }
-
     // ----- the trash storage -------------------------------------------------------
 
-    /// Move the blocks only trash entries of `rec` use to the trash storage:
-    /// copy, check, record, drop from this device's other warm storages.
+    /// Move the blocks only trash entries of `rec` use to the trash storage,
+    /// pack by pack (`storages3::moves`): a pack whose live members are all
+    /// trash-only goes whole, one with current blocks as well is rebuilt
+    /// (the trashed members into new packs on the trash storage, the others
+    /// into a new pack where it was); the new places in one map record, the
+    /// copies and drops in one batch, and only then the old packs go.
     fn trash_to_storage(
         &mut self,
         rec: &FolderRecord,
@@ -1215,193 +1096,125 @@ impl Engine {
         else {
             return Ok(());
         };
-        let state = self.load_state(&rec.folder_id)?;
-        let live: HashSet<ChunkId> = state
-            .files
-            .values()
-            .chain(state.pending_remote.values())
-            .filter(|f| !f.deleted)
-            .flat_map(|f| f.chunks.iter().map(|c| c.chunk.clone()))
-            .collect();
-        let view = self.view()?;
-        let warm: BTreeSet<String> = self
+        let folder = members3::bin(&rec.folder_id)?;
+        if !self.standing3(&folder).may_mark() {
+            return Ok(());
+        }
+        let epoch = self.folder_keys(rec)?.epoch;
+        self.flush_pending()?;
+        let view = self.view3()?;
+        let (manifests, _) = self.pull_folder_records(&folder, &view)?;
+        let live: HashSet<[u8; 32]> = manifests.references().copied().collect();
+        // Blocks only the trash or the version history uses.
+        let mut trashed: HashSet<[u8; 32]> = HashSet::new();
+        let sets = self.trash_sets(&rec.folder_id, now);
+        for e in sets.visible.iter().chain(sets.versions.iter()) {
+            for c in &e.chunks {
+                let o = crate::storages3::object_bin(&c.object)?;
+                if !live.contains(&o) {
+                    trashed.insert(o);
+                }
+            }
+        }
+        if trashed.is_empty() {
+            return Ok(());
+        }
+        let warm: Vec<StorageSpec> = self
             .config
             .storages
             .iter()
-            .filter(|s| !s.is_carrier() && !s.is_cold() && s.name() != ts_name)
-            .map(|s| s.name().to_string())
+            .filter(|s| !s.is_carrier() && !s.is_cold() && !s.is_data_only() && s.name() != ts_name)
+            .cloned()
             .collect();
-        let mut items: Vec<(ChunkRef, bool)> = Vec::new();
-        let mut seen: HashSet<ChunkId> = HashSet::new();
-        // Blocks only the trash or the version history uses.
-        let sets = self.trash_sets(&rec.folder_id, now);
-        for e in sets.visible.into_iter().chain(sets.versions) {
-            for c in e.chunks {
-                if live.contains(&c.chunk) || !seen.insert(c.chunk.clone()) {
-                    continue;
-                }
-                let Some(r) = view
-                    .locate(&rec.folder_id, &c.chunk)
-                    .filter(|r| r.object == c.object)
-                else {
-                    continue;
-                };
-                // Another folder naming the object keeps it where it is.
-                if view
-                    .chunks
-                    .iter()
-                    .any(|((f, _), o)| f != &rec.folder_id && o.object == c.object)
-                {
-                    continue;
-                }
-                let on_ts = r.storages.contains_key(&ts_name);
-                let on_warm = r.storages.keys().any(|n| warm.contains(n));
-                if on_ts && !on_warm {
-                    continue;
-                }
-                items.push((c, on_ts));
-            }
-        }
-        if items.is_empty() {
-            return Ok(());
-        }
         let ts = self.open_spec(&ts_spec)?;
-        let sources: OpenStorages = self
-            .open_storages(false)?
-            .into_iter()
-            .filter(|(s, _)| !s.is_carrier() && s.name() != ts_name)
-            .collect();
-        let read_back = !ts_spec.is_cold();
-        let task = activity::start(
-            activity::TRASH_MOVE,
-            &rec.name,
-            items.iter().map(|(c, _)| c.size).sum(),
-            activity::Unit::Bytes,
-        );
-        // A trash storage with a quota takes what fits; the rest stays where
-        // it is (`quotas`).
-        let gate = self.quota_gate(&view);
+        let task = activity::start(activity::TRASH_MOVE, &rec.name, 0, activity::Unit::Bytes);
         let mut failed = 0u64;
-        for group in crate::packs::byte_groups(&items, |(c, _)| c.size) {
-            task.advance(group.iter().map(|(c, _)| c.size).sum());
-            let mut deletes: Vec<(String, ObjectName, u64)> = Vec::new();
-            // The blocks the trash storage lacks, fetched and then written
-            // together (as packs, `crate::packs`).
-            let mut cts: HashMap<ObjectName, Vec<u8>> = HashMap::new();
-            let mut skipped: HashSet<ObjectName> = HashSet::new();
-            for (c, on_ts) in group {
-                if *on_ts {
-                    continue;
-                }
-                if !gate.take(&ts_name, c.size) {
-                    skipped.insert(c.object.clone());
-                    continue;
-                }
-                let good = |ct: &Vec<u8>| ObjectName::from_bytes(&crypto::hash(ct)) == c.object;
-                let ct = self.cached_object(&c.object).or_else(|| {
-                    match fetch::fetch_object(
-                        self.peers.as_deref(),
-                        &c.object,
-                        &sources,
-                        &self.fetch_stats,
-                    ) {
-                        Fetched::Got { bytes, .. } if good(&bytes) => Some(bytes),
-                        _ => None,
-                    }
-                });
-                if let Some(ct) = ct {
-                    cts.insert(c.object.clone(), ct);
-                }
+        for spec in warm {
+            let Ok(src) = self.open_spec(&spec) else {
+                continue;
+            };
+            let view = self.view3()?;
+            let plan = {
+                let table = self.table3(&folder)?;
+                let t = table.read().unwrap_or_else(|e| e.into_inner());
+                crate::storages3::moves::plan_move(
+                    &view,
+                    &t,
+                    &folder,
+                    spec.name(),
+                    &ts_name,
+                    &|o| trashed.contains(o),
+                )?
+            };
+            if plan.actions.is_empty() {
+                continue;
             }
-            let members: Vec<(String, &[u8])> = cts
-                .iter()
-                .map(|(o, ct)| (o.as_str().to_string(), ct.as_slice()))
-                .collect();
-            let written = members.is_empty() || ts.put_pack(&members).is_ok();
-            for (c, on_ts) in group {
-                let key = chunk_storage_key(&c.object);
-                let good = |ct: &Vec<u8>| ObjectName::from_bytes(&crypto::hash(ct)) == c.object;
-                if !on_ts {
-                    if skipped.contains(&c.object) {
-                        continue;
-                    }
-                    let Some(ct) = cts.get(&c.object) else {
-                        failed += 1;
-                        continue;
-                    };
-                    if !written {
-                        failed += 1;
-                        continue;
-                    }
-                    let checked = if read_back {
-                        matches!(ts.get(&key), Ok(Some(b)) if good(&b))
-                    } else {
-                        ts.exists(&key).unwrap_or(false)
-                    };
-                    if !checked {
-                        failed += 1;
-                        continue;
-                    }
-                    self.pending.push(Event::ChunkStored {
-                        folder: rec.folder_id.clone(),
-                        chunk: c.chunk.clone(),
-                        object: c.object.clone(),
-                        storage: ts_name.clone(),
-                        size: ct.len() as u64,
-                        pack: None,
-                    });
-                    if read_back {
-                        self.pending.push(Event::ChunkVerified {
-                            folder: rec.folder_id.clone(),
-                            chunk: c.chunk.clone(),
-                            object: c.object.clone(),
-                            storage: ts_name.clone(),
-                        });
-                    }
-                    report.blocks_moved += 1;
-                    report.bytes_moved += c.size;
-                }
-                let Some(r) = view.locate(&rec.folder_id, &c.chunk) else {
-                    continue;
-                };
-                for n in r.storages.keys().filter(|n| warm.contains(*n)) {
-                    self.pending.push(Event::ChunkDropped {
-                        folder: rec.folder_id.clone(),
-                        chunk: c.chunk.clone(),
-                        object: c.object.clone(),
-                        storage: n.clone(),
-                    });
-                    deletes.push((n.clone(), c.object.clone(), c.size));
-                }
+            task.advance(plan.bytes);
+            let run = crate::storages3::moves::run_move(
+                &plan,
+                &crate::storages3::moves::Endpoint {
+                    name: spec.name(),
+                    storage: src.as_ref(),
+                    cold: false,
+                    pool: None,
+                },
+                &crate::storages3::moves::Endpoint {
+                    name: &ts_name,
+                    storage: ts.as_ref(),
+                    cold: ts_spec.is_cold(),
+                    pool: None,
+                },
+                &crate::storages3::moves::MoveOptions::default(),
+            );
+            failed += (run.report.corrupt.len() + run.report.unavailable.len()) as u64;
+            if run.events.is_empty() && run.new_packs.is_empty() {
+                continue;
             }
-            // The copies and drops are sealed and pushed before anything is deleted.
-            self.commit_now()?;
-            let mut claimed: BTreeMap<String, HashSet<ObjectName>> = BTreeMap::new();
-            for (storage, object, _) in deletes {
-                if !claimed.contains_key(&storage) {
-                    claimed.insert(storage.clone(), self.objects_claimed_on(&storage)?);
+            // The copies and drops are sealed and pushed before anything
+            // is deleted.
+            self.with_map_writer(&folder, epoch, &view, |w, t, out, sink| {
+                let mut events = Vec::new();
+                let mut publish = None;
+                if !run.new_packs.is_empty() {
+                    let lamport = crate::gc3::Commit::tick(sink);
+                    let p = w.publish(
+                        out.writer,
+                        out.meta,
+                        &run.new_packs,
+                        lamport,
+                        Some(t),
+                        &view,
+                    )?;
+                    events.extend(p.events.clone());
+                    publish = Some(p);
                 }
-                if claimed[&storage].contains(&object) {
-                    continue;
+                events.extend(run.events.iter().cloned());
+                crate::gc3::Commit::commit(sink, events)?;
+                if let Some(p) = publish {
+                    p.apply_to(t, &|id: &[u8; 32]| {
+                        view.pack_folder(id).is_none_or(|f| f == folder)
+                    })?;
                 }
-                if let Ok(b) = self.open_storage(&storage) {
-                    let _ = b.delete(&chunk_storage_key(&object));
-                }
-            }
+                Ok(())
+            })?;
+            run.delete_dropped(src.as_ref())?;
+            report.blocks_moved += run.report.blocks_moved;
+            report.bytes_moved += run.report.bytes_moved;
         }
         if failed > 0 {
             report.notes.push(format!(
-                "{failed} block{} of folder {} could not be copied to the trash storage {ts_name}; they stay where they are and are tried again",
+                "{failed} pack{} of folder {} could not be moved to the trash storage {ts_name}; they stay where they are and are tried again",
                 if failed == 1 { "" } else { "s" },
                 rec.name
             ));
         }
-        report.notes.extend(gate.refusals());
         if ts_spec.is_cold() {
-            if let Some(d) = self.minimum_secs(&ts_name) {
+            if let Some(d) = self
+                .storage_price(&ts_name)
+                .and_then(|p| p.minimum_storage_days)
+            {
                 report.notes.push(format!(
-                    "{ts_name} bills every block for at least {} days: blocks are not deleted from it earlier, even when the trash is emptied",
-                    d / DAY
+                    "{ts_name} bills every pack for at least {d} days: packs are not deleted from it earlier, even when the trash is emptied"
                 ));
             }
         }
@@ -1470,39 +1283,34 @@ impl Engine {
     /// only from cold storage.
     pub(super) fn entry_storages(
         &self,
-        view: &LedgerView,
+        _view: &LedgerView,
         folder: &FolderId,
         e: &TrashEntry,
     ) -> (Vec<String>, bool) {
+        // Format 3: the storages holding a live place of each block.
+        let Ok(view) = self.view3() else {
+            return (Vec::new(), false);
+        };
         let mut names = BTreeSet::new();
         let mut cold_only = false;
         for c in &e.chunks {
-            let Some(r) = view
-                .locate(folder, &c.chunk)
-                .filter(|r| r.object == c.object)
-            else {
-                continue;
-            };
-            names.extend(r.storages.keys().cloned());
-            if self.needs_cold_read(r, c) {
+            let held = self.block_copies3(&view, folder, &c.object);
+            if self.needs_cold_read(&held, c) {
                 cold_only = true;
             }
+            names.extend(held);
         }
         (names.into_iter().collect(), cold_only)
     }
 
-    /// A block that no warm storage of this device and no cache holds, but a
-    /// cold one does.
-    pub(super) fn needs_cold_read(&self, r: &crate::ledger::ChunkRecord, c: &ChunkRef) -> bool {
+    /// A block that no warm storage of this device and no cache holds, but
+    /// a cold one does (format 3: `held` are the storages with a copy).
+    pub(super) fn needs_cold_read(&self, held: &BTreeSet<String>, c: &ChunkRef) -> bool {
         let spec = |n: &str| self.config.storages.iter().find(|s| s.name() == n);
-        let warm = r
-            .storages
-            .keys()
+        let warm = held
+            .iter()
             .any(|n| spec(n).is_some_and(|s| !s.is_cold() && !s.is_carrier()));
-        let cold = r
-            .storages
-            .keys()
-            .any(|n| spec(n).is_some_and(|s| s.is_cold()));
+        let cold = held.iter().any(|n| spec(n).is_some_and(|s| s.is_cold()));
         !warm && cold && self.cached_object(&c.object).is_none()
     }
 
@@ -1518,7 +1326,7 @@ impl Engine {
         let now = util::now_utc();
         let settings = self.trash_settings();
         let cache = self.load_settings_cache();
-        let view = self.view()?;
+        let view = self.view3()?;
         let mut st = TrashStatus {
             days: settings.days,
             storage: settings.storage.clone(),
@@ -1557,10 +1365,8 @@ impl Engine {
                     if !seen.insert(c.chunk.clone()) {
                         continue;
                     }
-                    if let Some(r) = view.locate(&rec.folder_id, &c.chunk) {
-                        for n in r.storages.keys() {
-                            *st.by_storage.entry(n.clone()).or_default() += c.size;
-                        }
+                    for n in self.block_copies3(&view, &rec.folder_id, &c.object) {
+                        *st.by_storage.entry(n).or_default() += c.size;
                     }
                 }
             }
@@ -1574,9 +1380,7 @@ impl Engine {
                 st.local_copy_bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
             }
         }
-        let queue: Vec<DropItem> =
-            util::read_json_or_default(&self.drops_path()).unwrap_or_default();
-        st.drops_waiting = queue.len() as u64;
+        st.drops_waiting = self.gc_drops_waiting();
         Ok(st)
     }
 
@@ -1679,22 +1483,17 @@ impl Engine {
         let now = util::now_utc().max(s.updated_utc + 1);
         s.updated_utc = now;
         s.device = Some(me.clone());
-        let json = serde_json::to_vec(&s)?;
-        let blob = crypto::encrypt(
-            &settings_key(&self.folder_record_key_now()),
-            &settings_aad(&self.vault.vault_id, &me, now),
-            &json,
-        )?;
-        let key = format!("{SETTINGS_PREFIX}{me}/{now:020}.enc");
-        let own = format!("{SETTINGS_PREFIX}{me}/");
-        for (_, b) in self.metadata_storages(true)? {
-            b.put_if_absent(&key, &blob)?;
-            for old in b.list(&own)? {
-                if old != key {
-                    b.delete(&old)?;
-                }
-            }
-        }
+        let me3 = self.me3();
+        let lamport = self.clock.lamport + 1;
+        let storages = self.metadata_storages(true)?;
+        let stream = crate::trash3::settings::settings_stream(me3);
+        let key = crate::record::KeyId::Registry(self.vault_keys3().newest_epoch());
+        let body = s.to_record(me3, lamport, now)?;
+        self.write_record3(&storages, &stream, &key, |seq| {
+            let mut b = body.clone();
+            b.seq = seq;
+            b
+        })?;
         let mut cache = self.load_settings_cache();
         cache.local_storage = self.resolve_trash_storage(&s);
         cache.settings = Some(s);
@@ -1854,33 +1653,30 @@ impl Engine {
         plan: &mut TrashRestorePlan,
         cold: &mut BTreeSet<String>,
     ) {
+        let _ = view;
+        // Format 3: copies from the block map and the pack-level view.
+        let Ok(view) = self.view3() else {
+            return;
+        };
         for c in &e.chunks {
-            match view
-                .locate(folder, &c.chunk)
-                .filter(|r| r.object == c.object)
+            let held = self.block_copies3(&view, folder, &c.object);
+            if self.needs_cold_read(&held, c) {
+                plan.cold_bytes += c.size;
+                cold.extend(
+                    held.iter()
+                        .filter(|n| {
+                            self.config
+                                .storages
+                                .iter()
+                                .any(|s| s.name() == n.as_str() && s.is_cold())
+                        })
+                        .cloned(),
+                );
+            } else if held.is_empty()
+                && self.cached_object(&c.object).is_none()
+                && !plan.unavailable.contains(&e.path)
             {
-                Some(r) if self.needs_cold_read(r, c) => {
-                    plan.cold_bytes += c.size;
-                    cold.extend(
-                        r.storages
-                            .keys()
-                            .filter(|n| {
-                                self.config
-                                    .storages
-                                    .iter()
-                                    .any(|s| s.name() == n.as_str() && s.is_cold())
-                            })
-                            .cloned(),
-                    );
-                }
-                Some(r) if !r.storages.is_empty() || !r.devices.is_empty() => {}
-                _ => {
-                    if self.cached_object(&c.object).is_none()
-                        && !plan.unavailable.contains(&e.path)
-                    {
-                        plan.unavailable.push(e.path.clone());
-                    }
-                }
+                plan.unavailable.push(e.path.clone());
             }
         }
     }
@@ -1957,7 +1753,7 @@ impl Engine {
             let tmp = tmp_dir.join(format!("{}-{}", std::process::id(), e.id));
             let got = match &local {
                 Some(p) => fs::copy(p, &tmp).map(|_| true).map_err(anyhow::Error::from),
-                None => self.restore_from_blocks(&rec, &fk, &e, &tmp, &storages),
+                None => self.restore_from_blocks(&fk, &e, &tmp, &storages),
             };
             match got {
                 Ok(from_local) => {
@@ -2035,6 +1831,7 @@ impl Engine {
                     by: me.clone(),
                     restored: true,
                     deleted_utc: *deleted_utc,
+                    lamport: self.clock.lamport,
                 },
             );
             cache.queued.insert(id.clone());
@@ -2059,7 +1856,6 @@ impl Engine {
     /// (not from a local copy).
     pub(super) fn restore_from_blocks(
         &mut self,
-        rec: &FolderRecord,
         fk: &FolderKeys,
         e: &TrashEntry,
         out: &Path,
@@ -2068,15 +1864,15 @@ impl Engine {
         let mut file = fs::File::create(out)?;
         for c in &e.chunks {
             let good = |ct: &Vec<u8>| ObjectName::from_bytes(&crypto::hash(ct)) == c.object;
-            let (ct, source) = match self.cached_object(&c.object) {
-                Some(ct) => (ct, None),
+            let ct = match self.cached_object(&c.object) {
+                Some(ct) => ct,
                 None => match fetch::fetch_object(
                     self.peers.as_deref(),
                     &c.object,
                     storages,
                     &self.fetch_stats,
                 ) {
-                    Fetched::Got { bytes, source, .. } if good(&bytes) => (bytes, Some(source)),
+                    Fetched::Got { bytes, .. } if good(&bytes) => bytes,
                     Fetched::Got { .. } => bail!("block {} failed its check", c.chunk.short()),
                     Fetched::Failed(err) => return Err(err),
                     Fetched::Missing(Some(nd)) => return Err(anyhow::Error::new(nd)),
@@ -2095,14 +1891,6 @@ impl Engine {
                 &ct,
             )?;
             file.write_all(&plain)?;
-            if let Some(s) = source.filter(|s| !s.starts_with("peer:")) {
-                self.pending.push(Event::ChunkVerified {
-                    folder: rec.folder_id.clone(),
-                    chunk: c.chunk.clone(),
-                    object: c.object.clone(),
-                    storage: s,
-                });
-            }
         }
         file.sync_all()?;
         Ok(false)
@@ -2155,6 +1943,7 @@ impl Engine {
                         by: me.clone(),
                         restored: false,
                         deleted_utc: e.deleted_utc,
+                        lamport: self.clock.lamport,
                     },
                 );
                 cache.queued.insert(e.id.clone());
@@ -2175,7 +1964,6 @@ impl Engine {
         };
         for (rec, picked) in &touched {
             self.trash_publish(rec, now)?;
-            self.trash_enqueue(&rec.folder_id, picked)?;
             let fk = self.folder_keys(rec)?;
             for e in picked {
                 for p in self.local_copies(&fk, e) {
@@ -2186,12 +1974,12 @@ impl Engine {
             }
             task.advance(picked.len() as u64);
         }
-        let mut counts = DropCounts::default();
-        self.trash_drop_queued(now, &stale, &mut counts)?;
-        self.flush_pack_deletions();
-        report.blocks_dropped = counts.dropped;
-        report.bytes_dropped = counts.bytes;
-        report.blocks_waiting = counts.waiting;
+        // Their blocks go once every writer of the folder acknowledged the
+        // marks (at once on a device that is the folder's only writer).
+        let gc = self.gc_run3(now, &stale)?;
+        report.blocks_dropped = gc.blocks_dropped;
+        report.bytes_dropped = gc.bytes_freed;
+        report.blocks_waiting = gc.drops_waiting;
         Ok(report)
     }
 
@@ -2213,7 +2001,14 @@ impl Engine {
             if rec.is_removed() || rec.is_backup() {
                 continue;
             }
-            let ok = self.with_key(&rec).is_ok()
+            // A folder attached here and never synced yet is not pulled
+            // in the background (it would download every file behind the
+            // sync that is about to): it counts as not pulled.
+            let never_synced = self
+                .load_state(&fid)
+                .is_ok_and(|s| s.files.is_empty() && s.local_index.is_empty());
+            let ok = !never_synced
+                && self.with_key(&rec).is_ok()
                 && !self.is_held(&fid)
                 && self.pull(fid.as_str()).is_ok();
             if !ok {
@@ -2236,6 +2031,10 @@ impl Engine {
 
     /// `trash_upkeep` as if it were `now` (tests).
     pub fn trash_upkeep_at(&mut self, now: i64) -> Result<TrashUpkeepReport> {
+        self.exclusive(|e| e.trash_upkeep_inner(now))
+    }
+
+    fn trash_upkeep_inner(&mut self, now: i64) -> Result<TrashUpkeepReport> {
         self.ensure_active()?;
         let mut report = TrashUpkeepReport::default();
         self.trash_refresh(true)?;
@@ -2258,10 +2057,7 @@ impl Engine {
                 .iter()
                 .filter(|e| now >= e.deleted_utc + days * DAY)
                 .count() as u64;
-            if !newly.is_empty() {
-                self.trash_enqueue(&rec.folder_id, &newly)?;
-                cache.queued.extend(newly.iter().map(|e| e.id.clone()));
-            }
+            cache.queued.extend(newly.iter().map(|e| e.id.clone()));
             // Versions the history let go since the last upkeep.
             let thinned: Vec<TrashEntry> = sets
                 .versions_gone
@@ -2270,10 +2066,7 @@ impl Engine {
                 .cloned()
                 .collect();
             report.versions_dropped += thinned.len() as u64;
-            if !thinned.is_empty() {
-                self.trash_enqueue(&rec.folder_id, &thinned)?;
-                cache.queued.extend(thinned.iter().map(|e| e.id.clone()));
-            }
+            cache.queued.extend(thinned.iter().map(|e| e.id.clone()));
             // Forget queued ids no record lists any more.
             let listed: HashSet<&str> = sets
                 .gone
@@ -2292,24 +2085,38 @@ impl Engine {
             }
             report.local_copies_removed += self.clear_local_trash(&rec.folder_id, days, now);
         }
-        let mut counts = DropCounts::default();
-        self.trash_drop_queued(now, &stale, &mut counts)?;
-        report.blocks_dropped = counts.dropped;
-        report.bytes_dropped = counts.bytes;
-        report.blocks_waiting = counts.waiting;
-        if counts.waiting > 0 {
-            report.notes.push(format!(
-                "{} block cop{} on cold storage stay until the storage's minimum duration has passed",
-                counts.waiting,
-                if counts.waiting == 1 { "y" } else { "ies" }
-            ));
-        }
-        // What the drops left of the packs: mostly dead hot packs are
-        // rewritten (`crate::packs`).
+        // Blocks nothing references any more: dead marks, and packs whose
+        // marks have settled are dropped or rewritten (`pack_upkeep`).
         if !self.vault.member && !self.forked_self {
-            match self.pack_upkeep() {
-                Ok(p) => report.blocks_repacked = p.blocks_moved,
-                Err(e) => report.notes.push(format!("packs not tidied: {e:#}")),
+            match self.gc_run3(now, &stale) {
+                Ok(gc) => {
+                    report.blocks_dropped = gc.blocks_dropped;
+                    report.bytes_dropped = gc.bytes_freed;
+                    report.blocks_waiting = gc.drops_waiting;
+                    report.blocks_repacked = gc.blocks_moved;
+                    if gc.drops_waiting > 0 {
+                        report.notes.push(format!(
+                            "{} pack cop{} on cold storage stay until the storage's minimum duration has passed",
+                            gc.drops_waiting,
+                            if gc.drops_waiting == 1 { "y" } else { "ies" }
+                        ));
+                    }
+                    report
+                        .notes
+                        .extend(gc.skipped.iter().map(|s| format!("not collected: {s}")));
+                    if !gc.waiting_for.is_empty() {
+                        report.notes.push(format!(
+                            "deleted blocks are freed once {} {} synced",
+                            gc.waiting_for.join(", "),
+                            if gc.waiting_for.len() == 1 {
+                                "has"
+                            } else {
+                                "have"
+                            }
+                        ));
+                    }
+                }
+                Err(e) => report.notes.push(format!("blocks not collected: {e:#}")),
             }
         }
         let mut c = self.load_settings_cache();

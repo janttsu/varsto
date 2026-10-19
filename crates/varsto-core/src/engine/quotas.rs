@@ -3,8 +3,9 @@
 //! (`crate::storage_settings`, `docs/spec/alpha-0-format.md` section 44).
 //!
 //! A quota is the most bytes (and optionally objects) Varsto keeps on one
-//! storage. Usage is counted from the ledger: the blocks claimed on the
-//! storage and not dropped, plus an estimate of the records, ledger batches
+//! storage. Usage is counted from the ledger: the packs claimed on the
+//! storage and not dropped, by their size classes (padding included, the
+//! storage holds it; spec section 77.9), plus an estimate of the records, ledger batches
 //! and manifests there (the size of this device's ledger, or what the last
 //! `storage quota --measure` found). Writers keep 1 % of the quota free
 //! and skip a storage that would go over it; the block then goes to the
@@ -12,17 +13,13 @@
 
 use super::*;
 use crate::ids::Id;
-use crate::storage_settings::{
-    self, SettingsEntry, StorageSettings, StorageSettingsRecord, QUOTA_WARN_PERCENT,
-};
+use crate::storage_settings::{self, SettingsEntry, StorageSettings, QUOTA_WARN_PERCENT};
 use std::sync::Mutex;
 
 /// Local cache of storage keys by storage name.
 const KEYS_FILE: &str = "storage-keys.json";
 /// What `storage quota --measure` found, by storage name.
 const MEASURED_FILE: &str = "storage-measured.json";
-/// Other devices' names for this device's storages (see `refresh_aliases`).
-const ALIASES_FILE: &str = "storage-aliases.json";
 
 /// A storage's use against its quota.
 #[derive(Clone, Debug, Serialize, Default, PartialEq)]
@@ -72,30 +69,99 @@ pub(super) struct Usage {
 type Room = (Option<i128>, Option<i128>);
 
 /// Room left on the storages with a quota, taken as writes are planned.
+/// Blocks go into packs padded to size classes, and a storage's use is the
+/// classes of its packs (spec section 77.9), so what a run takes on a
+/// storage is counted as the packs its blocks fill: whole top-class packs
+/// and the smallest class the rest fits in.
 #[derive(Default)]
 pub(super) struct QuotaGate {
-    /// Storage -> (bytes left, objects left), `None` where unlimited.
+    /// Storage -> (bytes left, packs left), `None` where unlimited.
     left: Mutex<BTreeMap<String, Room>>,
+    /// Storage -> member bytes taken by this gate so far.
+    taken: Mutex<BTreeMap<String, u64>>,
     /// The sentence for a full storage, by name.
     messages: BTreeMap<String, String>,
     refused: Mutex<BTreeSet<String>>,
 }
 
+/// The pack bytes and packs `members` bytes of blocks fill.
+fn padded(members: u64) -> (u64, u64) {
+    if members == 0 {
+        return (0, 0);
+    }
+    let top = crate::packs::HOT_TARGET as u64;
+    let full = members / top;
+    let rest = members % top;
+    let tail = if rest == 0 {
+        0
+    } else {
+        crate::packs::padded_len(rest as usize, crate::packs::HOT_TARGET) as u64
+    };
+    (full * top + tail, full + u64::from(rest > 0))
+}
+
 impl QuotaGate {
-    /// Take room for one object of `bytes` on `storage`; false (and nothing
-    /// taken) when it does not fit.
+    /// What taking `bytes` more on `storage` adds: (pack bytes, packs).
+    fn cost(&self, storage: &str, bytes: u64) -> (u64, u64) {
+        let taken = self
+            .taken
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(storage)
+            .copied()
+            .unwrap_or(0);
+        let (b0, p0) = padded(taken);
+        let (b1, p1) = padded(taken + bytes);
+        (b1 - b0, p1 - p0)
+    }
+
+    /// Take room for one block of `bytes` on `storage`; false (and nothing
+    /// taken) when the packs it needs do not fit.
     pub(super) fn take(&self, storage: &str, bytes: u64) -> bool {
         let mut left = self.left.lock().unwrap_or_else(|e| e.into_inner());
         let Some((b, o)) = left.get_mut(storage) else {
             return true;
         };
-        let fits = b.is_none_or(|b| b >= bytes as i128) && o.is_none_or(|o| o >= 1);
+        let (cb, cp) = self.cost(storage, bytes);
+        let fits = b.is_none_or(|b| b >= cb as i128) && o.is_none_or(|o| o >= cp as i128);
         if fits {
             if let Some(b) = b {
-                *b -= bytes as i128;
+                *b -= cb as i128;
             }
             if let Some(o) = o {
-                *o -= 1;
+                *o -= cp as i128;
+            }
+            *self
+                .taken
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(storage.to_string())
+                .or_default() += bytes;
+        } else {
+            self.refused
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(storage.to_string());
+        }
+        fits
+    }
+
+    /// Take room for one pack of exactly `bytes` (a whole pack copied, or
+    /// new packs of that many member bytes counted as one); false (and
+    /// nothing taken) when it does not fit.
+    pub(super) fn take_pack(&self, storage: &str, bytes: u64) -> bool {
+        let mut left = self.left.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((b, o)) = left.get_mut(storage) else {
+            return true;
+        };
+        let (cb, cp) = padded(bytes);
+        let fits = b.is_none_or(|b| b >= cb as i128) && o.is_none_or(|o| o >= cp as i128);
+        if fits {
+            if let Some(b) = b {
+                *b -= cb as i128;
+            }
+            if let Some(o) = o {
+                *o -= cp as i128;
             }
         } else {
             self.refused
@@ -106,24 +172,50 @@ impl QuotaGate {
         fits
     }
 
+    /// Give back what `take` took for one block of `bytes` on `storage`
+    /// whose write did not happen (the storage failed, the block was there
+    /// already, its source had nothing, the run stopped before it): the
+    /// packs that block would have filled are free again for the rest of
+    /// the run.
+    pub(super) fn give_back(&self, storage: &str, bytes: u64) {
+        let mut left = self.left.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((b, o)) = left.get_mut(storage) else {
+            return;
+        };
+        let mut taken = self.taken.lock().unwrap_or_else(|e| e.into_inner());
+        let t = taken.entry(storage.to_string()).or_default();
+        let (b1, p1) = padded(*t);
+        *t = t.saturating_sub(bytes);
+        let (b0, p0) = padded(*t);
+        if let Some(b) = b {
+            *b += (b1 - b0) as i128;
+        }
+        if let Some(o) = o {
+            *o += (p1 - p0) as i128;
+        }
+    }
+
+    /// Give back what `take_pack` took.
+    pub(super) fn give_back_pack(&self, storage: &str, bytes: u64) {
+        let mut left = self.left.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((b, o)) = left.get_mut(storage) {
+            let (cb, cp) = padded(bytes);
+            if let Some(b) = b {
+                *b += cb as i128;
+            }
+            if let Some(o) = o {
+                *o += cp as i128;
+            }
+        }
+    }
+
     /// Whether `bytes` more would fit, without taking them.
     pub(super) fn fits(&self, storage: &str, bytes: u64) -> bool {
         let left = self.left.lock().unwrap_or_else(|e| e.into_inner());
-        left.get(storage)
-            .is_none_or(|(b, o)| b.is_none_or(|b| b >= bytes as i128) && o.is_none_or(|o| o >= 1))
-    }
-
-    /// Give back room taken for a write that did not happen.
-    pub(super) fn give_back(&self, storage: &str, bytes: u64) {
-        let mut left = self.left.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((b, o)) = left.get_mut(storage) {
-            if let Some(b) = b {
-                *b += bytes as i128;
-            }
-            if let Some(o) = o {
-                *o += 1;
-            }
-        }
+        let (cb, cp) = self.cost(storage, bytes);
+        left.get(storage).is_none_or(|(b, o)| {
+            b.is_none_or(|b| b >= cb as i128) && o.is_none_or(|o| o >= cp as i128)
+        })
     }
 
     /// The sentences for the storages that refused a write.
@@ -143,7 +235,6 @@ impl QuotaGate {
             .unwrap_or_else(|| format!("storage {storage} is at its quota"))
     }
 }
-
 fn full_message(storage: &str, used: u64, quota: u64) -> String {
     format!(
         "storage {storage} is at its quota ({} of {})",
@@ -157,7 +248,7 @@ impl Engine {
 
     /// The key every device uses for a storage in shared settings: its
     /// identity, a pool's identity, or a keyed hash of its name.
-    fn storage_keys(&self) -> BTreeMap<String, Id> {
+    pub(super) fn storage_keys(&self) -> BTreeMap<String, Id> {
         let path = self.home.join("state").join(KEYS_FILE);
         let mut cached: BTreeMap<String, Id> =
             util::read_json_or_default(&path).unwrap_or_default();
@@ -230,15 +321,18 @@ impl Engine {
             .collect()
     }
 
-    /// Change a storage's settings here and publish them to every device.
+    /// Change a storage's settings here and publish them to every device:
+    /// they travel in this device's next `storage-names` record (kind 19,
+    /// `storages3_ops`), and every device adopts the newest of each
+    /// storage's.
     pub(super) fn publish_storage_settings(
         &mut self,
         name: &str,
         settings: StorageSettings,
     ) -> Result<()> {
-        let Some(key) = self.storage_keys().get(name).cloned() else {
+        if !self.storage_keys().contains_key(name) {
             bail!("unknown storage {name}");
-        };
+        }
         let prev = self
             .config
             .storage_settings
@@ -246,39 +340,6 @@ impl Engine {
             .map(|e| e.updated_utc)
             .unwrap_or(0);
         let now = util::now_utc().max(prev + 1);
-        let rec = StorageSettingsRecord {
-            storage: key,
-            name: name.to_string(),
-            device: self.vault.device_id.clone(),
-            updated_utc: now,
-            settings: settings.clone(),
-        };
-        let fr_key = self.folder_record_key_now();
-        let blob = if self.org.is_some() {
-            rec.seal_signed(&self.vault.vault_id, &fr_key, &self.keys.signer)?
-        } else {
-            rec.seal(&self.vault.vault_id, &fr_key)?
-        };
-        // Every storage that holds records, drained ones too: they say so.
-        let mut written = 0;
-        let mut last_err = None;
-        for spec in self.config.storages.clone() {
-            if spec.is_data_only() || spec.is_carrier() {
-                continue;
-            }
-            match self
-                .open_spec(&spec)
-                .and_then(|b| b.put_if_absent(&rec.storage_key(), &blob))
-            {
-                Ok(_) => written += 1,
-                Err(e) => last_err = Some(e),
-            }
-        }
-        if written == 0 {
-            if let Some(e) = last_err {
-                return Err(e.context("the storage settings could not be published"));
-            }
-        }
         // Kept with its time even when empty, so an older record does not
         // come back.
         self.config.storage_settings.insert(
@@ -286,112 +347,17 @@ impl Engine {
             SettingsEntry {
                 settings,
                 updated_utc: now,
+                by: None,
             },
         );
         self.config.save(&self.home)?;
-        self.refresh_aliases();
-        Ok(())
-    }
-
-    /// Adopt the newest settings record of every storage this device has.
-    /// Returns whether anything changed.
-    pub(super) fn pull_storage_settings(&mut self) -> Result<bool> {
-        if self.vault.member {
-            return Ok(false);
-        }
-        let keys = self.storage_keys();
-        let by_key: BTreeMap<&Id, &String> = keys.iter().map(|(n, k)| (k, n)).collect();
-        let fr_keys = self.folder_record_keys();
-        let mut newest: BTreeMap<String, StorageSettingsRecord> = BTreeMap::new();
-        for (_, backend) in self.metadata_storages(false)? {
-            let Ok(list) = backend.list(storage_settings::PREFIX) else {
-                continue;
-            };
-            for key in list {
-                let mut parts = key[storage_settings::PREFIX.len()..].split('/');
-                let (Some(sk), Some(dev), Some(stamp)) = (parts.next(), parts.next(), parts.next())
-                else {
-                    continue;
-                };
-                let (Ok(sk), Ok(dev)) = (Id::from_hex(sk), DeviceId::from_hex(dev)) else {
-                    continue;
-                };
-                let Some(name) = by_key.get(&sk).map(|n| n.to_string()) else {
-                    continue;
-                };
-                let stamp: i64 = stamp
-                    .strip_suffix(".enc")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-                let known = self
-                    .config
-                    .storage_settings
-                    .get(&name)
-                    .map(|e| e.updated_utc)
-                    .unwrap_or(0)
-                    .max(newest.get(&name).map(|r| r.updated_utc).unwrap_or(0));
-                if stamp <= known {
-                    continue;
-                }
-                let Ok(Some(blob)) = backend.get(&key) else {
-                    continue;
-                };
-                let verify = |d: &DeviceId| self.device_key(d);
-                let Ok(rec) = StorageSettingsRecord::open_any(
-                    &blob,
-                    &self.vault.vault_id,
-                    &sk,
-                    &dev,
-                    &fr_keys,
-                    &verify,
-                    self.org.is_none(),
-                ) else {
-                    continue;
-                };
-                if rec.updated_utc != stamp || !self.trusted(&rec.device) {
-                    continue;
-                }
-                let allowed = match &self.org {
-                    Some(o) => o.is_admin(&rec.device) || o.policy().members_may_add_storages,
-                    None => true,
-                };
-                if allowed {
-                    newest.insert(name, rec);
-                }
-            }
-        }
-        let changed = !newest.is_empty();
-        for (name, rec) in newest {
-            self.config.storage_settings.insert(
-                name,
-                SettingsEntry {
-                    settings: rec.settings,
-                    updated_utc: rec.updated_utc,
-                },
+        if self.record_storages()?.is_empty() {
+            bail!(
+                "the storage settings could not be published: no storage holds the vault's records"
             );
         }
-        if changed {
-            self.config.save(&self.home)?;
-        }
-        self.refresh_aliases();
-        Ok(changed)
-    }
-
-    /// While any storage has a quota or a drain: publish this device's
-    /// names for its storages (the ledger names a storage by its writer's
-    /// name) and keep the other devices' names for them, so that usage
-    /// and drains count every device's copies.
-    fn refresh_aliases(&self) {
-        if self
-            .config
-            .storage_settings
-            .values()
-            .all(|e| e.settings.is_empty())
-        {
-            return;
-        }
-        let aliases = self.drain_resolver().aliases();
-        let _ = util::write_json(&self.home.join("state").join(ALIASES_FILE), &aliases);
+        self.refresh_storage_aliases();
+        Ok(())
     }
 
     // ----- quotas ----------------------------------------------------------------
@@ -428,31 +394,15 @@ impl Engine {
         self.quota_status(name)
     }
 
-    /// Bytes and objects on each storage according to the ledger: the
-    /// blocks claimed there and not dropped (each object once).
-    fn block_usage(&self, view: &LedgerView) -> Usage {
-        // Other devices' claims count under this device's name for the storage.
-        let aliases: BTreeMap<DeviceId, BTreeMap<String, String>> =
-            util::read_json_or_default(&self.home.join("state").join(ALIASES_FILE))
-                .unwrap_or_default();
-        let mut seen: BTreeMap<String, HashSet<&ObjectName>> = BTreeMap::new();
+    /// Bytes and packs on each storage according to the ledger: the packs
+    /// claimed there and not dropped, counted by their size classes
+    /// (padding included: the storage holds it), under this device's
+    /// names for the storages (the view is localized).
+    fn block_usage(&self, view: &crate::ledger3::LedgerView) -> Usage {
         let mut out: BTreeMap<String, (u64, u64)> = BTreeMap::new();
-        for rec in view.chunks.values() {
-            for (name, loc) in &rec.storages {
-                if loc.claimed_by.is_empty() {
-                    continue;
-                }
-                let local = loc
-                    .claimed_by
-                    .iter()
-                    .find_map(|d| aliases.get(d).and_then(|m| m.get(name)))
-                    .unwrap_or(name);
-                if seen.entry(local.clone()).or_default().insert(&rec.object) {
-                    let e = out.entry(local.clone()).or_default();
-                    e.0 += rec.size;
-                    e.1 += 1;
-                }
-            }
+        for spec in &self.config.storages {
+            let u = crate::storages3::storage_usage(view, spec.name());
+            out.insert(spec.name().to_string(), (u.bytes, u.packs));
         }
         // This device's ledger: every batch is on every storage with records.
         let (mut bytes, mut objects) = (0u64, 0u64);
@@ -573,13 +523,13 @@ impl Engine {
             .iter()
             .find(|s| s.name() == name)
             .ok_or_else(|| anyhow!("unknown storage {name}"))?;
-        let view = self.view()?;
+        let view = self.view3()?;
         Ok(self.quota_status_from(spec, &self.block_usage(&view)))
     }
 
     /// Every storage's use against its quota, in configuration order.
     pub fn quota_statuses(&self) -> Result<Vec<QuotaStatus>> {
-        let view = self.view()?;
+        let view = self.view3()?;
         let usage = self.block_usage(&view);
         Ok(self
             .config
@@ -629,7 +579,7 @@ impl Engine {
 
     /// Sentences on storages that keep blocks out: at their quota, or
     /// being drained (for policy reports).
-    pub(super) fn storage_notes(&self, view: &LedgerView) -> Vec<String> {
+    pub(super) fn storage_notes(&self, view: &crate::ledger3::LedgerView) -> Vec<String> {
         let mut out = Vec::new();
         let any = self
             .config
@@ -658,7 +608,7 @@ impl Engine {
     }
 
     /// Room left on every storage with a quota, from the ledger as of `view`.
-    pub(super) fn quota_gate(&self, view: &LedgerView) -> QuotaGate {
+    pub(super) fn quota_gate(&self, view: &crate::ledger3::LedgerView) -> QuotaGate {
         let limited: Vec<&StorageSpec> = self
             .config
             .storages
@@ -696,5 +646,60 @@ impl Engine {
         }
         gate.left = Mutex::new(left);
         gate
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A gate with `bytes` of room (and no object limit) on "q".
+    fn gate(bytes: i128) -> QuotaGate {
+        let g = QuotaGate::default();
+        g.left
+            .lock()
+            .unwrap()
+            .insert("q".to_string(), (Some(bytes), None));
+        g
+    }
+
+    fn left(g: &QuotaGate) -> i128 {
+        g.left.lock().unwrap()["q"].0.unwrap()
+    }
+
+    #[test]
+    fn a_write_that_did_not_happen_gives_its_room_back() {
+        // Room for one 256 KiB pack: one 200 kB block fits, a second
+        // would need a 1 MiB pack.
+        let g = gate(300_000);
+        assert!(g.take("q", 200_000));
+        assert_eq!(left(&g), 300_000 - (256 << 10));
+        assert!(
+            !g.take("q", 200_000),
+            "the second block needs a larger pack"
+        );
+        // The first write failed: its room is free again, and the next
+        // block of the run takes it.
+        g.give_back("q", 200_000);
+        assert_eq!(left(&g), 300_000);
+        assert!(g.take("q", 200_000));
+        // Giving back a block in a pack that others share frees only what
+        // the pack no longer needs.
+        let g = gate(10 << 20);
+        assert!(g.take("q", 100_000));
+        assert!(g.take("q", 100_000));
+        assert_eq!(left(&g), (10 << 20) - (256 << 10));
+        g.give_back("q", 100_000);
+        assert_eq!(left(&g), (10 << 20) - (256 << 10));
+        g.give_back("q", 100_000);
+        assert_eq!(left(&g), 10 << 20);
+        // Storages without a quota, and more than was taken, change nothing.
+        g.give_back("other", 1);
+        g.give_back("q", 5);
+        assert_eq!(left(&g), 10 << 20);
+        // A whole pack copy that did not happen.
+        assert!(g.take_pack("q", 1 << 20));
+        g.give_back_pack("q", 1 << 20);
+        assert_eq!(left(&g), 10 << 20);
     }
 }

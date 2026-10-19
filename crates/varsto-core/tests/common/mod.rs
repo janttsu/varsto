@@ -12,6 +12,43 @@ use std::path::{Path, PathBuf};
 use varsto_core::crypto;
 use varsto_core::ids::ObjectName;
 use varsto_core::packs::{self, PackLoc};
+use varsto_core::storage::StorageSpec;
+use varsto_core::Engine;
+
+/// Storage format 3: `device` asks for every folder `owner` holds and
+/// `owner` approves it (comparing the six words, as a person would), then
+/// `device` reads its grants. A device that joined with the vault words
+/// alone opens no folder before this.
+pub fn approve_all(owner: &mut Engine, device: &mut Engine) {
+    let folders: Vec<String> = owner
+        .folders()
+        .into_iter()
+        .filter(|(r, _)| !r.key_hex.is_empty())
+        .map(|(r, _)| r.name.clone())
+        .collect();
+    let name = device.own_device_name().to_string();
+    for f in folders {
+        let req = device.f3_folder_request(&f, "editor").unwrap();
+        owner
+            .f3_approve(&f, &name, None, Some(&req.fingerprint))
+            .unwrap();
+    }
+    device.refresh_devices().unwrap();
+}
+
+/// `Engine::join` and `approve_all` by `owner`.
+pub fn join_approved(
+    home: &Path,
+    name: &str,
+    pass: &str,
+    key: &str,
+    storage: StorageSpec,
+    owner: &mut Engine,
+) -> Engine {
+    let mut e = Engine::join(home, name, pass, key, storage).unwrap();
+    approve_all(owner, &mut e);
+    e
+}
 
 /// Every pack file under a storage directory: (path, pack id).
 pub fn pack_files(root: &Path) -> Vec<(PathBuf, String)> {
@@ -125,3 +162,5 @@ pub fn lose_all_objects(root: &Path) {
         }
     }
 }
+
+pub mod p2p;

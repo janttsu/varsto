@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! The folder block map of storage format 3 (`docs/spec/format-3-design.md`
-//! section 3; work package 4). Built behind the `format3` feature; the
-//! format-2 engine does not call it.
+//! section 3; work package 4).
 //!
 //! For every block of a folder the map says in which pack and at which
 //! offset it is. It is per folder and per writer device: a stream of

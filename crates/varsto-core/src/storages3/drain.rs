@@ -52,6 +52,11 @@ pub struct DrainNeeds {
     /// Blocks current files and known snapshots use; `None`: unknown, all
     /// live blocks count.
     pub referenced: Option<HashSet<ObjectBin>>,
+    /// Keep the number of copies where a target can take one: a pack whose
+    /// blocks keep their rules without this storage is still copied to the
+    /// first target that lacks it (a drain moves data; a removal only keeps
+    /// what the rules need).
+    pub replace: bool,
 }
 
 /// The copies of a block (storage, place) before a drain and without the
@@ -278,6 +283,18 @@ pub fn drain_plan(
             added.push((t.clone(), place_of(t)));
             item.copy_to.push(t.clone());
             why = lacking(&added);
+        }
+        if why.is_none()
+            && item.copy_to.is_empty()
+            && !afters.is_empty()
+            && need.is_some_and(|n| n.replace)
+        {
+            if let Some(t) = candidates
+                .iter()
+                .find(|t| t.as_str() != storage && !holders.contains(*t))
+            {
+                item.copy_to.push(t.clone());
+            }
         }
         item.shortfall = why;
         match &item.shortfall {

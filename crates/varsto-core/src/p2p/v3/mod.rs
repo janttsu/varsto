@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Peers and transport of storage format 3 (`docs/spec/format-3-design.md`
-//! section 8, work package 9), behind the `format3` feature. Nothing of the
-//! format-2 path changes: the TCP server, the QUIC node and the peer table
-//! take a format-3 mode (`Server::with_tls`, `quic::Node::start_v3`,
-//! `Peers::build_v3`) that the engine switches to with the format
-//! (work package 12).
+//! section 8, work package 9; `alpha-0-format.md` sections 75 and 77.8):
+//! the only transport there is. The TCP server (`Server::bind`), the QUIC
+//! node (`quic::Node::start_v3`) and the peer table (`Peers::build_v3`)
+//! run on what is here; the engine side is `engine/p2p3.rs` and
+//! `engine/ledger_heads.rs`.
 //!
 //! - [`peer`]: peer records as SignedRecords of kind `peer` and the
 //!   directory of accepted ones, which maps certificates to devices.
@@ -111,6 +111,9 @@ pub struct Responder {
     nonces: token::NonceWindow,
     batches: RwLock<Option<Arc<dyn BatchSource>>>,
     heard: Mutex<Vec<Heard>>,
+    /// A handshake presented a certificate the directory does not name
+    /// (a device whose record arrived after the last read, or a stranger).
+    unknown: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for Responder {
@@ -134,6 +137,7 @@ impl Responder {
             nonces: token::NonceWindow::default(),
             batches: RwLock::new(None),
             heard: Mutex::new(Vec::new()),
+            unknown: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -158,7 +162,28 @@ impl Responder {
     /// Whether the handshake admits a client certificate: named by the
     /// directory, and not this device's own.
     pub fn admits(&self, cert: &[u8; 32]) -> bool {
-        cert != &self.own_cert && self.directory().device_for_cert(cert).is_some()
+        if cert == &self.own_cert {
+            return false;
+        }
+        let known = self.directory().device_for_cert(cert).is_some();
+        if !known {
+            self.note_unknown();
+        }
+        known
+    }
+
+    /// A handshake was refused for a certificate the directory does not
+    /// name: the service reads the peer records again soon (rate-limited),
+    /// so a device that just published its record is admitted.
+    pub fn note_unknown(&self) {
+        self.unknown
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether an unknown certificate was refused since the last call.
+    pub fn take_unknown(&self) -> bool {
+        self.unknown
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// A token from this device for `path` at `responder`, on the
@@ -224,6 +249,10 @@ impl Responder {
             Ok(d) => d,
             Err((s, b)) => return (s, b, None),
         };
+        // A removed device is refused at the door, whatever it asks.
+        if snap.revoked.contains(&asker) {
+            return (403, b"forbidden".to_vec(), None);
+        }
         // A relay asks on our registration with it, for another device of
         // the directory; nowhere else may a request speak for another.
         let dev = if for_device.is_empty() {
@@ -247,14 +276,24 @@ impl Responder {
                 }
             }
         };
-        if let Some(r) = self.answer_ledger(path, &dev) {
+        if snap.revoked.contains(&dev) || dev == snap.device_id {
+            return serve_as(snap, path, dev);
+        }
+        if let Some(r) = self.answer_ledger(snap, path, &dev) {
             return (r.0, r.1, Some(dev));
         }
         serve_as(snap, path, dev)
     }
 
-    /// The format-3 ledger paths, or `None` for any other path.
-    fn answer_ledger(&self, path: &str, from: &DeviceId) -> Option<(u16, Vec<u8>)> {
+    /// The ledger paths (`/p2p/changed`, `/p2p/heads`, `/p2p/ledger/`), or
+    /// `None` for any other path. Batches come from the source set with
+    /// `set_batches`, else from the snapshot.
+    fn answer_ledger(
+        &self,
+        snap: &Snapshot,
+        path: &str,
+        from: &DeviceId,
+    ) -> Option<(u16, Vec<u8>)> {
         let changed = heads::list_of_path(path, heads::CHANGED_PREFIX);
         let asked = heads::list_of_path(path, heads::HEADS_PREFIX);
         if let Some(list) = changed.clone().or(asked.clone()) {
@@ -270,13 +309,18 @@ impl Responder {
             let source = self.batches.read().unwrap().clone();
             return Some(match source {
                 Some(src) => (200, heads::answer(src.as_ref(), &list).encode()),
+                None if snap.ledger_dir.is_some() => (200, heads::answer(snap, &list).encode()),
                 None if changed.is_some() => (200, HeadsAnswer::default().encode()),
                 None => (404, b"no ledger".to_vec()),
             });
         }
         if let Some((device, seq)) = heads::parse_ledger_path(path) {
             let source = self.batches.read().unwrap().clone();
-            return Some(match source.and_then(|s| s.batch(&device, seq)) {
+            let rec = match source {
+                Some(s) => s.batch(&device, seq),
+                None => snap.batch(&device, seq),
+            };
+            return Some(match rec {
                 Some(rec) => (200, rec),
                 None => (404, b"not here".to_vec()),
             });
@@ -363,6 +407,25 @@ impl Client {
             timeout,
             &|e: &[u8; 32]| self.token(e, responder, path),
         )
+    }
+}
+
+/// The snapshot answers for the local ledger: its head list, and batches
+/// read from the ledger directory (`<device hex>/<seq 16>-0000.rec`).
+impl BatchSource for Snapshot {
+    fn heads(&self) -> Vec<HeadRef> {
+        self.heads.clone()
+    }
+    fn batch(&self, device: &Id16, seq: u64) -> Option<Vec<u8>> {
+        let dir = self.ledger_dir.as_ref()?;
+        let p = dir
+            .join(hex::encode(device))
+            .join(format!("{seq:016}-0000.rec"));
+        let meta = std::fs::metadata(&p).ok()?;
+        if meta.len() > crate::record::MAX_PART_READ {
+            return None;
+        }
+        std::fs::read(p).ok()
     }
 }
 
