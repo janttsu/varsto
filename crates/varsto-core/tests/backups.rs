@@ -108,7 +108,7 @@ fn objects(path: &Path) -> usize {
 /// Objects of a folder's blocks that a storage directory still holds: the
 /// members of the packs the ledger says were written for the folder.
 fn stored(e: &Engine, root: &Path, folder: &FolderId) -> BTreeSet<String> {
-    let view = e.ledger_view3().unwrap();
+    let view = e.ledger_view().unwrap();
     let fb: [u8; 16] = hex::decode(folder.as_str()).unwrap().try_into().unwrap();
     let mut out = BTreeSet::new();
     for (_, id) in common::pack_files(root) {
@@ -355,7 +355,7 @@ fn devices_and_transferrers_never_receive_backup_contents() {
     assert_eq!(snapshot_files(&lab.p("two")).len(), 1);
     // No device claims to hold its blocks: the backup has no manifest, and
     // its packs are on the storages that are not transferrers only.
-    let view = a.ledger_view3().unwrap();
+    let view = a.ledger_view().unwrap();
     let fb: [u8; 16] = hex::decode(id.as_str()).unwrap().try_into().unwrap();
     assert!(!stored(&a, &lab.p("one"), &id).is_empty());
     assert!(stored(&a, &lab.p("usb"), &id).is_empty());
@@ -385,11 +385,11 @@ fn devices_and_transferrers_never_receive_backup_contents() {
     b.sync(None).unwrap();
     a.sync(None).unwrap();
     // Still no manifest of the backup anywhere.
-    let view = a.ledger_view3().unwrap();
+    let view = a.ledger_view().unwrap();
     assert!(view.streams.keys().all(|(kind, scope, _)| *kind
         != varsto_core::record::Kind::Manifest.code()
         || *scope != fb));
-    assert_eq!(a.ledger_view3().unwrap(), a.view3_replayed().unwrap());
+    assert_eq!(a.ledger_view().unwrap(), a.view3_replayed().unwrap());
 }
 
 #[test]
@@ -537,7 +537,7 @@ fn expiry_deletes_only_what_no_live_snapshot_uses() {
     // Running it again changes nothing.
     let r = a.expire_backups_at(s1.expires_utc + DAY + 120).unwrap();
     assert_eq!(r.snapshots_expired, 0);
-    assert_eq!(a.ledger_view3().unwrap(), a.view3_replayed().unwrap());
+    assert_eq!(a.ledger_view().unwrap(), a.view3_replayed().unwrap());
     let fsck = a.fsck(false).unwrap();
     assert!(fsck.chunks_missing.is_empty(), "{:?}", fsck.chunks_missing);
     let _ = packed_before;

@@ -4,13 +4,15 @@
 //! removable disks and network mounts); S3 and rclone remotes follow, and a
 //! pool of removable disks (`crate::pool`) that holds chunk objects only.
 //!
-//! Object keys use forward slashes. Layout written by the engine:
+//! Object keys use forward slashes. Layout written by the engine (storage
+//! format 3, `docs/spec/format-3-design.md`):
 //! - `vault/meta.json`                       vault identity (not secret)
-//! - `vault/devices/<device>.enc`            device record (encrypted)
-//! - `vault/folders/<device>/<folder>.enc`   folder record (encrypted)
-//! - `ledger/<device>/<seq>.json`            signed, encrypted ledger batches
-//! - `manifests/<folder>/<device>/<seq>.enc` encrypted folder manifests
-//! - `chunks/<xx>/<objectname>`              encrypted chunks
+//! - `<kind path>/<seq 16>-<part 4>.rec`     signed records (`crate::record`):
+//!   devices, folders, grants, ledger batches, manifests, block maps, ...
+//! - `packs/<xx>/<id>`                       packs of encrypted blocks
+//!
+//! `chunks/<xx>/<objectname>` is the name of one block inside a pack: a
+//! `crate::packs::PackStore` answers it from the packs and the block maps.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -43,7 +45,6 @@ pub const MAX_RECORD: u64 = 256 << 20;
 /// How many bytes a read of `key` may return: nothing a storage holds can
 /// make the program allocate more.
 pub fn read_limit(key: &str) -> u64 {
-    #[cfg(feature = "format3")]
     if key.ends_with(".rec") {
         return crate::record::MAX_PART_READ;
     }

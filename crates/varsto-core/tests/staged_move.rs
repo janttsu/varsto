@@ -127,8 +127,8 @@ impl Lab {
 /// place of each in a pack held there.
 fn on(e: &Engine, storage: &str) -> (usize, u64) {
     (
-        e.objects_on_storage3(storage).unwrap().len(),
-        e.block_bytes_on_storage3(storage).unwrap(),
+        e.objects_on_storage(storage).unwrap().len(),
+        e.block_bytes_on_storage(storage).unwrap(),
     )
 }
 
@@ -142,7 +142,7 @@ fn every_block_present(e: &Engine) {
     let names: Vec<String> = e.storages().iter().map(|s| s.name().to_string()).collect();
     let mut all: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     for n in &names {
-        for o in e.objects_on_storage3(n).unwrap() {
+        for o in e.objects_on_storage(n).unwrap() {
             all.entry(o).or_default().push(n.clone());
         }
     }

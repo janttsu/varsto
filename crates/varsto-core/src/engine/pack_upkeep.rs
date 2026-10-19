@@ -124,7 +124,7 @@ impl Engine {
     /// The storages garbage collection works on, by class: cold ones keep
     /// their minimum duration, pools and transferrers are never rewritten.
     /// Storages that cannot be opened are left out (and named).
-    fn gc_storages3(&self, skipped: &mut Vec<String>) -> StorageSet {
+    fn gc_storages(&self, skipped: &mut Vec<String>) -> StorageSet {
         let mut set = StorageSet::default();
         for spec in &self.config.storages {
             let b: Arc<dyn Storage> = match self.open_spec(spec) {
@@ -160,7 +160,7 @@ impl Engine {
     }
 
     /// The folder's current epoch (folder epoch records).
-    fn folder_epoch3(&self, folder: &Id16) -> u32 {
+    fn folder_epoch(&self, folder: &Id16) -> u32 {
         self.f3
             .members
             .registry
@@ -175,7 +175,7 @@ impl Engine {
         crate::gc3::folder_writers(
             &self.f3.members.registry,
             folder,
-            self.folder_epoch3(folder),
+            self.folder_epoch(folder),
             &self.f3.members.revoked,
         )
     }
@@ -185,7 +185,7 @@ impl Engine {
         crate::gc3::folder_readers(
             &self.f3.members.registry,
             folder,
-            self.folder_epoch3(folder),
+            self.folder_epoch(folder),
             &self.f3.members.revoked,
         )
     }
@@ -194,7 +194,7 @@ impl Engine {
     /// writer's newest manifest and the unexpired trash and history
     /// entries, with how far each writer's manifest and trash streams were
     /// applied (collection waits for a writer whose records are behind).
-    fn gc_references3(
+    fn gc_references(
         &self,
         rec: &FolderRecord,
         manifests: &FolderManifests,
@@ -244,7 +244,7 @@ impl Engine {
                     .insert(crate::storages3::object_bin(&c.object)?);
             }
         }
-        for (d, seq) in self.trash_applied3(&rec.folder_id) {
+        for (d, seq) in self.trash_applied(&rec.folder_id) {
             refs.applied.insert((Kind::Trash, d), seq);
         }
         Ok(refs)
@@ -252,7 +252,7 @@ impl Engine {
 
     /// The newest own map record on the storages: a record under a seq no
     /// batch announced (a crash before the batch) is skipped by the writer.
-    fn own_map_highest3(&self, folder: &Id16, meta: &[&dyn Storage]) -> Result<u64> {
+    fn own_map_highest(&self, folder: &Id16, meta: &[&dyn Storage]) -> Result<u64> {
         let Some(first) = meta.first() else {
             return Ok(0);
         };
@@ -278,7 +278,7 @@ impl Engine {
 
     /// Seal and push the events recorded so far now, also inside an action
     /// that would keep them for its one batch.
-    pub(super) fn flush_pending3(&mut self) -> Result<()> {
+    pub(super) fn flush_pending(&mut self) -> Result<()> {
         if self.pending.is_empty() && self.f3.pending.is_empty() {
             return Ok(());
         }
@@ -291,7 +291,7 @@ impl Engine {
     /// Run `f` with what a marking round, a collection or a repair of
     /// `folder` needs: the map writer of this device, the folder's table,
     /// where map records go and the sink that seals and pushes one batch.
-    pub(super) fn with_map_writer3<T>(
+    pub(super) fn with_map_writer<T>(
         &mut self,
         folder: &Id16,
         epoch: u32,
@@ -301,7 +301,7 @@ impl Engine {
         // Events recorded before (a push's map and manifest announcements,
         // a trash record) are sealed first: the map record this writes
         // follows theirs in seq and in the ledger.
-        self.flush_pending3()?;
+        self.flush_pending()?;
         let me = self.me3();
         let vault = members3::bin(&self.vault.vault_id)?;
         let table = self.table3(folder)?;
@@ -310,13 +310,13 @@ impl Engine {
         for _ in 0..4 {
             lamports.push_back(self.tick()?);
         }
-        let storages = self.record_storages3()?;
+        let storages = self.record_storages()?;
         let meta: Vec<&dyn Storage> = storages
             .iter()
             .filter(|(s, _)| !s.is_cold())
             .map(|(_, b)| &**b)
             .collect();
-        let highest = self.own_map_highest3(folder, &meta)?;
+        let highest = self.own_map_highest(folder, &meta)?;
         let mut writer = MapWriter::from_view(*folder, me, epoch, view, highest);
         let vault_keys = self.vault_keys3();
         let Engine {
@@ -360,7 +360,7 @@ impl Engine {
     }
 
     /// One marking round and one collection run of an attached folder.
-    fn gc_folder3(
+    fn gc_folder(
         &mut self,
         rec: &FolderRecord,
         storages: &StorageSet,
@@ -376,15 +376,15 @@ impl Engine {
         let writers = self.folder_writers3(&folder);
         // 1. Every record up to date, then the references.
         let view = self.view3()?;
-        let (manifests, _) = self.pull_folder_records3(&folder, &view)?;
+        let (manifests, _) = self.pull_folder_records(&folder, &view)?;
         // A backup's blocks are referenced by its unexpired snapshots.
         let refs = if rec.is_backup() {
             self.backup_gc_references3(rec, now)?
         } else {
-            self.gc_references3(rec, &manifests, now)?
+            self.gc_references(rec, &manifests, now)?
         };
         // 2. Marks.
-        let marks = self.with_map_writer3(&folder, epoch, &view, |w, t, out, sink| {
+        let marks = self.with_map_writer(&folder, epoch, &view, |w, t, out, sink| {
             crate::gc3::mark_round(&standing, w, t, &view, out, &refs, &writers, sink)
         })?;
         report.marked_dead += marks.dead;
@@ -434,7 +434,7 @@ impl Engine {
             }
             n
         };
-        let r = self.with_map_writer3(&folder, epoch, &view, |w, t, out, sink| {
+        let r = self.with_map_writer(&folder, epoch, &view, |w, t, out, sink| {
             crate::gc3::collect(
                 &standing, w, t, &view, out, storages, &refs, &writers, sink, &opts,
             )
@@ -461,8 +461,8 @@ impl Engine {
         if self.vault.member || self.forked_self || self.removal.is_some() {
             return Ok(report);
         }
-        self.flush_pending3()?;
-        let storages = self.gc_storages3(&mut report.skipped);
+        self.flush_pending()?;
+        let storages = self.gc_storages(&mut report.skipped);
         let mut attached: Vec<FolderRecord> = self
             .config
             .folders
@@ -483,7 +483,7 @@ impl Engine {
         );
         let mut collecting = None;
         for rec in &attached {
-            if let Err(e) = self.gc_folder3(rec, &storages, now, &mut report) {
+            if let Err(e) = self.gc_folder(rec, &storages, now, &mut report) {
                 report.skipped.push(format!("folder {}: {e:#}", rec.name));
                 continue;
             }
@@ -499,7 +499,7 @@ impl Engine {
         // 4. Orphans, over the tables of every folder held here.
         if let Some(standing) = collecting {
             let view = self.view3()?;
-            self.ensure_tables3();
+            self.ensure_tables();
             let tables: Vec<_> = self
                 .f3
                 .tables
@@ -545,7 +545,7 @@ impl Engine {
 
     /// Pack copies on cold storage the last run left for later (the
     /// storage's minimum duration).
-    pub(super) fn gc_drops_waiting3(&self) -> u64 {
+    pub(super) fn gc_drops_waiting(&self) -> u64 {
         self.load_gc_state().drops_waiting
     }
 

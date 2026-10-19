@@ -82,7 +82,7 @@ impl Engine {
     /// membership records (folder record and key wraps). `others` take
     /// part with their roles; `converted_from` names the folder it
     /// replaces.
-    pub(super) fn publish_strongroom3(
+    pub(super) fn publish_strongroom(
         &mut self,
         name: &str,
         k13: &SecretKey,
@@ -114,7 +114,7 @@ impl Engine {
         let others = others.to_vec();
         let k13 = k13.clone();
         let name = name.to_string();
-        self.with_enrolled3(|m| {
+        self.with_enrolled(|m| {
             if m.registry.get(&id).is_none() {
                 m.create_strongroom(&name, &k13, record, &others)?;
             } else {
@@ -418,7 +418,7 @@ impl Engine {
             .unwrap_or_default();
 
         // 2. The new folder's records, then switch here and push into it.
-        self.publish_strongroom3(
+        self.publish_strongroom(
             &rec.name,
             folder_key,
             &info,
@@ -543,7 +543,7 @@ impl Engine {
             .get(&id)
             .is_none_or(|st| st.is_removed());
         if !removed {
-            self.with_enrolled3(|m| m.remove_folder(&id))?
+            self.with_enrolled(|m| m.remove_folder(&id))?
                 .ok_or_else(|| anyhow!("no storage to publish the removal to"))?;
         }
         // The blocks the deleted packs held (one pack holds many).
@@ -554,7 +554,7 @@ impl Engine {
             }
             Err(_) => BTreeSet::new(),
         };
-        let (packs, records) = self.purge_folder3(&id, &old.name)?;
+        let (packs, records) = self.purge_folder(&id, &old.name)?;
         let objects = if packs == 0 { 0 } else { objects.len() as u64 };
         let _ = fs::remove_file(self.state_path(&old.folder_id));
         Ok((objects, records))
@@ -567,7 +567,7 @@ impl Engine {
     /// converted copy may not include stay as they are: after the next
     /// unlock they are synced like new local files (identical content
     /// merges, different content becomes a conflict copy).
-    pub(super) fn adopt_conversions3(&mut self) -> Result<()> {
+    pub(super) fn adopt_conversions(&mut self) -> Result<()> {
         let me = self.me3();
         let found: Vec<(FolderId, FolderId, Option<u64>)> = self
             .f3
@@ -791,7 +791,7 @@ impl Engine {
             covered: old.as_ref().map(|o| o.covered.clone()).unwrap_or_default(),
             rekey: old.as_ref().is_some_and(|o| o.rekey),
         };
-        self.with_enrolled3(|m| m.write_strongroom(record))?
+        self.with_enrolled(|m| m.write_strongroom(record))?
             .ok_or_else(|| anyhow!("this device has no storage to publish the keys to"))?;
         let mut new_rec = rec.clone();
         new_rec.strongroom = Some(new_info);

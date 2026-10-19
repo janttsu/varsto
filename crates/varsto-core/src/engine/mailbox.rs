@@ -506,7 +506,7 @@ impl Engine {
             return None;
         }
         let rec = self.keyring.folders.get(folder)?;
-        let table = self.folder_table3(rec).ok().flatten()?;
+        let table = self.folder_table(rec).ok().flatten()?;
         let t = table.read().unwrap_or_else(|e| e.into_inner());
         let mut found: BTreeMap<ObjectName, u64> = BTreeMap::new();
         let mut targets: BTreeSet<String> = BTreeSet::new();
@@ -861,7 +861,7 @@ impl Engine {
             let Ok(state) = self.load_state(&rec.folder_id) else {
                 continue;
             };
-            let Ok(Some(table)) = self.folder_table3(&rec) else {
+            let Ok(Some(table)) = self.folder_table(&rec) else {
                 continue;
             };
             let current: HashSet<crate::ledger3::ObjectBin> = state
@@ -1546,7 +1546,7 @@ impl Engine {
             .copied()
             .collect();
         let mut newest: BTreeMap<crate::record::Id16, crate::mailbox::BoardBody> = BTreeMap::new();
-        let _ = self.with_records3(|store| {
+        let _ = self.with_records(|store| {
             let streams: Vec<_> = devices
                 .iter()
                 .map(|d| crate::mailbox::board_stream(*d))
@@ -1599,7 +1599,7 @@ impl Engine {
         }
         let updated_utc = now.max(st.board_utc + 1);
         let me = self.me3();
-        let published = self.publish_newest3(&crate::mailbox::board_stream(me), |seq| {
+        let published = self.publish_newest(&crate::mailbox::board_stream(me), |seq| {
             crate::mailbox::BoardBody::new(me, seq, updated_utc, &held)
         });
         match published {

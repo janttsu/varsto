@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Folder membership of storage format 3 (`docs/spec/format-3-design.md`,
-//! sections 1, 5, 6 and 9; work package 8a). Built behind the `format3`
-//! feature; nothing in the format-2 code path calls it yet.
+//! sections 1, 5, 6 and 9; work package 8a).
 //!
 //! Every object here is a [`crate::record::SignedRecord`]:
 //!

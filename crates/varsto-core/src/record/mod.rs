@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Signed records of storage format 3 (`docs/spec/format-3-design.md`,
-//! section 5; work package 1). Built behind the `format3` feature; nothing
-//! in the format-2 code path calls it yet.
+//! section 5; work package 1).
 //!
 //! Every object a device publishes, except packs, is a [`SignedRecord`]:
 //! `"VSR3" || postcard(envelope)`. The envelope names the kind, vault,

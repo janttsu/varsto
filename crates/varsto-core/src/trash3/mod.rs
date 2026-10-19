@@ -2,9 +2,8 @@
 //! Trash and version history of storage format 3 as signed base + delta
 //! records (`docs/spec/format-3-design.md`, section 7; work package 7),
 //! the `settings` record they are timed by, and the combined references
-//! garbage collection uses. Built behind the `format3` feature; nothing in
-//! the format-2 code path calls it yet (the switch is WP12). Snapshots are
-//! in `crate::snapshot3`.
+//! garbage collection uses. Snapshots are in
+//! `crate::snapshot3`.
 //!
 //! - [`record`]: the body of a `trash` record (`TrashBody`), its entries,
 //!   removals and the version history, limits and entry checks.

@@ -33,7 +33,7 @@ fn on_storage(root: &Path) -> usize {
 /// The sizes of the blocks (stored bytes) of one folder's packs in a
 /// storage directory, ascending.
 fn block_sizes(e: &Engine, root: &Path, folder: &varsto_core::ids::FolderId) -> Vec<u64> {
-    let view = e.ledger_view3().unwrap();
+    let view = e.ledger_view().unwrap();
     let fb: [u8; 16] = hex::decode(folder.as_str()).unwrap().try_into().unwrap();
     let mut out = Vec::new();
     for (_, id) in common::pack_files(root) {

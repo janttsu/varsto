@@ -3,8 +3,6 @@
 //! --folders` shows the joining device's name and six words and asks, the
 //! joining side shows the same six words, the ticked folder is granted and
 //! no other, and a device the person declines gets nothing.
-#![cfg(feature = "format3")]
-
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;

@@ -5,9 +5,7 @@
 //! `pack_stored` events of its first upload.
 //!
 //! Run with
-//! `cargo test --release -p varsto-core --features format3 --test ledger3_scale -- --ignored --nocapture`.
-#![cfg(feature = "format3")]
-
+//! `cargo test --release -p varsto-core --test ledger3_scale -- --ignored --nocapture`.
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::Instant;

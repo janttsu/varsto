@@ -145,7 +145,7 @@ fn devices_never_online_together_converge() {
     assert_eq!(docs.chunks_without_storage_copy, 0);
     // Format 3 verifies whole packs (automatic verification), not blocks
     // as they are fetched: `chunks_verified_elsewhere` comes from
-    // `pack_verified` (f3-switch: part B wires automatic verification).
+    // `pack_verified` (automatic verification, `fsck --verify`).
     assert_eq!(status.devices.len(), 2);
     drop(b);
 

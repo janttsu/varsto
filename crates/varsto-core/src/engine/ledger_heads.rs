@@ -148,7 +148,7 @@ impl Engine {
         let mut devices: Vec<Id16> = self.full_device_keys().keys().copied().collect();
         devices.push(self.me3());
         let mut out = Vec::new();
-        let Ok(storages) = self.record_storages3() else {
+        let Ok(storages) = self.record_storages() else {
             return out;
         };
         for (spec, backend) in storages {
@@ -226,7 +226,7 @@ impl Engine {
         // This device's own batches: what it pushed to each storage it
         // knows itself.
         let mut own_top = 0;
-        for (spec, backend) in self.record_storages3()? {
+        for (spec, backend) in self.record_storages()? {
             let seq = self.f3.ledger.pushed(spec.name());
             let Some(storage) = verify::storage_identity(backend.as_ref())
                 .ok()
@@ -281,35 +281,5 @@ impl Engine {
     /// The suspect (storage, device) pairs the rollback judge keeps.
     pub fn rollback_suspects(&self) -> BTreeMap<String, heads::Suspect> {
         Watch::load(&self.home).rollback.suspects
-    }
-
-    /// Format 2's pull asks the peers here before it lists the storages;
-    /// in format 3 that is the catch-up.
-    pub(super) fn exchange_heads(&mut self) {
-        if let Err(e) = self.p2p_catch_up() {
-            log::debug!("head exchange with peers failed: {e:#}");
-        }
-    }
-
-    /// Per device: how far a peer proved that device's ledger (a signed
-    /// batch envelope or the writer's own peer record). Beyond a removed
-    /// device's cut-off nothing counts.
-    pub(super) fn peer_reach(&self, dir: &KeyDirectory) -> BTreeMap<DeviceId, u64> {
-        let me = &self.vault.device_id;
-        let mut out: BTreeMap<DeviceId, u64> = BTreeMap::new();
-        for (dev, p) in Watch::load(&self.home).proved {
-            let Ok(dev) = DeviceId::from_hex(&dev) else {
-                continue;
-            };
-            if &dev == me || !dir.contains_key(&dev) {
-                continue;
-            }
-            let reach = match self.devices.revoked.get(&dev) {
-                Some(r) => p.seq.min(r.cutoff_seq),
-                None => p.seq,
-            };
-            out.insert(dev, reach);
-        }
-        out
     }
 }

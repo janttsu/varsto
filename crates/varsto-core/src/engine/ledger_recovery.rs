@@ -638,7 +638,7 @@ impl Engine {
     }
 
     /// This device's own ledger prefix on the storages.
-    fn own_prefix3(&self) -> String {
+    fn own_prefix(&self) -> String {
         format!("ledger/{}/", hex::encode(self.me3()))
     }
 
@@ -649,7 +649,7 @@ impl Engine {
     fn own_objects_ahead(&mut self) -> Result<Option<u64>> {
         let me = self.me3();
         let head = self.own_head3();
-        let prefix = self.own_prefix3();
+        let prefix = self.own_prefix();
         let start = if head == 0 {
             String::new()
         } else {
@@ -698,7 +698,7 @@ impl Engine {
         key: &str,
     ) -> Result<bool> {
         let me = self.me3();
-        let prefix = self.own_prefix3();
+        let prefix = self.own_prefix();
         let Some(o) = key
             .strip_prefix(&prefix)
             .and_then(crate::ledger3::LedgerObject::parse)
@@ -742,7 +742,7 @@ impl Engine {
     /// genuine objects are never touched, whatever their number.
     pub fn ledger_clean_junk(&mut self, dry_run: bool) -> Result<JunkReport> {
         self.ensure_active()?;
-        let prefix = self.own_prefix3();
+        let prefix = self.own_prefix();
         let mut report = JunkReport {
             dry_run,
             ..Default::default()
@@ -766,17 +766,6 @@ impl Engine {
         }
         self.ledger_alarm.watch.save(&self.home);
         Ok(report)
-    }
-
-    /// Before signing: a storage that holds this identity's batches after
-    /// the local head fences the device (nothing is signed).
-    pub(super) fn check_storage_before_signing(&mut self) -> Result<()> {
-        if let Some(n) = self.own_objects_ahead()? {
-            self.ledger_alarm.storage_ahead = Some(n);
-            self.forked_self = true;
-            self.ensure_ledger_writable()?;
-        }
-        Ok(())
     }
 
     /// The cheap check of the storages (at service start and now and then):
@@ -861,14 +850,14 @@ impl Engine {
         report.local = self.f3.ledger.rescan()?;
         report.own_head_before = self.f3.ledger.head(&me).seq;
         let base_before = self.f3.ledger.head(&me).base.map(|b| b.seq);
-        self.refresh_members3()?;
+        self.refresh_members()?;
 
         task.set_phase("own");
         // Own batches signed here that no storage holds while the storages
         // hold other batches of this device under those numbers (a copy
         // restored from a backup that signed before it noticed): set aside,
         // their events signed again after the storages' history.
-        let requeued = self.set_aside_unpublished3(&mut report)?;
+        let requeued = self.set_aside_unpublished(&mut report)?;
         let no_ledger_before = self.ledger_lost_everywhere(true)?;
         let verify = opts.from_storage || (opts.automatic && no_ledger_before);
         let storages: Vec<(StorageSpec, Box<dyn Storage>)> = self
@@ -1018,7 +1007,7 @@ impl Engine {
         self.forked_self = false;
         self.f3.ledger.clear_fork(&me)?;
         self.f3.ledger.save()?;
-        self.reset_view3();
+        self.reset_view();
 
         task.set_phase("others");
         let forks = self.pull_ledger()?;
@@ -1083,7 +1072,7 @@ impl Engine {
     /// storage's copy would be the same), so they are set aside under
     /// `ledger/discarded/` and their events go into the next batch.
     /// Returns how many events were requeued.
-    fn set_aside_unpublished3(&mut self, report: &mut LedgerRebuildReport) -> Result<u64> {
+    fn set_aside_unpublished(&mut self, report: &mut LedgerRebuildReport) -> Result<u64> {
         let me = self.me3();
         let head = self.f3.ledger.head(&me);
         if head.seq == 0 {

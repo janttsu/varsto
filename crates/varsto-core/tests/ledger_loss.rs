@@ -155,7 +155,7 @@ fn heads_of(e: &Engine, device: &str) -> BTreeSet<u64> {
 
 /// Every pack copy the ledger view claims: `<pack>@<storage>`.
 fn claims(e: &Engine) -> BTreeSet<String> {
-    let view = e.ledger_view3().unwrap();
+    let view = e.ledger_view().unwrap();
     view.packs
         .keys()
         .flat_map(|id| {
@@ -217,7 +217,7 @@ fn s2_deleted_local_ledger_is_restored_and_numbering_continues() {
     let home = lab.a_home();
     let a_id = a.device_id().to_string();
     let head = own_head(&a);
-    let view = a.ledger_view3().unwrap().canonical();
+    let view = a.ledger_view().unwrap().canonical();
     drop((a, b));
     fs::remove_dir_all(home.join("ledger")).unwrap();
 
@@ -245,7 +245,7 @@ fn s2_deleted_local_ledger_is_restored_and_numbering_continues() {
     assert!(r.batches_pulled > 0, "B's batches came back too: {r:?}");
     assert!(!r.reenrolled);
     assert!(r.health.is_ok(), "{:?}", r.health);
-    let after = a.ledger_view3().unwrap().canonical();
+    let after = a.ledger_view().unwrap().canonical();
     assert_eq!(after.packs, view.packs);
     assert_eq!(after.devices, view.devices);
     assert_eq!(after.folders.len(), 2, "the new folder is recorded");
@@ -289,7 +289,7 @@ fn s2_restores_own_checkpoint_after_pruning() {
         "old batches were pruned: {on_box:?}"
     );
     let head = own_head(&a);
-    let view = a.ledger_view3().unwrap().canonical();
+    let view = a.ledger_view().unwrap().canonical();
     let home = lab.a_home();
     drop(a);
     fs::remove_dir_all(home.join("ledger")).unwrap();
@@ -298,7 +298,7 @@ fn s2_restores_own_checkpoint_after_pruning() {
     let r = a.ledger_rebuild(&LedgerRebuildOptions::default()).unwrap();
     assert_eq!(r.adopted_checkpoint, Some(cp));
     assert_eq!(own_head(&a), head);
-    assert_eq!(a.ledger_view3().unwrap().canonical().packs, view.packs);
+    assert_eq!(a.ledger_view().unwrap().canonical().packs, view.packs);
     fs::write(lab.a_docs().join("after.txt"), b"after").unwrap();
     a.sync(None).unwrap();
     assert_eq!(own_head(&a), head + 1);
@@ -589,11 +589,11 @@ fn s4_service_rebuilds_by_itself_and_skips_damaged_objects() {
 fn s5_damaged_view_cache_is_rebuilt() {
     let (lab, a, b) = two_devices();
     let home = lab.a_home();
-    let before = a.ledger_view3().unwrap().canonical();
+    let before = a.ledger_view().unwrap().canonical();
     drop((a, b));
     fs::write(home.join("ledger/view.rec"), b"garbage").unwrap();
     let a = open(&home);
-    assert_eq!(a.ledger_view3().unwrap().canonical(), before);
+    assert_eq!(a.ledger_view().unwrap().canonical(), before);
     assert!(a.ledger_health().is_ok());
 }
 

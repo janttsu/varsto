@@ -73,7 +73,7 @@ impl Engine {
     /// Record the versions of `view`, a writer's manifest as read (only the
     /// paths in `only` when given). Every record read was accepted against
     /// its announcement, so its versions count as verified.
-    pub(super) fn history_from_view3(
+    pub(super) fn history_from_view(
         &self,
         hist: &mut ChangeLog,
         device: &Id16,
@@ -129,7 +129,7 @@ impl Engine {
     /// every writer this device took records from, then the other devices'
     /// versions this device holds that none of them named, at the file's
     /// modification time. Runs once per folder.
-    pub(super) fn history_backfill3(
+    pub(super) fn history_backfill(
         &self,
         hist: &mut ChangeLog,
         state: &FolderState,
@@ -139,7 +139,7 @@ impl Engine {
             return Ok(());
         }
         for (dev, view) in &manifests.views {
-            self.history_from_view3(hist, dev, view, None)?;
+            self.history_from_view(hist, dev, view, None)?;
         }
         let me = self.vault.device_id.clone();
         let now = util::now_utc();
@@ -181,8 +181,8 @@ impl Engine {
         }
         let rec = self.with_key(&rec)?;
         let state = self.load_state(&rec.folder_id)?;
-        let manifests = self.load_manifests3(&members3::bin(&rec.folder_id)?);
-        self.history_backfill3(&mut hist, &state, &manifests)?;
+        let manifests = self.load_manifests(&members3::bin(&rec.folder_id)?);
+        self.history_backfill(&mut hist, &state, &manifests)?;
         hist.save()
     }
 

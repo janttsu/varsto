@@ -44,7 +44,6 @@ varsto_core::redacted_debug!(ServiceFile { pid, port, started_utc, version ; tok
 pub struct ServiceState {
     /// Storage format 3: folder requests already announced to the page
     /// (`folder.request`), as `<folder>/<device>/<words>`.
-    #[cfg(feature = "format3")]
     pub seen_requests: std::collections::BTreeSet<String>,
     pub running: bool,
     pub paused: bool,
@@ -213,7 +212,6 @@ impl ServiceState {
     /// only reads. Answering a request is up to a person, at the page or at
     /// a command line: nothing in this file approves, denies or grants.
     pub fn watch_folder_requests(&mut self, engine: &mut Engine) {
-        #[cfg(feature = "format3")]
         match engine.f3_requests(None) {
             Ok(list) => {
                 let mut now = std::collections::BTreeSet::new();
@@ -242,8 +240,6 @@ impl ServiceState {
             }
             Err(e) => log::debug!("folder requests not checked: {e:#}"),
         }
-        #[cfg(not(feature = "format3"))]
-        let _ = engine;
     }
 
     /// Rank the pool disks for docking next (`disk suggest`) and, at most

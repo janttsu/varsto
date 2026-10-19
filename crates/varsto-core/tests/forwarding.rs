@@ -221,12 +221,12 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
 
     // The copies are the laptop's claims, and its own read-back is not a
     // verification by another device.
-    let view = laptop.ledger_view3().unwrap();
+    let view = laptop.ledger_view().unwrap();
     let me: [u8; 16] = hex::decode(laptop.device_id().as_str())
         .unwrap()
         .try_into()
         .unwrap();
-    let packs = laptop.packs_on_storage3("bucket").unwrap();
+    let packs = laptop.packs_on_storage("bucket").unwrap();
     assert!(!packs.is_empty());
     for id in packs.keys() {
         let id: [u8; 32] = hex::decode(id).unwrap().try_into().unwrap();
@@ -235,7 +235,7 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
             assert!(!c.independently_verified);
         }
     }
-    let claimed = laptop.objects_on_storage3("bucket").unwrap().len();
+    let claimed = laptop.objects_on_storage("bucket").unwrap().len();
     assert_eq!(claimed as u64, waiting);
 
     // Nothing is left to do.
@@ -264,7 +264,7 @@ fn a_selective_laptop_carries_the_phones_blocks_to_the_bucket() {
     }
     // The phone learns of the copies too.
     phone.sync(None).unwrap();
-    let pv = phone.ledger_view3().unwrap();
+    let pv = phone.ledger_view().unwrap();
     assert!(pv.packs.keys().any(|p| pv.is_held(p, "bucket")));
 }
 

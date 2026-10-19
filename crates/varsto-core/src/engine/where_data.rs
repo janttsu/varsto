@@ -187,7 +187,7 @@ impl Engine {
             } else {
                 None
             };
-            let held = self.load_manifests3(&folder3).held_index();
+            let held = self.load_manifests(&folder3).held_index();
             // Unique blocks of current files, with their manifest sizes.
             let mut chunks: BTreeMap<&ObjectName, u64> = BTreeMap::new();
             for f in state.files.values().filter(|f| !f.deleted) {

@@ -22,10 +22,6 @@ use super::*;
 /// Whether superseded own manifest records are deleted from the storages.
 #[derive(Clone, Copy, Debug)]
 pub struct ManifestPolicy {
-    /// Unused since format 3: a pull reads the records the ledger
-    /// announced and never lists a folder's manifests in full (kept so that
-    /// callers of the format-2 policy compile).
-    pub sweep_secs: i64,
     /// Delete own records below the newest base that every reader has
     /// seen past.
     pub prune: bool,
@@ -33,10 +29,7 @@ pub struct ManifestPolicy {
 
 impl Default for ManifestPolicy {
     fn default() -> Self {
-        ManifestPolicy {
-            sweep_secs: 6 * 3600,
-            prune: true,
-        }
+        ManifestPolicy { prune: true }
     }
 }
 

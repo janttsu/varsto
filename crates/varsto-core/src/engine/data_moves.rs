@@ -443,7 +443,7 @@ impl Engine {
         )?;
         // This device's `placement` record of the folder (kind 12): every
         // device takes the newest.
-        self.publish_placement3(&rec, placement.as_ref(), now)?;
+        self.publish_placement(&rec, placement.as_ref(), now)?;
         self.placement(folder)
     }
 
@@ -601,7 +601,7 @@ impl Engine {
                 to.name()
             );
         }
-        let table = self.folder_table3(rec)?.ok_or_else(|| {
+        let table = self.folder_table(rec)?.ok_or_else(|| {
             anyhow!(
                 "this device holds no key of folder {}: ask for it with `varsto folder request`",
                 rec.name
@@ -1413,7 +1413,7 @@ impl Engine {
             let view = self.view3()?;
             self.publish_map3(&folder, epoch, &written, &view)?;
             self.f3.pending.extend(events);
-            self.commit_now3()?;
+            self.commit_now()?;
             let (_, failed) = run.delete_dropped_each(from.as_ref());
             for (p, e) in failed {
                 log::warn!(storage = from_spec.name(), pack = hex::encode(p).as_str(); "a dropped pack stays until garbage collection: {e}");

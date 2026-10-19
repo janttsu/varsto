@@ -138,7 +138,7 @@ impl Engine {
             let Ok(rec) = self.with_key(&rec) else {
                 continue; // a locked Strongroom is skipped
             };
-            let Some(table) = self.folder_table3(&rec)? else {
+            let Some(table) = self.folder_table(&rec)? else {
                 continue;
             };
             let t = table.read().unwrap_or_else(|e| e.into_inner());

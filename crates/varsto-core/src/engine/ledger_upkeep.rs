@@ -44,9 +44,6 @@ impl Default for LedgerPolicy {
     }
 }
 
-/// Typical size of a stored batch (mostly its hybrid signature).
-const TYPICAL_BATCH_BYTES: u64 = 8 * 1024;
-
 /// Events recorded but not yet sealed into a batch, kept across restarts.
 const DEFERRED_FILE: &str = "ledger/pending.json";
 
@@ -108,21 +105,6 @@ impl Engine {
         let committed = self.commit_batch();
         let out = out?;
         Ok((out, committed?))
-    }
-
-    /// The newest batch of every other device held here, for the `seen`
-    /// field of this device's next batch.
-    pub(super) fn seen_heads(&self) -> BTreeMap<DeviceId, u64> {
-        self.ledger
-            .devices()
-            .into_iter()
-            .filter(|d| d != &self.vault.device_id)
-            .map(|d| {
-                let seq = self.ledger.head(&d).seq;
-                (d, seq)
-            })
-            .filter(|(_, seq)| *seq > 0)
-            .collect()
     }
 
     /// Keep the ledger small, after a sync: acknowledge other devices'
@@ -320,18 +302,6 @@ impl Engine {
         hex::encode(crypto::hash(&crypto::aad("ledger-view-context", &refs)))
     }
 
-    /// Forget the cached view (memory and `ledger/view.enc`): the next
-    /// call rebuilds it from the batches.
-    pub(super) fn reset_view_cache(&self) {
-        let mut slot = self.view_cache.lock().unwrap_or_else(|e| e.into_inner());
-        *slot = ViewSlot {
-            cache: None,
-            loaded: true,
-            unsaved: 0,
-        };
-        let _ = fs::remove_file(self.view_cache_path());
-    }
-
     fn view_cache_path(&self) -> PathBuf {
         self.home.join("ledger").join("view.enc")
     }
@@ -388,7 +358,7 @@ impl Engine {
     /// for a predecessor. The pull has just asked every storage for them; a
     /// gap that stays for `WITHHOLD_PULLS` pulls in a row is reported as a
     /// storage that may be withholding batches (`LedgerHealth::warnings`).
-    pub(super) fn watch_freshness3(
+    pub(super) fn watch_freshness(
         &mut self,
         view: &crate::ledger3::LedgerView,
         malformed: u64,
@@ -740,7 +710,7 @@ pub(super) mod tests {
         let home = b.home.clone();
         drop(devs);
         let mut b = Engine::open(&home, PASS).unwrap();
-        assert!(b.load_view3().is_some());
+        assert!(b.load_view().is_some());
         view_is_replay(&b);
         append_synthetic(&mut b, 1, 3, &folder);
         view_is_replay(&b);
@@ -821,7 +791,7 @@ pub(super) mod tests {
         let a = &mut devs[0];
         a.sync(None).unwrap();
         let folder = crate::record::id16(&a.keyring.find("photos").unwrap().folder_id).unwrap();
-        let held = a.load_manifests3(&folder).held_index();
+        let held = a.load_manifests(&folder).held_index();
         let state = a.load_state(&FolderId::from_bytes(&folder)).unwrap();
         let object = &state.files["one.jpg"].chunks[0].object;
         let obj = crate::storages3::object_bin(object).unwrap();

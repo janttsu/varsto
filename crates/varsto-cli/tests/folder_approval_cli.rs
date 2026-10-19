@@ -3,8 +3,6 @@
 //! 8b): request, requests, approve (the fingerprint question and `--yes`),
 //! members, deny, role, remove (a new folder epoch), resolve-epoch, the
 //! recovery copies and the warning of `varsto status`.
-#![cfg(feature = "format3")]
-
 use serde_json::Value;
 use std::io::Write;
 use std::path::Path;

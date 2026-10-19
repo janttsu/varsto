@@ -50,7 +50,7 @@ pub(super) fn set_read_only(path: &Path, read_only: bool) {
 
 impl Engine {
     /// The current role of `dev` in a folder (`None`: not a participant).
-    pub(super) fn folder_role3(&self, folder: &FolderId, dev: &DeviceId) -> Option<Role> {
+    pub(super) fn folder_role(&self, folder: &FolderId, dev: &DeviceId) -> Option<Role> {
         let (f, d) = (members3::bin(folder).ok()?, members3::bin(dev).ok()?);
         self.f3.members.role(&d, &f)
     }
@@ -58,7 +58,7 @@ impl Engine {
     /// The role of another device in a folder: whether this device takes
     /// what it writes there now.
     pub fn share_role_of(&self, folder: &FolderId, dev: &DeviceId) -> ShareRole {
-        match self.folder_role3(folder, dev) {
+        match self.folder_role(folder, dev) {
             Some(Role::Viewer) | None => ShareRole::Viewer,
             Some(_) => ShareRole::Editor,
         }
@@ -68,13 +68,13 @@ impl Engine {
     pub fn share_own_role(&self, folder: &FolderId) -> ShareRole {
         if let Some(m) = &self.f3.members.member {
             if members3::bin(folder).ok() == Some(m.folder) {
-                return match self.folder_role3(folder, &self.vault.device_id) {
+                return match self.folder_role(folder, &self.vault.device_id) {
                     Some(Role::Viewer) | None => ShareRole::Viewer,
                     Some(_) => ShareRole::Editor,
                 };
             }
         }
-        match self.folder_role3(folder, &self.vault.device_id) {
+        match self.folder_role(folder, &self.vault.device_id) {
             Some(Role::Viewer) => ShareRole::Viewer,
             _ => ShareRole::Editor,
         }
@@ -101,46 +101,6 @@ impl Engine {
     #[doc(hidden)]
     pub fn disable_read_only_guard(&mut self) {
         self.role_guard_off = true;
-    }
-
-    /// Whether this device takes a manifest or record of `dev` for a
-    /// folder now: it is this device, or an owner or editor of it.
-    pub(super) fn share_writer_ok(&self, rec: &FolderRecord, dev: &DeviceId) -> bool {
-        dev == &self.vault.device_id
-            || matches!(
-                self.folder_role3(&rec.folder_id, dev),
-                Some(Role::Owner | Role::Editor)
-            )
-    }
-
-    /// Viewers of a folder that were editors, with the Lamport time from
-    /// which their changes no longer count (`0`: never an editor).
-    pub(super) fn share_viewer_clocks(&self, rec: &FolderRecord) -> BTreeMap<DeviceId, u64> {
-        let mut out = BTreeMap::new();
-        let Ok(f) = members3::bin(&rec.folder_id) else {
-            return out;
-        };
-        let Some(st) = self.f3.members.registry.get(&f) else {
-            return out;
-        };
-        for (d, h) in &st.history {
-            if st.role(d) != Some(Role::Viewer) {
-                continue;
-            }
-            // The stamp of the change that made it a viewer for good.
-            let since = h
-                .iter()
-                .rev()
-                .take_while(|(_, r)| *r == Some(Role::Viewer))
-                .last()
-                .map(|(s, _)| s.lamport)
-                .unwrap_or(0);
-            let wrote = h
-                .iter()
-                .any(|(_, r)| matches!(r, Some(Role::Owner | Role::Editor)));
-            out.insert(DeviceId::from_bytes(d), if wrote { since } else { 0 });
-        }
-        out
     }
 
     /// Owner: make a participant of a folder a viewer or an editor (a
@@ -195,7 +155,7 @@ impl Engine {
         }
         let dev = members3::bin(&DeviceId::from_hex(&m.id)?)?;
         let stamp = self
-            .with_enrolled3(|ms| {
+            .with_enrolled(|ms| {
                 let epoch = ms.folder_epochs(&id).current();
                 if !ms.registry.is_owner(&ms.me, &id, epoch) {
                     bail!("this device is not an owner of {}", rec.name);

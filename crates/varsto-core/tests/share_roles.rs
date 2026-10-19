@@ -232,10 +232,10 @@ fn what_a_modified_viewer_client_publishes_is_refused() {
     // Every reader refuses what the viewer announces in its batches (its
     // records then wait for an announcement that never counts), and the
     // records themselves by the acceptance rule.
-    let refused_before = a.ledger_view3().unwrap().events_refused;
+    let refused_before = a.ledger_view().unwrap().events_refused;
     a.sync(None).unwrap();
     assert!(
-        a.ledger_view3().unwrap().events_refused > refused_before,
+        a.ledger_view().unwrap().events_refused > refused_before,
         "the viewer's announcements are refused"
     );
     b.sync(None).unwrap();
