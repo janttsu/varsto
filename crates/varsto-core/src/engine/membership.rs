@@ -710,7 +710,7 @@ impl Engine {
                 .members
                 .registry
                 .get(f)
-                .map(|s| s.name.clone())
+                .map(|s| s.shown.clone())
                 .unwrap_or_else(|| hex::encode(f))
         };
         let target = targets.iter().next().cloned().expect("checked non-empty");

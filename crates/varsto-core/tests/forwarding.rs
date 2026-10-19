@@ -83,8 +83,13 @@ fn cloud_copy() -> Policy {
 /// A phone with the camera folder and three pictures that went nowhere
 /// (its only storage is at its quota). Returns the phone and the vault key.
 fn phone(lab: &Lab) -> (Engine, String) {
+    phone_with(lab, ChunkerParams::SMALL)
+}
+
+/// `phone` with the given block sizes.
+fn phone_with(lab: &Lab, chunker: ChunkerParams) -> (Engine, String) {
     let (mut phone, key) = Engine::init(&lab.p("phone-home"), "phone", PASS).unwrap();
-    phone.chunker = ChunkerParams::SMALL;
+    phone.chunker = chunker;
     phone.add_storage(lab.hub()).unwrap();
     phone.set_storage_quota("hub", None, Some(Some(1))).unwrap();
     let files = lab.p("phone-camera");
@@ -93,6 +98,14 @@ fn phone(lab: &Lab) -> (Engine, String) {
     phone.set_policy("camera", Some(cloud_copy())).unwrap();
     for (i, name) in ["a.jpg", "b.jpg", "c.mp4"].iter().enumerate() {
         fs::write(files.join(name), pseudo_random(150_000, i as u64 + 1)).unwrap();
+        // One second apart: forwarding takes the newest first.
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000 + i as u64);
+        fs::File::options()
+            .write(true)
+            .open(files.join(name))
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
     }
     phone.sync(None).unwrap();
     assert_eq!(
@@ -281,6 +294,61 @@ fn turned_off_it_forwards_nothing() {
     assert_eq!(laptop.forward_status().describe(), "forwarding: off");
     laptop.set_forwarding(true).unwrap();
     assert!(laptop.forward(&ForwardOptions::manual()).unwrap().blocks > 0);
+}
+
+#[test]
+fn room_taken_for_a_block_that_is_not_written_goes_to_the_next_one() {
+    let lab = Lab::new();
+    // The default block sizes: each picture is one block.
+    let (mut phone, key) = phone_with(&lab, ChunkerParams::DEFAULT);
+    let mut laptop = laptop(&lab, "laptop", &key, &mut phone);
+    // The bucket has room for one more pack of the smallest class (256
+    // KiB): one picture (150 kB), not two.
+    let used = laptop.quota_status("bucket").unwrap().used_bytes;
+    let quota = (used + 300_000) * 100 / 99 + 1;
+    laptop
+        .set_storage_quota("bucket", Some(Some(quota)), None)
+        .unwrap();
+    // The newest picture (c.mp4, the same bytes as b.jpg), which
+    // forwarding takes first, is gone from the phone's disk with b.jpg
+    // (the phone has not noticed yet): no source has its block. The block
+    // takes room before it is asked for; the room must come back when the
+    // fetch finds nothing, or a.jpg finds the bucket full.
+    fs::remove_file(lab.p("phone-camera").join("c.mp4")).unwrap();
+    fs::remove_file(lab.p("phone-camera").join("b.jpg")).unwrap();
+    let _served = serve(&mut phone, &mut [&mut laptop]);
+    let r = laptop.forward(&ForwardOptions::manual()).unwrap();
+    let f = &r.folders[0];
+    assert_eq!(f.unavailable, 1, "c.mp4 has no source: {r:?}");
+    assert_eq!(f.blocks, 1, "a.jpg takes the room c.mp4 left: {r:?}");
+    assert_eq!(f.waiting_for_target, 0, "{r:?}");
+    assert_eq!(f.to_storages.get("bucket"), Some(&1), "{r:?}");
+    // One pack of the smallest class went there, and nothing more fits:
+    // b.jpg back on the phone waits for room.
+    assert_eq!(
+        laptop
+            .packs_on_storage("bucket")
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>(),
+        vec![&0u8]
+    );
+    let served = serve(&mut phone, &mut [&mut laptop]);
+    fs::write(
+        lab.p("phone-camera").join("b.jpg"),
+        pseudo_random(150_000, 2),
+    )
+    .unwrap();
+    served.refresh(&mut phone);
+    let r = laptop.forward(&ForwardOptions::manual()).unwrap();
+    let f = &r.folders[0];
+    assert_eq!((f.blocks, f.waiting_for_target), (0, 1), "{r:?}");
+    assert!(
+        r.storages_full
+            .iter()
+            .any(|m| m.contains("storage bucket is at its quota")),
+        "{r:?}"
+    );
 }
 
 #[test]

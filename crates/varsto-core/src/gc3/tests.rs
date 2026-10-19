@@ -210,6 +210,8 @@ impl World {
             FolderState {
                 id: FOLDER,
                 name: "photos".into(),
+                shown: "photos".into(),
+                created_utc: 0,
                 settings: BTreeMap::new(),
                 creator: devs[0].id,
                 history: entries

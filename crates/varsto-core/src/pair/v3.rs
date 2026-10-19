@@ -355,6 +355,7 @@ mod tests {
 
     #[test]
     fn the_hello_shows_name_and_fingerprint_and_the_vault_key_opens_only_with_k8() {
+        let _port = super::super::tests::port_lock();
         let k6 = SigningKey::generate();
         let k8 = DecapsKey::generate();
         let vault_key = SecretKey::random();
@@ -405,6 +406,7 @@ mod tests {
 
     #[test]
     fn a_declined_device_gets_nothing_and_the_offer_closes() {
+        let _port = super::super::tests::port_lock();
         let k8 = DecapsKey::generate();
         let o =
             Offer::start_v3(bundle(), SecretKey::random(), Arc::new(|_: &Joiner| false)).unwrap();
@@ -423,6 +425,7 @@ mod tests {
 
     #[test]
     fn a_wrong_code_is_refused_before_anything_is_shown() {
+        let _port = super::super::tests::port_lock();
         let asked = Arc::new(Mutex::new(0));
         let asked2 = asked.clone();
         let o = Offer::start_v3(
@@ -453,6 +456,7 @@ mod tests {
 
     #[test]
     fn the_joining_side_shows_the_same_words_as_the_offering_side() {
+        let _port = super::super::tests::port_lock();
         let keys = PairingKeys::generate();
         let seen: Arc<Mutex<Option<String>>> = Arc::default();
         let seen2 = seen.clone();
@@ -488,6 +492,7 @@ mod tests {
 
     #[test]
     fn discovery_finds_a_v3_offer_by_its_tag() {
+        let _port = super::super::tests::port_lock();
         let o =
             Offer::start_v3(bundle(), SecretKey::random(), Arc::new(|_: &Joiner| true)).unwrap();
         let code = o.status().code;

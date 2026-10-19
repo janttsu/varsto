@@ -141,11 +141,23 @@ impl RecordBody for FolderRecord {
     }
 }
 
+/// The setting the creator's first record carries: its creation time
+/// (Unix seconds), which decides which of two folders created under one
+/// name keeps it (`FolderRegistry::dedupe_names`).
+pub const CREATED_SETTING: &str = "created_utc";
+
 /// One folder as the accepted records describe it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FolderState {
     pub id: Id16,
+    /// The name the newest accepted entry gives.
     pub name: String,
+    /// The name devices show and resolve: `name`, numbered when an older
+    /// folder of the vault has the same name (`dedupe_names`). Records
+    /// keep `name`.
+    pub shown: String,
+    /// `CREATED_SETTING` of the creator's first record; 0 without one.
+    pub created_utc: i64,
     pub settings: BTreeMap<String, String>,
     pub creator: Id16,
     /// Per device: its role, or `None` when denied (or removed), with the
@@ -201,6 +213,13 @@ impl FolderState {
         let mut st = FolderState {
             id: genesis.body.id,
             name: genesis.body.name.clone(),
+            shown: String::new(),
+            created_utc: genesis
+                .body
+                .settings
+                .get(CREATED_SETTING)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
             settings: genesis.body.settings.clone(),
             creator,
             entries: BTreeMap::from([(creator, (Some(Role::Owner), Stamp::default()))]),
@@ -273,6 +292,7 @@ impl FolderState {
                 }
             }
         }
+        st.shown = st.name.clone();
         Some(st)
     }
 
@@ -371,7 +391,43 @@ impl FolderRegistry {
                 out.folders.insert(id, st);
             }
         }
+        out.dedupe_names(&Default::default());
         Ok(out)
+    }
+
+    /// Two devices that created a folder under one name while they could
+    /// not see each other's records: every device shows the older one
+    /// (by `created_utc`, then by folder id) under the name and numbers
+    /// the others, "Photos (2)", "Photos (3)", ..., names compared without
+    /// case, so every device ends up with the same unique names. Removed
+    /// folders take no name. `apart`: folders that share a name with
+    /// another on purpose (a Strongroom being converted from a folder
+    /// keeps its name until the old one is removed); they keep theirs and
+    /// take none from the others. Only `shown` changes: the records keep
+    /// the name their writers gave.
+    pub fn dedupe_names(&mut self, apart: &std::collections::BTreeSet<Id16>) {
+        let mut live: Vec<(i64, Id16)> = Vec::new();
+        for st in self.folders.values_mut() {
+            st.shown = st.name.clone();
+            if !st.is_removed() && !apart.contains(&st.id) {
+                live.push((st.created_utc, st.id));
+            }
+        }
+        live.sort();
+        let mut taken: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for (_, id) in live {
+            let Some(st) = self.folders.get_mut(&id) else {
+                continue;
+            };
+            let mut candidate = st.name.clone();
+            let mut n = 2;
+            while taken.contains(&candidate.to_lowercase()) {
+                candidate = format!("{} ({n})", st.name);
+                n += 1;
+            }
+            taken.insert(candidate.to_lowercase());
+            st.shown = candidate;
+        }
     }
 
     pub fn get(&self, folder: &Id16) -> Option<&FolderState> {
@@ -441,5 +497,77 @@ impl crate::ledger3::scope::FolderRoles for FolderRegistry {
     fn writes_at(&self, device: &Id16, folder: &Id16, lamport: u64) -> Option<bool> {
         self.role_at(device, folder, lamport)
             .map(|r| matches!(r, Some(Role::Owner | Role::Editor)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    fn folder(id: u8, name: &str, created_utc: i64) -> FolderState {
+        FolderState {
+            id: [id; 16],
+            name: name.into(),
+            shown: name.into(),
+            created_utc,
+            settings: BTreeMap::new(),
+            creator: [0; 16],
+            entries: BTreeMap::new(),
+            entries_refused: 0,
+            max_lamport: 0,
+            history: BTreeMap::new(),
+            members: BTreeMap::new(),
+            removed: None,
+        }
+    }
+
+    fn shown(reg: &FolderRegistry) -> BTreeMap<u8, String> {
+        reg.folders
+            .values()
+            .map(|st| (st.id[0], st.shown.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn the_older_folder_keeps_a_name_two_devices_gave_while_apart() {
+        let mut reg = FolderRegistry::default();
+        // Made later, but with the smaller id: the older one keeps the name.
+        for st in [
+            folder(9, "Photos", 100),
+            folder(1, "photos", 200),
+            folder(5, "Photos", 200),
+            folder(7, "Music", 50),
+        ] {
+            reg.folders.insert(st.id, st);
+        }
+        reg.dedupe_names(&BTreeSet::new());
+        assert_eq!(
+            shown(&reg),
+            BTreeMap::from([
+                (9, "Photos".to_string()),
+                // Same time: the smaller folder id goes first.
+                (1, "photos (2)".to_string()),
+                (5, "Photos (3)".to_string()),
+                (7, "Music".to_string()),
+            ])
+        );
+        // The records keep the names their writers gave.
+        assert_eq!(reg.folders[&[1; 16]].name, "photos");
+        // A name a number would give is taken already: the next number.
+        reg.folders.insert([3; 16], folder(3, "photos (2)", 10));
+        reg.dedupe_names(&BTreeSet::new());
+        assert_eq!(shown(&reg)[&3], "photos (2)");
+        assert_eq!(shown(&reg)[&1], "photos (3)");
+        assert_eq!(shown(&reg)[&5], "Photos (4)");
+        // The older one removed: the next keeps the name (on every device).
+        reg.folders.get_mut(&[9; 16]).unwrap().removed = Some(Stamp::default());
+        reg.dedupe_names(&BTreeSet::new());
+        assert_eq!(shown(&reg)[&1], "photos");
+        assert_eq!(shown(&reg)[&5], "Photos (3)", "(2) is folder 3's own name");
+        // A Strongroom converted from a folder keeps the name beside it.
+        reg.dedupe_names(&BTreeSet::from([[5; 16]]));
+        assert_eq!(shown(&reg)[&1], "photos");
+        assert_eq!(shown(&reg)[&5], "Photos");
     }
 }

@@ -1146,6 +1146,14 @@ impl Engine {
         };
         // Room on the new storage first (its quota counts size classes).
         let mut actions: Vec<crate::storages3::PackAction> = Vec::new();
+        // The room each pack took, given back when its copy does not happen.
+        let mut reserved: HashMap<crate::ledger3::PackId, u64> = HashMap::new();
+        let give_back = |reserved: &mut HashMap<crate::ledger3::PackId, u64>,
+                         p: &crate::ledger3::PackId| {
+            if let Some(need) = reserved.remove(p) {
+                gate.give_back_pack(to_spec.name(), need);
+            }
+        };
         for a in plan
             .actions
             .iter()
@@ -1172,6 +1180,9 @@ impl Engine {
                     }
                 }
                 continue;
+            }
+            if need > 0 {
+                reserved.insert(*a.pack(), need);
             }
             actions.push(a.clone());
         }
@@ -1230,6 +1241,9 @@ impl Engine {
         for (groups_done, group) in groups.iter().enumerate() {
             if ex.max_groups.is_some_and(|m| groups_done >= m) {
                 report.stopped_early = true;
+                for a in groups[groups_done..].iter().flatten() {
+                    give_back(&mut reserved, a.pack());
+                }
                 break;
             }
             let sub = crate::storages3::MovePlan {
@@ -1284,6 +1298,17 @@ impl Engine {
             let run = runs.last().expect("pushed");
             let r = &run.report;
             disks_used.extend(r.disks_used.iter().cloned());
+            // Packs that were not copied now (no room, no place, damaged,
+            // unreadable) give their room back.
+            for p in r
+                .waiting_room
+                .iter()
+                .chain(&r.waiting_place)
+                .chain(&r.corrupt)
+                .chain(r.unavailable.iter().map(|(p, _)| p))
+            {
+                give_back(&mut reserved, p);
+            }
             // Blocks that found no room went into the remainder on the
             // source: not moved.
             let kept: HashSet<crate::ledger3::ObjectBin> = r.kept_back.iter().copied().collect();

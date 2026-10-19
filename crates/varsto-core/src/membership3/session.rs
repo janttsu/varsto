@@ -321,6 +321,19 @@ impl<'a> Membership<'a> {
             self.refused = counter;
             self.strongrooms = got?;
         }
+        // A Strongroom converted from a folder that is still there shares
+        // its name until the old one is removed: no numbering for it.
+        let apart: std::collections::BTreeSet<Id16> = self
+            .strongrooms
+            .values()
+            .filter(|r| {
+                r.converted_from.is_some_and(|old| {
+                    old != r.folder && self.registry.get(&old).is_some_and(|st| !st.is_removed())
+                })
+            })
+            .map(|r| r.folder)
+            .collect();
+        self.registry.dedupe_names(&apart);
         let mut lamport = self.lamport;
         for st in self.registry.folders.values() {
             lamport = lamport.max(st.max_lamport);
@@ -867,7 +880,7 @@ impl<'a> Membership<'a> {
         members: Vec<MemberKeys>,
     ) -> Result<()> {
         let stamp = self.next_stamp();
-        let (name, settings) = match name {
+        let (name, mut settings) = match name {
             Some(n) => n,
             None => {
                 let st = self
@@ -877,6 +890,12 @@ impl<'a> Membership<'a> {
                 (st.name.clone(), st.settings.clone())
             }
         };
+        if creation.is_some() {
+            // Which of two folders made under one name keeps it.
+            settings
+                .entry(super::folders::CREATED_SETTING.to_string())
+                .or_insert_with(|| crate::util::now_utc().to_string());
+        }
         let rec = FolderRecord {
             id: *folder,
             name,

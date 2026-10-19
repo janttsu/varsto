@@ -104,7 +104,7 @@ fn request_view(m: &Membership<'_>, r: &PendingRequest) -> FolderRequest {
         folder: m
             .registry
             .get(&r.folder)
-            .map(|s| s.name.clone())
+            .map(|s| s.shown.clone())
             .unwrap_or_default(),
         device_id: hex::encode(r.device),
         device: r.name.clone(),
@@ -125,13 +125,20 @@ fn member_view(m: &Membership<'_>, device: &Id16, role: &str) -> FolderMember {
 /// A folder of the registry by name or by (a prefix of) its id.
 fn find_folder(m: &Membership<'_>, text: &str) -> Result<Id16> {
     let t = text.trim();
-    let by_name: Vec<Id16> = m
-        .registry
-        .folders
-        .values()
-        .filter(|s| s.name == t)
-        .map(|s| s.id)
-        .collect();
+    // The name devices show ("Photos (2)" for the newer of two folders
+    // made under one name), else the name the records give.
+    let named = |shown: bool| -> Vec<Id16> {
+        m.registry
+            .folders
+            .values()
+            .filter(|s| if shown { s.shown == t } else { s.name == t })
+            .map(|s| s.id)
+            .collect()
+    };
+    let mut by_name = named(true);
+    if by_name.is_empty() {
+        by_name = named(false);
+    }
     match by_name.as_slice() {
         [one] => return Ok(*one),
         [] => {}
@@ -224,7 +231,11 @@ impl Engine {
     pub fn f3_folder_create(&mut self, name: &str, k1: Option<&RecoveryKey>) -> Result<String> {
         crate::names::check_display_name(name)?;
         self.enrolled3(|m| {
-            if m.registry.folders.values().any(|s| s.name == name) {
+            if m.registry
+                .folders
+                .values()
+                .any(|s| s.name == name || s.shown == name)
+            {
                 bail!("a folder named {name} exists already");
             }
             let id = m.create_folder(name, BTreeMap::new(), k1)?;
@@ -251,7 +262,7 @@ impl Engine {
                 folder: m
                     .registry
                     .get(&id)
-                    .map(|s| s.name.clone())
+                    .map(|s| s.shown.clone())
                     .unwrap_or_default(),
                 device_id: hex::encode(m.me),
                 device: me.name.clone(),
@@ -427,7 +438,7 @@ impl Engine {
                 folder: m
                     .registry
                     .get(&id)
-                    .map(|s| s.name.clone())
+                    .map(|s| s.shown.clone())
                     .unwrap_or_default(),
                 removed: m.devices.name(&dev),
                 epoch: started.epoch,
@@ -581,7 +592,7 @@ fn members_of(m: &mut Membership<'_>, id: &Id16) -> Result<FolderMembers> {
         .collect();
     Ok(FolderMembers {
         folder_id: hex::encode(id),
-        folder: st.name.clone(),
+        folder: st.shown.clone(),
         epoch,
         your_role: m.registry.role(&m.me, id, epoch).map(role_text),
         participants,

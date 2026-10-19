@@ -714,6 +714,13 @@ pub struct Engine {
     /// Where the peer-to-peer server takes what it serves from: refreshed
     /// as soon as a push has published new files, before their upload.
     snapshot_sink: Option<SnapshotSink>,
+    /// How often a long push with peers publishes what it stored so far
+    /// (`EarlyPublish`).
+    early_publish: EarlyPublish,
+    /// Tests: the pack size of hot storages instead of `packs::HOT_TARGET`.
+    pack_target_for_tests: Option<usize>,
+    /// Tests: called before every pack write of this engine's storages.
+    pack_write_hook: Option<crate::storage::PackWriteHook>,
     /// What this device knows of the packs on each storage.
     pack_caches: crate::packs::Caches,
     /// Objects of small files fetched ahead during a pull (see `prefetch_small`).
@@ -791,6 +798,27 @@ pub struct Engine {
 /// What the peer-to-peer server serves from (see `Engine::set_snapshot_sink`).
 pub type SnapshotSink =
     std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<crate::p2p::Snapshot>>>>;
+
+/// A push with peers publishes its file list before the upload, so peers
+/// fetch the new files from this device while the storages receive them,
+/// and then, while the upload runs, the map record of the packs stored so
+/// far with their claims, whenever `bytes` more were handed to the
+/// storages or `secs` passed since the last time, and something new was
+/// stored (spec section 77.23).
+#[derive(Clone, Copy, Debug)]
+pub struct EarlyPublish {
+    pub bytes: u64,
+    pub secs: u64,
+}
+
+impl Default for EarlyPublish {
+    fn default() -> Self {
+        EarlyPublish {
+            bytes: 64 << 20,
+            secs: 30,
+        }
+    }
+}
 
 /// Open storages with their specs.
 type OpenStorages = Vec<(StorageSpec, Box<dyn Storage>)>;
@@ -972,14 +1000,20 @@ fn upload_budget(targets: impl Iterator<Item = usize>) -> u64 {
     (sum * 2 + (64 << 20)).clamp(UPLOAD_BYTES, UPLOAD_BYTES_MAX)
 }
 
-/// Count one finished write in the report and the ledger.
+/// Count one finished write in the report and the ledger. The quota room
+/// taken for a block that was not written now (the storage failed, or held
+/// it already) is given back to `gate` for the rest of the push.
 fn apply_upload(
     me: &mut Engine,
     folder_id: &FolderId,
     d: UploadDone,
     report: &mut PushReport,
     first_error: &mut Option<anyhow::Error>,
+    gate: &quotas::QuotaGate,
 ) {
+    if !matches!(d.outcome, Ok(true)) {
+        gate.give_back(&d.storage, d.size);
+    }
     match d.outcome {
         Ok(written) => {
             if written {
@@ -1010,6 +1044,62 @@ fn apply_upload(
         Err(e) => {
             first_error.get_or_insert(e);
         }
+    }
+}
+
+/// The packs `storages` wrote since they were last asked, by storage, for
+/// the map record of a push. Packs written in this process by anything
+/// but this push (whose blocks are `info`) are left out: their writers
+/// make their own map records.
+fn stored_packs(
+    storages: &OpenStorages,
+    info: &HashMap<crate::ledger3::ObjectBin, crate::blockmap::ChunkInfo>,
+) -> Vec<(String, Vec<crate::packs::NewPack>)> {
+    let mut per_storage = Vec::new();
+    for (spec, backend) in storages {
+        let new: Vec<crate::packs::NewPack> = backend
+            .take_new_packs()
+            .into_iter()
+            .filter(|p| {
+                p.members.iter().all(|(o, _)| {
+                    crate::storages3::object_bin(&ObjectName::from_hex(o).unwrap_or_default())
+                        .is_ok_and(|b| info.contains_key(&b))
+                })
+            })
+            .collect();
+        if !new.is_empty() {
+            per_storage.push((spec.name().to_string(), new));
+        }
+    }
+    per_storage
+}
+
+/// When a push publishes the packs it stored so far (`EarlyPublish`).
+struct Cadence {
+    every: EarlyPublish,
+    /// Encrypted bytes handed to the uploaders since the last publish.
+    bytes: u64,
+    since: std::time::Instant,
+}
+
+impl Cadence {
+    fn new(every: EarlyPublish) -> Cadence {
+        Cadence {
+            every,
+            bytes: 0,
+            since: std::time::Instant::now(),
+        }
+    }
+
+    /// Count `bytes` more handed over; true when a publish is due.
+    fn add(&mut self, bytes: u64) -> bool {
+        self.bytes += bytes;
+        self.bytes >= self.every.bytes || self.since.elapsed().as_secs() >= self.every.secs
+    }
+
+    fn published(&mut self) {
+        self.bytes = 0;
+        self.since = std::time::Instant::now();
     }
 }
 
@@ -1447,6 +1537,9 @@ impl Engine {
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
+            early_publish: EarlyPublish::default(),
+            pack_target_for_tests: None,
+            pack_write_hook: None,
             pack_caches: Default::default(),
             prefetched: HashMap::new(),
             local_rules: None,
@@ -1545,6 +1638,9 @@ impl Engine {
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
+            early_publish: EarlyPublish::default(),
+            pack_target_for_tests: None,
+            pack_write_hook: None,
             pack_caches: Default::default(),
             prefetched: HashMap::new(),
             local_rules: None,
@@ -1802,7 +1898,8 @@ impl Engine {
         let target = if spec.is_cold() {
             crate::packs::COLD_TARGET
         } else {
-            crate::packs::HOT_TARGET
+            self.pack_target_for_tests
+                .unwrap_or(crate::packs::HOT_TARGET)
         };
         crate::packs::PackStore::new(inner, &self.pack_caches, target)
     }
@@ -1824,11 +1921,37 @@ impl Engine {
             spec.open_with_options(&|r| store.secrets.get(r).cloned(), &options)?
         };
         let backend: Box<dyn Storage> = Box::new(self.pack_store(spec, inner));
+        let backend: Box<dyn Storage> = match &self.pack_write_hook {
+            Some(hook) => Box::new(crate::storage::HookedStorage::new(backend, hook.clone())),
+            None => backend,
+        };
         let backend: Box<dyn Storage> = Box::new(crate::storage::LoggedStorage::new(backend, kind));
         Ok(match &self.storage_calls {
             Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
             None => backend,
         })
+    }
+
+    /// Tests: write packs of `bytes` on hot storages instead of 64 MiB
+    /// (`None`: the default), so a test pushes several packs with little
+    /// data.
+    #[doc(hidden)]
+    pub fn set_pack_target_for_tests(&mut self, bytes: Option<usize>) {
+        self.pack_target_for_tests = bytes;
+        self.forget_storages();
+    }
+
+    /// Tests: run `hook` with the storage's name before every pack this
+    /// engine writes (a slow or failing storage); an error fails the write.
+    #[doc(hidden)]
+    pub fn set_pack_write_hook(&mut self, hook: Option<crate::storage::PackWriteHook>) {
+        self.pack_write_hook = hook;
+        self.forget_storages();
+    }
+
+    /// How often a long push with peers publishes what it stored so far.
+    pub fn set_early_publish(&mut self, every: EarlyPublish) {
+        self.early_publish = every;
     }
 
     /// Count every call this engine makes to its storages from now on
@@ -3476,9 +3599,31 @@ impl Engine {
         report.files_scanned = scanned;
         report.files_changed = changed;
         (report.files_ignored, report.metadata_changed) = self.scan_extra;
-        // Format 3 publishes the file list after the upload, with the map
-        // record of the blocks: other devices fetch the new blocks once the
-        // push is done (not from this device during the upload).
+        let folder = members3::bin(&rec.folder_id)?;
+        let epoch = self.folder_keys(&rec)?.epoch;
+        // Unpublished changes, with peers: the file list goes out before
+        // the upload (spec section 77.23). The other devices fetch the new
+        // files from this device peer to peer (it holds them: `held`) while
+        // the storages receive their copies; a large file would otherwise
+        // reach them only once its whole upload is done. A device that
+        // cannot reach this one finds the blocks on the storages later.
+        // Without peers nobody could fetch from here before the upload, and
+        // the push keeps to one map record and one batch.
+        if self.has_peers() && Manifest::files_hash(&state.files) != state.published_hash {
+            if let Some(seq) = self.publish_manifest(&folder, epoch, &state)? {
+                report.manifest_seq = Some(seq);
+                state.published_seq = seq;
+                state.published_hash = Manifest::files_hash(&state.files);
+                let _ = self.history_from_own(&rec, &state, util::now_utc());
+                // Now, not at the end of the push: the other devices learn
+                // of the new record from this batch.
+                self.flush_pending()?;
+                self.save_state(&rec.folder_id, &state)?;
+                self.refresh_snapshot();
+                self.notify_peers_changed();
+                log::debug!("push {}: file list published before the upload", rec.name);
+            }
+        }
         // A folder added with many pictures shows its first thumbnails
         // before the (possibly hours long) upload, not only after it.
         report.thumbnails = self.make_thumbnails(
@@ -3491,9 +3636,9 @@ impl Engine {
         // One action (design section 3, "Writer"): packs, then one map
         // delta listing their members, then the manifest delta and the trash
         // record, then one batch with `pack_stored` for every (pack,
-        // storage) and `record_published` for every record.
-        let folder = members3::bin(&rec.folder_id)?;
-        let epoch = self.folder_keys(&rec)?.epoch;
+        // storage) and `record_published` for every record. A long upload
+        // with peers publishes the packs stored so far on the way
+        // (`EarlyPublish`); `written` is what is left.
         let written = self.upload_missing(&rec, &root, &state, &mut report)?;
         let view3 = self.view3()?;
         self.publish_map3(&folder, epoch, &written, &view3)?;
@@ -3626,6 +3771,8 @@ impl Engine {
         let budget = (std::sync::Mutex::new(0u64), std::sync::Condvar::new());
         let budget_ref = &budget;
         let limit = upload_budget(storages.iter().map(|(_, b)| b.pack_target().max(1 << 20)));
+        // With peers, the packs stored so far are published on the way.
+        let mut early = self.has_peers().then(|| Cadence::new(self.early_publish));
         std::thread::scope(|s| -> Result<()> {
             // Owned by this closure: however it returns (an error reading a
             // file included), the sender goes and the uploaders stop.
@@ -3699,7 +3846,7 @@ impl Engine {
             let mut send =
                 |me: &mut Self, report: &mut PushReport, job: Option<UploadJob>| -> bool {
                     while let Ok(d) = done_rx.try_recv() {
-                        apply_upload(me, &folder_id, d, report, &mut first_error);
+                        apply_upload(me, &folder_id, d, report, &mut first_error, &gate);
                     }
                     if first_error.is_some() {
                         return false;
@@ -3743,8 +3890,9 @@ impl Engine {
                         // collected, a pack is filled from the buffer
                         // (first fit decreasing) and sent; the rest waits
                         // for the next one. Only the last pack of the push
-                        // is not full.
-                        if e.1 >= target + crate::packs::MAX_OBJECT
+                        // is not full. (A block larger than the pack size
+                        // gets a pack of its own.)
+                        if e.1 >= target + crate::packs::MAX_OBJECT.min(target)
                             && !send_full(&mut collected, &set, target)
                         {
                             return false;
@@ -3785,6 +3933,7 @@ impl Engine {
                         ) {
                             info.insert(o, (c, expected.size as u32, expected.epoch));
                         }
+                        let sent = ct.len() as u64;
                         let job = UploadJob {
                             targets,
                             chunk: expected.chunk.clone(),
@@ -3793,6 +3942,13 @@ impl Engine {
                         };
                         if !send(self, report, Some(job)) {
                             break 'files;
+                        }
+                        if let Some(c) = early.as_mut() {
+                            if c.add(sent) {
+                                self.publish_stored_so_far(
+                                    &rec.name, &folder3, fk.epoch, &storages, &info, c,
+                                );
+                            }
                         }
                     }
                     continue;
@@ -3846,6 +4002,7 @@ impl Engine {
                     ) {
                         info.insert(o, (c, expected.size as u32, expected.epoch));
                     }
+                    let sent = ct.len() as u64;
                     let job = UploadJob {
                         targets,
                         chunk: chunk_id,
@@ -3855,13 +4012,43 @@ impl Engine {
                     if !send(self, report, Some(job)) {
                         break 'files;
                     }
+                    if let Some(c) = early.as_mut() {
+                        if c.add(sent) {
+                            self.publish_stored_so_far(
+                                &rec.name, &folder3, fk.epoch, &storages, &info, c,
+                            );
+                        }
+                    }
                 }
             }
             send(self, report, None);
             drop(send);
+            // A push that stopped (a write failed) leaves blocks it took
+            // room for and never handed over: that room is given back.
+            for (set, (jobs, _)) in &collected {
+                for j in jobs {
+                    for &i in set {
+                        gate.give_back(storages_ref[i].0.name(), j.ct.len() as u64);
+                    }
+                }
+            }
             drop(job_tx);
-            for d in done_rx.iter() {
-                apply_upload(self, &folder_id, d, report, &mut first_error);
+            // The uploaders finish what they hold (up to the budget, which
+            // can take long on a slow storage): the packs they store are
+            // published on the way as well.
+            loop {
+                match done_rx.recv_timeout(std::time::Duration::from_millis(500)) {
+                    Ok(d) => apply_upload(self, &folder_id, d, report, &mut first_error, &gate),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+                if let Some(c) = early.as_mut() {
+                    if c.add(0) {
+                        self.publish_stored_so_far(
+                            &rec.name, &folder3, fk.epoch, &storages, &info, c,
+                        );
+                    }
+                }
             }
             Ok(())
         })?;
@@ -3870,25 +4057,9 @@ impl Engine {
                 report.storages_full.push(msg);
             }
         }
-        // The packs written, for the map record of this push.
-        // Packs written in this process by anything but this push are left
-        // out: their writers make their own map records.
-        let mut per_storage = Vec::new();
-        for (spec, backend) in &storages {
-            let new: Vec<crate::packs::NewPack> = backend
-                .take_new_packs()
-                .into_iter()
-                .filter(|p| {
-                    p.members.iter().all(|(o, _)| {
-                        crate::storages3::object_bin(&ObjectName::from_hex(o).unwrap_or_default())
-                            .is_ok_and(|b| info.contains_key(&b))
-                    })
-                })
-                .collect();
-            if !new.is_empty() {
-                per_storage.push((spec.name().to_string(), new));
-            }
-        }
+        // The packs written (and not published on the way), for the map
+        // record of this push.
+        let per_storage = stored_packs(&storages, &info);
         if let Some(e) = first_error {
             // Packs written before the failure are claimed by nobody: the
             // next push writes their blocks again and garbage collection
@@ -5559,6 +5730,62 @@ impl Engine {
     /// reads its snapshot from, so a push can refresh it early.
     pub fn set_snapshot_sink(&mut self, sink: Option<SnapshotSink>) {
         self.snapshot_sink = sink;
+    }
+
+    /// Serve what this device holds now: the peer-to-peer server's snapshot
+    /// is built again (a push published new files, or stored packs).
+    fn refresh_snapshot(&self) {
+        let Some(sink) = &self.snapshot_sink else {
+            return;
+        };
+        match self.peer_snapshot() {
+            Ok(s) => *sink.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::sync::Arc::new(s)),
+            Err(e) => log::warn!("p2p snapshot after publishing failed: {e:#}"),
+        }
+    }
+
+    /// Whether this device has peers to serve a push's new files to.
+    fn has_peers(&self) -> bool {
+        self.peers.as_ref().is_some_and(|p| !p.is_empty())
+    }
+
+    /// During a long push (`EarlyPublish`): the packs stored so far go into
+    /// a map record and their claims into a batch, pushed now, so other
+    /// devices read the blocks from the storages (and peers from the
+    /// packs this device serves) before the upload ends; the push's own
+    /// map record at the end lists the rest. Nothing stored yet: nothing
+    /// is published and the cadence keeps counting. A failure is logged:
+    /// the packs it took are claimed by nobody, and the next push writes
+    /// their blocks again (orphans go after 7 days).
+    fn publish_stored_so_far(
+        &mut self,
+        name: &str,
+        folder: &crate::record::Id16,
+        epoch: u32,
+        storages: &OpenStorages,
+        info: &HashMap<crate::ledger3::ObjectBin, crate::blockmap::ChunkInfo>,
+        cadence: &mut Cadence,
+    ) {
+        let per_storage = stored_packs(storages, info);
+        if per_storage.is_empty() {
+            return;
+        }
+        cadence.published();
+        let packs: usize = per_storage.iter().map(|(_, p)| p.len()).sum();
+        let out = (|| -> Result<()> {
+            let written = crate::blockmap::written_packs(&per_storage, &|o| info.get(o).copied())?;
+            let view = self.view3()?;
+            self.publish_map3(folder, epoch, &written, &view)?;
+            self.flush_pending()
+        })();
+        match out {
+            Ok(()) => {
+                log::debug!("push {name}: {packs} packs published during the upload");
+                self.refresh_snapshot();
+                self.notify_peers_changed();
+            }
+            Err(e) => log::warn!("push {name}: publishing the packs stored so far failed: {e:#}"),
+        }
     }
 
     /// Tell the other devices over peer-to-peer that something new was
