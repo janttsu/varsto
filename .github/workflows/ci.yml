@@ -111,6 +111,18 @@ jobs:
           ONLY=viz-tv-4k VIZ_SCENE="$RUNNER_TEMP/viz-tv-scene.json" python3 scripts/screenshots/viz-shots.py "$RUNNER_TEMP/demo" dist/shots-viz
       - name: Screenshots of the Linux desktop (tray, own window)
         run: scripts/screenshots/linux-desktop.sh "$VARSTO_BIN" "$RUNNER_TEMP/demo" dist/shots
+      - name: Demo service logs (after a failed screenshot step)
+        if: failure()
+        run: |
+          # A flaky timeout in ui-shots.py or the desktop shots is diagnosable
+          # only with what the demo services said: print the last lines of
+          # each log (svc-laptop.log, svc-phone.log, ...) as a folded group.
+          for f in "$RUNNER_TEMP"/demo/*.log; do
+            [ -f "$f" ] || continue
+            echo "::group::$(basename "$f") (last 300 lines)"
+            tail -n 300 "$f" || true
+            echo "::endgroup::"
+          done
       - name: Stop the demo
         if: always()
         run: |

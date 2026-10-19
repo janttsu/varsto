@@ -575,6 +575,32 @@ def s_repair():
     # The good members of the damaged pack went into a new pack (another id); the damaged one is gone.
     check(not victim.exists(), "the corrupt pack is still in the bucket")
     check(len(bucket_packs()) >= 2, f"{len(bucket_packs())} packs in the bucket after the repair")
+    # A pack whose only holder on the laptop is a conflict copy: both devices write a different
+    # new file at the same path, the laptop pushes first, the desktop's version becomes a
+    # conflict copy on the laptop, and the pack the desktop wrote (its block is in no file under
+    # the desktop's path on the laptop) is deleted. The laptop rebuilds it from the copy.
+    fsck_clean("vl-desktop", "before the conflict copy case")
+    run("vl-laptop", "head -c 3000 /dev/urandom > ~/data/docs/conflict-repair-probe.bin")
+    run("vl-desktop", "head -c 3000 /dev/urandom > ~/data/docs/conflict-repair-probe.bin")
+    v("vl-laptop", "push docs")
+    time.sleep(6)
+    before = {p.name for p in bucket_packs()}
+    v("vl-desktop", "sync")
+    desk_packs = [p for p in bucket_packs() if p.name not in before]
+    time.sleep(6)
+    v("vl-laptop", "sync")
+    copies = run("vl-laptop", "ls ~/data/docs | grep -i 'conflict-repair-probe'").stdout.split()
+    check(len(copies) >= 2, f"no conflict copy of the probe on the laptop: {copies}")
+    check(len(desk_packs) == 1, f"the desktop's version made {len(desk_packs)} new packs, expected one")
+    desk_packs[0].unlink()
+    time.sleep(6)
+    rep = fsck_report("vl-laptop")
+    check(any(c["pack"] == desk_packs[0].name for c in rep["format3"]["missing_copies"]),
+          f"the deleted pack of the conflicting version was not found missing: {json.dumps(rep['format3']['missing_copies'])[:400]}")
+    rep3 = v("vl-laptop", "repair", check_rc=False)
+    v("vl-laptop", "sync", check_rc=False)
+    fsck_clean("vl-laptop", f"after repairing from a conflict copy (repair said {str(rep3)[:300]})")
+    CTX["conflict_copy_repair"] = {"copies": copies, "repair": str(rep3)[:300]}
 
 
 @scenario("policy")
@@ -2745,12 +2771,20 @@ def s_mailbox_offline_disk():
     for name in ("vdb", "vdc"):
         run(vm, f"sudo umount /mnt/{name} 2>/dev/null; true", check_rc=False)
         lab.virsh("detach-disk", vm, name, "--live", check=False)
+        # The guest unplugs asynchronously: attaching the same target before it has
+        # finished leaves libvirt and the guest disagreeing about the disk.
+        for _ in range(20):
+            if run(vm, f"test -b /dev/{name}", check_rc=False).returncode != 0:
+                break
+            time.sleep(0.5)
         for f in (lab.DIR / "pool").glob(f"{vm}-{name}.qcow2"):
             f.unlink()
     for name in ("vdb", "vdc"):
         attach_disk(vm, name)
         run(vm, f"sudo mkfs.ext4 -q -L {name} /dev/{name} && sudo mkdir -p /mnt/{name} && sudo mount /dev/{name} /mnt/{name} && sudo chown varsto: /mnt/{name}")
     dl_init()
+    # The default rule keeps 15 % or 50 GB free, more than the VM's whole 12 GB disk has.
+    dl("mailbox set --keep-free 1GB", json_out=False)
     dl("storage add-local box /home/varsto/dl-box --place cloud", json_out=False)
     dl("storage add-pool shelf --place home", json_out=False)
     dl("disk group shelf --copies 2", json_out=False)
@@ -2789,8 +2823,15 @@ def s_mailbox_offline_disk():
     dl("disk eject dA", json_out=False)
     run(vm, "sudo umount /mnt/vdb")
     detach_disk(vm, "vdb")
-    attach_disk(vm, "vdc")
-    run(vm, "sudo mount /dev/vdc /mnt/vdc")
+    # The guest names a hot-plugged disk by the first free letter, not by the target libvirt
+    # was given (vdb is free now, so dB comes back as /dev/vdb): find it by its label.
+    img = lab.DIR / "pool" / f"{vm}-vdc.qcow2"
+    lab.virsh("attach-disk", vm, str(img), "vdc", "--targetbus", "virtio", "--subdriver", "qcow2", "--live")
+    for _ in range(40):
+        if run(vm, "sudo blkid -L vdc", check_rc=False).returncode == 0:
+            break
+        time.sleep(0.5)
+    run(vm, "sudo mount -L vdc /mnt/vdc")
     dl("disk check dB --full")
     dl("mailbox run")
     check(pack in disk_packs("/mnt/vdc"), f"the staged pack {pack[:12]} is not on dB: {sorted(p[:12] for p in disk_packs('/mnt/vdc'))}")
