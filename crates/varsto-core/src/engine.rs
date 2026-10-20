@@ -1200,6 +1200,9 @@ fn canonical(path: &Path) -> std::io::Result<PathBuf> {
     Ok(p)
 }
 
+/// How long joining waits for the bundled storages to answer, all together.
+const REACHABLE_WITHIN: std::time::Duration = std::time::Duration::from_secs(8);
+
 impl Engine {
     // ----- lifecycle -------------------------------------------------------
 
@@ -1635,8 +1638,11 @@ impl Engine {
         crate::names::check_display_name(device_name)?;
         let mut notes = Vec::new();
         let mut first = None;
+        // All storages are asked at once with a short budget: a dead one
+        // costs that budget once, not once each in turn.
+        let mut answers = Self::reachable_all(&bundle.storages, REACHABLE_WITHIN);
         for (i, s) in bundle.storages.iter().enumerate() {
-            match Self::reachable(s) {
+            match answers[i].take().unwrap_or_else(|| Ok(())) {
                 Ok(()) => {
                     first = Some(i);
                     break;
@@ -1694,8 +1700,10 @@ impl Engine {
             );
         }
         notes.push(format!("{}: joined through it", chosen.spec.name()));
-        for s in bundle.storages.iter().skip(first + 1) {
-            let r = Self::reachable(s)
+        for (i, s) in bundle.storages.iter().enumerate().skip(first + 1) {
+            let r = answers[i]
+                .take()
+                .unwrap_or_else(|| Ok(()))
                 .and_then(|()| engine.add_storage_internal(s.spec.clone(), s.secret.clone()));
             notes.push(match r {
                 Ok(()) => format!("{}: added", s.spec.name()),
@@ -1703,6 +1711,46 @@ impl Engine {
             });
         }
         Ok((engine, notes))
+    }
+
+    /// `reachable` for every storage at once, each on its own thread, waiting
+    /// at most `within` in all. One answer per storage; a storage that has
+    /// not answered by then is a network error (its thread is left to end by
+    /// itself: every network call has its own limits).
+    fn reachable_all(
+        storages: &[crate::pair::BundleStorage],
+        within: std::time::Duration,
+    ) -> Vec<Option<Result<()>>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for (i, s) in storages.iter().enumerate() {
+            let (tx, s) = (tx.clone(), s.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send((i, Self::reachable(&s)));
+            });
+        }
+        drop(tx);
+        let deadline = std::time::Instant::now() + within;
+        let mut out: Vec<Option<Result<()>>> = storages.iter().map(|_| None).collect();
+        let mut got = 0;
+        while got < storages.len() {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left) {
+                Ok((i, r)) => {
+                    out[i] = Some(r);
+                    got += 1;
+                }
+                Err(_) => break,
+            }
+        }
+        for (i, slot) in out.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(Err(crate::storage::network_unavailable(
+                    storages[i].spec.name().to_string(),
+                    format!("no answer within {} s", within.as_secs()),
+                )));
+            }
+        }
+        out
     }
 
     /// Whether a paired storage holds the vault and can be opened from here.

@@ -79,6 +79,53 @@ pub fn too_large(key: &str, size: u64, max: u64) -> anyhow::Error {
     })
 }
 
+/// A storage call that failed because the network, not the storage, did
+/// not answer: no route, a name that does not resolve, a refused or reset
+/// connection, a timeout, a killed stuck `rclone`. It says nothing about
+/// the objects: retry later, and meanwhile work with what is local. Found
+/// with `is_network_error`.
+#[derive(Debug, thiserror::Error)]
+#[error("{what}: the network does not answer ({detail})")]
+pub struct NetworkUnavailable {
+    pub what: String,
+    pub detail: String,
+}
+
+/// The error of a call that failed on the network (`NetworkUnavailable`).
+pub fn network_unavailable(what: impl Into<String>, detail: impl Into<String>) -> anyhow::Error {
+    anyhow::Error::new(NetworkUnavailable {
+        what: what.into(),
+        detail: detail.into(),
+    })
+}
+
+/// Whether `e` is a failure of the network (see `NetworkUnavailable`), as
+/// opposed to a refusal by the storage, a missing object or a bad object.
+/// Also true for a bare `std::io::Error` of a connection kind anywhere in
+/// the chain, so that errors from other transports count too.
+pub fn is_network_error(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        c.downcast_ref::<NetworkUnavailable>().is_some()
+            || c.downcast_ref::<std::io::Error>().is_some_and(|io| {
+                use std::io::ErrorKind::*;
+                matches!(
+                    io.kind(),
+                    ConnectionRefused
+                        | ConnectionReset
+                        | ConnectionAborted
+                        | NotConnected
+                        | TimedOut
+                        | BrokenPipe
+                        | UnexpectedEof
+                        | AddrNotAvailable
+                        | HostUnreachable
+                        | NetworkUnreachable
+                        | NetworkDown
+                )
+            })
+    })
+}
+
 /// Run one storage operation so that a panic in it (a malformed object name
 /// or index met on the way) is an error for this object, not the end of the
 /// whole pass.
