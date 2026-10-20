@@ -105,6 +105,7 @@ mod verify;
 mod view;
 mod viz;
 mod where_data;
+mod youtube;
 pub use access_sync::AccessExchangeReport;
 pub use backups::{
     BackupOptions, BackupSummary, ExpireReport, RestoreReport, SnapshotInfo, SnapshotPick,
@@ -182,6 +183,12 @@ pub use trash::{
     TRASH_UPKEEP_EVERY_SECS,
 };
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
+pub use youtube::{
+    find_youtube_job, task_args as youtube_task_args, youtube_jobs_at, BlockingYoutubeEnv,
+    ServiceYoutubeEnv, TaskKind as YoutubeTaskKind, Video as YoutubeVideo, VideoCounts,
+    VideoStatus, YoutubeAddOptions, YoutubeEnv, YoutubeJob, YoutubeScanReport, YtState,
+    DEFAULT_REFRESH_HOURS, DEFAULT_YT_FREE_MIN,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct LocalIndexEntry {

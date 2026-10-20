@@ -17,7 +17,7 @@ folder.
 
 Linux only, on the command line. On main and in the daily builds (storage
 format 3), not in a release yet. The details are in
-[section 79 of the specification](spec/alpha-0-format.md).
+[section 81 of the specification](spec/alpha-0-format.md).
 
 ## Installing transmission-daemon
 

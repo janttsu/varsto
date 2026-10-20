@@ -84,6 +84,7 @@ pub mod trash3;
 pub mod util;
 pub mod vault;
 pub mod viz;
+pub mod youtube;
 
 /// Storage format version written into every object header. See
 /// `docs/spec/format-versions.md`.

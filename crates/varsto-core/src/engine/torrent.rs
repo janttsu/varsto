@@ -2,7 +2,7 @@
 //! Torrent jobs: a torrent far larger than the local disk is downloaded by
 //! a local transmission-daemon in batches that fit the disk, and every
 //! batch goes into a Varsto folder before the next one starts
-//! (`docs/spec/alpha-0-format.md` section 79, "Torrents through a local
+//! (`docs/spec/alpha-0-format.md` section 81, "Torrents through a local
 //! transmission daemon", and `docs/torrents.md`).
 //!
 //! A job is a file, `state/torrents/<info hash>.json`. Each step
