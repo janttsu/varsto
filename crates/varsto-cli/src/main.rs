@@ -5274,6 +5274,17 @@ fn run(cli: &Cli) -> Result<()> {
                                 (Some(n), _) => println!("Sent the vault to {n}."),
                                 (None, r) => bail!("pairing closed: {}", r.unwrap_or_default()),
                             }
+                            // The folder grants were kept on this device so
+                            // the pairing did not wait on a storage: they go
+                            // out now, or with the next sync.
+                            match engine.flush_records3() {
+                                Ok(f) if f.waiting > 0 => eprintln!(
+                                    "{} changes waiting to upload: they go out with the next sync",
+                                    f.waiting
+                                ),
+                                Ok(_) => {}
+                                Err(e) => eprintln!("the folder grants wait to upload: {e:#}"),
+                            }
                             break;
                         }
                     }

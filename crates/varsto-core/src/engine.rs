@@ -2721,15 +2721,34 @@ impl Engine {
         if self.vault.member {
             bail!("this device is a member of a shared folder only; it cannot create folders in the owner's vault");
         }
-        self.ensure_unique_folder_name(name)?;
+        // The name is checked against the folders this device knows, and
+        // below against the records as read now (the storages when they
+        // answer): adding a folder does not wait for a storage.
+        self.ensure_unique_folder_name_known(name)?;
         crate::names::check_display_name(name)?;
         fs::create_dir_all(path)?;
         // Format 3: the folder record (this device the owner), a random K9₀
         // granted to this device, and the escrow under the recovery key when
         // this session holds it (else `status` warns until it is written).
+        // They are kept on this device first; a storage that does not
+        // answer gets them from the outbox later.
         let k1 = self.f3.recovery.clone();
+        let wanted = name.trim().to_lowercase();
         let id = self
-            .with_enrolled(|m| m.create_folder(name, BTreeMap::new(), k1.as_ref()))?
+            .with_enrolled_at(members3::Reach::StoragesOrLocal, |m| {
+                if let Some(st) = m
+                    .registry
+                    .folders
+                    .values()
+                    .find(|s| !s.is_removed() && s.name.to_lowercase() == wanted)
+                {
+                    bail!(
+                        "the vault already has a folder named {}: attach that one, or choose another name",
+                        st.name
+                    );
+                }
+                m.create_folder(name, BTreeMap::new(), k1.as_ref())
+            })?
             .ok_or_else(|| {
                 anyhow!("add a storage first: a folder's records live on the vault's storages")
             })?;
@@ -2819,7 +2838,14 @@ impl Engine {
             })
         };
         if keyless(self) && !self.vault.member {
-            let _ = self.refresh_members();
+            // This device's copy of the records first (a grant the last
+            // sync brought); the storages only when that has no key.
+            if let Err(e) = self.load_members3_local() {
+                log::debug!("membership not read from this device's copy: {e:#}");
+            }
+            if keyless(self) {
+                let _ = self.refresh_members();
+            }
         }
         let rec = self
             .keyring
@@ -2863,6 +2889,15 @@ impl Engine {
             bail!("a folder needs a name");
         }
         let _ = self.pull_registry();
+        self.ensure_unique_folder_name_known(name)
+    }
+
+    /// `ensure_unique_folder_name` against the folders this device knows,
+    /// without reading the storages.
+    fn ensure_unique_folder_name_known(&self, name: &str) -> Result<()> {
+        if name.trim().is_empty() {
+            bail!("a folder needs a name");
+        }
         if let Some(f) = self
             .keyring
             .folders

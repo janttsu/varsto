@@ -14,7 +14,7 @@ use super::folders::{
 use super::grants::{self, k10_of, k11_of, FolderKeys, GrantRecord, GrantedKeys, VaultGrantRecord};
 use super::keys::{KeyRing, VaultKeys};
 use super::requests::{fingerprint, PendingRequest, RequestRecord};
-use super::store::{self, Writer};
+use super::store::{self, Local, Taken, Writer};
 use super::trust::Trust;
 use super::{derive3, Role, Stamp, VAULT_SCOPE};
 use crate::crypto::{SecretKey, SigningKey, VerifyingKey};
@@ -25,7 +25,50 @@ use crate::record::{
 use crate::storage::Storage;
 use anyhow::{anyhow, bail, Result};
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A key made for a new epoch, kept on this device before the epoch record
+/// leaves it, so that an epoch whose record landed always has a holder:
+/// when the process stops (or a storage fails) between the epoch record
+/// and the grants, `Membership::resume_pending` finishes the epoch on the
+/// next open (the key, this device's own grant, the revocations and the
+/// grants that are missing). It is dropped once the epoch is complete, or
+/// once another device's record holds the number.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PendingKey {
+    /// A vault epoch of `remove_devices`: K3 and what the removal names.
+    Vault {
+        epoch: u32,
+        k3: [u8; 32],
+        targets: Vec<(Id16, u64)>,
+        wipe: bool,
+    },
+    /// A folder epoch of `start_folder_epoch`: K9 and the folder's K11.
+    Folder {
+        folder: Id16,
+        epoch: u32,
+        k9: [u8; 32],
+        k11: [u8; 32],
+    },
+}
+
+impl Drop for PendingKey {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        match self {
+            PendingKey::Vault { k3, .. } => k3.zeroize(),
+            PendingKey::Folder { k9, k11, .. } => {
+                k9.zeroize();
+                k11.zeroize();
+            }
+        }
+    }
+}
+
+/// How the engine keeps a [`PendingKey`]: `true` to keep it, `false` to
+/// drop it again.
+pub type KeepKey<'a> = &'a dyn Fn(&PendingKey, bool) -> Result<()>;
 
 /// What `start_folder_epoch` did.
 #[derive(Clone, Debug)]
@@ -86,6 +129,11 @@ pub struct Membership<'a> {
     /// vault.
     vault_signed: BTreeSet<u32>,
     lamport: u64,
+    /// Where records are written (`write_through`): the storages (`None`:
+    /// `storages`) and this device's own copy.
+    remotes: Option<&'a [&'a dyn Storage]>,
+    local: Option<Local<'a>>,
+    keep_key: Option<KeepKey<'a>>,
 }
 
 impl<'a> Membership<'a> {
@@ -134,9 +182,34 @@ impl<'a> Membership<'a> {
             hold_grants: BTreeSet::new(),
             vault_signed: BTreeSet::new(),
             lamport: 0,
+            remotes: None,
+            local: None,
+            keep_key: None,
         };
         m.refresh()?;
         Ok(m)
+    }
+
+    /// Write through this device's own copy (`Local`) first: records are
+    /// kept there, then put on `remotes` as far as they answer, and what a
+    /// storage lacks waits in the outbox (`store::flush_outbox`). Reads
+    /// stay on `storages` (which should hold `local.mirror` too).
+    pub fn write_through(&mut self, remotes: &'a [&'a dyn Storage], local: Local<'a>) {
+        self.remotes = Some(remotes);
+        self.local = Some(local);
+    }
+
+    /// Keep the keys of new epochs with `keep` before their epoch record
+    /// leaves this device (`PendingKey`).
+    pub fn keep_keys_with(&mut self, keep: KeepKey<'a>) {
+        self.keep_key = Some(keep);
+    }
+
+    fn keep(&self, key: &PendingKey, keep: bool) -> Result<()> {
+        match self.keep_key {
+            Some(f) => f(key, keep),
+            None => Ok(()),
+        }
     }
 
     /// Open with one vault key (the vault words): its epoch is found on
@@ -164,7 +237,8 @@ impl<'a> Membership<'a> {
     fn writer(&self) -> Writer<'_> {
         Writer {
             vault: self.vault,
-            storages: self.storages,
+            storages: self.remotes.unwrap_or(self.storages),
+            local: self.local,
             device: self.me,
             key: self.sign,
         }
@@ -1214,6 +1288,25 @@ impl<'a> Membership<'a> {
         Ok(())
     }
 
+    /// Read every request of every folder once (a storage that keeps a
+    /// local copy of what is read, the engine's mirror, then answers
+    /// `list_requests` without the storages). Returns how many were read.
+    pub fn read_all_requests(&self) -> Result<usize> {
+        let ring = self.ring();
+        let trust = self.trust();
+        let mut counter = RecordsRefused::default();
+        let r: Vec<Record<RequestRecord>> = store::read_all(
+            self.storages,
+            self.vault,
+            Kind::Request,
+            "vault/requests/",
+            &ring,
+            &trust,
+            &mut counter,
+        )?;
+        Ok(r.len())
+    }
+
     /// Requests for `folder` that are not answered: the requester is a
     /// device of the vault whose device record carries the request's K8,
     /// neither a participant nor denied.
@@ -1494,6 +1587,7 @@ impl<'a> Membership<'a> {
             .into_iter()
             .filter(|p| !gone.contains(&p.device) && !ep.removed_at(&p.device, current))
             .collect();
+        let me = self.me;
         let e = current + 1;
         let k9 = SecretKey::random();
         let body = FolderEpochRecord {
@@ -1503,7 +1597,16 @@ impl<'a> Membership<'a> {
             participants: stay.clone(),
             removed: remove.to_vec(),
         };
-        {
+        // Keys first: K9 is kept on this device before the epoch record
+        // leaves it, so an epoch whose record landed always has a holder.
+        let pending_key = PendingKey::Folder {
+            folder: *folder,
+            epoch: e,
+            k9: k9.0,
+            k11: keys.k11.0,
+        };
+        self.keep(&pending_key, true)?;
+        let written = {
             let mut ring = self.ring();
             ring.extra.push((
                 KeyId::Meta {
@@ -1521,8 +1624,18 @@ impl<'a> Membership<'a> {
                     epoch: e,
                 },
                 &body,
-            )?;
+            )
+        };
+        if let Err(err) = written {
+            // Another owner holds the number: this key never counts. Any
+            // other failure leaves it kept (the record may have landed).
+            if err.downcast_ref::<Taken>().is_some() {
+                let _ = self.keep(&pending_key, false);
+            }
+            return Err(err);
         }
+        keys.epochs.insert(e, k9);
+        self.granted.add(keys.clone());
         let stamp = Stamp {
             lamport: self.lamport + 1,
             device: self.me,
@@ -1534,13 +1647,17 @@ impl<'a> Membership<'a> {
                 stamp,
             })
             .collect();
+        let (mut granted_to, mut pending) = (Vec::new(), Vec::new());
+        let mut members = Vec::new();
+        // This device's own grant before anything else.
+        if let Some(p) = stay.iter().find(|p| p.device == me) {
+            self.write_grant(&keys, e, p.device, p.role)?;
+            granted_to.push(p.device);
+        }
         if !denied.is_empty() {
             self.write_folder_record(folder, None, None, Vec::new(), denied)?;
         }
-        keys.epochs.insert(e, k9);
-        let (mut granted_to, mut pending) = (Vec::new(), Vec::new());
-        let mut members = Vec::new();
-        for p in &stay {
+        for p in stay.iter().filter(|p| p.device != me) {
             if self.devices.kem_key(&p.device).is_some() {
                 self.write_grant(&keys, e, p.device, p.role)?;
                 granted_to.push(p.device);
@@ -1564,6 +1681,10 @@ impl<'a> Membership<'a> {
             self.refresh_member_grants(folder)?;
             granted_to.extend(members);
             self.refresh()?;
+        }
+        // The epoch is complete: its grants hold the key from now on.
+        if let Err(err) = self.keep(&pending_key, false) {
+            log::warn!("a finished folder epoch stays listed as pending: {err:#}");
         }
         Ok(EpochStart {
             folder: *folder,
@@ -1660,7 +1781,16 @@ impl<'a> Membership<'a> {
             members: members.clone(),
             revoked: gone.iter().copied().collect(),
         };
-        {
+        // Keys first: K3 is kept on this device before the epoch record
+        // leaves it, so an epoch whose record landed always has a holder.
+        let pending_key = PendingKey::Vault {
+            epoch: new,
+            k3: k3.0,
+            targets: targets.to_vec(),
+            wipe,
+        };
+        self.keep(&pending_key, true)?;
+        let written = {
             let mut ring = self.ring();
             ring.extra
                 .push((KeyId::Epoch(new), derive3(&k3, "epoch-record", &[])));
@@ -1670,47 +1800,43 @@ impl<'a> Membership<'a> {
                 Some(u64::from(new)),
                 &KeyId::Epoch(new),
                 &record,
-            )?;
+            )
+        };
+        if let Err(err) = written {
+            // Another device holds the number: this key never counts. Any
+            // other failure leaves it kept (the record may have landed).
+            if err.downcast_ref::<Taken>().is_some() {
+                let _ = self.keep(&pending_key, false);
+            }
+            return Err(err);
+        }
+        // From here the engine keeps the key even when a later step fails.
+        self.vault_keys.keys.insert(new, k3.clone());
+        // This device's own vault grant first, then the revocations and the
+        // grants to the others (each kept here first, so a storage that is
+        // down only delays them).
+        let mut grant_to: Vec<Id16> = members
+            .iter()
+            .filter(|m| self.devices.kem_key(m).is_some() && !self.hold_grants.contains(*m))
+            .copied()
+            .collect();
+        grant_to.sort_by_key(|m| *m != self.me);
+        let mut sent = Vec::new();
+        if grant_to.first() == Some(&self.me) {
+            self.write_vault_grant(new, &k3, self.me)?;
+            sent.push(self.me);
         }
         for (target, cutoff_seq) in targets {
-            let rev = RevocationRecord {
-                device: *target,
-                name: self.devices.name(target),
-                issuer: self.me,
-                cutoff_seq: *cutoff_seq,
-                wipe,
-                new_epoch: new,
-            };
-            self.writer().write(
-                &self.ring(),
-                &RevocationRecord::stream(*target, self.me),
-                None,
-                &KeyId::Registry(0),
-                &rev,
-            )?;
+            self.write_revocation(*target, *cutoff_seq, wipe, new)?;
         }
-        let mut sent = Vec::new();
-        for m in &members {
-            if self.devices.kem_key(m).is_none() || self.hold_grants.contains(m) {
-                continue;
-            }
-            let body = VaultGrantRecord {
-                epoch: new,
-                recipient: *m,
-                issuer: self.me,
-                k3: k3.0,
-            };
-            self.writer().write(
-                &self.ring(),
-                &StreamRef::grant(VAULT_SCOPE, new, *m, self.me),
-                None,
-                &KeyId::Kem(*m),
-                &body,
-            )?;
-            sent.push(*m);
+        for m in grant_to.into_iter().filter(|m| *m != self.me) {
+            self.write_vault_grant(new, &k3, m)?;
+            sent.push(m);
         }
-        self.vault_keys.keys.insert(new, k3);
         self.refresh()?;
+        if let Err(err) = self.keep(&pending_key, false) {
+            log::warn!("a finished vault epoch stays listed as pending: {err:#}");
+        }
         // Folders this device recovered whose last owner just left.
         self.claim_recovered_folders()?;
         // A folder epoch for every folder the device took part in.
@@ -1746,10 +1872,262 @@ impl<'a> Membership<'a> {
                 report.folders_not_rotated.push(folder);
                 continue;
             }
-            let start = self.start_folder_epoch(&folder, &removed, k1)?;
-            report.folder_epochs.push((folder, start.epoch));
+            // The vault epoch stands whatever happens to one folder: a
+            // folder that could not be rotated now is reported, not fatal.
+            match self.start_folder_epoch(&folder, &removed, k1) {
+                Ok(start) => report.folder_epochs.push((folder, start.epoch)),
+                Err(err) => {
+                    log::warn!(
+                        "folder {} was not re-keyed after the removal: {err:#}",
+                        hex::encode(folder)
+                    );
+                    report.folders_not_rotated.push(folder);
+                }
+            }
         }
         Ok(report)
+    }
+
+    fn write_vault_grant(&self, epoch: u32, k3: &SecretKey, recipient: Id16) -> Result<()> {
+        let body = VaultGrantRecord {
+            epoch,
+            recipient,
+            issuer: self.me,
+            k3: k3.0,
+        };
+        self.writer().write(
+            &self.ring(),
+            &StreamRef::grant(VAULT_SCOPE, epoch, recipient, self.me),
+            None,
+            &KeyId::Kem(recipient),
+            &body,
+        )?;
+        Ok(())
+    }
+
+    fn write_revocation(
+        &self,
+        target: Id16,
+        cutoff_seq: u64,
+        wipe: bool,
+        epoch: u32,
+    ) -> Result<()> {
+        let rev = RevocationRecord {
+            device: target,
+            name: self.devices.name(&target),
+            issuer: self.me,
+            cutoff_seq,
+            wipe,
+            new_epoch: epoch,
+        };
+        self.writer().write(
+            &self.ring(),
+            &RevocationRecord::stream(target, self.me),
+            None,
+            &KeyId::Registry(0),
+            &rev,
+        )?;
+        Ok(())
+    }
+
+    /// Finish the epochs a process started and did not complete
+    /// (`PendingKey`): an epoch record of this device under the number, which
+    /// opens with the kept key, makes the key held here and gets this
+    /// device's grant, the revocations and the grants that are missing.
+    /// Returns the keys that are done with: finished, or their number taken
+    /// by another device's record. A key whose number holds nothing stays
+    /// (its record may be on a storage that does not answer now).
+    pub fn resume_pending(&mut self, pending: &[PendingKey]) -> Result<Vec<PendingKey>> {
+        let mut done = Vec::new();
+        for p in pending {
+            let finished = match p {
+                PendingKey::Vault {
+                    epoch,
+                    k3,
+                    targets,
+                    wipe,
+                } => self.resume_vault_epoch(*epoch, &SecretKey(*k3), targets, *wipe)?,
+                PendingKey::Folder {
+                    folder,
+                    epoch,
+                    k9,
+                    k11,
+                } => self.resume_folder_epoch(folder, *epoch, &SecretKey(*k9), &SecretKey(*k11))?,
+            };
+            if finished {
+                done.push(p.clone());
+            }
+        }
+        Ok(done)
+    }
+
+    fn resume_vault_epoch(
+        &mut self,
+        epoch: u32,
+        k3: &SecretKey,
+        targets: &[(Id16, u64)],
+        wipe: bool,
+    ) -> Result<bool> {
+        let held = self.vault_keys.keys.get(&epoch).map(|k| k.0 == k3.0);
+        if held == Some(false) {
+            // Another record holds the number and this device took its key.
+            return Ok(true);
+        }
+        if held.is_none() {
+            let devices = &self.devices;
+            let found = store::numbered(
+                self.storages,
+                self.vault,
+                Kind::Epoch,
+                "vault/epochs/",
+                &|d| devices.signing_key(d),
+            )?;
+            let Some(list) = found.get(&u64::from(epoch)) else {
+                return Ok(false);
+            };
+            if !list.iter().any(|n| n.device == self.me) {
+                return Ok(true);
+            }
+            let Ok((keys, opened)) =
+                epochs::walk_vault_chain(self.storages, self.vault, epoch, k3.clone())
+            else {
+                // This device's record under the number does not open with
+                // the key: a newer try took it.
+                return Ok(true);
+            };
+            if opened.first().is_none_or(|o| o.record.issuer != self.me) {
+                return Ok(true);
+            }
+            let agrees = self
+                .vault_keys
+                .keys
+                .iter()
+                .all(|(e, k)| keys.get(*e).is_none_or(|n| n.0 == k.0));
+            if !agrees {
+                return Ok(true);
+            }
+            log::warn!("finishing vault epoch {epoch}: it was started here and not completed");
+            for (e, k) in keys.keys {
+                self.vault_keys.keys.entry(e).or_insert(k);
+            }
+            self.write_vault_grant(epoch, k3, self.me)?;
+            self.refresh()?;
+        }
+        for (target, cutoff) in targets {
+            if !self.revocations.contains_key(target) && self.devices.get(target).is_some() {
+                self.write_revocation(*target, *cutoff, wipe, epoch)?;
+            }
+        }
+        self.grant_missing_vault_keys()?;
+        self.refresh()?;
+        Ok(true)
+    }
+
+    fn resume_folder_epoch(
+        &mut self,
+        folder: &Id16,
+        epoch: u32,
+        k9: &SecretKey,
+        k11: &SecretKey,
+    ) -> Result<bool> {
+        let Some(st) = self.registry.get(folder).cloned() else {
+            // The folder is gone (or not readable here): nothing to finish.
+            return Ok(true);
+        };
+        let held = self
+            .granted
+            .get(folder)
+            .and_then(|k| k.epochs.get(&epoch))
+            .map(|k| k.0 == k9.0);
+        if held == Some(false) {
+            return Ok(true);
+        }
+        if held.is_none() {
+            let prefix = FolderEpochRecord::stream(*folder, [0u8; 16])
+                .prefix()
+                .unwrap_or_default();
+            let devices = &self.devices;
+            let envs =
+                store::numbered(self.storages, self.vault, Kind::ShareEpoch, &prefix, &|d| {
+                    devices.signing_key(d)
+                })?;
+            let Some(list) = envs.get(&u64::from(epoch)) else {
+                return Ok(false);
+            };
+            let mut counter = RecordsRefused::default();
+            let mine = list.iter().filter(|n| n.device == self.me).any(|n| {
+                self.open_epoch_record(folder, epoch, k9, n, &mut counter)
+                    .is_some()
+            });
+            if !mine {
+                return Ok(true);
+            }
+            log::warn!(
+                "finishing epoch {epoch} of folder {}: it was started here and not completed",
+                hex::encode(folder)
+            );
+            let mut keys = self.granted.get(folder).cloned().unwrap_or(FolderKeys {
+                folder: *folder,
+                epochs: BTreeMap::new(),
+                k11: k11.clone(),
+            });
+            keys.epochs.insert(epoch, k9.clone());
+            let role = st.role(&self.me).unwrap_or(Role::Owner);
+            self.write_grant(&keys, epoch, self.me, role)?;
+            self.refresh()?;
+        }
+        // The removed devices are denied, and every participant that stays
+        // with a device record here gets its grant.
+        let st = self.registry.get(folder).cloned().unwrap_or(st);
+        let ep = self.folder_epochs(folder);
+        let Some(rec) = ep.applied.get(&epoch).cloned() else {
+            return Ok(false);
+        };
+        let Some(keys) = self.granted.get(folder).cloned().filter(|k| k.holds(epoch)) else {
+            return Ok(false);
+        };
+        let stamp = Stamp {
+            lamport: self.lamport + 1,
+            device: self.me,
+        };
+        let denied: Vec<Denied> = rec
+            .removed
+            .iter()
+            .filter(|r| st.role(&r.device).is_some())
+            .map(|r| Denied {
+                device: r.device,
+                stamp,
+            })
+            .collect();
+        if !denied.is_empty() {
+            self.write_folder_record(folder, None, None, Vec::new(), denied)?;
+        }
+        let mut have: BTreeSet<Id16> = BTreeSet::new();
+        let prefix = format!("vault/grants/{}/{epoch:010}/", hex::encode(folder));
+        for s in self.storages {
+            for name in s.list(&prefix)? {
+                if let Some(n) = RecordName::parse_as(Kind::Grant, &name) {
+                    if let Some(r) = n.recipient {
+                        have.insert(r);
+                    }
+                }
+            }
+        }
+        for p in &rec.participants {
+            if p.device == self.me
+                || have.contains(&p.device)
+                || self.devices.kem_key(&p.device).is_none()
+            {
+                continue;
+            }
+            self.write_grant(&keys, epoch, p.device, p.role)?;
+        }
+        self.refresh()?;
+        if !st.members.is_empty() {
+            self.refresh_member_grants(folder)?;
+            self.refresh()?;
+        }
+        Ok(true)
     }
 
     /// Seal the newest vault key to every device its epoch record keeps

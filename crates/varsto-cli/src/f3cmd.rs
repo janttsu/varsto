@@ -99,9 +99,15 @@ mod imp {
                 parse_folder_role(role)?;
                 let mut e = crate::open_engine(home)?;
                 let r = e.f3_folder_request(folder, role)?;
+                let waiting = e.records_waiting3() > 0;
                 crate::print(cli, &r, |r| {
                     format!(
-                        "Asked the owners of folder {} for the {} role.\nThis device is {}; its six words are:\n  {}\nGive an owner these words (not through the same channel as the request); they compare them before approving.",
+                        "{} the owners of folder {} for the {} role.\nThis device is {}; its six words are:\n  {}\nGive an owner these words (not through the same channel as the request); they compare them before approving.",
+                        if waiting {
+                            "A storage did not answer: the request is kept on this device and goes out with the next sync. It asks"
+                        } else {
+                            "Asked"
+                        },
                         r.folder, r.role_wanted, r.device, r.fingerprint
                     )
                 })?;
@@ -346,7 +352,9 @@ mod imp {
         RecoveryKey::from_words(text.trim()).map(Some)
     }
 
-    /// The recovery warnings of `varsto status`, on standard error.
+    /// The recovery warnings of `varsto status`, on standard error, from
+    /// this device's copy of the records (no network), and the membership
+    /// changes that wait for a storage.
     pub fn status_warnings(engine: &mut Engine) {
         match engine.f3_missing_escrows() {
             Ok(list) => {
@@ -354,7 +362,14 @@ mod imp {
                     eprintln!("warning: {}", m.warning);
                 }
             }
-            Err(e) => log::debug!("recovery copies not checked: {e:#}"),
+            Err(e) => log::warn!("recovery copies not checked: {e:#}"),
+        }
+        let waiting = engine.records_waiting3();
+        if waiting > 0 {
+            eprintln!(
+                "{waiting} {} waiting to upload (membership records kept on this device until a storage answers)",
+                if waiting == 1 { "change" } else { "changes" }
+            );
         }
     }
 }

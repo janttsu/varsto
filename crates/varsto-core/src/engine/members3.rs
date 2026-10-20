@@ -263,7 +263,25 @@ impl Storage for Tee<'_> {
 }
 
 /// `member3.json` of a member device.
-const MEMBER_FILE: &str = "member3.json";
+pub(super) const MEMBER_FILE: &str = "member3.json";
+
+/// The outbox of membership records, under `state/`.
+const OUTBOX_DIR: &str = "outbox3";
+
+/// How a membership operation reaches the records (`with_members3_at`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Reach {
+    /// The storages and this device's copy; an error when a storage cannot
+    /// be read. Vault and folder epochs need this: a storage decides their
+    /// number.
+    Storages,
+    /// As `Storages`; when they cannot be read, this device's copy alone,
+    /// and every record written waits in the outbox.
+    StoragesOrLocal,
+    /// This device's copy alone, no network (falls back to
+    /// `StoragesOrLocal` while the copy knows no device).
+    Local,
+}
 
 #[derive(Serialize, Deserialize)]
 struct MemberState3 {
@@ -365,6 +383,30 @@ impl Engine {
         guard: bool,
         f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
     ) -> Result<Option<R>> {
+        self.with_members3_reach(Reach::Storages, guard, f)
+    }
+
+    /// `with_members3` read as `reach` says.
+    pub(crate) fn with_members3_at<R>(
+        &mut self,
+        reach: Reach,
+        f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
+    ) -> Result<Option<R>> {
+        self.with_members3_reach(reach, true, f)
+    }
+
+    /// Run `f` over a `Membership` read as `reach` says. Records it writes
+    /// are kept in this device's copy first and reach the storages that
+    /// answer; what a storage lacks waits in the outbox (`state/outbox3/`)
+    /// for `flush_records3`, which every refresh of the membership runs.
+    /// Epochs this device started and did not finish are finished first
+    /// when the storages were read (`Membership::resume_pending`).
+    fn with_members3_reach<R>(
+        &mut self,
+        reach: Reach,
+        guard: bool,
+        f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
+    ) -> Result<Option<R>> {
         let open = self.member_storages()?;
         if open.is_empty() {
             return Ok(None);
@@ -373,32 +415,132 @@ impl Engine {
         // Every membership record read is kept in a local mirror, so that
         // a later process knows the membership without reading a storage.
         let mirror = self.records_mirror()?;
+        let outbox = self.records_outbox()?;
+        // A copy that knows no device yet cannot stand in for the storages.
+        let reach = match reach {
+            Reach::Local
+                if mirror
+                    .list("vault/devices/")
+                    .map(|l| l.is_empty())
+                    .unwrap_or(true) =>
+            {
+                Reach::StoragesOrLocal
+            }
+            r => r,
+        };
         let teed: Vec<Tee> = open.iter().map(|(_, b)| Tee::new(&**b, &mirror)).collect();
         let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
+        // Reads: the storages and this device's copy (records it wrote
+        // that a storage does not hold yet count at once).
+        let mut with_local = refs.clone();
+        with_local.push(&mirror);
+        let only_local: Vec<&dyn Storage> = vec![&mirror];
+        let no_storage: Vec<&dyn Storage> = Vec::new();
+        let local = crate::membership3::Local {
+            mirror: &mirror,
+            outbox: &outbox,
+        };
         let lamport = self.clock.lamport;
         let kept = self.vault_kept3();
         let recovered = self.keyring_keys()?;
+        let held = self.org_held();
+        let pending = membership::load_pending_keys(
+            &self.home,
+            &self.keys,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+        )
+        .unwrap_or_else(|e| {
+            log::warn!("the keys of unfinished epochs could not be read: {e:#}");
+            Vec::new()
+        });
+        let (home, keys_ref) = (&self.home, &self.keys);
+        let (vault_id, device_id) = (&self.vault.vault_id, &self.vault.device_id);
+        let keep_key = |k: &crate::membership3::PendingKey, keep: bool| -> Result<()> {
+            membership::update_pending_keys(home, keys_ref, vault_id, device_id, k, keep)
+        };
         let (out, snapshot, keys, stamped) = {
             let Some(kem) = self.epochs.kem.as_ref() else {
                 bail!("this device has no KEM key (K8); it cannot take part in format-3 folders");
             };
-            let mut m = Membership::open_with(
-                vault,
-                &refs,
-                &self.keys.signer,
-                kem,
-                self.vault_keys3(),
-                kept,
-            )?;
-            // No storage answered: nothing was read, and an empty
-            // membership must not replace the one known here.
-            if let Some(e) = all_down(&teed) {
-                return Err(e.context("no storage could be reached to read the membership"));
-            }
+            let mut offline = reach == Reach::Local;
+            let mut m = if offline {
+                Membership::open_with(
+                    vault,
+                    &only_local,
+                    &self.keys.signer,
+                    kem,
+                    self.vault_keys3(),
+                    kept,
+                )?
+            } else {
+                match Membership::open_with(
+                    vault,
+                    &with_local,
+                    &self.keys.signer,
+                    kem,
+                    self.vault_keys3(),
+                    kept.clone(),
+                ) {
+                    // A storage that does not answer reads as empty (the
+                    // tee); when none answered, nothing came from the
+                    // storages.
+                    Ok(m) => match all_down(&teed) {
+                        None => m,
+                        Some(e) if reach == Reach::StoragesOrLocal => {
+                            log::warn!(
+                                "no storage could be reached ({e:#}); working from this device's copy of the membership, changes wait to upload"
+                            );
+                            offline = true;
+                            m
+                        }
+                        // An empty membership must not replace the one
+                        // known here, and epochs need a storage.
+                        Some(e) => {
+                            return Err(
+                                e.context("no storage could be reached to read the membership")
+                            )
+                        }
+                    },
+                    Err(e) if reach == Reach::StoragesOrLocal => {
+                        log::warn!(
+                            "the storages could not be read ({e:#}); working from this device's copy of the membership, changes wait to upload"
+                        );
+                        offline = true;
+                        Membership::open_with(
+                            vault,
+                            &only_local,
+                            &self.keys.signer,
+                            kem,
+                            self.vault_keys3(),
+                            kept,
+                        )?
+                    }
+                    Err(e) => return Err(e),
+                }
+            };
+            // Without the storages nothing is tried on them: the records
+            // wait in the outbox for the next flush.
+            m.write_through(if offline { &no_storage } else { &refs }, local);
+            m.keep_keys_with(&keep_key);
             m.observe_lamport(lamport);
+            m.hold_grants = held;
             for k in recovered {
                 if m.granted.get(&k.folder).is_none() {
                     m.add_recovered(k);
+                }
+            }
+            let ready = m.own_revocation.is_none() && m.unresolved_vault_forks().is_empty();
+            if !offline && ready && !pending.is_empty() {
+                match m.resume_pending(&pending) {
+                    Ok(done) => {
+                        for d in &done {
+                            if let Err(e) = keep_key(d, false) {
+                                log::warn!("a finished epoch stays listed as pending: {e:#}");
+                            }
+                        }
+                    }
+                    Err(e) => log::warn!("an unfinished key epoch was not completed yet: {e:#}"),
                 }
             }
             // A removed device, or one that waits for the user's choice
@@ -432,6 +574,49 @@ impl Engine {
             "records3".into(),
             self.home.join("state").join("records3"),
         )
+    }
+
+    /// The outbox of membership records (`state/outbox3/`): records this
+    /// device wrote that a storage does not hold yet.
+    fn records_outbox(&self) -> Result<crate::storage::LocalDirStorage> {
+        crate::storage::LocalDirStorage::new(
+            "this device".into(),
+            self.home.join("state").join(OUTBOX_DIR),
+        )
+    }
+
+    /// Put the membership records that wait in the outbox on every hot
+    /// metadata storage (put-if-absent). A storage that does not answer
+    /// keeps its records waiting; that is never an error here.
+    pub fn flush_records3(&self) -> Result<crate::membership3::Flushed> {
+        if !self.home.join("state").join(OUTBOX_DIR).is_dir() {
+            return Ok(Default::default());
+        }
+        let outbox = self.records_outbox()?;
+        let open = self.member_storages()?;
+        let refs: Vec<&dyn Storage> = open.iter().map(|(_, b)| &**b).collect();
+        let done = crate::membership3::flush_outbox(&outbox, &refs)?;
+        if done.sent > 0 {
+            log::info!("{} membership changes uploaded", done.sent);
+        }
+        if done.conflicts > 0 {
+            log::warn!(
+                "{} membership changes could not be uploaded: a storage holds other records under their names",
+                done.conflicts
+            );
+        }
+        Ok(done)
+    }
+
+    /// How many membership changes of this device wait for a storage
+    /// (`varsto status`: "N changes waiting to upload").
+    pub fn records_waiting3(&self) -> usize {
+        if !self.home.join("state").join(OUTBOX_DIR).is_dir() {
+            return 0;
+        }
+        self.records_outbox()
+            .and_then(|o| crate::membership3::outbox_waiting(&o))
+            .unwrap_or(0)
     }
 
     /// Copy every membership record of the local mirror to `to` (a storage
@@ -494,7 +679,25 @@ impl Engine {
             let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
             return self.read_member3_checked(&refs, || all_down(&teed));
         }
-        self.with_enrolled(|_| Ok(()))?;
+        // What this device wrote while a storage was away goes out first.
+        match self.flush_records3() {
+            Ok(f) if f.waiting > 0 => {
+                log::info!("{} membership changes still wait for a storage", f.waiting)
+            }
+            Ok(_) => {}
+            Err(e) => log::warn!("membership changes not uploaded: {e:#}"),
+        }
+        self.with_enrolled(|m| {
+            // Requests and recovery copies are read here once, so that the
+            // pages and `status` answer from this device's copy.
+            if let Err(e) = m.read_all_requests() {
+                log::debug!("folder requests not read: {e:#}");
+            }
+            if let Err(e) = m.missing_escrows() {
+                log::debug!("recovery copies not read: {e:#}");
+            }
+            Ok(())
+        })?;
         // The organization's manifest, roster and log (`org_ops`), judged
         // with the devices just read; a device its policy allows again gets
         // the vault key it was held back from.
@@ -576,8 +779,17 @@ impl Engine {
         &mut self,
         f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
     ) -> Result<Option<R>> {
+        self.with_enrolled_at(Reach::Storages, f)
+    }
+
+    /// `with_enrolled` read as `reach` says.
+    pub(crate) fn with_enrolled_at<R>(
+        &mut self,
+        reach: Reach,
+        f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
+    ) -> Result<Option<R>> {
         let name = self.vault.device_name.clone();
-        self.with_members3(|m| {
+        self.with_members3_at(reach, |m| {
             if m.devices.get(&m.me).is_none() {
                 m.enrol(&name)?;
             }

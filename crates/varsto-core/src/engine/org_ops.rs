@@ -662,6 +662,21 @@ impl Engine {
             })
     }
 
+    /// Read the organization (and with `registry`, the device and folder
+    /// records) before an administrator's change. The change is decided on
+    /// the storages, so it is not made from this device's copy: when they
+    /// cannot be read it is refused at once, saying why.
+    fn org_fresh(&mut self, registry: bool) -> Result<()> {
+        let read = if registry {
+            self.pull_registry().and_then(|_| self.sync_org())
+        } else {
+            self.sync_org()
+        };
+        read.context(
+            "organization changes are made on the vault's storages and they cannot be read from this device now; try again when it is online",
+        )
+    }
+
     // ----- creating -------------------------------------------------------------
 
     /// Turn this vault into an organization's vault: this device becomes the
@@ -681,8 +696,7 @@ impl Engine {
         if name.is_empty() || founder.is_empty() {
             bail!("give the organization a name and the founder a user name");
         }
-        self.pull_registry()?;
-        self.sync_org()?;
+        self.org_fresh(true)?;
         if let Some(o) = &self.org {
             bail!("this vault already belongs to the organization {}", o.name);
         }
@@ -786,7 +800,7 @@ impl Engine {
         confirmed: Option<&str>,
     ) -> Result<OrgApproved> {
         self.ensure_active()?;
-        self.sync_org()?;
+        self.org_fresh(false)?;
         self.require_admin()?;
         let info: RequestInfo = OrgRequest::parse(code)?;
         if let Some(c) = confirmed {
@@ -933,8 +947,7 @@ impl Engine {
 
     fn org_add_device_inner(&mut self, name_or_id: &str, user: &str) -> Result<()> {
         self.ensure_active()?;
-        self.pull_registry()?;
-        self.sync_org()?;
+        self.org_fresh(true)?;
         self.require_admin()?;
         let user = user.trim();
         if user.is_empty() {
@@ -1089,7 +1102,7 @@ impl Engine {
         // An administrator on a platform another one refused may still
         // change the policy (it is an administrator's decision either way).
         self.ensure_not_removed()?;
-        self.sync_org()?;
+        self.org_fresh(false)?;
         self.require_admin()?;
         let mut platforms: Vec<String> = Vec::new();
         for p in &policy.allowed_platforms {
@@ -1149,8 +1162,7 @@ impl Engine {
 
     fn org_admin_add_inner(&mut self, name_or_id: &str, root_words: &str) -> Result<()> {
         self.ensure_active()?;
-        self.pull_registry()?;
-        self.sync_org()?;
+        self.org_fresh(true)?;
         let (_, root) = org::root_from_words(root_words)?;
         let o = self
             .org
@@ -1199,8 +1211,7 @@ impl Engine {
 
     fn org_admin_remove_inner(&mut self, name_or_id: &str, root_words: &str) -> Result<()> {
         self.ensure_active()?;
-        self.pull_registry()?;
-        self.sync_org()?;
+        self.org_fresh(true)?;
         let (_, root) = org::root_from_words(root_words)?;
         let o = self
             .org
