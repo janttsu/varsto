@@ -69,9 +69,67 @@ const PROBE_BODY: &[u8] = b"varsto conditional-write probe";
 const MAX_BODY: u64 = crate::storage::MAX_RECORD;
 
 /// Objects larger than this (packs, `crate::packs`) are written in parts
-/// of `MULTIPART_PART` bytes.
-const MULTIPART_ABOVE: usize = 64 << 20;
-const MULTIPART_PART: usize = 16 << 20;
+/// of `MULTIPART_PART` bytes, so that a dropped connection costs one part,
+/// not the whole object, and each request fits the size-scaled time limit.
+const MULTIPART_ABOVE: usize = 8 << 20;
+const MULTIPART_PART: usize = 8 << 20;
+
+/// Tries of one idempotent request (the first and the repeats).
+const TRIES: u32 = 3;
+
+/// Pause before try number `n + 1` after try `n` failed.
+fn backoff(n: u32) -> Duration {
+    Duration::from_millis(if n <= 1 { 500 } else { 1500 })
+}
+
+/// How a failed request may be repeated: `Quick` failures (a reset or
+/// refused connection, a protocol error) get all the tries, `Slow` ones (a
+/// timeout, a name that does not resolve) one repeat, so that a dead
+/// network does not cost minutes per call.
+#[derive(Clone, Copy, PartialEq)]
+enum Transient {
+    Quick,
+    Slow,
+}
+
+/// Whether `e` is a failure of the connection rather than of the request.
+fn transient(e: &anyhow::Error) -> Option<Transient> {
+    for c in e.chain() {
+        if let Some(u) = c.downcast_ref::<ureq::Error>() {
+            return match u {
+                ureq::Error::Timeout(_) | ureq::Error::HostNotFound => Some(Transient::Slow),
+                ureq::Error::Io(_) | ureq::Error::ConnectionFailed | ureq::Error::Protocol(_) => {
+                    Some(Transient::Quick)
+                }
+                _ => None,
+            };
+        }
+    }
+    None
+}
+
+/// Whether a request can be sent again after an unknown outcome. Reads and
+/// deletes can; a PUT can because every object is content-addressed or has a
+/// single writer (and a repeated conditional PUT that finds the object there
+/// answers 412, which `put_if_absent` reads as "exists"); of the multipart
+/// calls only the start (a second upload id does no harm) can.
+fn repeatable(method: &str, query: &[(String, String)]) -> bool {
+    match method {
+        "GET" | "HEAD" | "DELETE" | "PUT" => true,
+        "POST" => query.iter().any(|(k, _)| k == "uploads"),
+        _ => false,
+    }
+}
+
+/// Time allowed for one call that moves about `bytes` bytes at `rate`
+/// bytes per second: a minute and what the transfer needs, at most an hour.
+fn call_timeout(bytes: u64, rate: u64) -> Duration {
+    Duration::from_secs((60 + bytes / rate).min(3600))
+}
+
+/// Slowest upload a call waits for (about 256 kbit/s) and download (512).
+const UPLOAD_RATE: u64 = 32 << 10;
+const DOWNLOAD_RATE: u64 = 64 << 10;
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 /// Whether `host[:port]` names this computer: `localhost`, `127.0.0.0/8`
@@ -170,11 +228,13 @@ impl S3Storage {
         };
         let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(600)))
-            // A storage that accepts the request and then goes silent must
-            // not freeze a sync for the whole global limit: connecting and
-            // the first byte of the answer each get their own, shorter one.
-            .timeout_connect(Some(Duration::from_secs(20)))
+            // No limit for a whole call here: each request gets one that
+            // grows with its body (`call_timeout`). A storage that accepts
+            // the request and then goes silent must not freeze a sync for
+            // that long: resolving, connecting and the first byte of the
+            // answer each get their own, shorter one.
+            .timeout_resolve(Some(Duration::from_secs(5)))
+            .timeout_connect(Some(Duration::from_secs(10)))
             .timeout_recv_response(Some(Duration::from_secs(120)))
             // Downloads keep up to 32 objects in flight; with ureq's default
             // of three idle connections per host the others would pay a new
@@ -205,15 +265,16 @@ impl S3Storage {
             return Ok(known);
         }
         let key = format!("vault/.probe-{:016x}", rand::random::<u64>());
-        let outcome = match self.put(&key, PROBE_BODY, true)? {
-            200 | 201 => match self.put(&key, PROBE_BODY, true)? {
-                412 => Ok(true),
-                200 | 201 | 400 | 501 => Ok(false),
-                s => Err(self.explain("PUT", &key, s, &[])),
-            },
-            400 | 501 => Ok(false),
-            s => Err(self.explain("PUT", &key, s, &[])),
-        };
+        let outcome = self.probe_conditional(&key);
+        if let Err(e) = &outcome {
+            if crate::storage::is_network_error(e) {
+                // Unknown, not "no": nothing is remembered, so the next write
+                // probes again, and this one takes the safe path (HEAD then
+                // PUT), which fails by itself if the network is really gone.
+                log::debug!(storage = self.cfg.name.as_str(); "s3: conditional-write probe unanswered, trying later: {e:#}");
+                return Ok(false);
+            }
+        }
         if let Err(e) = self.delete(&key) {
             log::debug!(storage = self.cfg.name.as_str(); "s3: probe object not deleted: {e:#}");
         }
@@ -224,6 +285,19 @@ impl S3Storage {
             self.warn_unconditional();
         }
         Ok(honoured)
+    }
+
+    /// The two probe writes; whether the server honoured the condition.
+    fn probe_conditional(&self, key: &str) -> Result<bool> {
+        match self.put(key, PROBE_BODY, true)? {
+            200 | 201 => match self.put(key, PROBE_BODY, true)? {
+                412 => Ok(true),
+                200 | 201 | 400 | 501 => Ok(false),
+                s => Err(self.explain("PUT", key, s, &[])),
+            },
+            400 | 501 => Ok(false),
+            s => Err(self.explain("PUT", key, s, &[])),
+        }
     }
 
     fn warn_unconditional(&self) {
@@ -308,7 +382,45 @@ impl S3Storage {
     ) -> Result<(u16, Vec<u8>, Option<String>)> {
         use std::sync::atomic::Ordering;
         let t = crate::logging::Timer::start();
-        let first = self.request_once(method, path, query, extra_headers, body, cap);
+        let repeat = repeatable(method, query);
+        let mut tries = 0;
+        let first = loop {
+            tries += 1;
+            let r = self.request_once(method, path, query, extra_headers, body, cap);
+            let again = repeat
+                && tries < TRIES
+                && match &r {
+                    Ok((st, ..)) => matches!(*st, 429 | 500 | 502 | 503 | 504),
+                    Err(e) => match transient(e) {
+                        Some(Transient::Quick) => true,
+                        Some(Transient::Slow) => tries < 2,
+                        None => false,
+                    },
+                };
+            if !again {
+                break r;
+            }
+            log::debug!(
+                storage = self.cfg.name.as_str();
+                "s3: {method} {path} failed (try {tries}), trying again: {}",
+                match &r {
+                    Ok((st, ..)) => format!("HTTP {st}"),
+                    Err(e) => format!("{e:#}"),
+                }
+            );
+            std::thread::sleep(backoff(tries));
+        };
+        // What still fails on the connection is told apart from a refusal.
+        let first = first.map_err(|e| {
+            if transient(&e).is_some() {
+                crate::storage::network_unavailable(
+                    format!("{method} {}", self.cfg.name),
+                    format!("{e:#}"),
+                )
+            } else {
+                e
+            }
+        });
         let failed = match &first {
             Ok((st, ..)) => *st >= 400 && *st != 404,
             Err(_) => true,
@@ -423,13 +535,23 @@ impl S3Storage {
         for (k, v) in extra_headers {
             send_headers.push((k.to_string(), v.to_string()));
         }
+        // The time allowed grows with the bytes moved: the body sent, or the
+        // most that may come back.
+        let timeout = if body.is_empty() {
+            call_timeout(cap.min(crate::storage::MAX_PACK), DOWNLOAD_RATE)
+        } else {
+            call_timeout(body.len() as u64, UPLOAD_RATE)
+        };
         let mut resp = match method {
             "PUT" | "POST" => {
                 let mut r = if method == "PUT" {
                     self.agent.put(&url)
                 } else {
                     self.agent.post(&url)
-                };
+                }
+                .config()
+                .timeout_global(Some(timeout))
+                .build();
                 for (k, v) in &send_headers {
                     r = r.header(k.as_str(), v.as_str());
                 }
@@ -441,7 +563,10 @@ impl S3Storage {
                     "HEAD" => self.agent.head(&url),
                     "DELETE" => self.agent.delete(&url),
                     other => bail!("unsupported method {other}"),
-                };
+                }
+                .config()
+                .timeout_global(Some(timeout))
+                .build();
                 for (k, v) in &send_headers {
                     r = r.header(k.as_str(), v.as_str());
                 }
@@ -500,19 +625,15 @@ impl S3Storage {
 
     /// `put_if_absent` for a large object: a multipart upload. Large
     /// objects are packs, named by the hash of their bytes, so whatever
-    /// already has the name holds the same bytes: a HEAD decides. A server
-    /// that refuses the multipart upload gets one PUT.
+    /// already has the name holds the same bytes: a HEAD decides. Each part
+    /// is tried again by itself (`request`), so a lossy link costs the
+    /// failed part, never the whole object; there is no one-request
+    /// fallback, which would only repeat the largest transfer.
     fn put_large(&self, key: &str, data: &[u8]) -> Result<bool> {
         if self.exists(key)? {
             return Ok(false);
         }
-        if let Err(e) = self.put_multipart(key, data) {
-            log::warn!(storage = self.cfg.name.as_str(); "s3: multipart upload of {key} failed, writing it in one request: {e:#}");
-            match self.put(key, data, false)? {
-                200 | 201 => {}
-                s => return Err(self.explain("PUT", key, s, &[])),
-            }
-        }
+        self.put_multipart(key, data)?;
         Ok(true)
     }
 
@@ -572,7 +693,13 @@ impl S3Storage {
             Ok(())
         };
         let result = upload();
-        if result.is_err() {
+        // With the network gone an abort cannot be sent either; the storage's
+        // own cleanup of unfinished uploads takes it.
+        if result
+            .as_ref()
+            .err()
+            .is_some_and(|e| !crate::storage::is_network_error(e))
+        {
             let _ = self.request(
                 "DELETE",
                 &path,
@@ -1128,7 +1255,148 @@ mod tests {
         assert!(!s.put_if_absent("packs/ab/abcd", &data).unwrap());
         let calls = seen.lock().unwrap().clone();
         let parts = calls.iter().filter(|c| c.contains("partNumber=")).count();
-        assert_eq!(parts, 8, "{calls:?}");
+        assert_eq!(parts, data.len().div_ceil(MULTIPART_PART), "{calls:?}");
+        server.unblock();
+        th.join().unwrap();
+    }
+
+    /// Answers `statuses` in turn to the requests it gets, then 200 with
+    /// `body`; the request lines seen are returned by the join handle.
+    fn scripted(statuses: Vec<u16>, body: Vec<u8>) -> (u16, std::thread::JoinHandle<Vec<String>>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let th = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            let mut left = statuses.len() + 1;
+            let mut it = statuses.into_iter();
+            while left > 0 {
+                let req = server.recv().unwrap();
+                left -= 1;
+                seen.push(format!("{} {}", req.method().as_str(), req.url()));
+                let resp = match it.next() {
+                    Some(st) => tiny_http::Response::from_data(Vec::new()).with_status_code(st),
+                    None => tiny_http::Response::from_data(body.clone()),
+                };
+                let _ = req.respond(resp);
+            }
+            seen
+        });
+        (port, th)
+    }
+
+    #[test]
+    fn a_read_is_repeated_after_a_server_error() {
+        let (port, th) = scripted(vec![503, 500], b"hello".to_vec());
+        let got = storage_for(port).get("manifests/x").unwrap();
+        assert_eq!(got.as_deref(), Some(&b"hello"[..]));
+        assert_eq!(th.join().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_dropped_connection_is_repeated() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let th = std::thread::spawn(move || {
+            // The first connection is closed without an answer.
+            let (c, _) = listener.accept().unwrap();
+            drop(c);
+            let (mut c, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = c.read(&mut buf);
+            let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        });
+        assert!(storage_for(port).exists("manifests/x").unwrap());
+        th.join().unwrap();
+    }
+
+    #[test]
+    fn a_refused_request_is_not_repeated() {
+        let (port, th) = scripted(vec![403], Vec::new());
+        let e = storage_for(port).get("manifests/x").unwrap_err();
+        assert!(!crate::storage::is_network_error(&e), "{e:#}");
+        assert_eq!(th.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_unreachable_server_is_a_network_error_and_the_probe_is_not_remembered() {
+        // A port nobody listens on: connections are refused at once.
+        let port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let s = storage_for(port);
+        let e = s.put_if_absent("chunks/ab/abcd", b"x").unwrap_err();
+        assert!(crate::storage::is_network_error(&e), "{e:#}");
+        // The probe could not be answered: unknown, to be tried later.
+        assert_eq!(s.conditional_writes(), None);
+        let e = s.get("manifests/x").unwrap_err();
+        assert!(crate::storage::is_network_error(&e), "{e:#}");
+    }
+
+    #[test]
+    fn the_time_allowed_grows_with_the_body() {
+        assert_eq!(call_timeout(0, UPLOAD_RATE), Duration::from_secs(60));
+        assert!(call_timeout(8 << 20, UPLOAD_RATE) > Duration::from_secs(300));
+        assert_eq!(
+            call_timeout(u64::MAX, UPLOAD_RATE),
+            Duration::from_secs(3600)
+        );
+    }
+
+    #[test]
+    fn only_the_failed_part_of_a_multipart_upload_is_sent_again() {
+        // Part 2 is answered 503 once; every other call succeeds. The
+        // object is never sent in one request.
+        let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
+        let port = server.server_addr().to_ip().unwrap().port();
+        let srv = server.clone();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let log = seen.clone();
+        let th = std::thread::spawn(move || {
+            let mut failed_once = false;
+            for mut req in srv.incoming_requests() {
+                let url = req.url().to_string();
+                let method = req.method().as_str().to_string();
+                log.lock().unwrap().push(format!("{method} {url}"));
+                let mut body = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut req.as_reader(), &mut body);
+                let reply = match method.as_str() {
+                    "HEAD" => tiny_http::Response::from_data(Vec::new()).with_status_code(404),
+                    "POST" if url.contains("uploads") => tiny_http::Response::from_data(
+                        b"<InitiateMultipartUploadResult><UploadId>u1</UploadId></InitiateMultipartUploadResult>".to_vec(),
+                    ),
+                    "PUT" if url.contains("partNumber=2") && !failed_once => {
+                        failed_once = true;
+                        tiny_http::Response::from_data(Vec::new()).with_status_code(503)
+                    }
+                    "PUT" if url.contains("partNumber=") => {
+                        tiny_http::Response::from_data(Vec::new())
+                    }
+                    "POST" => tiny_http::Response::from_data(
+                        b"<CompleteMultipartUploadResult></CompleteMultipartUploadResult>"
+                            .to_vec(),
+                    ),
+                    _ => tiny_http::Response::from_data(Vec::new()).with_status_code(400),
+                };
+                let _ = req.respond(reply);
+            }
+        });
+        let s = storage_for(port);
+        let data = vec![5u8; 3 * MULTIPART_PART];
+        assert!(s.put_if_absent("packs/ab/abcd", &data).unwrap());
+        let calls = seen.lock().unwrap().clone();
+        let count = |what: &str| calls.iter().filter(|c| c.contains(what)).count();
+        assert_eq!(count("partNumber=1"), 1, "{calls:?}");
+        assert_eq!(count("partNumber=2"), 2, "{calls:?}");
+        assert_eq!(count("partNumber=3"), 1, "{calls:?}");
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.starts_with("PUT") && !c.contains("partNumber=")),
+            "{calls:?}"
+        );
         server.unblock();
         th.join().unwrap();
     }

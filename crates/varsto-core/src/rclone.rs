@@ -4,9 +4,10 @@
 //! configuration. Object names map to files under the remote path.
 
 use crate::storage::Storage;
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 pub struct RcloneStorage {
     name: String,
@@ -60,7 +61,17 @@ impl RcloneStorage {
                 head.push(a);
             }
         }
-        cmd.args(&head)
+        // Never let an unreachable remote hold the call: rclone's own
+        // timeouts and a single retry, and below them a wall-clock kill.
+        // The subcommand stays first, as wrappers expect.
+        let (sub, rest) = head
+            .split_first()
+            .map_or((None, &head[..]), |(s, r)| (Some(*s), r));
+        if let Some(sub) = sub {
+            cmd.arg(sub);
+        }
+        cmd.args(NETWORK_FLAGS)
+            .args(rest)
             .arg("--")
             .args(&tail)
             .stdin(if stdin.is_some() {
@@ -71,48 +82,15 @@ impl RcloneStorage {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let t = crate::logging::Timer::start();
-        let mut child = cmd
-            .spawn()
-            .with_context(|| format!("spawn {}", self.binary))?;
-        if let Some(data) = stdin {
-            let mut pipe = child.stdin.take().expect("piped stdin");
-            pipe.write_all(data)?;
-            drop(pipe);
-        }
-        let mut stdout_pipe = child.stdout.take().expect("piped stdout");
-        let mut stderr_pipe = child.stderr.take().expect("piped stderr");
-        // Drain stderr on a thread (keeping its first MiB) so the child
-        // never blocks on a full pipe while stdout is read.
-        let err_reader = std::thread::spawn(move || {
-            use std::io::Read;
-            let (mut keep, mut buf) = (Vec::new(), [0u8; 8192]);
-            while let Ok(n) = stderr_pipe.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                if keep.len() < 1 << 20 {
-                    keep.extend_from_slice(&buf[..n]);
-                }
-            }
-            keep
-        });
-        let mut stdout = Vec::new();
-        {
-            use std::io::Read;
-            (&mut stdout_pipe).take(cap + 1).read_to_end(&mut stdout)?;
-        }
-        if stdout.len() as u64 > cap {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!("rclone answered with more than the {cap} bytes allowed; not read");
-        }
-        drop(stdout_pipe);
-        let status = child.wait()?;
-        let out = std::process::Output {
-            status,
-            stdout,
-            stderr: err_reader.join().unwrap_or_default(),
-        };
+        let size = stdin
+            .map(|d| d.len() as u64)
+            .unwrap_or(cap.min(crate::storage::MAX_PACK));
+        let what = format!(
+            "rclone {} {}",
+            args.first().copied().unwrap_or(""),
+            self.name
+        );
+        let out = run_child(cmd, stdin, cap, wall_clock(size), &what)?;
         // rclone's exit codes: 3 = directory not found, 4 = file not found.
         // Anything else that fails is an error, never "absent": a transport
         // failure must not look like a missing object.
@@ -165,12 +143,21 @@ fn check_binary(binary: &str) -> Result<()> {
     {
         return Ok(());
     }
-    let st = Command::new(binary)
-        .arg("version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .with_context(|| format!("run {binary} (install rclone or set VARSTO_RCLONE)"))?;
+    let mut cmd = Command::new(binary);
+    cmd.arg("version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // `rclone version` is local, but a broken wrapper must not hang opening.
+    let st = run_child(
+        cmd,
+        None,
+        1 << 20,
+        Duration::from_secs(30),
+        "rclone version",
+    )
+    .with_context(|| format!("run {binary} (install rclone or set VARSTO_RCLONE)"))?
+    .status;
     if !st.success() {
         bail!("{binary} version failed");
     }
@@ -180,6 +167,169 @@ fn check_binary(binary: &str) -> Result<()> {
         .get_or_insert_with(Default::default)
         .insert(binary.to_string());
     Ok(())
+}
+
+/// Flags that bound every rclone call on a dead network: connect in 10 s, no
+/// byte for 60 s ends the transfer, one try with two low-level retries.
+const NETWORK_FLAGS: [&str; 8] = [
+    "--contimeout",
+    "10s",
+    "--timeout",
+    "60s",
+    "--retries",
+    "1",
+    "--low-level-retries",
+    "2",
+];
+
+/// Wall-clock limit of one call moving about `size` bytes: two minutes and
+/// the time a 256 kbit/s link needs for the bytes, at most two hours.
+fn wall_clock(size: u64) -> Duration {
+    Duration::from_secs((120 + size / (32 << 10)).min(7200))
+}
+
+/// What a finished child left behind.
+struct ChildOut {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+/// Run `cmd` (stdout and stderr piped, stdin piped when `stdin` is given),
+/// reading at most `cap` bytes of its output. A child still running after
+/// `wall` is killed through its own handle (never by name) and the call
+/// is a network error: a stuck transfer must not hold a sync.
+fn run_child(
+    mut cmd: Command,
+    stdin: Option<&[u8]>,
+    cap: u64,
+    wall: Duration,
+    what: &str,
+) -> Result<ChildOut> {
+    use std::io::Read;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Condvar, Mutex};
+    let child = cmd
+        .spawn()
+        .with_context(|| format!("spawn {}", cmd.get_program().to_string_lossy()))?;
+    let child = Arc::new(Mutex::new(child));
+    let (stdin_pipe, mut stdout_pipe, mut stderr_pipe) = {
+        let mut c = child.lock().unwrap();
+        (
+            c.stdin.take(),
+            c.stdout.take().expect("piped stdout"),
+            c.stderr.take().expect("piped stderr"),
+        )
+    };
+    // The watchdog starts before anything is written: a child that never
+    // reads its stdin would block the write for good.
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let fired = Arc::new(AtomicBool::new(false));
+    let dog = {
+        let (child, gate, fired) = (child.clone(), gate.clone(), fired.clone());
+        std::thread::spawn(move || {
+            let (lock, cv) = &*gate;
+            let guard = lock.lock().unwrap();
+            let (guard, _) = cv.wait_timeout_while(guard, wall, |done| !*done).unwrap();
+            if !*guard {
+                fired.store(true, Ordering::SeqCst);
+                let _ = child.lock().unwrap().kill();
+            }
+        })
+    };
+    // Drain stderr on a thread (keeping its first MiB) so the child
+    // never blocks on a full pipe while stdout is read.
+    let err_reader = std::thread::spawn(move || {
+        let (mut keep, mut buf) = (Vec::new(), [0u8; 8192]);
+        while let Ok(n) = stderr_pipe.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            if keep.len() < 1 << 20 {
+                keep.extend_from_slice(&buf[..n]);
+            }
+        }
+        keep
+    });
+    let mut write_err = None;
+    if let (Some(data), Some(mut pipe)) = (stdin, stdin_pipe) {
+        if let Err(e) = pipe.write_all(data) {
+            write_err = Some(e);
+        }
+        drop(pipe);
+    }
+    let mut stdout = Vec::new();
+    let read = (&mut stdout_pipe).take(cap + 1).read_to_end(&mut stdout);
+    let overflow = stdout.len() as u64 > cap;
+    if overflow {
+        let _ = child.lock().unwrap().kill();
+    }
+    drop(stdout_pipe);
+    let status = loop {
+        match child.lock().unwrap().try_wait() {
+            Ok(Some(st)) => break Ok(st),
+            Ok(None) => {}
+            Err(e) => break Err(e),
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    {
+        let (lock, cv) = &*gate;
+        *lock.lock().unwrap() = true;
+        cv.notify_all();
+    }
+    let _ = dog.join();
+    let stderr = err_reader.join().unwrap_or_default();
+    let status = status?;
+    if fired.load(Ordering::SeqCst) && !status.success() {
+        return Err(crate::storage::network_unavailable(
+            what,
+            format!(
+                "no result within {} s; the stuck rclone was stopped",
+                wall.as_secs()
+            ),
+        ));
+    }
+    if overflow {
+        bail!("rclone answered with more than the {cap} bytes allowed; not read");
+    }
+    read?;
+    if let Some(e) = write_err {
+        if status.success() {
+            return Err(e.into());
+        }
+    }
+    Ok(ChildOut {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+/// The error for a failed rclone call: a network error when rclone's words
+/// say the remote could not be reached, otherwise a plain failure.
+fn failure(what: &str, stderr: &str) -> anyhow::Error {
+    let msg = stderr.trim();
+    let low = msg.to_lowercase();
+    const NETWORK: [&str; 12] = [
+        "i/o timeout",
+        "no such host",
+        "connection refused",
+        "connection reset",
+        "network is unreachable",
+        "no route to host",
+        "tls handshake timeout",
+        "context deadline exceeded",
+        "dial tcp",
+        "timeout awaiting response",
+        "temporary failure in name resolution",
+        "server misbehaving",
+    ];
+    if NETWORK.iter().any(|n| low.contains(n)) {
+        crate::storage::network_unavailable(what, msg)
+    } else {
+        anyhow!("{what}: {msg}")
+    }
 }
 
 /// Most output of one rclone command that is not an object read (listings).
@@ -203,7 +353,7 @@ impl Storage for RcloneStorage {
         }
         let (ok, _, err) = self.run(&["rcat", &self.target(key)], Some(data))?;
         if !ok {
-            bail!("rclone rcat {key}: {}", err.trim());
+            return Err(failure(&format!("rclone rcat {key}"), &err));
         }
         Ok(true)
     }
@@ -229,7 +379,7 @@ impl Storage for RcloneStorage {
         } else if is_not_found(&err) {
             Ok(None)
         } else {
-            bail!("rclone cat {key}: {}", err.trim())
+            Err(failure(&format!("rclone cat {key}"), &err))
         }
     }
 
@@ -257,7 +407,7 @@ impl Storage for RcloneStorage {
         } else if is_not_found(&err) {
             Ok(None)
         } else {
-            bail!("rclone cat {key}: {}", err.trim())
+            Err(failure(&format!("rclone cat {key}"), &err))
         }
     }
 
@@ -269,7 +419,7 @@ impl Storage for RcloneStorage {
         } else if is_not_found(&err) {
             Ok(false)
         } else {
-            bail!("rclone lsjson {key}: {}", err.trim())
+            Err(failure(&format!("rclone lsjson {key}"), &err))
         }
     }
 
@@ -286,7 +436,7 @@ impl Storage for RcloneStorage {
             if is_not_found(&err) {
                 return Ok(Vec::new());
             }
-            bail!("rclone lsf {prefix}: {}", err.trim());
+            return Err(failure(&format!("rclone lsf {prefix}"), &err));
         }
         let mut keys: Vec<String> = String::from_utf8_lossy(&out)
             .lines()
@@ -310,7 +460,7 @@ impl Storage for RcloneStorage {
         if ok || is_not_found(&err) {
             Ok(())
         } else {
-            bail!("rclone deletefile {key}: {}", err.trim())
+            Err(failure(&format!("rclone deletefile {key}"), &err))
         }
     }
 }
@@ -352,4 +502,85 @@ pub fn resolve_alias(remote: &str) -> String {
         };
     }
     cur
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    fn sh(script: &str) -> Command {
+        let mut c = Command::new("sh");
+        c.args(["-c", script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        c
+    }
+
+    #[test]
+    fn a_stuck_child_is_killed_and_is_a_network_error() {
+        let t = std::time::Instant::now();
+        let e = match run_child(
+            sh("exec sleep 60"),
+            Some(b"data"),
+            1 << 20,
+            Duration::from_millis(300),
+            "rclone cat test",
+        ) {
+            Ok(_) => panic!("a stuck child returned"),
+            Err(e) => e,
+        };
+        assert!(crate::storage::is_network_error(&e), "{e:#}");
+        assert!(t.elapsed() < Duration::from_secs(20));
+    }
+
+    #[test]
+    fn a_child_that_never_reads_stdin_is_killed_too() {
+        // More than a pipe holds: the write blocks until the kill.
+        let big = vec![0u8; 8 << 20];
+        let e = match run_child(
+            sh("exec sleep 60"),
+            Some(&big),
+            1 << 20,
+            Duration::from_millis(300),
+            "rclone rcat test",
+        ) {
+            Ok(_) => panic!("a stuck child returned"),
+            Err(e) => e,
+        };
+        assert!(crate::storage::is_network_error(&e), "{e:#}");
+    }
+
+    #[test]
+    fn a_quick_child_is_not_disturbed() {
+        let out = run_child(
+            sh("printf abc; echo oops >&2; exit 3"),
+            None,
+            1 << 20,
+            Duration::from_secs(30),
+            "x",
+        )
+        .unwrap();
+        assert_eq!(out.stdout, b"abc");
+        assert_eq!(out.status.code(), Some(3));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("oops"));
+    }
+
+    #[test]
+    fn failures_are_told_apart_by_rclones_words() {
+        let net = failure(
+            "rclone cat k",
+            "Failed: dial tcp: lookup s3.example: no such host",
+        );
+        assert!(crate::storage::is_network_error(&net));
+        let other = failure("rclone cat k", "Failed: AccessDenied");
+        assert!(!crate::storage::is_network_error(&other));
+    }
+
+    #[test]
+    fn the_wall_clock_grows_with_the_size() {
+        assert_eq!(wall_clock(0), Duration::from_secs(120));
+        assert!(wall_clock(64 << 20) > Duration::from_secs(1800));
+        assert_eq!(wall_clock(u64::MAX), Duration::from_secs(7200));
+    }
 }
