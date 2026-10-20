@@ -39,6 +39,7 @@ mod update;
 mod upkeep;
 mod view;
 mod viz;
+mod youtube;
 
 #[derive(Parser)]
 #[command(
@@ -237,6 +238,14 @@ enum Cmd {
     Import {
         #[command(subcommand)]
         cmd: import::ImportCmd,
+    },
+    /// Archive a YouTube channel, playlist or video into a folder with the
+    /// local yt-dlp: listed, downloaded one video at a time and politely
+    /// (25-65 s between videos, 600 kB/s), stored encrypted, never
+    /// downloaded twice. Only for content you may keep a copy of.
+    Youtube {
+        #[command(subcommand)]
+        cmd: youtube::YoutubeCmd,
     },
     /// The trash: files deleted on any device, kept for a number of days
     /// (30 by default) and restorable on every device.
@@ -4501,6 +4510,9 @@ fn run(cli: &Cli) -> Result<()> {
                     for l in placing::status_lines(&home) {
                         println!("{l}");
                     }
+                    for l in youtube::status_lines(&home) {
+                        println!("{l}");
+                    }
                 }
                 return Ok(());
             }
@@ -4510,7 +4522,9 @@ fn run(cli: &Cli) -> Result<()> {
             let move_lines = if cli.json {
                 Vec::new()
             } else {
-                placing::status_lines(&home)
+                let mut l = placing::status_lines(&home);
+                l.extend(youtube::status_lines(&home));
+                l
             };
             print(cli, &s, |s| {
                 let mut out = format!(
@@ -4587,6 +4601,7 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
         Cmd::Import { cmd } => import::run(cli, &home, cmd)?,
+        Cmd::Youtube { cmd } => youtube::run(cli, &home, cmd)?,
         Cmd::Advice { idle_days, cmd } => upkeep::advice(cli, &home, *idle_days, cmd)?,
         Cmd::Restic { cmd } => restic::run(cli, &home, cmd)?,
         Cmd::Repair {

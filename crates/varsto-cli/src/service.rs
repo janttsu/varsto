@@ -117,6 +117,9 @@ pub struct ServiceState {
     pub drains: Vec<varsto_core::engine::DrainStatus>,
     /// Drains already announced as finished or waiting (not repeated).
     pub drain_notified: std::collections::BTreeSet<String>,
+    /// YouTube jobs already announced as waiting for space (not repeated
+    /// while they wait).
+    pub youtube_notified: std::collections::BTreeSet<String>,
     /// Storages at their quota during the last sync, one sentence each.
     pub quota_full: Vec<String>,
     /// Folders paused on this device (marker missing, deletions held), by
@@ -671,6 +674,34 @@ impl ServiceState {
             }
         }
         self.drains = engine.drain_statuses().unwrap_or_default();
+    }
+    /// Step the YouTube jobs of this device (called after a sync): yt-dlp
+    /// runs between steps; notify once when one waits for disk space.
+    /// Desktops only (yt-dlp is a desktop program).
+    pub fn youtube_if_due(&mut self, engine: &mut Engine) {
+        if cfg!(any(target_os = "android", target_os = "ios")) {
+            return;
+        }
+        for j in engine.youtube_to_run() {
+            let mut env = varsto_core::engine::ServiceYoutubeEnv;
+            match engine.youtube_tick(&j.id, &mut env, false) {
+                Ok(Some(now)) if now.state != j.state => {
+                    if now.state == varsto_core::engine::YtState::WaitingSpace {
+                        if self.youtube_notified.insert(now.id.clone()) {
+                            notify(
+                                "Varsto YouTube",
+                                &format!("{} waits for disk space: {}", now.label, now.text),
+                            );
+                        }
+                    } else {
+                        self.youtube_notified.remove(&now.id);
+                    }
+                    log::info!("youtube job {}: {}", now.short(), now.line());
+                }
+                Ok(_) => {}
+                Err(e) => log::warn!("youtube job {}: {e:#}", j.short()),
+            }
+        }
     }
     /// Take the scheduled backup snapshots that are due and, at most every
     /// six hours, expire old ones (called after a sync, like repair).
@@ -2425,8 +2456,8 @@ pub fn boot_url(f: &ServiceFile) -> Result<String> {
 }
 
 /// The service's upkeep after a sync, in order (ledger, verify, scrub,
-/// repair, drains, backups, trash, restic, moves, disk suggestions, device
-/// details); each runs with the state taken anew.
+/// repair, drains, backups, trash, restic, YouTube jobs, moves, disk
+/// suggestions, device details); each runs with the state taken anew.
 type UpkeepStep = fn(&mut ServiceState, &mut varsto_core::engine::Engine);
 const UPKEEP_STEPS: &[UpkeepStep] = &[
     |s, e| s.ledger_after_sync(e),
@@ -2441,6 +2472,7 @@ const UPKEEP_STEPS: &[UpkeepStep] = &[
     |s, e| s.backups_if_due(e),
     |s, e| s.trash_if_due(e),
     |s, e| s.restic_if_due(e),
+    |s, e| s.youtube_if_due(e),
     |s, e| {
         s.moves_if_due(e, true);
     },

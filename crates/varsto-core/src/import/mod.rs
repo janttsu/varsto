@@ -11,7 +11,9 @@
 //!   continues the same Varsto folder;
 //! - any rclone remote ([`rclone`]): Dropbox, OneDrive, Google Drive, ...;
 //! - a local directory ([`dir`]), optionally emptied once its files are
-//!   safely stored and the folder's durability policy is met.
+//!   safely stored and the folder's durability policy is met;
+//! - the spool directory of a YouTube job ([`youtube`]), emptied the same
+//!   way after each video (`engine::youtube`).
 //!
 //! One Varsto folder per source. The source's identity is recorded with the
 //! folder in an *import book* ([`ImportBook`]): which content ids (git-annex
@@ -30,6 +32,7 @@ pub mod annex;
 pub mod dir;
 pub mod hashes;
 pub mod rclone;
+pub mod youtube;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,6 +42,7 @@ use std::io::Read;
 pub const KIND_ANNEX: &str = "git-annex";
 pub const KIND_RCLONE: &str = "rclone";
 pub const KIND_DIR: &str = "dir";
+pub const KIND_YOUTUBE: &str = "youtube";
 
 /// How a source describes itself before anything is read.
 #[derive(Clone, Debug, Serialize)]
@@ -276,6 +280,13 @@ pub struct ImportBook {
     /// Where a local source is (for `import cleanup`).
     #[serde(default)]
     pub source_path: Option<String>,
+    /// YouTube videos in this folder: video id -> paths (`youtube:<id>`
+    /// content of a YouTube job, or files named `... [<id>].<ext>` that
+    /// `varsto youtube scan` found). Every folder's list together is the
+    /// vault's index of videos, so that no job downloads one again. A book
+    /// with an empty `kind` holds only this list.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub youtube: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl ImportBook {
@@ -330,6 +341,18 @@ impl ImportBook {
         if self.source_path.is_none() {
             self.source_path = other.source_path.clone();
         }
+        for (id, paths) in &other.youtube {
+            self.youtube
+                .entry(id.clone())
+                .or_default()
+                .extend(paths.iter().cloned());
+        }
+    }
+
+    /// Only the YouTube index (`varsto youtube scan` of a folder that was
+    /// not imported).
+    pub fn is_index_only(&self) -> bool {
+        self.kind.is_empty()
     }
 
     /// Ids of the current file list with no content in the vault yet.

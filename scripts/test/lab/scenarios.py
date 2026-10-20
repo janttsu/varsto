@@ -2846,6 +2846,81 @@ def s_mailbox_offline_disk():
     dl_clean()
 
 
+YT_FAKE = r'''#!/usr/bin/env bash
+# A fake yt-dlp for the lab (no network): lists ~/yt-listing.txt, prints a size of
+# 2 MB for a probe, fails the private video, writes 2 MB of random data and an info file.
+echo "$*" >> ~/yt-calls.log
+mode=download; out=''; prev=''
+for a in "$@"; do
+  case "$a" in --flat-playlist) mode=list ;; --skip-download) mode=probe ;; esac
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  prev="$a"
+done
+url="${@: -1}"; id="${url##*v=}"
+case "$mode" in
+  list) cat ~/yt-listing.txt; exit 0 ;;
+  probe)
+    if [ "$id" = labPRIVATE1 ]; then echo "ERROR: [youtube] $id: Private video" >&2; exit 1; fi
+    echo 2000000; exit 0 ;;
+esac
+base="${out%%\%(id)s.\%(ext)s}"
+head -c 2000000 /dev/urandom > "$base$id.mp4"
+printf '{"id":"%s","title":"Lab episode %s","channel":"Lab Channel","upload_date":"20240601"}' "$id" "$id" > "$base$id.info.json"
+'''
+
+
+@scenario("youtube-spool")
+def s_youtube_spool():
+    """Spec 80 with a fake yt-dlp on the VM (nothing goes to the network): a channel of
+    four videos, one private and one the vault has in another folder. `youtube add` lists,
+    downloads one at a time into the spool, stores each in the folder and empties the spool;
+    the private video is recorded as failed and the job goes on; the one in the other folder
+    is never downloaded. A later listing with one more video downloads only that one, and
+    `youtube scan` of a directory registers a video by its file name."""
+    dl_clean()
+    vm = DL_VM
+    run(vm, "rm -rf ~/yt-dl ~/yt-old ~/yt-mine ~/yt-calls.log ~/yt-listing.txt ~/fake-yt-dlp ~/Varsto/lab-channel; true",
+        check_rc=False)
+    dl_init()
+    dl("storage add-local box /home/varsto/dl-box --place cloud", json_out=False)
+    run(vm, "mkdir -p ~/yt-old && head -c 1000 /dev/urandom > ~/yt-old/'Earlier [labOLDVID04].mp4'")
+    dl_folder_add("yt-old", "/home/varsto/yt-old")
+    dl("push yt-old")
+    run(vm, f"cat > ~/fake-yt-dlp <<'EOF'\n{YT_FAKE}EOF\nchmod +x ~/fake-yt-dlp")
+    ids = ["labVIDEO001", "labPRIVATE1", "labOLDVID04", "labVIDEO002"]
+    listing = "".join(f"{i}\\thttps://www.youtube.com/watch?v={i}\\tLab episode {i}\\n" for i in ids)
+    run(vm, f"printf '{listing}' > ~/yt-listing.txt")
+    job = dl("youtube add https://www.youtube.com/@LabChannel --folder lab-channel --storage box "
+             "--download-dir /home/varsto/yt-dl --ytdlp-path /home/varsto/fake-yt-dlp")
+    check(isinstance(job, dict) and job.get("state") == "waiting_retry", f"youtube add: {str(job)[:400]}")
+    by_id = {x["id"]: x for x in job["videos"]}
+    check(by_id["labVIDEO001"]["status"] == "stored" and by_id["labVIDEO002"]["status"] == "stored",
+          f"stored: {by_id}")
+    check(by_id["labOLDVID04"]["status"] == "already_stored", f"already: {by_id['labOLDVID04']}")
+    check(by_id["labPRIVATE1"]["status"] == "failed"
+          and "Private video" in (by_id["labPRIVATE1"].get("last_error") or ""), f"private: {by_id['labPRIVATE1']}")
+    calls = run(vm, "cat ~/yt-calls.log").stdout
+    check("labOLDVID04" not in calls, "the video in the vault was never asked for")
+    check("--sleep-interval 25 --max-sleep-interval 65 --sleep-requests 2 --limit-rate 600K" in calls,
+          "polite defaults")
+    left = run(vm, f"find {job['spool_dir']} -name '*.mp4' | wc -l").stdout.strip()
+    check(left == "0", f"the spool still holds {left} video(s)")
+    files = dl("folder files lab-channel")
+    names = {f["path"] for f in files}
+    check("Lab Channel/2024-06-01 Lab episode labVIDEO001 [labVIDEO001].mp4" in names, f"files: {sorted(names)}")
+    fsck_clean(vm, "after the YouTube job", home=DL)
+    # One more video: only it is downloaded.
+    run(vm, "printf 'labVIDEO003\\thttps://www.youtube.com/watch?v=labVIDEO003\\tNew\\n' >> ~/yt-listing.txt")
+    before = int(run(vm, "wc -l < ~/yt-calls.log").stdout.strip())
+    dl(f"youtube run {job['id'][:8]} --retry-failed")
+    new = run(vm, f"tail -n +{before + 1} ~/yt-calls.log").stdout
+    check("labVIDEO003" in new and "labVIDEO001" not in new and "labVIDEO002" not in new,
+          f"calls of the second run: {new[-600:]}")
+    run(vm, "mkdir -p ~/yt-mine && touch ~/yt-mine/'Mine [labMINE0005].webm'")
+    scan = dl("youtube scan /home/varsto/yt-mine")
+    check(scan.get("videos") == 1, f"scan: {scan}")
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_approval_flow, s_recovery_escrow, s_member_removal,
@@ -2853,7 +2928,7 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale, s_format3_scale,
              s_backup, s_gc_settling, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_mailbox_offline_disk,
              s_scrub, s_restic, s_ledger_loss, s_ledger_withhold, s_ledger_rollback, s_rollback_warning,
-             s_upgrade, s_forward, s_pair_fallback]
+             s_upgrade, s_forward, s_pair_fallback, s_youtube_spool]
 
 # What a run must contain (the format 3 switch): the old scenarios, updated, and the new ones.
 REQUIRED = {"reset", "init-and-s3-through-nat", "pair-over-lan", "sync-to-second-device", "join-with-recovery-words",

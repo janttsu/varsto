@@ -794,11 +794,11 @@ impl Engine {
             .join(format!("{folder}.json"))
     }
 
-    fn load_book(&self, folder: &FolderId) -> Option<ImportBook> {
+    pub(super) fn load_book(&self, folder: &FolderId) -> Option<ImportBook> {
         util::read_json::<ImportBook>(&self.book_path(folder)).ok()
     }
 
-    fn save_book(&self, folder: &FolderId, book: &ImportBook) -> Result<()> {
+    pub(super) fn save_book(&self, folder: &FolderId, book: &ImportBook) -> Result<()> {
         let p = self.book_path(folder);
         if let Some(d) = p.parent() {
             fs::create_dir_all(d)?;
@@ -807,7 +807,7 @@ impl Engine {
     }
 
     /// Publish this device's book of a folder, replacing its older record.
-    fn publish_book(&self, rec: &FolderRecord, book: &ImportBook) -> Result<()> {
+    pub(super) fn publish_book(&self, rec: &FolderRecord, book: &ImportBook) -> Result<()> {
         let storages = self.metadata_storages(false)?;
         if storages.is_empty() {
             return Ok(());
@@ -848,7 +848,7 @@ impl Engine {
 
     /// Read the other devices' books of every folder and merge them into
     /// this device's.
-    fn refresh_books(&mut self) -> Result<()> {
+    pub(super) fn refresh_books(&mut self) -> Result<()> {
         let storages = self.metadata_storages(false)?;
         // (folder, device) -> (written, storage index, key)
         let mut newest: BTreeMap<(String, DeviceId), (i64, usize, String)> = BTreeMap::new();
@@ -1012,9 +1012,30 @@ impl Engine {
                 }
             }
         }
-        if opts.remove_source && info.kind != import::KIND_DIR {
+        if opts.remove_source && info.kind != import::KIND_DIR && info.kind != import::KIND_YOUTUBE
+        {
             bail!("only local directories can be removed after an import");
         }
+        // A YouTube job may continue a folder whose videos `youtube scan`
+        // listed (its book holds only that list).
+        let existing = existing.or_else(|| {
+            let want = opts.folder.as_ref()?.trim().to_lowercase();
+            (info.kind == import::KIND_YOUTUBE)
+                .then(|| {
+                    self.keyring
+                        .folders
+                        .values()
+                        .find(|r| {
+                            !r.is_removed() && !r.is_backup() && r.name.to_lowercase() == want
+                        })
+                        .filter(|r| {
+                            self.load_book(&r.folder_id)
+                                .is_some_and(|b| b.is_index_only())
+                        })
+                        .cloned()
+                })
+                .flatten()
+        });
         let name = match (&existing, &opts.folder) {
             (Some(rec), Some(want)) if rec.name.to_lowercase() != want.trim().to_lowercase() => bail!(
                 "this source was imported into folder {} before; leave out --folder to continue there",
@@ -1707,6 +1728,12 @@ impl Engine {
                 },
             );
             book.missing_holders.remove(&g.id);
+            if let Some(v) = crate::youtube::video_of_content_id(&g.id) {
+                let paths = book.youtube.entry(v.to_string()).or_default();
+                for &i in &g.paths {
+                    paths.insert(items[i].path.clone());
+                }
+            }
             report.imported_ids += 1;
             report.imported_files += g.paths.len() as u64;
             report.imported_bytes += done.size;
@@ -1923,7 +1950,10 @@ impl Engine {
                     continue;
                 }
             }
-            if let Some(b) = self.load_book(&rec.folder_id) {
+            if let Some(b) = self
+                .load_book(&rec.folder_id)
+                .filter(|b| !b.is_index_only())
+            {
                 out.push((rec.clone(), b));
             }
         }
@@ -2184,6 +2214,18 @@ impl Engine {
     /// Remove the files of a local source that are safely in the vault
     /// (`apply`), or say which would be removed and which wait and why.
     pub fn import_cleanup(&mut self, folder: &str, apply: bool) -> Result<ImportCleanupReport> {
+        self.import_cleanup_at(folder, None, apply)
+    }
+
+    /// [`Self::import_cleanup`]; `spool`: a YouTube job's directory and the
+    /// files of it to consider (as listed there now), instead of the
+    /// book's source directory and file list.
+    pub(super) fn import_cleanup_at(
+        &mut self,
+        folder: &str,
+        spool: Option<(&Path, Vec<(String, TreeEntry)>)>,
+        apply: bool,
+    ) -> Result<ImportCleanupReport> {
         self.ensure_active()?;
         let _ = self.refresh_books();
         let (rec, mut b) = self
@@ -2191,26 +2233,40 @@ impl Engine {
             .into_iter()
             .next()
             .expect("one folder");
-        if b.kind != import::KIND_DIR {
-            bail!("only imports of local directories can remove their source files");
-        }
-        let src = PathBuf::from(
-            b.source_path
-                .clone()
-                .ok_or_else(|| anyhow!("the import of {} names no source directory", rec.name))?,
-        );
-        let src = src
-            .canonicalize()
-            .with_context(|| format!("the source {} is not here", src.display()))?;
-        if b.identity
-            .iter()
-            .all(|i| i != &format!("dir:{}", src.display()))
-        {
-            bail!(
-                "{} is not the directory this folder was imported from",
-                src.display()
-            );
-        }
+        let (src, tree) = match spool {
+            Some((dir, entries)) => {
+                if b.kind != import::KIND_YOUTUBE {
+                    bail!("folder {} is not filled by a YouTube job", rec.name);
+                }
+                let src = dir.canonicalize().with_context(|| {
+                    format!("the download directory {} is not here", dir.display())
+                })?;
+                (src, entries)
+            }
+            None => {
+                if b.kind != import::KIND_DIR {
+                    bail!("only imports of local directories can remove their source files");
+                }
+                let src = PathBuf::from(b.source_path.clone().ok_or_else(|| {
+                    anyhow!("the import of {} names no source directory", rec.name)
+                })?);
+                let src = src
+                    .canonicalize()
+                    .with_context(|| format!("the source {} is not here", src.display()))?;
+                if b.identity
+                    .iter()
+                    .all(|i| i != &format!("dir:{}", src.display()))
+                {
+                    bail!(
+                        "{} is not the directory this folder was imported from",
+                        src.display()
+                    );
+                }
+                let tree: Vec<(String, TreeEntry)> =
+                    b.tree.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                (src, tree)
+            }
+        };
         self.check_source_path(&src, true)?;
         let mut report = ImportCleanupReport {
             folder: rec.name.clone(),
@@ -2221,7 +2277,7 @@ impl Engine {
         let task = activity::start(
             activity::IMPORT,
             &rec.name,
-            b.tree.len() as u64,
+            tree.len() as u64,
             activity::Unit::Items,
         );
         task.set_phase("cleanup");
@@ -2244,8 +2300,6 @@ impl Engine {
                 });
             }
         };
-        let tree: Vec<(String, TreeEntry)> =
-            b.tree.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         for (path, e) in tree {
             task.advance(1);
             let Some(x) = b.imported.get(&e.id).cloned() else {
