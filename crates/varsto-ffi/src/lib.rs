@@ -30,6 +30,8 @@ mod desktop;
 mod drive_mount;
 #[path = "../../varsto-cli/src/filemanager.rs"]
 mod filemanager;
+#[path = "../../varsto-cli/src/import_jobs.rs"]
+mod import_jobs;
 #[path = "../../varsto-cli/src/mcp_keys.rs"]
 mod mcp_keys;
 #[path = "../../varsto-cli/src/readcache.rs"]

@@ -18,12 +18,13 @@
 //! takes the state when it is free. A thread here also steps the running
 //! torrent and YouTube jobs every few seconds between the service's syncs,
 //! and announces every change of the list as the event `import.jobs`.
+//!
+//! The command `varsto import jobs` is in `import_jobs_cmd` (the command
+//! line only; this module is shared with the mobile apps through
+//! varsto-ffi).
 
 use crate::desktop::Shared;
-use crate::torrent::RpcArgs;
-use crate::{print, Cli};
 use anyhow::{anyhow, bail, Context, Result};
-use clap::Subcommand;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::Read;
@@ -541,7 +542,7 @@ pub fn jobs_json(home: &Path) -> Value {
         },
         "defaults": {
             "free_min": "15%",
-            "youtube_download_dir": crate::youtube::default_download_dir()
+            "youtube_download_dir": default_youtube_download_dir()
                 .map(|d| d.display().to_string())
                 .unwrap_or_default(),
             "sleep": "25-65",
@@ -844,7 +845,7 @@ fn start(state: &Shared, home: &Path, input: &Value) -> Result<String> {
                 storages: storages_of(&input),
                 free_min: MinFree::parse(&or(text(&input, "free_min"), "15%"))?,
                 download_dir: match text(&input, "download_dir") {
-                    d if d.is_empty() => crate::youtube::default_download_dir()?,
+                    d if d.is_empty() => default_youtube_download_dir()?,
                     d => PathBuf::from(d),
                 },
                 folder_parent: crate::desktop::folder_root(&home),
@@ -1047,63 +1048,13 @@ fn step_jobs(state: &Shared, home: &Path) {
     }
 }
 
-// ----- `varsto import jobs` ---------------------------------------------------------
-
-/// `varsto import jobs`: the torrent and YouTube imports of this device.
-#[derive(Subcommand)]
-pub enum JobsCmd {
-    /// Every import job of this device (torrents and YouTube), one line
-    /// each with its kind.
-    List,
-    /// A job's state, files or videos and errors (every job without a name).
-    Status {
-        job: Option<String>,
-        /// List every video of a YouTube job with its state.
-        #[arg(long)]
-        videos: bool,
-    },
-    /// Work on a job in this terminal: a torrent job until it is complete
-    /// (download a batch, import it, remove it from the disk, the next
-    /// batch), a YouTube job until it waits (for space, the policy, a retry,
-    /// the next listing). Without a job: every YouTube job until it waits
-    /// and one step of every torrent job. Stop with Ctrl-C; running it again
-    /// carries on.
-    Run {
-        job: Option<String>,
-        /// Seconds between the steps of a torrent job.
-        #[arg(long, default_value_t = 5)]
-        interval: u64,
-        /// One step only.
-        #[arg(long)]
-        once: bool,
-        /// YouTube: try failed and given-up videos again now, and list again.
-        #[arg(long)]
-        retry_failed: bool,
-        #[command(flatten)]
-        rpc: RpcArgs,
-    },
-    /// Stop a job's downloads; the job stays.
-    Pause {
-        job: String,
-        #[command(flatten)]
-        rpc: RpcArgs,
-    },
-    /// Carry on (YouTube: videos that were given up are tried again).
-    Resume {
-        job: String,
-        #[command(flatten)]
-        rpc: RpcArgs,
-    },
-    /// Forget a job. The folder stays; files in the download directory that
-    /// were not stored yet stay there too.
-    Remove {
-        job: String,
-        /// Torrent: leave the torrent in transmission.
-        #[arg(long)]
-        keep_in_transmission: bool,
-        #[command(flatten)]
-        rpc: RpcArgs,
-    },
+/// Where YouTube downloads wait for import unless a job names its own
+/// directory (`~/Downloads/varsto-youtube`).
+pub(crate) fn default_youtube_download_dir() -> Result<PathBuf> {
+    match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        Some(h) => Ok(PathBuf::from(h).join("Downloads").join("varsto-youtube")),
+        None => bail!("give --download-dir"),
+    }
 }
 
 /// A job of either kind.
@@ -1120,22 +1071,16 @@ impl JobRef {
             JobRef::Youtube(j) => format!("youtube:{}", j.id),
         }
     }
-    fn line(&self) -> String {
+    pub fn line(&self) -> String {
         match self {
             JobRef::Torrent(j) => j.line(),
             JobRef::Youtube(j) => j.line(),
         }
     }
-    fn value(&self) -> Result<Value> {
+    pub fn value(&self) -> Result<Value> {
         match self {
             JobRef::Torrent(j) => tagged(j, &self.id(), "torrent"),
             JobRef::Youtube(j) => tagged(j, &self.id(), "youtube"),
-        }
-    }
-    fn describe(&self, videos: bool) -> String {
-        match self {
-            JobRef::Torrent(j) => crate::torrent::describe(j),
-            JobRef::Youtube(j) => crate::youtube::describe_jobs(std::slice::from_ref(j), videos),
         }
     }
 }
@@ -1151,7 +1096,7 @@ fn tagged<T: Serialize>(job: &T, id: &str, kind: &str) -> Result<Value> {
 }
 
 /// Every job of both kinds, oldest first.
-fn all_jobs(home: &Path) -> Vec<JobRef> {
+pub fn all_jobs(home: &Path) -> Vec<JobRef> {
     let mut out: Vec<(i64, JobRef)> = torrent_jobs_at(home)
         .into_iter()
         .map(|j| (j.created_utc, JobRef::Torrent(j)))
@@ -1191,205 +1136,6 @@ pub fn find(home: &Path, key: &str) -> Result<JobRef> {
                 Some(m) => bail!("{m}"),
                 None => bail!("no import job {key}: `varsto import jobs list` shows them"),
             }
-        }
-    }
-}
-
-/// `varsto import jobs ...`.
-pub fn jobs(cli: &Cli, home: &Path, cmd: &JobsCmd) -> Result<()> {
-    match cmd {
-        JobsCmd::List => {
-            let rows = job_rows(home);
-            let lines: Vec<String> = all_jobs(home).iter().map(JobRef::line).collect();
-            print(cli, &rows, |_| {
-                if lines.is_empty() {
-                    "no import jobs (varsto import torrent ..., varsto import youtube ...)".into()
-                } else {
-                    lines.join("\n")
-                }
-            })
-        }
-        JobsCmd::Status { job, videos } => match job {
-            Some(k) => {
-                let j = find(home, k)?;
-                let text = j.describe(*videos);
-                print(cli, &j.value()?, |_| text)
-            }
-            None => {
-                let list = all_jobs(home);
-                let values = list.iter().map(JobRef::value).collect::<Result<Vec<_>>>()?;
-                let text = if list.is_empty() {
-                    "no import jobs (varsto import torrent ..., varsto import youtube ...)"
-                        .to_string()
-                } else {
-                    list.iter()
-                        .map(|j| j.describe(*videos))
-                        .collect::<Vec<_>>()
-                        .join("\n\n")
-                };
-                print(cli, &values, |_| text)
-            }
-        },
-        JobsCmd::Run {
-            job,
-            interval,
-            once,
-            retry_failed,
-            rpc,
-        } => {
-            let mut engine = Engine::open(home, &crate::passphrase()?)?;
-            match job {
-                Some(k) => {
-                    let after = run_one(
-                        cli,
-                        home,
-                        &mut engine,
-                        find(home, k)?,
-                        *interval,
-                        *once,
-                        *retry_failed,
-                        rpc,
-                    )?;
-                    let text = after.describe(false);
-                    print(cli, &after.value()?, |_| text)
-                }
-                None => {
-                    let mut out = Vec::new();
-                    for j in engine.youtube_to_run() {
-                        out.push(run_one(
-                            cli,
-                            home,
-                            &mut engine,
-                            JobRef::Youtube(j),
-                            *interval,
-                            true,
-                            *retry_failed,
-                            rpc,
-                        )?);
-                    }
-                    if cfg!(target_os = "linux") {
-                        for j in engine.torrents_to_run() {
-                            out.push(run_one(
-                                cli,
-                                home,
-                                &mut engine,
-                                JobRef::Torrent(j),
-                                *interval,
-                                true,
-                                false,
-                                rpc,
-                            )?);
-                        }
-                    }
-                    let values = out.iter().map(JobRef::value).collect::<Result<Vec<_>>>()?;
-                    let text = if out.is_empty() {
-                        "no import job to run".to_string()
-                    } else {
-                        out.iter().map(JobRef::line).collect::<Vec<_>>().join("\n")
-                    };
-                    print(cli, &values, |_| text)
-                }
-            }
-        }
-        JobsCmd::Pause { job, rpc } | JobsCmd::Resume { job, rpc } => {
-            let paused = matches!(cmd, JobsCmd::Pause { .. });
-            let j = find(home, job)?;
-            let mut engine = Engine::open(home, &crate::passphrase()?)?;
-            let after = match j {
-                JobRef::Torrent(j) => {
-                    crate::torrent::linux_only()?;
-                    let client = Rpc::new(engine.torrent_rpc(&j, &rpc.given()));
-                    JobRef::Torrent(engine.torrent_set_paused(&j.hash, paused, &client)?)
-                }
-                JobRef::Youtube(j) => JobRef::Youtube(engine.youtube_set_paused(&j.id, paused)?),
-            };
-            let text = after.line();
-            print(cli, &after.value()?, |_| text)
-        }
-        JobsCmd::Remove {
-            job,
-            keep_in_transmission,
-            rpc,
-        } => {
-            let j = find(home, job)?;
-            let mut engine = Engine::open(home, &crate::passphrase()?)?;
-            match j {
-                JobRef::Torrent(j) => {
-                    crate::torrent::linux_only()?;
-                    let client = Rpc::new(engine.torrent_rpc(&j, &rpc.given()));
-                    let j = engine.torrent_remove(&j.hash, *keep_in_transmission, Some(&client))?;
-                    let left = std::fs::read_dir(&j.download_dir)
-                        .map(|d| d.count())
-                        .unwrap_or(0);
-                    let text = format!(
-                        "removed torrent job {} ({}); folder {} stays{}{}",
-                        j.short(),
-                        j.name,
-                        j.folder,
-                        if *keep_in_transmission {
-                            "; the torrent stays in transmission"
-                        } else {
-                            ""
-                        },
-                        if left > 0 {
-                            format!(
-                                "; {} holds files that were not stored yet",
-                                j.download_dir.display()
-                            )
-                        } else {
-                            String::new()
-                        }
-                    );
-                    print(cli, &JobRef::Torrent(j).value()?, |_| text)
-                }
-                JobRef::Youtube(j) => {
-                    if *keep_in_transmission {
-                        bail!("--keep-in-transmission is for torrent jobs");
-                    }
-                    let j = engine.youtube_remove(&j.id)?;
-                    let mut text = format!(
-                        "YouTube job {} removed; folder {} keeps its videos.",
-                        j.short(),
-                        j.folder
-                    );
-                    if j.spool_dir.exists() {
-                        text += &format!(
-                            "\nFiles not stored yet stay in {} (remove them yourself when you no longer need them).",
-                            j.spool_dir.display()
-                        );
-                    }
-                    print(cli, &JobRef::Youtube(j).value()?, |_| text)
-                }
-            }
-        }
-    }
-}
-
-/// Work on one job in this terminal (see [`JobsCmd::Run`]).
-#[allow(clippy::too_many_arguments)]
-fn run_one(
-    cli: &Cli,
-    home: &Path,
-    engine: &mut Engine,
-    job: JobRef,
-    interval: u64,
-    once: bool,
-    retry_failed: bool,
-    rpc: &RpcArgs,
-) -> Result<JobRef> {
-    match job {
-        JobRef::Torrent(j) => {
-            crate::torrent::linux_only()?;
-            let client = Rpc::new(engine.torrent_rpc(&j, &rpc.given()));
-            let after = crate::torrent::drive(cli, home, engine, &j.hash, &client, interval, once)?;
-            Ok(JobRef::Torrent(after))
-        }
-        JobRef::Youtube(j) => {
-            if retry_failed {
-                engine.youtube_retry_failed(&j.id)?;
-            }
-            let after = crate::youtube::run_job(engine, home, &j.id, !cli.json)?;
-            Ok(JobRef::Youtube(after))
         }
     }
 }

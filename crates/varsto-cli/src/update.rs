@@ -496,7 +496,7 @@ fn set_job(f: impl FnOnce(&mut UpdateJob)) {
 pub fn start_job(home: PathBuf, restart: impl FnOnce() + Send + 'static) -> Result<UpdateJob> {
     start_job_with(
         home,
-        Box::new(|| check()),
+        Box::new(check),
         Box::new(|c: &Check, p: &Policy<'_>| apply(c, p)),
         restart,
     )

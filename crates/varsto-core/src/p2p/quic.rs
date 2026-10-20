@@ -551,16 +551,11 @@ async fn read_response(mut recv: quinn::RecvStream) -> Result<(u16, Vec<u8>)> {
     body.reserve(len.saturating_sub(body.len()));
     let mut buf = vec![0u8; 64 * 1024];
     let deadline = body_deadline(len);
-    loop {
-        match read_some(&mut recv, &mut buf, deadline).await? {
-            Some(n) => {
-                if body.len() + n > len {
-                    bail!("peer response length mismatch");
-                }
-                body.extend_from_slice(&buf[..n]);
-            }
-            None => break,
+    while let Some(n) = read_some(&mut recv, &mut buf, deadline).await? {
+        if body.len() + n > len {
+            bail!("peer response length mismatch");
         }
+        body.extend_from_slice(&buf[..n]);
     }
     if body.len() != len {
         bail!("peer response length mismatch");

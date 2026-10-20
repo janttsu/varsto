@@ -25,6 +25,7 @@ mod history;
 mod icon;
 mod import;
 mod import_jobs;
+mod import_jobs_cmd;
 mod logcmd;
 mod mcp;
 mod mcp_keys;

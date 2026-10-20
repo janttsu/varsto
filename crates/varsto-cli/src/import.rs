@@ -103,7 +103,7 @@ pub enum ImportCmd {
     /// `torrent:<hash>` or `youtube:<id>` (or by its id, folder or name).
     Jobs {
         #[command(subcommand)]
-        cmd: crate::import_jobs::JobsCmd,
+        cmd: crate::import_jobs_cmd::JobsCmd,
     },
     /// Register YouTube videos you have already by the `[<id>]` in their file
     /// names (yt-dlp's default names): a folder of the vault (recorded for
@@ -230,7 +230,7 @@ pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
     match cmd {
         ImportCmd::Torrent(a) => return crate::torrent::add(cli, home, a),
         ImportCmd::Youtube(a) => return crate::youtube::add(cli, home, a),
-        ImportCmd::Jobs { cmd } => return crate::import_jobs::jobs(cli, home, cmd),
+        ImportCmd::Jobs { cmd } => return crate::import_jobs_cmd::jobs(cli, home, cmd),
         ImportCmd::YoutubeScan { target } => return crate::youtube::scan(cli, home, target),
         _ => {}
     }

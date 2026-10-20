@@ -768,7 +768,7 @@ impl ServiceState {
         }
     }
     /// Take the scheduled backup snapshots that are due (no expiry: also
-    /// after a sync that could not reach every storage, spec section 78).
+    /// after a sync that could not reach every storage, spec section 79.3).
     pub fn backup_snapshots_if_due(&mut self, engine: &mut Engine) {
         let now = varsto_core::util::now_utc();
         for name in engine.backups_due(now) {
@@ -3289,7 +3289,7 @@ mod tests {
         assert!(src.contains("f3_requests"));
     }
 
-    /// Offline (spec section 78): after a sync that could not reach every
+    /// Offline (spec section 79.3): after a sync that could not reach every
     /// storage, the upkeep that works on this device's own disks or only
     /// adds still runs; what checks, repairs, rebuilds or deletes waits for
     /// a full round (a storage out of reach would make its blocks look lost).

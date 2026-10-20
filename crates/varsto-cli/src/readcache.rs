@@ -7,7 +7,7 @@
 //! (every request that is not a GET) empties the cache, so a page never sees
 //! an answer older than its own change. With no answer kept, a read waits
 //! at most [`BUSY_WAIT`] and is then answered "busy" (503), never held up
-//! by a sync on a slow or dead link (spec section 78).
+//! by a sync on a slow or dead link (spec section 79.3).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

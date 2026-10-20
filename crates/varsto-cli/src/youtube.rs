@@ -84,10 +84,7 @@ pub struct AddArgs {
 
 /// The default spool parent.
 pub(crate) fn default_download_dir() -> Result<PathBuf> {
-    match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-        Some(h) => Ok(PathBuf::from(h).join("Downloads").join("varsto-youtube")),
-        None => bail!("give --download-dir"),
-    }
+    crate::import_jobs::default_youtube_download_dir()
 }
 
 fn throttle(a: &AddArgs) -> Result<Throttle> {

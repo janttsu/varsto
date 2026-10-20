@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Local actions with a storage that cannot be reached (spec section 78):
+//! Local actions with a storage that cannot be reached (spec section 79.4):
 //! the local import, the trash list, the thumbnail lookup and the file
 //! writes finish with what is on this device; the upload follows later.
 

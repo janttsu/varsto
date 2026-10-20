@@ -472,7 +472,7 @@ pub fn bind(port: u16) -> Result<(Server, String)> {
 /// goes, in arrival order, to one worker thread, which works on the engine
 /// taken out of the state ([`checkout`]). No network I/O runs under the
 /// state lock: a sync on a slow or dead link holds the engine, not the lock
-/// (spec section 78). The host name, token and counters it needs never
+/// (spec section 79.3). The host name, token and counters it needs never
 /// change after start, so they are copied here once.
 pub fn serve_arc(server: Arc<Server>, state: Shared) {
     let fixed = {
@@ -481,7 +481,6 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
             bound: st.bound.clone(),
             home: st.home.clone(),
             token: st.token.clone(),
-            home: st.home.clone(),
             traffic: st.traffic.clone(),
             state: state.clone(),
             reads: Arc::default(),
@@ -712,7 +711,7 @@ fn serve_read(
     // taken out of the state so that the lock stays free meanwhile.
     enum Hold<'a> {
         Lock(std::sync::MutexGuard<'a, State>),
-        Work(Work<'a>),
+        Work(Box<Work<'a>>),
     }
     let take = || {
         if read_without_engine(path) {
@@ -722,7 +721,7 @@ fn serve_read(
                 Err(std::sync::TryLockError::WouldBlock) => None,
             }
         } else {
-            try_checkout(state, path).map(Hold::Work)
+            try_checkout(state, path).map(|w| Hold::Work(Box::new(w)))
         }
     };
     match readcache::take_or_cached(
@@ -809,7 +808,6 @@ struct Fixed {
     /// The device directory (job files are read without the state).
     home: PathBuf,
     token: String,
-    home: PathBuf,
     traffic: Arc<varsto_core::p2p::Traffic>,
     state: Shared,
     /// The last answers of the reads (`readcache`), emptied by every change.
@@ -4887,7 +4885,7 @@ mod tests {
         holder.join().unwrap();
     }
 
-    /// Offline (spec section 78): a sync on a dead link has the engine out
+    /// Offline (spec section 79.3): a sync on a dead link has the engine out
     /// of the state for minutes. The summary, pause, lock, the settings and
     /// the liveness probe answer at once meanwhile; a read with nothing kept
     /// is answered "busy" instead of hanging; pause and lock take effect
