@@ -1169,3 +1169,33 @@ html[data-density="compact"] body:not([data-mobile="1"]) #files tbody tr, html[d
 .f3-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
 .f3-who { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; min-width: 0; }
 .f3-words { background: var(--surface-2, rgba(127, 127, 127, 0.12)); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+
+/* Import page: the sources as cards (step 1), the imports in progress. */
+.ij-step { font-size: 14px; font-weight: 600; margin: 18px 0 8px; color: var(--text-2); }
+.ij-sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 0 0 8px; }
+button.ij-source { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; height: auto; min-height: 104px; padding: 12px 14px; text-align: left; white-space: normal; font-weight: 400; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
+button.ij-source:hover { background: var(--hover); }
+button.ij-source[aria-checked="true"] { border-color: var(--accent); background: var(--selected); box-shadow: inset 0 0 0 1px var(--accent); }
+button.ij-source .icon { width: 24px; height: 24px; margin: 0 0 2px; color: var(--accent); }
+button.ij-source.unavailable { opacity: .65; }
+.ij-source-title { font-weight: 600; font-size: 14px; line-height: 1.3; }
+.ij-source-sub { font-size: 12px; line-height: 1.35; color: var(--muted); }
+.ij-toggle { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.ij-toggle label.inline { margin: 0 0 4px; }
+details.ij-advanced, details.ij-help { margin: 4px 0 12px; }
+details.ij-advanced > summary, details.ij-help > summary { cursor: pointer; font-weight: 500; margin: 0 0 8px; color: var(--text-2); }
+ul.ij-list li.ij-row { align-items: flex-start; }
+.ij-source-line { display: block; }
+.ij-progress { margin: 6px 0 4px; max-width: 520px; }
+.ij-counts { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.ij-error { font-size: 13px; color: var(--bad-text); overflow-wrap: anywhere; }
+details.ij-failed { margin-top: 6px; font-size: 13px; }
+details.ij-failed > summary { cursor: pointer; color: var(--bad-text); }
+ul.list details.ij-failed ul { list-style: disc; margin: 4px 0 0; padding-left: 18px; }
+ul.list details.ij-failed li { display: list-item; border-top: 0; padding: 3px 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .ij-sources { grid-template-columns: 1fr 1fr; }
+  button.ij-source { min-height: 0; }
+  ul.ij-list .li-actions { margin-left: 48px; flex-wrap: wrap; }
+}
+@media (max-width: 380px) { .ij-sources { grid-template-columns: 1fr; } }

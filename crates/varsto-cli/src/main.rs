@@ -24,6 +24,8 @@ mod filemanager;
 mod history;
 mod icon;
 mod import;
+mod import_jobs;
+mod import_jobs_cmd;
 mod logcmd;
 mod mcp;
 mod mcp_keys;
@@ -33,12 +35,14 @@ mod remember;
 mod restic;
 mod service;
 mod sse;
+mod torrent;
 mod trash;
 mod tray;
 mod update;
 mod upkeep;
 mod view;
 mod viz;
+mod youtube;
 
 #[derive(Parser)]
 #[command(
@@ -233,7 +237,8 @@ enum Cmd {
         cmd: backup::BackupCmd,
     },
     /// Import a git-annex repository, a cloud drive (Dropbox, OneDrive, any
-    /// rclone remote) or a local directory into a folder; status, verify, cleanup.
+    /// rclone remote), a local directory or a YouTube channel, playlist or
+    /// video into a folder; status, verify, cleanup, jobs.
     Import {
         #[command(subcommand)]
         cmd: import::ImportCmd,
@@ -4410,6 +4415,9 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Sync { folder } => {
             let mut engine = open_engine(&home)?;
+            // Asked for by hand: a storage resting after failures is tried
+            // again now (storage health layer, spec section 79).
+            engine.retry_storages_now();
             let r = engine.sync(folder.as_deref())?;
             warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {
@@ -4490,6 +4498,9 @@ fn run(cli: &Cli) -> Result<()> {
                         api("/api/state")
                     )
                 );
+                for line in torrent::status_lines(&home) {
+                    println!("{line}");
+                }
             }
             if let Some(mut v) = from_service {
                 if cli.json {
@@ -4501,6 +4512,9 @@ fn run(cli: &Cli) -> Result<()> {
                     for l in placing::status_lines(&home) {
                         println!("{l}");
                     }
+                    for l in youtube::status_lines(&home) {
+                        println!("{l}");
+                    }
                 }
                 return Ok(());
             }
@@ -4510,7 +4524,9 @@ fn run(cli: &Cli) -> Result<()> {
             let move_lines = if cli.json {
                 Vec::new()
             } else {
-                placing::status_lines(&home)
+                let mut l = placing::status_lines(&home);
+                l.extend(youtube::status_lines(&home));
+                l
             };
             print(cli, &s, |s| {
                 let mut out = format!(
@@ -5273,6 +5289,17 @@ fn run(cli: &Cli) -> Result<()> {
                             match (st.paired_with, st.closed_reason) {
                                 (Some(n), _) => println!("Sent the vault to {n}."),
                                 (None, r) => bail!("pairing closed: {}", r.unwrap_or_default()),
+                            }
+                            // The folder grants were kept on this device so
+                            // the pairing did not wait on a storage: they go
+                            // out now, or with the next sync.
+                            match engine.flush_records3() {
+                                Ok(f) if f.waiting > 0 => eprintln!(
+                                    "{} changes waiting to upload: they go out with the next sync",
+                                    f.waiting
+                                ),
+                                Ok(_) => {}
+                                Err(e) => eprintln!("the folder grants wait to upload: {e:#}"),
                             }
                             break;
                         }
@@ -7806,24 +7833,31 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
 
     // The accepted peer records of the other devices, probed over TLS on
     // TCP with their pinned certificates.
-    let records: Vec<varsto_core::p2p::PeerInfo> = engine
-        .peer_directory()?
-        .bodies()
-        .map(|b| b.info())
-        .collect();
+    // One read of the records (the saved directory and every storage)
+    // serves both the list and the probe.
+    let dir = engine.peer_directory()?;
+    let records: Vec<varsto_core::p2p::PeerInfo> = dir.bodies().map(|b| b.info()).collect();
+    // A temporary socket: the mapping differs from the service's, but the
+    // public IP and the NAT guess are the same. Asked at the same time as
+    // the peers, at most two servers with a short wait each (offline this
+    // costs about two seconds, not a lookup and a wait per server).
+    let stun_servers: Vec<String> = c.stun.iter().take(2).cloned().collect();
+    let stun_thread = (!stun_servers.is_empty()).then(|| {
+        std::thread::spawn(move || {
+            std::net::UdpSocket::bind("0.0.0.0:0").ok().map(|s| {
+                varsto_core::p2p::stun::probe(
+                    &s,
+                    &stun_servers,
+                    std::time::Duration::from_millis(800),
+                )
+            })
+        })
+    });
     let probe = engine
-        .p2p_peers_tcp()
+        .p2p_peers_tcp_from(&dir)
         .map(|p| p.probe())
         .unwrap_or_default();
-    // A temporary socket: the mapping differs from the service's, but the
-    // public IP and the NAT guess are the same.
-    let stun = if c.stun.is_empty() {
-        None
-    } else {
-        std::net::UdpSocket::bind("0.0.0.0:0").ok().map(|s| {
-            varsto_core::p2p::stun::probe(&s, &c.stun, std::time::Duration::from_millis(1500))
-        })
-    };
+    let stun = stun_thread.and_then(|t| t.join().ok().flatten());
     if json {
         println!(
             "{}",

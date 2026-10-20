@@ -19,6 +19,13 @@ use varsto_core::Engine;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
+/// The longest a call waits for the service's answer.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What the assistant hears when the service is busy (a sync on a slow or
+/// dead link holds the engine): a tool error it can act on.
+const BUSY: &str = "Varsto is busy right now (a sync or another long task); try again in a minute";
+
 /// Sent to the client in `initialize`, for the model: the short form of
 /// `docs/mcp.md`.
 const INSTRUCTIONS: &str = "Varsto keeps the user's files encrypted on their own storage and syncs them between their devices. You see only the folders the user granted: ro (read), analyse (also record file analyses) or rw (also move, rename and create files); varsto_folders shows each level.
@@ -86,6 +93,9 @@ impl Backend {
         };
         let mut stream = TcpStream::connect(("127.0.0.1", *port))
             .with_context(|| format!("connect to the service on port {port}"))?;
+        // Never wait without end for an answer (the service waits for the
+        // engine at most `desktop::MCP_WAIT`, then says busy itself).
+        stream.set_read_timeout(Some(READ_TIMEOUT))?;
         let payload = body.map(|b| b.to_string()).unwrap_or_default();
         let req = format!(
             "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
@@ -97,7 +107,15 @@ impl Backend {
         );
         stream.write_all(req.as_bytes())?;
         let mut raw = Vec::new();
-        stream.read_to_end(&mut raw)?;
+        if let Err(e) = stream.read_to_end(&mut raw) {
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) {
+                bail!("{BUSY}");
+            }
+            return Err(e.into());
+        }
         let sep = raw
             .windows(4)
             .position(|w| w == b"\r\n\r\n")
@@ -129,6 +147,9 @@ impl Backend {
                 let (status, bytes) = self.http(method, path, body.as_ref())?;
                 let v: Value = serde_json::from_slice(&bytes)
                     .unwrap_or_else(|_| json!({"error": String::from_utf8_lossy(&bytes)}));
+                if status == 503 && v.get("busy").is_some() {
+                    bail!("{BUSY}");
+                }
                 if status >= 400 {
                     bail!("{}", v["error"].as_str().unwrap_or("request failed"));
                 }
@@ -316,7 +337,7 @@ fn tools() -> Value {
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
         {"name": "varsto_write", "description": "Create a new text file inside a folder (read-write grant), for example a summary, an index or notes about what you organised; the file syncs like any other. Existing files are never overwritten: pick a new name.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}, "text": {"type": "string"}}, "required": ["folder", "path", "text"]}},
-        {"name": "varsto_sync", "description": "Sync one folder or all granted folders now.",
+        {"name": "varsto_sync", "description": "Sync one folder or all granted folders now. With the Varsto service running, the sync is queued and runs in the background (the answer says queued).",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}}}},
         {"name": "varsto_storage_advice", "description": "Varsto's own placement estimate, exposed for context: files idle for idle_days (default 90) and their monthly cost in every known storage class, cheapest first, with sources. Nothing is moved.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "idle_days": {"type": "integer", "minimum": 1}}}}

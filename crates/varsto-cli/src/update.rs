@@ -48,6 +48,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// The download site; the one place to change it (or override with
 /// `VARSTO_UPDATE_URL`, e.g. for a mirror; the signature check stays). The old
@@ -313,15 +315,27 @@ pub trait Fetch {
 /// The system `curl`.
 pub struct Curl;
 
+/// Gives up on a connection that does not come up within this many
+/// seconds: offline, or with a DNS or a firewall that swallows the
+/// packets, a check fails in seconds instead of running out `--max-time`.
+const CONNECT_TIMEOUT_SECS: &str = "10";
+
+/// The options every `curl` call starts with.
+fn curl_base_args(max_time: &str) -> Vec<String> {
+    vec![
+        "-fsSL".into(),
+        "--connect-timeout".into(),
+        CONNECT_TIMEOUT_SECS.into(),
+        "--max-time".into(),
+        max_time.into(),
+        "-A".into(),
+        format!("varsto/{}", env!("CARGO_PKG_VERSION")),
+    ]
+}
+
 fn curl(max_time: &str, args: &[&str]) -> Result<Vec<u8>> {
     let out = std::process::Command::new("curl")
-        .args([
-            "-fsSL",
-            "--max-time",
-            max_time,
-            "-A",
-            &format!("varsto/{}", env!("CARGO_PKG_VERSION")),
-        ])
+        .args(curl_base_args(max_time))
         .args(args)
         .output()
         .context("curl is required for updates (install it or download by hand)")?;
@@ -399,6 +413,161 @@ fn version_key(v: &str) -> (u64, u64, u64, u8, u64) {
 
 pub fn check() -> Result<Check> {
     check_with(&Curl, &downloads_base(), &release_key())
+}
+
+/// A successful check is reused this long by `check_cached` ...
+const CHECK_KEEP: Duration = Duration::from_secs(3600);
+/// ... and a failed one (offline) this long, so that a page that polls does
+/// not start a download attempt every time.
+const CHECK_FAILED_KEEP: Duration = Duration::from_secs(600);
+
+/// The last answer of the release check and when it was made.
+type Checked = Option<(Instant, std::result::Result<Check, String>)>;
+static CHECKED: Mutex<Checked> = Mutex::new(None);
+
+/// Whether a kept answer of `at` is still good at `now`.
+fn check_fresh(at: Instant, ok: bool, now: Instant) -> bool {
+    now.saturating_duration_since(at) < if ok { CHECK_KEEP } else { CHECK_FAILED_KEEP }
+}
+
+/// The release check for the service (`GET /api/update/check`, the tray):
+/// the kept answer while it is fresh, else a new check. Never called with
+/// the service's state held; checks asked for at the same time wait for one
+/// another and share the answer.
+pub fn check_cached() -> Result<Check> {
+    check_cached_with(&|| check())
+}
+
+fn check_cached_with(run: &dyn Fn() -> Result<Check>) -> Result<Check> {
+    let mut kept = CHECKED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, answer)) = kept.as_ref() {
+        if check_fresh(*at, answer.is_ok(), Instant::now()) {
+            return answer.clone().map_err(|e| anyhow!(e));
+        }
+    }
+    let answer = run().map_err(|e| format!("{e:#}"));
+    *kept = Some((Instant::now(), answer.clone()));
+    answer.map_err(|e| anyhow!(e))
+}
+
+/// Forget the kept answer (after an update was installed or failed).
+fn forget_check() {
+    *CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// An update installed by the service in the background (`POST
+/// /api/update`): what it does now and how it ended. Read with `GET
+/// /api/update/status`.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+pub struct UpdateJob {
+    /// "idle", "checking", "installing", "done" or "failed".
+    pub state: String,
+    pub running: bool,
+    pub latest: Option<String>,
+    /// A newer version was installed: the service restarts.
+    pub updated: bool,
+    pub message: Option<String>,
+    pub started_utc: Option<i64>,
+    pub finished_utc: Option<i64>,
+}
+
+static JOB: Mutex<Option<UpdateJob>> = Mutex::new(None);
+
+/// The background update's state.
+pub fn job_status() -> UpdateJob {
+    JOB.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_else(|| UpdateJob {
+            state: "idle".into(),
+            ..Default::default()
+        })
+}
+
+fn set_job(f: impl FnOnce(&mut UpdateJob)) {
+    let mut j = JOB.lock().unwrap_or_else(|e| e.into_inner());
+    let job = j.get_or_insert_with(UpdateJob::default);
+    f(job);
+}
+
+/// Start installing the latest release on a thread of its own and answer at
+/// once; `restart` is called after a newer version was put in place (the
+/// Windows setup program restarts Varsto itself). Refused while one runs.
+pub fn start_job(home: PathBuf, restart: impl FnOnce() + Send + 'static) -> Result<UpdateJob> {
+    start_job_with(
+        home,
+        Box::new(check),
+        Box::new(|c: &Check, p: &Policy<'_>| apply(c, p)),
+        restart,
+    )
+}
+
+type ApplyFn = Box<dyn FnOnce(&Check, &Policy<'_>) -> Result<String> + Send>;
+
+fn start_job_with(
+    home: PathBuf,
+    run_check: Box<dyn FnOnce() -> Result<Check> + Send>,
+    run_apply: ApplyFn,
+    restart: impl FnOnce() + Send + 'static,
+) -> Result<UpdateJob> {
+    {
+        let mut j = JOB.lock().unwrap_or_else(|e| e.into_inner());
+        if j.as_ref().is_some_and(|j| j.running) {
+            bail!("an update is already being installed");
+        }
+        *j = Some(UpdateJob {
+            state: "checking".into(),
+            running: true,
+            started_utc: Some(varsto_core::util::now_utc()),
+            ..Default::default()
+        });
+    }
+    let spawned = std::thread::Builder::new()
+        .name("update-job".into())
+        .spawn(move || {
+            let result = run_check().and_then(|c| {
+                set_job(|j| {
+                    j.state = "installing".into();
+                    j.latest = Some(c.latest.clone());
+                });
+                let policy = Policy::new(&home, false);
+                run_apply(&c, &policy).map(|m| (c, m))
+            });
+            forget_check();
+            match result {
+                Ok((c, message)) => {
+                    log::info!("update: {message}");
+                    set_job(|j| {
+                        j.state = "done".into();
+                        j.updated = c.available;
+                        j.message = Some(message);
+                    });
+                    if c.available && !c.installer() {
+                        restart();
+                    }
+                }
+                Err(e) => {
+                    log::warn!("update failed: {e:#}");
+                    set_job(|j| {
+                        j.state = "failed".into();
+                        j.message = Some(format!("{e:#}"));
+                    });
+                }
+            }
+            set_job(|j| {
+                j.running = false;
+                j.finished_utc = Some(varsto_core::util::now_utc());
+            });
+        });
+    if let Err(e) = spawned {
+        set_job(|j| {
+            j.running = false;
+            j.state = "failed".into();
+            j.message = Some(format!("cannot start the update: {e}"));
+        });
+        bail!("cannot start the update: {e}");
+    }
+    Ok(job_status())
 }
 
 fn check_with(fetch: &dyn Fetch, base: &str, key: &PublicKey) -> Result<Check> {
@@ -2575,5 +2744,98 @@ mod tests {
         let c = check_daily_with(&fake, DBASE, &key, &policy).unwrap();
         assert_eq!(c.latest_build, "20261016-316c579");
         assert!(c.newer);
+    }
+
+    #[test]
+    fn curl_gives_up_on_a_connection_that_does_not_come_up() {
+        // Offline or behind a black hole: seconds, not the whole --max-time.
+        let a = curl_base_args("120");
+        let at = a.iter().position(|x| x == "--connect-timeout").unwrap();
+        assert_eq!(a[at + 1], CONNECT_TIMEOUT_SECS);
+        let at = a.iter().position(|x| x == "--max-time").unwrap();
+        assert_eq!(a[at + 1], "120");
+    }
+
+    fn a_check(available: bool) -> Check {
+        Check {
+            current: "0.0.1".into(),
+            latest: "0.0.2".into(),
+            available,
+            newer: true,
+            download_page: "https://example.invalid/downloads/".into(),
+            archive: available.then(|| "varsto-0.0.2-test.tar.gz".to_string()),
+            target: "test".into(),
+        }
+    }
+
+    #[test]
+    fn the_release_check_is_kept_and_a_failure_for_less_time() {
+        let now = Instant::now();
+        assert!(check_fresh(now, true, now + Duration::from_secs(1800)));
+        assert!(!check_fresh(now, true, now + CHECK_KEEP));
+        assert!(check_fresh(now, false, now + Duration::from_secs(60)));
+        assert!(!check_fresh(now, false, now + CHECK_FAILED_KEEP));
+        // The second call is answered from the kept answer: no new check.
+        forget_check();
+        let runs = std::sync::atomic::AtomicUsize::new(0);
+        let run = || -> Result<Check> {
+            runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(a_check(false))
+        };
+        assert_eq!(check_cached_with(&run).unwrap().latest, "0.0.2");
+        assert_eq!(check_cached_with(&run).unwrap().latest, "0.0.2");
+        assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // A failure (offline) is kept as well, as the same error.
+        forget_check();
+        let fail = || -> Result<Check> { Err(anyhow!("could not resolve host")) };
+        let e = check_cached_with(&fail).unwrap_err();
+        assert!(format!("{e:#}").contains("could not resolve host"));
+        let e = check_cached_with(&run).unwrap_err();
+        assert!(format!("{e:#}").contains("could not resolve host"));
+        forget_check();
+    }
+
+    #[test]
+    fn an_update_runs_in_the_background_and_says_how_it_went() {
+        let home = tempfile::tempdir().unwrap();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let (restarted_tx, restarted_rx) = std::sync::mpsc::channel::<()>();
+        let started = start_job_with(
+            home.path().to_path_buf(),
+            Box::new(|| Ok(a_check(true))),
+            Box::new(move |c: &Check, _p: &Policy<'_>| {
+                // Held until the test lets it go: the answer came first.
+                go_rx.recv().unwrap();
+                Ok(format!("updated to {}", c.latest))
+            }),
+            move || restarted_tx.send(()).unwrap(),
+        )
+        .unwrap();
+        assert!(started.running);
+        // A second one is refused while the first runs.
+        let again = start_job_with(
+            home.path().to_path_buf(),
+            Box::new(|| Ok(a_check(true))),
+            Box::new(|_: &Check, _: &Policy<'_>| Ok(String::new())),
+            || {},
+        );
+        assert!(again.is_err());
+        go_tx.send(()).unwrap();
+        restarted_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the service is asked to restart");
+        let until = Instant::now() + Duration::from_secs(10);
+        let job = loop {
+            let j = job_status();
+            if !j.running || Instant::now() > until {
+                break j;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(!job.running);
+        assert_eq!(job.state, "done");
+        assert!(job.updated);
+        assert_eq!(job.latest.as_deref(), Some("0.0.2"));
+        assert_eq!(job.message.as_deref(), Some("updated to 0.0.2"));
     }
 }

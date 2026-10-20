@@ -1804,9 +1804,129 @@
   "the 24 words of your recovery kit: they make the folder's recovery copy now. Leave empty to write it later": "palautuspaketin 24 sanaa: niillä tehdään kansion palautuskopio heti. Jätä tyhjäksi, jos haluat kirjoittaa sen myöhemmin",
   "Your vault key and recovery words": "Holvin avain ja palautussanat",
   "Write both word sets down and keep them offline: they are the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. The recovery words also make each new folder's recovery copy. They are shown once.": "Kirjoita molemmat sanasarjat muistiin ja säilytä ne offline-tilassa: ne ovat ainoa tapa palauttaa tiedot tai liittyä ilman toista laitetta; laitteita voi lisätä myös parituskoodilla. Palautussanoista tehdään myös jokaisen uuden kansion palautuskopio. Ne näytetään vain kerran.",
-  "I have written them down": "Olen kirjoittanut ne muistiin"
+  "I have written them down": "Olen kirjoittanut ne muistiin",
+  "Torrent job {name} is waiting for disk space: {free} free on its download disk, {need} more is needed above the reserve.": "Torrent-työ {name} odottaa levytilaa: latauslevyllä on vapaana {free}, varauksen lisäksi tarvitaan vielä {need}.",
+  "Torrent job {name} is complete: all {count} files are in folder {folder}.": "Torrent-työ {name} on valmis: kaikki {count} tiedostoa ovat kansiossa {folder}.",
+  "Make room for torrent job {name}": "Tee tilaa torrent-työlle {name}",
+  "The next files need {need} more free space on the download disk than the reserve leaves; the download waits until there is room.": "Seuraavat tiedostot tarvitsevat latauslevyllä {need} enemmän vapaata tilaa kuin varaus jättää; lataus odottaa, kunnes tilaa on.",
+  "Free up space on the download disk, or lower the reserve with --free-min when you add a job. The job goes on by itself once there is room.": "Vapauta tilaa latauslevyltä tai pienennä varausta valitsimella --free-min, kun lisäät työn. Työ jatkuu itsestään, kun tilaa on.",
+  "Torrent job {name} is complete": "Torrent-työ {name} on valmis",
+  "Every file of the torrent is in folder {folder} on your storages; the download directory is empty.": "Torrentin jokainen tiedosto on kansiossa {folder} tallennuspaikoissasi; latauskansio on tyhjä.",
+  "Remove the job when you no longer want to see it. To move the folder's data to other storages later, use varsto move.": "Poista työ, kun et enää halua nähdä sitä. Kansion tiedot voi siirtää myöhemmin muihin tallennuspaikkoihin komennolla varsto move.",
+  "Every file of the torrent is in folder {folder} on your storages; {count} downloaded files differ from the folder's files at the same paths and stay in the download directory.": "Torrentin jokainen tiedosto on kansiossa {folder} tallennuspaikoissasi; {count} ladattua tiedostoa eroaa kansion samoissa poluissa olevista tiedostoista ja jää latauskansioon.",
+  "In progress": "Käynnissä",
+  "Nothing is being imported right now.": "Mitään ei tuoda juuri nyt.",
+  "1. What do you want to import?": "1. Mitä haluat tuoda?",
+  "What to import": "Mitä tuodaan",
+  "Local folder or disk": "Paikallinen kansio tai levy",
+  "A folder of this device, an external disk or a memory card": "Tämän laitteen kansio, ulkoinen levy tai muistikortti",
+  "git-annex repository": "git-annex-tietovarasto",
+  "A clone on this device or on a disk, one disk after another": "Klooni tällä laitteella tai levyllä, levy kerrallaan",
+  "Cloud drive": "Pilvilevy",
+  "Dropbox, OneDrive, Google Drive or any rclone remote": "Dropbox, OneDrive, Google Drive tai mikä tahansa rclone-etäkohde",
+  "Torrent": "Torrent",
+  "A magnet link or a .torrent file, even one larger than this disk": "Magnet-linkki tai .torrent-tiedosto, vaikka tätä levyä suurempi",
+  "A video, a playlist or a whole channel": "Video, soittolista tai koko kanava",
+  "2. Details": "2. Tiedot",
+  "Repository": "Tietovarasto",
+  "a clone of the repository; nothing is changed in it": "tietovaraston klooni; siihen ei muuteta mitään",
+  "Commit": "Versio",
+  "a branch, a tag or HEAD": "haara, tagi tai HEAD",
+  "Do not check the content against the keys' hashes (faster)": "Älä tarkista sisältöä avainten tiivisteitä vasten (nopeampi)",
+  "Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next.": "Aja se kerran jokaiselle levylle, jolla on tietovaraston klooni: jokainen ajo jatkaa samaa kansiota sillä, mitä levyllä on, ja kertoo, mikä levy liitetään seuraavaksi.",
+  "Another rclone remote (Google Drive, S3, SFTP and more)": "Muu rclone-etäkohde (Google Drive, S3, SFTP ja muut)",
+  "Remote": "Etäkohde",
+  "an rclone remote and an optional path, such as mydropbox:Photos": "rclone-etäkohde ja valinnainen polku, esimerkiksi mydropbox:Photos",
+  "Parallel downloads": "Rinnakkaiset lataukset",
+  "No remote yet?": "Eikö etäkohdetta vielä ole?",
+  "Signing in to a cloud drive is done once, in rclone, which opens your browser for it; that is why this step is a command. Run it in a terminal of this device, then come back:": "Pilvilevylle kirjaudutaan kerran rclonessa, joka avaa sitä varten selaimesi; siksi tämä vaihe on komento. Aja se tämän laitteen päätteessä ja palaa sitten tänne:",
+  "Magnet link": "Magnet-linkki",
+  "Or a .torrent file": "Tai .torrent-tiedosto",
+  "A local transmission-daemon downloads the torrent a batch at a time, so that the download disk keeps its reserve free; each file is stored in the folder and leaves the disk once it is safe.": "Paikallinen transmission-daemon lataa torrentin erä kerrallaan niin, että latauslevylle jää varattu vapaa tila; jokainen tiedosto tallennetaan kansioon ja poistuu levyltä, kun se on turvassa.",
+  "One video": "Yksi video",
+  "Whole channel or playlist": "Koko kanava tai soittolista",
+  "Only archive what you may keep a copy of: your own uploads, videos whose licence allows copies, or what the law where you live lets you keep. Videos are downloaded one at a time and slowly, as set under Advanced.": "Arkistoi vain sitä, mistä saat pitää kopion: omia latauksiasi, videoita joiden lisenssi sallii kopiot, tai mitä asuinpaikkasi laki sallii pitää. Videot ladataan yksi kerrallaan ja hitaasti, kuten Lisäasetuksissa on asetettu.",
+  "Storage": "Tallennuspaikka",
+  "where the folder's files are kept": "missä kansion tiedostoja säilytetään",
+  "Keep free on the download disk": "Pidä vapaana latauslevyllä",
+  "a share (15%) or an amount (20GB); never less than Varsto's own minimum": "osuus (15%) tai määrä (20GB); ei koskaan vähemmän kuin Varston oma vähimmäismäärä",
+  "Download directory": "Lataushakemisto",
+  "transmission's own download directory": "transmissionin oma lataushakemisto",
+  "Downloads/varsto-youtube in your home directory": "Downloads/varsto-youtube kotihakemistossasi",
+  "not inside a Varsto folder": "ei Varsto-kansion sisällä",
+  "Copies on storages before a file leaves the download disk": "Kopioita tallennuspaikoissa ennen kuin tiedosto poistuu latauslevyltä",
+  "Download files the folder has already and compare them": "Lataa myös tiedostot, jotka kansiossa jo on, ja vertaa niitä",
+  "Advanced": "Lisäasetukset",
+  "Pause between videos (seconds)": "Tauko videoiden välillä (sekuntia)",
+  "chosen at random in this range": "valitaan satunnaisesti tältä väliltä",
+  "Pause between requests (seconds)": "Tauko pyyntöjen välillä (sekuntia)",
+  "Download rate limit": "Latausnopeuden raja",
+  "600K, 1.5M, or none": "600K, 1.5M tai none",
+  "Fragments at a time": "Osia kerrallaan",
+  "Format": "Muoto",
+  "the best yt-dlp finds": "paras, jonka yt-dlp löytää",
+  "yt-dlp's --format": "yt-dlp:n --format",
+  "Cookies from a browser": "Evästeet selaimesta",
+  "none": "ei mitään",
+  "for videos that need a sign-in you have, such as firefox": "videoille, jotka vaativat kirjautumisen jonka sinulla on, esimerkiksi firefox",
+  "Subtitles": "Tekstitykset",
+  "languages, such as en,fi": "kielet, esimerkiksi en,fi",
+  "Keep thumbnails": "Säilytä pikkukuvat",
+  "List the channel again for new videos every (hours)": "Listaa kanava uudelleen uusien videoiden varalta joka (tuntia)",
+  "0: list once": "0: listaa kerran",
+  "Start import": "Aloita tuonti",
+  "Finished": "Valmiit",
+  "This device imports its own folders only. Import other sources on a computer of the vault: the folder then reaches this device like any other.": "Tämä laite tuo vain omia kansioitaan. Tuo muut lähteet holvin tietokoneella: kansio tulee sitten tälle laitteelle kuten mikä tahansa muu.",
+  "Torrents are imported on Linux only: Varsto drives a transmission-daemon on the same computer.": "Torrentit tuodaan vain Linuxissa: Varsto ohjaa samalla tietokoneella toimivaa transmission-daemonia.",
+  "YouTube imports run on computers only (Linux, macOS, Windows), with yt-dlp.": "YouTube-tuonnit toimivat vain tietokoneilla (Linux, macOS, Windows) yt-dlp:n avulla.",
+  "yt-dlp was not found on this computer. Install it (pacman -S yt-dlp, apt install yt-dlp or brew install yt-dlp), keep it up to date, then start the import.": "yt-dlp:tä ei löytynyt tältä tietokoneelta. Asenna se (pacman -S yt-dlp, apt install yt-dlp tai brew install yt-dlp), pidä se ajan tasalla ja aloita sitten tuonti.",
+  "transmission-daemon was not found on this computer. Install it (apt install transmission-daemon or pacman -S transmission-cli) and start it, then start the import.": "transmission-daemonia ei löytynyt tältä tietokoneelta. Asenna se (apt install transmission-daemon tai pacman -S transmission-cli) ja käynnistä se, ja aloita sitten tuonti.",
+  "rclone was not found on this computer. Install it from rclone.org or your package manager and set up a remote, then start the import.": "rclonea ei löytynyt tältä tietokoneelta. Asenna se osoitteesta rclone.org tai paketinhallinnasta ja määritä etäkohde, ja aloita sitten tuonti.",
+  "git was not found on this computer; the import reads the repository with it.": "gitiä ei löytynyt tältä tietokoneelta; tuonti lukee tietovaraston sen avulla.",
+  "The folder's usual placement": "Kansion tavallinen sijoitus",
+  "The cheapest storage (by price per GB-month)": "Halvin tallennuspaikka (hinta gigatavua kohden kuukaudessa)",
+  "This is not a YouTube address Varsto knows.": "Tämä ei ole YouTube-osoite, jonka Varsto tuntee.",
+  "Paste the address of a video, a playlist or a channel.": "Liitä videon, soittolistan tai kanavan osoite.",
+  "A single video.": "Yksittäinen video.",
+  "A playlist: every video in it, one at a time.": "Soittolista: kaikki sen videot yksi kerrallaan.",
+  "A channel: every video in it, one at a time; new videos are listed again later.": "Kanava: kaikki sen videot yksi kerrallaan; uudet videot listataan myöhemmin uudelleen.",
+  "A video in a playlist: choose the video alone or the whole playlist.": "Video soittolistassa: valitse pelkkä video tai koko soittolista.",
+  "This .torrent file is larger than the page can send (5 MB). Add it on the command line: varsto import torrent <file>.": "Tämä .torrent-tiedosto on suurempi kuin sivu voi lähettää (5 MB). Lisää se komentorivillä: varsto import torrent <tiedosto>.",
+  "The .torrent file could not be read.": ".torrent-tiedostoa ei voitu lukea.",
+  "Choose the git-annex repository.": "Valitse git-annex-tietovarasto.",
+  "Give an rclone remote, such as mydropbox: or gdrive:Photos.": "Anna rclone-etäkohde, esimerkiksi mydropbox: tai gdrive:Photos.",
+  "Give a magnet link or choose a .torrent file.": "Anna magnet-linkki tai valitse .torrent-tiedosto.",
+  "Give the address of a YouTube video, playlist or channel.": "Anna YouTube-videon, -soittolistan tai -kanavan osoite.",
+  "Local folder": "Paikallinen kansio",
+  "Command line": "Komentorivi",
+  "started on the command line": "aloitettu komentoriviltä",
+  "Waiting for the service": "Odottaa palvelua",
+  "Failed": "Epäonnistui",
+  "Adding": "Lisätään",
+  "Fetching the file list": "Haetaan tiedostoluetteloa",
+  "Waiting for space": "Odottaa tilaa",
+  "Waiting for the policy": "Odottaa käytäntöä",
+  "Waiting to try again": "Odottaa uutta yritystä",
+  "Complete": "Valmis",
+  "Listing the videos": "Listataan videoita",
+  "Checking a video's size": "Tarkistetaan videon kokoa",
+  "Up to date": "Ajan tasalla",
+  "Try failed videos again": "Yritä epäonnistuneita videoita uudelleen",
+  "Pausing…": "Keskeytetään…",
+  "Resuming…": "Jatketaan…",
+  "Removing…": "Poistetaan…",
+  "Trying again…": "Yritetään uudelleen…",
+  "Now:": "Nyt:",
+  "Error:": "Virhe:",
+  "no reason given": "syytä ei kerrottu",
+  "1 video failed": "1 video epäonnistui",
+  "Remove the job?": "Poistetaanko työ?"
  },
  "patterns": [
+  [
+   "^Storage (.+) cannot be reached; it is tried again at (.+)\\.$",
+   "Tallennustilaan $1 ei saada yhteyttä; sitä yritetään uudelleen klo $2."
+  ],
   [
    "^This device's six words: (.+)\\. The other device shows the same words before it lets this one join\\.$",
    "Tämän laitteen kuusi sanaa: $1. Toinen laite näyttää samat sanat ennen kuin se päästää tämän liittymään."
@@ -2530,6 +2650,70 @@
   [
    "^added ([\\d.\\-/: ]+)$",
    "lisätty $1"
+  ],
+  [
+   "^Import started: (.+)$",
+   "Tuonti aloitettu: $1"
+  ],
+  [
+   "^Into folder (.+)$",
+   "Kansioon $1"
+  ],
+  [
+   "^(\\d+) of (\\d+) files$",
+   "$1/$2 tiedostoa"
+  ],
+  [
+   "^(\\d+) of (\\d+) videos$",
+   "$1/$2 videota"
+  ],
+  [
+   "^([\\d.]+ (?:B|KiB|MiB|GiB|TiB)) of ([\\d.]+ (?:B|KiB|MiB|GiB|TiB))$",
+   "$1 / $2"
+  ],
+  [
+   "^([\\d.]+ (?:B|KiB|MiB|GiB|TiB)) stored$",
+   "$1 tallennettu"
+  ],
+  [
+   "^(\\d+) already in the vault$",
+   "$1 jo holvissa"
+  ],
+  [
+   "^(\\d+) already in the folder$",
+   "$1 jo kansiossa"
+  ],
+  [
+   "^(\\d+) in conflict$",
+   "$1 ristiriidassa"
+  ],
+  [
+   "^Tries again at (.+)$",
+   "Yrittää uudelleen $1"
+  ],
+  [
+   "^(\\d+) videos failed$",
+   "$1 videota epäonnistui"
+  ],
+  [
+   "^Given up after (\\d+) tries$",
+   "Luovuttu $1 yrityksen jälkeen"
+  ],
+  [
+   "^Try (\\d+), next at (.+)$",
+   "Yritys $1, seuraava $2"
+  ],
+  [
+   "^(\\d+) file\\(s\\) imported, (\\d+) imported before, (\\d+) could not be read$",
+   "$1 tiedosto(a) tuotu, $2 tuotu aiemmin, $3 ei voitu lukea"
+  ],
+  [
+   "^Remove the torrent job (.+)\\? Folder (.+) stays, and so do the files in the download directory that were not stored yet; transmission drops the torrent\\.$",
+   "Poistetaanko torrent-työ $1? Kansio $2 säilyy, samoin lataushakemiston tiedostot, joita ei ole vielä tallennettu; transmission poistaa torrentin."
+  ],
+  [
+   "^Remove the YouTube job (.+)\\? Folder (.+) keeps every video; files in the spool that were not stored yet stay there\\.$",
+   "Poistetaanko YouTube-työ $1? Kansio $2 säilyttää kaikki videot; välihakemiston tiedostot, joita ei ole vielä tallennettu, jäävät sinne."
   ]
  ],
  "parts": [

@@ -14,6 +14,7 @@
 //! `service.rs` checks its source). A person at a command line or a page
 //! does, after comparing the six words.
 
+use super::members3::Reach;
 use super::*;
 use crate::membership3::escrow::MissingEscrow;
 use crate::membership3::{EpochStart, Membership, PendingRequest, RecoveryKey, Removed, Role};
@@ -198,8 +199,15 @@ impl Engine {
     /// first makes its K8 (when it has none) and publishes its device
     /// record if the registry lacks it; without, a device that never did
     /// that gets `None`.
+    ///
+    /// `reach` says how the records are read (`members3::Reach`): changes
+    /// that only this device's records make (requests, approvals, roles,
+    /// grants, recovery copies) work from this device's copy when the
+    /// storages cannot be read, and their records wait to upload; folder
+    /// epochs need a storage that answers.
     fn with_membership<R>(
         &mut self,
+        reach: Reach,
         enrol: bool,
         f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
     ) -> Result<Option<R>> {
@@ -207,10 +215,10 @@ impl Engine {
             bail!("this device is a member of a shared folder only; it has no folder membership of its own");
         }
         if enrol {
-            return self.with_enrolled(f);
+            return self.with_enrolled_at(reach, f);
         }
         Ok(self
-            .with_members3(|m| {
+            .with_members3_at(reach, |m| {
                 if m.devices.get(&m.me).is_none() {
                     return Ok(None);
                 }
@@ -219,8 +227,12 @@ impl Engine {
             .flatten())
     }
 
-    fn enrolled3<R>(&mut self, f: impl FnOnce(&mut Membership<'_>) -> Result<R>) -> Result<R> {
-        self.with_membership(true, f)?
+    fn enrolled3<R>(
+        &mut self,
+        reach: Reach,
+        f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
+    ) -> Result<R> {
+        self.with_membership(reach, true, f)?
             .ok_or_else(|| anyhow!("this device could not be enrolled: add a storage first"))
     }
 
@@ -230,7 +242,7 @@ impl Engine {
     /// comes to be. Returns the folder id (hex).
     pub fn f3_folder_create(&mut self, name: &str, k1: Option<&RecoveryKey>) -> Result<String> {
         crate::names::check_display_name(name)?;
-        self.enrolled3(|m| {
+        self.enrolled3(Reach::StoragesOrLocal, |m| {
             if m.registry
                 .folders
                 .values()
@@ -250,7 +262,9 @@ impl Engine {
         if role == Role::Owner {
             bail!("a request asks for editor or viewer; an owner makes you an owner afterwards");
         }
-        self.enrolled3(|m| {
+        // Without the storages the request is kept here and sent with the
+        // next sync.
+        self.enrolled3(Reach::StoragesOrLocal, |m| {
             let id = find_folder(m, folder)?;
             if m.registry.get(&id).and_then(|s| s.role(&m.me)).is_some() {
                 bail!("this device is a participant of the folder already");
@@ -274,7 +288,7 @@ impl Engine {
 
     /// This device's own fingerprint: the six words an owner compares.
     pub fn f3_own_fingerprint(&mut self) -> Result<String> {
-        self.enrolled3(|m| {
+        self.enrolled3(Reach::StoragesOrLocal, |m| {
             let me = m.devices.get(&m.me).cloned().expect("enrolled");
             Ok(crate::membership3::fingerprint(&me.sign_pub, &me.kem_pub))
         })
@@ -282,7 +296,7 @@ impl Engine {
 
     /// Pending requests for `folder`, or for every folder this device owns.
     pub fn f3_requests(&mut self, folder: Option<&str>) -> Result<Vec<FolderRequest>> {
-        let Some(out) = self.with_membership(false, |m| {
+        let Some(out) = self.with_membership(Reach::StoragesOrLocal, false, |m| {
             let ids: Vec<Id16> = match folder {
                 Some(f) => vec![find_folder(m, f)?],
                 None => m
@@ -322,7 +336,10 @@ impl Engine {
         fingerprint: Option<&str>,
     ) -> Result<FolderMembers> {
         let role = role.map(parse_role).transpose()?;
-        self.enrolled3(|m| {
+        // Approved here at once; without the storages the folder record and
+        // the grant wait to upload (a request this device has not read yet
+        // cannot be approved then).
+        self.enrolled3(Reach::StoragesOrLocal, |m| {
             let id = find_folder(m, folder)?;
             let dev = find_device(m, device)?;
             let pending = m.list_requests(&id)?;
@@ -349,7 +366,7 @@ impl Engine {
 
     /// Deny `device` for `folder`.
     pub fn f3_deny(&mut self, folder: &str, device: &str) -> Result<FolderMembers> {
-        self.enrolled3(|m| {
+        self.enrolled3(Reach::StoragesOrLocal, |m| {
             let id = find_folder(m, folder)?;
             let dev = find_device(m, device)?;
             m.deny(&id, &dev)?;
@@ -359,7 +376,7 @@ impl Engine {
 
     /// Participants, denied devices and pending requests of `folder`.
     pub fn f3_members(&mut self, folder: &str) -> Result<FolderMembers> {
-        self.enrolled3(|m| {
+        self.enrolled3(Reach::StoragesOrLocal, |m| {
             let id = find_folder(m, folder)?;
             members_of(m, &id)
         })
@@ -367,7 +384,18 @@ impl Engine {
 
     /// Every folder of the membership records this device can see.
     pub fn f3_folders(&mut self) -> Result<Vec<FolderMembers>> {
-        let Some(v) = self.with_membership(false, |m| {
+        self.f3_folders_at(Reach::StoragesOrLocal)
+    }
+
+    /// `f3_folders` from this device's copy of the records, without the
+    /// network (a dialog that asks every second; the sync keeps the copy
+    /// current).
+    pub fn f3_folders_local(&mut self) -> Result<Vec<FolderMembers>> {
+        self.f3_folders_at(Reach::Local)
+    }
+
+    fn f3_folders_at(&mut self, reach: Reach) -> Result<Vec<FolderMembers>> {
+        let Some(v) = self.with_membership(reach, false, |m| {
             let ids: Vec<Id16> = m.registry.folders.keys().copied().collect();
             ids.iter().map(|id| members_of(m, id)).collect()
         })?
@@ -382,7 +410,7 @@ impl Engine {
     /// keys back; removing the device does, with a new folder epoch.)
     pub fn f3_set_role(&mut self, folder: &str, device: &str, role: &str) -> Result<FolderMembers> {
         let role = parse_role(role)?;
-        self.enrolled3(|m| {
+        self.enrolled3(Reach::StoragesOrLocal, |m| {
             let id = find_folder(m, folder)?;
             let dev = find_device(m, device)?;
             let epoch = m.folder_epochs(&id).current();
@@ -422,7 +450,8 @@ impl Engine {
                 Some((id, self.f3.ledger.head(&id).seq))
             })
             .collect();
-        self.enrolled3(|m| {
+        // A folder epoch needs a storage that answers: it decides the number.
+        self.enrolled3(Reach::Storages, |m| {
             let id = find_folder(m, folder)?;
             let dev = find_device(m, device)?;
             let started: EpochStart = m.start_folder_epoch(
@@ -460,7 +489,7 @@ impl Engine {
         epoch: u32,
         keep: &str,
     ) -> Result<FolderMembers> {
-        self.enrolled3(|m| {
+        self.enrolled3(Reach::Storages, |m| {
             let id = find_folder(m, folder)?;
             let issuer = find_device(m, keep)?;
             m.resolve_folder_epoch(&id, epoch, &issuer)?;
@@ -469,9 +498,12 @@ impl Engine {
     }
 
     /// Folder epochs this device holds with no recovery copy (empty for a
-    /// device that never took part in format 3).
+    /// device that never took part in format 3). Answered from this
+    /// device's copy of the records, without the network (`status` asks on
+    /// every poll); every refresh of the membership reads the recovery
+    /// copies into it, and copies written here count at once.
     pub fn f3_missing_escrows(&mut self) -> Result<Vec<MissingRecoveryCopy>> {
-        let Some(v) = self.with_membership(false, |m| {
+        let Some(v) = self.with_membership(Reach::Local, false, |m| {
             Ok(m.missing_escrows()?
                 .into_iter()
                 .map(|e: MissingEscrow| MissingRecoveryCopy {
@@ -495,7 +527,8 @@ impl Engine {
         folder: Option<&str>,
         k1: &RecoveryKey,
     ) -> Result<Vec<MissingRecoveryCopy>> {
-        self.enrolled3(|m| {
+        // Without the storages the copies are kept here and uploaded later.
+        self.enrolled3(Reach::StoragesOrLocal, |m| {
             let only = folder.map(|f| find_folder(m, f)).transpose()?;
             let mut written = Vec::new();
             for e in m.missing_escrows()? {
@@ -532,6 +565,14 @@ impl Engine {
     /// Pairing (the offering device, after the person ticked folders for
     /// the joining device): grants as an editor for every folder in
     /// `folders` (names or ids). Returns the joining device's id.
+    ///
+    /// The pairing does not wait on a storage: the folder records and
+    /// grants are made from this device's copy of the records and kept
+    /// here. They are uploaded at once, before the joining device gets its
+    /// answer, so that it holds the folders as soon as it has joined; a
+    /// storage that cannot be reached gets them with the next flush (the
+    /// caller runs `flush_records3` again once the vault key went out, and
+    /// every sync does).
     pub fn f3_pair_grants(
         &mut self,
         name: &str,
@@ -541,13 +582,21 @@ impl Engine {
         role: &str,
     ) -> Result<String> {
         let role = parse_role(role)?;
-        self.enrolled3(|m| {
+        self.enrolled3(Reach::Local, |m| {
             let ids = folders
                 .iter()
                 .map(|f| find_folder(m, f))
                 .collect::<Result<Vec<_>>>()?;
             let dev = m.grant_to_joiner(name, k6_public, k8_public, &ids, role)?;
             Ok(hex::encode(dev))
+        })
+        .inspect(|_| match self.flush_records3() {
+            Ok(f) if f.waiting > 0 => log::info!(
+                "{} membership changes of the pairing wait for a storage",
+                f.waiting
+            ),
+            Ok(_) => {}
+            Err(e) => log::warn!("the pairing's folder grants wait to upload: {e:#}"),
         })
     }
 }
@@ -563,8 +612,9 @@ fn fingerprint_matches(a: &str, b: &str) -> bool {
     norm(a) == norm(b)
 }
 
+/// The membership was read when it was opened, and every change refreshes
+/// it: no second read of the storages here.
 fn members_of(m: &mut Membership<'_>, id: &Id16) -> Result<FolderMembers> {
-    m.refresh()?;
     let epochs = m.folder_epochs(id);
     let epoch = epochs.current();
     let unresolved_epochs = epochs.unresolved();

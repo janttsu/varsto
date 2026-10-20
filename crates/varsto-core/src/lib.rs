@@ -79,10 +79,12 @@ pub mod storage_settings;
 pub mod storages3;
 pub mod strongroom;
 pub mod thumbs;
+pub mod transmission;
 pub mod trash3;
 pub mod util;
 pub mod vault;
 pub mod viz;
+pub mod youtube;
 
 /// Storage format version written into every object header. See
 /// `docs/spec/format-versions.md`.

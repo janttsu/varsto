@@ -473,14 +473,56 @@ async fn write_response(send: &mut quinn::SendStream, status: u16, body: &[u8]) 
     Ok(())
 }
 
-async fn read_response(mut recv: quinn::RecvStream) -> Result<(u16, Vec<u8>)> {
-    let raw = tokio::time::timeout(REQUEST_TIMEOUT, recv.read_to_end(MAX_BODY + 64))
-        .await
-        .map_err(|_| anyhow!("peer response timed out"))??;
-    let nl = raw
-        .iter()
-        .position(|b| *b == b'\n')
-        .ok_or_else(|| anyhow!("malformed peer response"))?;
+/// The longest a response may go without a byte arriving: a slow link
+/// keeps sending, a dead one stops. (A whole-response deadline failed any
+/// 16 MiB block below about 4.5 Mbit/s.)
+const RESPONSE_IDLE: Duration = Duration::from_secs(30);
+/// The slowest pace a response may keep on average once its length is
+/// known; with `RESPONSE_IDLE` added it bounds the whole response, so a
+/// peer trickling a byte now and then cannot hold a request for ever.
+const MIN_RATE: u64 = 16 * 1024;
+
+/// One read from `recv` that must bring something within `RESPONSE_IDLE`
+/// (and before `deadline`): `None` at the end of the stream.
+async fn read_some(
+    recv: &mut quinn::RecvStream,
+    buf: &mut [u8],
+    deadline: tokio::time::Instant,
+) -> Result<Option<usize>> {
+    let until = deadline.min(tokio::time::Instant::now() + RESPONSE_IDLE);
+    match tokio::time::timeout_at(until, recv.read(buf)).await {
+        Ok(r) => Ok(r?),
+        Err(_) if until >= deadline => bail!("peer response too slow"),
+        Err(_) => bail!(
+            "peer response timed out (nothing for {} s)",
+            RESPONSE_IDLE.as_secs()
+        ),
+    }
+}
+
+/// The deadline of a whole body of `len` bytes from now.
+fn body_deadline(len: usize) -> tokio::time::Instant {
+    tokio::time::Instant::now() + RESPONSE_IDLE + Duration::from_secs(len as u64 / MIN_RATE)
+}
+
+/// The head line of a response (`<status> <length>\n`) and the bytes of the
+/// body that came with it.
+async fn read_head(recv: &mut quinn::RecvStream) -> Result<(u16, usize, Vec<u8>)> {
+    let mut raw: Vec<u8> = Vec::with_capacity(256);
+    let mut buf = vec![0u8; 64 * 1024];
+    let deadline = tokio::time::Instant::now() + RESPONSE_IDLE;
+    let nl = loop {
+        if let Some(i) = raw.iter().position(|b| *b == b'\n') {
+            break i;
+        }
+        if raw.len() > 64 {
+            bail!("malformed peer response");
+        }
+        match read_some(recv, &mut buf, deadline).await? {
+            Some(n) => raw.extend_from_slice(&buf[..n]),
+            None => bail!("malformed peer response"),
+        }
+    };
     let head = std::str::from_utf8(&raw[..nl]).map_err(|_| anyhow!("malformed peer response"))?;
     let mut parts = head.split_whitespace();
     let status: u16 = parts
@@ -491,11 +533,34 @@ async fn read_response(mut recv: quinn::RecvStream) -> Result<(u16, Vec<u8>)> {
         .next()
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| anyhow!("malformed length"))?;
-    let body = &raw[nl + 1..];
+    if len > MAX_BODY {
+        bail!("peer answer of {len} bytes is too large");
+    }
+    let rest = raw.split_off(nl + 1);
+    if rest.len() > len {
+        bail!("peer response length mismatch");
+    }
+    Ok((status, len, rest))
+}
+
+/// A response, read with a per-chunk idle timeout (`RESPONSE_IDLE`) and a
+/// floor on the average rate (`MIN_RATE`) instead of one deadline for the
+/// whole answer.
+async fn read_response(mut recv: quinn::RecvStream) -> Result<(u16, Vec<u8>)> {
+    let (status, len, mut body) = read_head(&mut recv).await?;
+    body.reserve(len.saturating_sub(body.len()));
+    let mut buf = vec![0u8; 64 * 1024];
+    let deadline = body_deadline(len);
+    while let Some(n) = read_some(&mut recv, &mut buf, deadline).await? {
+        if body.len() + n > len {
+            bail!("peer response length mismatch");
+        }
+        body.extend_from_slice(&buf[..n]);
+    }
     if body.len() != len {
         bail!("peer response length mismatch");
     }
-    Ok((status, body.to_vec()))
+    Ok((status, body))
 }
 
 /// One request on a fresh stream of `conn`.
@@ -522,10 +587,26 @@ async fn request_on_for(
         head.pop(); // the blank line goes after the extra header
         head.extend_from_slice(format!("X-Varsto-For: {d}\n\n").as_bytes());
     }
-    let (mut send, recv) = conn.open_bi().await.context("open stream")?;
-    send.write_all(&head).await?;
-    send.finish()?;
+    let (_send, recv) = open_request(conn, &head).await?;
     read_response(recv).await
+}
+
+/// Open a stream on `conn` and send the request `head` on it. Opening
+/// waits for a free stream (at most `MAX_STREAMS` per connection), but not
+/// for longer than `RESPONSE_IDLE`.
+async fn open_request(
+    conn: &quinn::Connection,
+    head: &[u8],
+) -> Result<(quinn::SendStream, quinn::RecvStream)> {
+    let (mut send, recv) = tokio::time::timeout(RESPONSE_IDLE, conn.open_bi())
+        .await
+        .map_err(|_| anyhow!("no stream free on the connection"))?
+        .context("open stream")?;
+    tokio::time::timeout(RESPONSE_IDLE, send.write_all(head))
+        .await
+        .map_err(|_| anyhow!("request not sent"))??;
+    send.finish()?;
+    Ok((send, recv))
 }
 
 // ----- the node ---------------------------------------------------------------
@@ -590,6 +671,9 @@ pub struct Node {
     /// that queued behind that attempt (a download asks many blocks at
     /// once) give up at once instead of each waiting out its own timeout.
     failed: Mutex<HashMap<SocketAddr, Instant>>,
+    /// How long the last handshake with each host took: the connect
+    /// timeout adapts to it (`v3::tls::handshake_timeout`).
+    handshakes: Mutex<HashMap<std::net::IpAddr, Duration>>,
     /// Connections this node opened as a client (for tests and diagnostics).
     opened: std::sync::atomic::AtomicUsize,
     /// Relays we are registered with (device -> connection).
@@ -723,6 +807,7 @@ impl Node {
             conns: tokio::sync::Mutex::new(HashMap::new()),
             connecting: tokio::sync::Mutex::new(HashMap::new()),
             failed: Mutex::new(HashMap::new()),
+            handshakes: Mutex::new(HashMap::new()),
             opened: std::sync::atomic::AtomicUsize::new(0),
             relays: Mutex::new(BTreeMap::new()),
             punched: Mutex::new(Vec::new()),
@@ -951,12 +1036,19 @@ impl Node {
             .with_context(|| format!("connect {addr}"))?;
         let mut connecting = Box::pin(connecting);
         let started = Instant::now();
-        let deadline = started
-            + if punch {
-                PUNCH_TIMEOUT
-            } else {
-                CONNECT_TIMEOUT
-            };
+        // Three times the last handshake with that host (a long round
+        // trip), at least the LAN or punching figure, at most six seconds;
+        // beyond the LAN the wait is given once more before giving up, so
+        // one lost packet does not rest the device.
+        let base = if punch {
+            PUNCH_TIMEOUT
+        } else {
+            CONNECT_TIMEOUT
+        };
+        let last = self.handshakes.lock().unwrap().get(&addr.ip()).copied();
+        let wait = super::v3::tls::handshake_timeout(base, last);
+        let mut deadline = started + wait;
+        let mut extended = super::is_lan(addr.ip());
         let mut tick = tokio::time::interval(PUNCH_INTERVAL);
         let mut punches = 0u32;
         let outcome = loop {
@@ -966,6 +1058,14 @@ impl Node {
                     if punch {
                         self.punch(addr);
                         punches += 1;
+                    }
+                    if Instant::now() >= deadline && !extended {
+                        extended = true;
+                        deadline += wait;
+                        log(&format!(
+                            "quic {addr}: no answer in {} ms; waiting once more",
+                            started.elapsed().as_millis()
+                        ));
                     }
                     if Instant::now() >= deadline {
                         break Err(anyhow!(
@@ -999,6 +1099,10 @@ impl Node {
             }
         ));
         self.failed.lock().unwrap().remove(&addr);
+        self.handshakes
+            .lock()
+            .unwrap()
+            .insert(addr.ip(), started.elapsed());
         self.conns.lock().await.insert(addr, conn.clone());
         self.opened
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1214,22 +1318,17 @@ impl Node {
             .get(dev)
             .cloned()
             .ok_or_else(|| anyhow!("not registered here"))?;
-        let r = self.rt.block_on(async {
-            tokio::time::timeout(
-                Duration::from_secs(60),
-                request_on(&conn, "GET", path, &auth_for(&conn)),
-            )
-            .await
-        });
-        match r {
-            Ok(Ok(x)) => Ok(x),
-            Ok(Err(e)) => {
+        // Bounded by the per-chunk idle timeout of the response, not by a
+        // deadline for the whole answer (a large block on a slow link).
+        let auth = auth_for(&conn);
+        match self.rt.block_on(request_on(&conn, "GET", path, &auth)) {
+            Ok(x) => Ok(x),
+            Err(e) => {
                 if conn.close_reason().is_some() {
                     self.serving.registrants.lock().unwrap().remove(dev);
                 }
                 Err(e)
             }
-            Err(_) => bail!("no answer on its registration in 60 s"),
         }
     }
 
@@ -1316,6 +1415,12 @@ async fn serve_stream(
     let path_label = sv.path_label(&conn, via.as_ref());
     let r = sv.v3.clone();
     let ci = super::v3::ConnInfo::of_quic(&conn, via.is_some());
+    // A request to relay is answered as the registrant's answer arrives.
+    if let Ok((verb, target, auth)) = parse_request(&head) {
+        if let (true, Some(rest)) = (verb == "GET", target.strip_prefix("/p2p/via/")) {
+            return relay_stream(&mut send, &sv, &r, &ci, &target, rest, &auth).await;
+        }
+    }
     let (status, body, peer, target) = serve_v3(&sv, &r, &ci, &head, &conn).await;
     // The device the answer goes to, once its token checked out, and the
     // path asked for: the traffic counters charge the answer to it.
@@ -1366,10 +1471,7 @@ async fn serve_v3(
     let for_device = header_value(head, "X-Varsto-For").unwrap_or_default();
     match verb.as_str() {
         "GET" => {
-            if let Some(rest) = target.strip_prefix("/p2p/via/") {
-                let (status, body) = relay_v3(sv, r, ci, &target, rest, &auth).await;
-                return (status, body, None, target);
-            }
+            // `/p2p/via/` is relayed before this (`relay_stream`).
             let snap = sv.snapshot.lock().unwrap().clone();
             let (r, ci, t) = (r.clone(), ci.clone(), target.clone());
             let (status, body, peer) = tokio::task::spawn_blocking(move || {
@@ -1411,47 +1513,88 @@ async fn serve_v3(
 /// cannot travel on; we check it and ask the registrant on our own
 /// connection with it, with a token of ours and `X-Varsto-For` naming the
 /// asker (the registrant trusts us as a device of its directory).
-async fn relay_v3(
+///
+/// The registrant's answer is passed on as it arrives, its head line first
+/// and then the body chunk by chunk, so neither leg waits for the other to
+/// finish and a large block on a slow link is not cut off (each leg has the
+/// per-chunk idle timeout of `read_response`).
+async fn relay_stream(
+    send: &mut quinn::SendStream,
     sv: &Serving,
     r: &super::v3::Responder,
     ci: &super::v3::ConnInfo,
     target: &str,
     rest: &str,
     auth: &str,
-) -> (u16, Vec<u8>) {
+) -> Result<()> {
     let Some((device, inner)) = rest.split_once('/') else {
-        return (400, b"bad relay path".to_vec());
+        return write_response(send, 400, b"bad relay path").await;
     };
     let Ok(dev) = DeviceId::from_hex(device) else {
-        return (400, b"bad device".to_vec());
+        return write_response(send, 400, b"bad device").await;
     };
     let inner = format!("/{inner}");
     let asker = match r.authorize(ci, auth, target) {
         Ok(a) => a,
-        Err(e) => return e,
+        Err((status, body)) => return write_response(send, status, &body).await,
     };
     let reg = sv.registrants.lock().unwrap().get(&dev).cloned();
     let Some(reg) = reg else {
-        return (502, b"device is not registered with this relay".to_vec());
+        return write_response(send, 502, b"device is not registered with this relay").await;
     };
     let Some(exp) = exporter(&reg) else {
-        return (502, b"relay: no exporter on the registration".to_vec());
+        return write_response(send, 502, b"relay: no exporter on the registration").await;
     };
     let token = r.token(&exp, &dev, &inner);
     let _active = sv.traffic.begin_relay(&dev, &asker);
-    match request_on_for(&reg, "GET", &inner, &token, Some(&asker)).await {
-        Ok(x) => {
-            sv.traffic
-                .record_relay(&dev, &asker, x.1.len() as u64, is_object(&inner, x.0));
-            x
-        }
+    let mut head = request_bytes("GET", &inner, &token);
+    head.pop(); // the blank line goes after the extra header
+    head.extend_from_slice(format!("X-Varsto-For: {asker}\n\n").as_bytes());
+    let asked = match open_request(&reg, &head).await {
+        Ok((reg_send, mut recv)) => read_head(&mut recv).await.map(|h| (reg_send, recv, h)),
+        Err(e) => Err(e),
+    };
+    let (_reg_send, mut recv, (status, len, first)) = match asked {
+        Ok(x) => x,
         Err(e) => {
             if reg.close_reason().is_some() {
                 sv.registrants.lock().unwrap().remove(&dev);
             }
-            (502, format!("relay: {e}").into_bytes())
+            let msg = format!("relay: {e}");
+            return write_response(send, 502, msg.as_bytes()).await;
+        }
+    };
+    // From here on the answer is the registrant's, passed on as it comes.
+    send.write_all(format!("{status} {len}\n").as_bytes())
+        .await?;
+    send.write_all(&first).await?;
+    let mut passed = first.len();
+    let mut buf = vec![0u8; 64 * 1024];
+    let deadline = body_deadline(len);
+    while passed < len {
+        match read_some(&mut recv, &mut buf, deadline).await {
+            Ok(Some(n)) if passed + n <= len => {
+                send.write_all(&buf[..n]).await?;
+                passed += n;
+            }
+            Ok(Some(_)) => break,
+            Ok(None) => break,
+            Err(e) => {
+                let _ = send.reset(0u32.into());
+                return Err(e.context("relay: the registrant's answer stalled"));
+            }
         }
     }
+    if passed != len {
+        // The asker sees a stream reset, never a short body taken as whole.
+        let _ = send.reset(0u32.into());
+        bail!("relay: the registrant's answer did not match its length");
+    }
+    send.finish()?;
+    sv.traffic
+        .record_relay(&dev, &asker, len as u64, is_object(&inner, status));
+    let _ = tokio::time::timeout(REQUEST_TIMEOUT, send.stopped()).await;
+    Ok(())
 }
 
 #[cfg(test)]

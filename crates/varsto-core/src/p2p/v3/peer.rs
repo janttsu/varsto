@@ -10,8 +10,8 @@ use super::Id16;
 use crate::ids::DeviceId;
 use crate::p2p::{stun, PeerInfo};
 use crate::record::{
-    KeyId, Kind, Outcome, Record, RecordBody, RecordMeta, RecordName, RecordStore, RecordWriter,
-    RecordsRefused, StreamRef,
+    Acceptor, KeyId, Kind, Outcome, Parts, Record, RecordBody, RecordMeta, RecordName, RecordStore,
+    RecordWriter, RecordsRefused, StreamRef,
 };
 use crate::storage::Storage;
 use anyhow::{bail, Result};
@@ -207,6 +207,20 @@ pub fn publish(
     bail!("could not find a free seq for the peer record");
 }
 
+/// The peer directory as a device keeps it between runs: the signed
+/// records as they were read, each part as (storage name, hex bytes). It
+/// is checked again on load, so the file is no source of trust.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedDirectory {
+    pub records: Vec<SavedRecord>,
+}
+
+/// One saved record: its parts in any order.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedRecord {
+    pub parts: Vec<(String, String)>,
+}
+
 /// Accepted peer records of trusted full devices, newest seq of each.
 /// This device and any record carrying this device's certificate are left
 /// out (a device never admits or dials its own certificate, section 73).
@@ -215,6 +229,9 @@ pub struct PeerDirectory {
     me: Id16,
     own_cert: [u8; 32],
     entries: BTreeMap<Id16, PeerBody>,
+    /// The signed parts each entry was accepted from, as they were read:
+    /// what is saved on this device (`saved`) and checked again on load.
+    raw: BTreeMap<Id16, Parts>,
     by_cert: HashMap<[u8; 32], Id16>,
     /// Certificates two devices claim: admitted for neither.
     contested: Vec<[u8; 32]>,
@@ -244,12 +261,87 @@ impl PeerDirectory {
         self.offer_body(rec.body)
     }
 
-    /// Take the entries of a directory read from another storage: the
-    /// newest seq of each device wins.
-    pub fn merge(&mut self, other: PeerDirectory) {
-        for (_, body) in other.entries {
-            self.offer_body(body);
+    /// `offer`, keeping the signed parts the record was accepted from so
+    /// that the entry can be saved and checked again later.
+    pub fn offer_parts(&mut self, rec: Record<PeerBody>, parts: Parts) -> bool {
+        let device = rec.body.device;
+        let taken = self.offer_body(rec.body);
+        if taken {
+            self.raw.insert(device, parts);
         }
+        taken
+    }
+
+    /// Take the entries of a directory read from another storage (or the
+    /// one saved on this device): the newest seq of each device wins, and
+    /// an entry that is not replaced stays as it was.
+    pub fn merge(&mut self, mut other: PeerDirectory) {
+        for (device, body) in std::mem::take(&mut other.entries) {
+            if self.offer_body(body) {
+                if let Some(parts) = other.raw.remove(&device) {
+                    self.raw.insert(device, parts);
+                }
+            }
+        }
+    }
+
+    /// The signed parts of every entry that has them, as they were read:
+    /// what the device saves so that peer-to-peer works before (or
+    /// without) any storage answering.
+    pub fn saved(&self) -> SavedDirectory {
+        SavedDirectory {
+            records: self
+                .raw
+                .iter()
+                .filter(|(d, _)| self.entries.contains_key(*d))
+                .map(|(_, parts)| SavedRecord {
+                    parts: parts
+                        .iter()
+                        .map(|(name, bytes)| (name.clone(), hex::encode(bytes)))
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// A directory from records saved earlier, each checked again by
+    /// `acceptor` exactly as a record read from a storage is (signature,
+    /// signer trusted now, vault, registry key held, body). Records of
+    /// devices not in `devices` (removed or no longer trusted since) and
+    /// records that do not pass are left out.
+    pub fn from_saved(
+        saved: &SavedDirectory,
+        acceptor: &Acceptor<'_>,
+        devices: &[Id16],
+        me: Id16,
+        own_cert: [u8; 32],
+        counter: &mut RecordsRefused,
+    ) -> PeerDirectory {
+        let mut dir = PeerDirectory::new(me, own_cert);
+        for rec in &saved.records {
+            let mut parts: Parts = Vec::with_capacity(rec.parts.len());
+            for (name, h) in &rec.parts {
+                match hex::decode(h) {
+                    Ok(b) if b.len() as u64 <= crate::record::MAX_PART_READ => {
+                        parts.push((name.clone(), b))
+                    }
+                    _ => {}
+                }
+            }
+            if parts.is_empty() || parts.len() != rec.parts.len() {
+                continue;
+            }
+            match acceptor.accept::<PeerBody>(&parts) {
+                Outcome::Accepted(r) if devices.contains(&r.body.device) => {
+                    dir.offer_parts(r, parts);
+                }
+                Outcome::Accepted(_) | Outcome::Waiting(_) => {}
+                Outcome::Refused(r) => {
+                    counter.note(&r);
+                }
+            }
+        }
+        dir
     }
 
     fn offer_body(&mut self, body: PeerBody) -> bool {
@@ -263,6 +355,7 @@ impl PeerDirectory {
         {
             return false;
         }
+        self.raw.remove(&body.device);
         self.entries.insert(body.device, body);
         self.reindex();
         true
@@ -333,9 +426,19 @@ impl PeerDirectory {
             }
             let listed = store.list_after(&PeerBody::stream(d), 0)?;
             for l in listed.iter().rev() {
-                match store.read::<PeerBody>(l)? {
+                // Fetched and accepted as `RecordStore::read` does, keeping
+                // the parts so that the directory can be saved.
+                let parts = match store.fetch(l)? {
+                    Ok(p) if !p.is_empty() => p,
+                    Ok(_) => continue,
+                    Err(r) => {
+                        counter.note(&r);
+                        continue;
+                    }
+                };
+                match store.acceptor.accept::<PeerBody>(&parts) {
                     Outcome::Accepted(rec) => {
-                        dir.offer(rec);
+                        dir.offer_parts(rec, parts);
                         break;
                     }
                     Outcome::Refused(r) => {

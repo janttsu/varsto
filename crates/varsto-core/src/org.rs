@@ -1341,6 +1341,7 @@ mod tests {
                 vault_key: SecretKey::random().to_hex(),
                 from: "hq".into(),
                 storages: vec![],
+                vault_epochs: None,
             },
             org_id: "b".repeat(32),
             root_pubkey_hex: String::new(),

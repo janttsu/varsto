@@ -1804,9 +1804,129 @@
   "the 24 words of your recovery kit: they make the folder's recovery copy now. Leave empty to write it later": "de 24 orden i ditt återställningspaket: med dem görs mappens återställningskopia nu. Lämna tomt för att skriva den senare",
   "Your vault key and recovery words": "Valvets nyckel och återställningsord",
   "Write both word sets down and keep them offline: they are the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. The recovery words also make each new folder's recovery copy. They are shown once.": "Skriv ner båda ordlistorna och förvara dem offline: de är det enda sättet att återställa data eller ansluta utan en annan enhet; enheter kan också läggas till med en parningskod. Återställningsorden skapar också varje ny mapps återställningskopia. De visas bara en gång.",
-  "I have written them down": "Jag har skrivit ner dem"
+  "I have written them down": "Jag har skrivit ner dem",
+  "Torrent job {name} is waiting for disk space: {free} free on its download disk, {need} more is needed above the reserve.": "Torrentjobbet {name} väntar på diskutrymme: {free} ledigt på nedladdningsdisken, {need} till behövs utöver reserven.",
+  "Torrent job {name} is complete: all {count} files are in folder {folder}.": "Torrentjobbet {name} är klart: alla {count} filer finns i mappen {folder}.",
+  "Make room for torrent job {name}": "Gör plats för torrentjobbet {name}",
+  "The next files need {need} more free space on the download disk than the reserve leaves; the download waits until there is room.": "Nästa filer behöver {need} mer ledigt utrymme på nedladdningsdisken än reserven lämnar; nedladdningen väntar tills det finns plats.",
+  "Free up space on the download disk, or lower the reserve with --free-min when you add a job. The job goes on by itself once there is room.": "Frigör utrymme på nedladdningsdisken, eller sänk reserven med --free-min när du lägger till ett jobb. Jobbet fortsätter av sig självt när det finns plats.",
+  "Torrent job {name} is complete": "Torrentjobbet {name} är klart",
+  "Every file of the torrent is in folder {folder} on your storages; the download directory is empty.": "Varje fil i torrenten finns i mappen {folder} på dina lagringsplatser; nedladdningsmappen är tom.",
+  "Remove the job when you no longer want to see it. To move the folder's data to other storages later, use varsto move.": "Ta bort jobbet när du inte längre vill se det. Mappens data kan senare flyttas till andra lagringsplatser med varsto move.",
+  "Every file of the torrent is in folder {folder} on your storages; {count} downloaded files differ from the folder's files at the same paths and stay in the download directory.": "Varje fil i torrenten finns i mappen {folder} på dina lagringsplatser; {count} nedladdade filer skiljer sig från mappens filer med samma sökvägar och ligger kvar i nedladdningskatalogen.",
+  "In progress": "Pågår",
+  "Nothing is being imported right now.": "Inget importeras just nu.",
+  "1. What do you want to import?": "1. Vad vill du importera?",
+  "What to import": "Vad som importeras",
+  "Local folder or disk": "Lokal mapp eller disk",
+  "A folder of this device, an external disk or a memory card": "En mapp på den här enheten, en extern disk eller ett minneskort",
+  "git-annex repository": "git-annex-förråd",
+  "A clone on this device or on a disk, one disk after another": "En klon på den här enheten eller på en disk, en disk i taget",
+  "Cloud drive": "Molnlagring",
+  "Dropbox, OneDrive, Google Drive or any rclone remote": "Dropbox, OneDrive, Google Drive eller valfri rclone-fjärr",
+  "Torrent": "Torrent",
+  "A magnet link or a .torrent file, even one larger than this disk": "En magnetlänk eller en .torrent-fil, även en som är större än den här disken",
+  "A video, a playlist or a whole channel": "En video, en spellista eller en hel kanal",
+  "2. Details": "2. Detaljer",
+  "Repository": "Förråd",
+  "a clone of the repository; nothing is changed in it": "en klon av förrådet; inget ändras i den",
+  "Commit": "Version",
+  "a branch, a tag or HEAD": "en gren, en tagg eller HEAD",
+  "Do not check the content against the keys' hashes (faster)": "Kontrollera inte innehållet mot nycklarnas hashvärden (snabbare)",
+  "Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next.": "Kör den en gång för varje disk som har en klon av förrådet: varje körning fortsätter samma mapp med det som disken har och säger vilken disk som ska anslutas härnäst.",
+  "Another rclone remote (Google Drive, S3, SFTP and more)": "Annan rclone-fjärr (Google Drive, S3, SFTP med flera)",
+  "Remote": "Fjärr",
+  "an rclone remote and an optional path, such as mydropbox:Photos": "en rclone-fjärr och en valfri sökväg, till exempel mydropbox:Photos",
+  "Parallel downloads": "Parallella nedladdningar",
+  "No remote yet?": "Ingen fjärr ännu?",
+  "Signing in to a cloud drive is done once, in rclone, which opens your browser for it; that is why this step is a command. Run it in a terminal of this device, then come back:": "Inloggningen till molnlagringen görs en gång i rclone, som öppnar din webbläsare för det; därför är det här steget ett kommando. Kör det i en terminal på den här enheten och kom sedan tillbaka:",
+  "Magnet link": "Magnetlänk",
+  "Or a .torrent file": "Eller en .torrent-fil",
+  "A local transmission-daemon downloads the torrent a batch at a time, so that the download disk keeps its reserve free; each file is stored in the folder and leaves the disk once it is safe.": "En lokal transmission-daemon laddar ned torrenten en omgång i taget så att nedladdningsdisken behåller sin reserv ledig; varje fil lagras i mappen och lämnar disken när den är säker.",
+  "One video": "En video",
+  "Whole channel or playlist": "Hela kanalen eller spellistan",
+  "Only archive what you may keep a copy of: your own uploads, videos whose licence allows copies, or what the law where you live lets you keep. Videos are downloaded one at a time and slowly, as set under Advanced.": "Arkivera bara det du får behålla en kopia av: dina egna uppladdningar, videor vars licens tillåter kopior, eller det som lagen där du bor låter dig behålla. Videorna laddas ned en i taget och långsamt, enligt Avancerat.",
+  "Storage": "Lagringsplats",
+  "where the folder's files are kept": "där mappens filer förvaras",
+  "Keep free on the download disk": "Håll ledigt på nedladdningsdisken",
+  "a share (15%) or an amount (20GB); never less than Varsto's own minimum": "en andel (15%) eller en mängd (20GB); aldrig mindre än Varstos eget minimum",
+  "Download directory": "Nedladdningskatalog",
+  "transmission's own download directory": "transmissions egen nedladdningskatalog",
+  "Downloads/varsto-youtube in your home directory": "Downloads/varsto-youtube i din hemkatalog",
+  "not inside a Varsto folder": "inte inuti en Varsto-mapp",
+  "Copies on storages before a file leaves the download disk": "Kopior på lagringsplatser innan en fil lämnar nedladdningsdisken",
+  "Download files the folder has already and compare them": "Ladda ned filer som mappen redan har och jämför dem",
+  "Advanced": "Avancerat",
+  "Pause between videos (seconds)": "Paus mellan videor (sekunder)",
+  "chosen at random in this range": "väljs slumpmässigt i det här intervallet",
+  "Pause between requests (seconds)": "Paus mellan förfrågningar (sekunder)",
+  "Download rate limit": "Gräns för nedladdningshastighet",
+  "600K, 1.5M, or none": "600K, 1.5M eller none",
+  "Fragments at a time": "Fragment åt gången",
+  "Format": "Format",
+  "the best yt-dlp finds": "det bästa yt-dlp hittar",
+  "yt-dlp's --format": "yt-dlp:s --format",
+  "Cookies from a browser": "Kakor från en webbläsare",
+  "none": "inga",
+  "for videos that need a sign-in you have, such as firefox": "för videor som kräver en inloggning du har, till exempel firefox",
+  "Subtitles": "Undertexter",
+  "languages, such as en,fi": "språk, till exempel en,fi",
+  "Keep thumbnails": "Behåll miniatyrbilder",
+  "List the channel again for new videos every (hours)": "Lista kanalen igen för nya videor var (timme)",
+  "0: list once": "0: lista en gång",
+  "Start import": "Starta importen",
+  "Finished": "Klara",
+  "This device imports its own folders only. Import other sources on a computer of the vault: the folder then reaches this device like any other.": "Den här enheten importerar bara sina egna mappar. Importera andra källor på en dator i valvet: mappen når sedan den här enheten som vilken annan som helst.",
+  "Torrents are imported on Linux only: Varsto drives a transmission-daemon on the same computer.": "Torrenter importeras bara på Linux: Varsto styr en transmission-daemon på samma dator.",
+  "YouTube imports run on computers only (Linux, macOS, Windows), with yt-dlp.": "YouTube-importer körs bara på datorer (Linux, macOS, Windows) med yt-dlp.",
+  "yt-dlp was not found on this computer. Install it (pacman -S yt-dlp, apt install yt-dlp or brew install yt-dlp), keep it up to date, then start the import.": "yt-dlp hittades inte på den här datorn. Installera det (pacman -S yt-dlp, apt install yt-dlp eller brew install yt-dlp), håll det uppdaterat och starta sedan importen.",
+  "transmission-daemon was not found on this computer. Install it (apt install transmission-daemon or pacman -S transmission-cli) and start it, then start the import.": "transmission-daemon hittades inte på den här datorn. Installera den (apt install transmission-daemon eller pacman -S transmission-cli) och starta den, starta sedan importen.",
+  "rclone was not found on this computer. Install it from rclone.org or your package manager and set up a remote, then start the import.": "rclone hittades inte på den här datorn. Installera det från rclone.org eller din pakethanterare och ställ in en fjärr, starta sedan importen.",
+  "git was not found on this computer; the import reads the repository with it.": "git hittades inte på den här datorn; importen läser förrådet med det.",
+  "The folder's usual placement": "Mappens vanliga placering",
+  "The cheapest storage (by price per GB-month)": "Den billigaste lagringsplatsen (pris per GB och månad)",
+  "This is not a YouTube address Varsto knows.": "Det här är ingen YouTube-adress som Varsto känner till.",
+  "Paste the address of a video, a playlist or a channel.": "Klistra in adressen till en video, en spellista eller en kanal.",
+  "A single video.": "En enskild video.",
+  "A playlist: every video in it, one at a time.": "En spellista: alla dess videor, en i taget.",
+  "A channel: every video in it, one at a time; new videos are listed again later.": "En kanal: alla dess videor, en i taget; nya videor listas igen senare.",
+  "A video in a playlist: choose the video alone or the whole playlist.": "En video i en spellista: välj bara videon eller hela spellistan.",
+  "This .torrent file is larger than the page can send (5 MB). Add it on the command line: varsto import torrent <file>.": "Den här .torrent-filen är större än sidan kan skicka (5 MB). Lägg till den på kommandoraden: varsto import torrent <fil>.",
+  "The .torrent file could not be read.": ".torrent-filen kunde inte läsas.",
+  "Choose the git-annex repository.": "Välj git-annex-förrådet.",
+  "Give an rclone remote, such as mydropbox: or gdrive:Photos.": "Ange en rclone-fjärr, till exempel mydropbox: eller gdrive:Photos.",
+  "Give a magnet link or choose a .torrent file.": "Ange en magnetlänk eller välj en .torrent-fil.",
+  "Give the address of a YouTube video, playlist or channel.": "Ange adressen till en YouTube-video, -spellista eller -kanal.",
+  "Local folder": "Lokal mapp",
+  "Command line": "Kommandorad",
+  "started on the command line": "startad på kommandoraden",
+  "Waiting for the service": "Väntar på tjänsten",
+  "Failed": "Misslyckades",
+  "Adding": "Läggs till",
+  "Fetching the file list": "Hämtar fillistan",
+  "Waiting for space": "Väntar på utrymme",
+  "Waiting for the policy": "Väntar på policyn",
+  "Waiting to try again": "Väntar på nytt försök",
+  "Complete": "Klar",
+  "Listing the videos": "Listar videorna",
+  "Checking a video's size": "Kontrollerar en videos storlek",
+  "Up to date": "Uppdaterad",
+  "Try failed videos again": "Försök igen med misslyckade videor",
+  "Pausing…": "Pausar…",
+  "Resuming…": "Återupptar…",
+  "Removing…": "Tar bort…",
+  "Trying again…": "Försöker igen…",
+  "Now:": "Nu:",
+  "Error:": "Fel:",
+  "no reason given": "inget skäl angivet",
+  "1 video failed": "1 video misslyckades",
+  "Remove the job?": "Ta bort jobbet?"
  },
  "patterns": [
+  [
+   "^Storage (.+) cannot be reached; it is tried again at (.+)\\.$",
+   "Lagringen $1 kan inte nås; den provas igen kl. $2."
+  ],
   [
    "^This device's six words: (.+)\\. The other device shows the same words before it lets this one join\\.$",
    "Den här enhetens sex ord: $1. Den andra enheten visar samma ord innan den låter den här ansluta."
@@ -2530,6 +2650,70 @@
   [
    "^added ([\\d.\\-/: ]+)$",
    "tillagd $1"
+  ],
+  [
+   "^Import started: (.+)$",
+   "Importen startad: $1"
+  ],
+  [
+   "^Into folder (.+)$",
+   "Till mappen $1"
+  ],
+  [
+   "^(\\d+) of (\\d+) files$",
+   "$1 av $2 filer"
+  ],
+  [
+   "^(\\d+) of (\\d+) videos$",
+   "$1 av $2 videor"
+  ],
+  [
+   "^([\\d.]+ (?:B|KiB|MiB|GiB|TiB)) of ([\\d.]+ (?:B|KiB|MiB|GiB|TiB))$",
+   "$1 av $2"
+  ],
+  [
+   "^([\\d.]+ (?:B|KiB|MiB|GiB|TiB)) stored$",
+   "$1 lagrat"
+  ],
+  [
+   "^(\\d+) already in the vault$",
+   "$1 redan i valvet"
+  ],
+  [
+   "^(\\d+) already in the folder$",
+   "$1 redan i mappen"
+  ],
+  [
+   "^(\\d+) in conflict$",
+   "$1 i konflikt"
+  ],
+  [
+   "^Tries again at (.+)$",
+   "Försöker igen $1"
+  ],
+  [
+   "^(\\d+) videos failed$",
+   "$1 videor misslyckades"
+  ],
+  [
+   "^Given up after (\\d+) tries$",
+   "Gav upp efter $1 försök"
+  ],
+  [
+   "^Try (\\d+), next at (.+)$",
+   "Försök $1, nästa $2"
+  ],
+  [
+   "^(\\d+) file\\(s\\) imported, (\\d+) imported before, (\\d+) could not be read$",
+   "$1 fil(er) importerade, $2 importerade tidigare, $3 kunde inte läsas"
+  ],
+  [
+   "^Remove the torrent job (.+)\\? Folder (.+) stays, and so do the files in the download directory that were not stored yet; transmission drops the torrent\\.$",
+   "Ta bort torrentjobbet $1? Mappen $2 finns kvar, och likaså filerna i nedladdningskatalogen som inte har lagrats ännu; transmission tar bort torrenten."
+  ],
+  [
+   "^Remove the YouTube job (.+)\\? Folder (.+) keeps every video; files in the spool that were not stored yet stay there\\.$",
+   "Ta bort YouTube-jobbet $1? Mappen $2 behåller alla videor; filer i mellanlagret som inte har lagrats ännu blir kvar där."
   ]
  ],
  "parts": [

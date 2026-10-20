@@ -66,6 +66,7 @@ mod folder_safety;
 mod forward;
 mod fsck3_ops;
 mod guide;
+mod health;
 mod help;
 mod history;
 mod home_lock;
@@ -98,12 +99,14 @@ mod storage_directory;
 mod storages3_ops;
 mod strongroom_ops;
 mod thumbs3;
+mod torrent;
 mod trash;
 mod trash3_io;
 mod verify;
 mod view;
 mod viz;
 mod where_data;
+mod youtube;
 pub use access_sync::AccessExchangeReport;
 pub use backups::{
     BackupOptions, BackupSummary, ExpireReport, RestoreReport, SnapshotInfo, SnapshotPick,
@@ -128,6 +131,7 @@ pub use forward::{
     ForwardFolder, ForwardOptions, ForwardReport, ForwardSettings, ForwardStatus, LEASE_SLOT_SECS,
     LEASE_WORK_SECS,
 };
+pub use health::{is_network_error, StorageDown, StorageHealth};
 pub use help::{help_without_vault, HelpObserved};
 pub use history::{
     history_kept, parse_utc, FolderHistory, HistoryItem, HistoryList, HistoryRestoreReport,
@@ -158,6 +162,7 @@ pub use org_ops::{
     LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
     UnlistedDevice,
 };
+pub use p2p3::{DirectoryRead, SAVED_PEERS};
 pub use protection::{ClassCoverage, Protection};
 pub use quotas::QuotaStatus;
 pub use repair::{
@@ -170,12 +175,23 @@ pub use share_roles::{ShareRoleReport, KEPT_ASIDE_DIR};
 pub use staged_moves::{JobRunLimits, MoveJobRequest, MoveJobRun, SERVICE_RUN_GROUPS};
 pub use storage_directory::KnownStorage;
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
+pub use torrent::{
+    find_job, plan_batch, torrent_jobs_at, BatchPlan, Candidate, CompletedFiles, FileOutcome,
+    JobFile, JobState, SystemEnv, TorrentAddOptions, TorrentEnv, TorrentJob, CHEAPEST,
+    DEFAULT_FREE_MIN,
+};
 pub use trash::{
     restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
     TrashSettings, TrashStatus, TrashUpkeepReport, DEFAULT_TRASH_DAYS, MAX_TRASH_DAYS,
     TRASH_UPKEEP_EVERY_SECS,
 };
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
+pub use youtube::{
+    find_youtube_job, task_args as youtube_task_args, youtube_jobs_at, BlockingYoutubeEnv,
+    ServiceYoutubeEnv, TaskKind as YoutubeTaskKind, Video as YoutubeVideo, VideoCounts,
+    VideoStatus, YoutubeAddOptions, YoutubeEnv, YoutubeJob, YoutubeScanReport, YtState,
+    DEFAULT_REFRESH_HOURS, DEFAULT_YT_FREE_MIN,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct LocalIndexEntry {
@@ -332,6 +348,10 @@ pub struct PushReport {
     /// Read-only folder: local changes moved to `kept-aside/` or undone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kept_aside: Vec<String>,
+    /// The change is saved here but its upload failed (a storage cannot be
+    /// reached): why. The next sync or push uploads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_pending: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -391,6 +411,14 @@ pub struct PullReport {
     /// `kept-aside/` or undone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kept_aside: Vec<String>,
+    /// The folder was not synced this time: why (a sync reports it and
+    /// goes on with the other folders).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Storages this sync could not reach and left out (`storage_health`
+    /// says more).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub storages_down: Vec<String>,
 }
 
 impl PullReport {
@@ -533,6 +561,10 @@ pub struct StatusReport {
     /// Destination devices of transferrers, by storage name.
     #[serde(default)]
     pub carrier_for: BTreeMap<String, Vec<String>>,
+    /// Storages that could not be reached and rest before the next try
+    /// (`Engine::storage_health`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub storages_down: Vec<StorageHealth>,
     /// The organization the vault belongs to, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub org: Option<OrgBrief>,
@@ -766,6 +798,9 @@ pub struct Engine {
     /// (one connection pool, one view of the packs) instead of opening the
     /// storage again (`open_spec`, `finish_storages`).
     storages_open: std::sync::Mutex<OpenedStorages>,
+    /// Storages that failed with a network error in this run, and those
+    /// resting after failures (`health`).
+    health: health::Health,
     /// The location view, kept up to date as batches arrive.
     view_cache: std::sync::Mutex<ledger_upkeep::ViewSlot>,
     /// Set while one action runs whose ledger events go into one batch.
@@ -898,16 +933,22 @@ fn write_to_set(
     backends: &[&dyn Storage],
     jobs: &[std::sync::Arc<UploadJob>],
 ) -> Vec<Vec<Result<bool>>> {
-    let failed_all = |e: &anyhow::Error| -> Vec<Result<bool>> {
+    let failed_all = |e: &anyhow::Error, storage: &str| -> Vec<Result<bool>> {
         // A full disk stays that error (the storage is left out, not the
-        // push), and so does a pool's "no disk".
+        // push), and so do a pool's "no disk" and a storage that cannot be
+        // reached (`health`).
         let low = crate::freespace::low_space(e).cloned();
         let pool = pool::pool_error(e).cloned();
+        let down = health::is_network_error(e).then(|| health::StorageDown {
+            storage: storage.to_string(),
+            reason: format!("{e:#}"),
+        });
         let msg = format!("{e:#}");
         jobs.iter()
-            .map(|_| match (&low, &pool) {
-                (Some(l), _) => Err(anyhow::Error::new(l.clone())),
-                (None, Some(p)) => Err(anyhow::Error::new(p.clone())),
+            .map(|_| match (&low, &pool, &down) {
+                (Some(l), _, _) => Err(anyhow::Error::new(l.clone())),
+                (None, Some(p), _) => Err(anyhow::Error::new(p.clone())),
+                (None, None, Some(d)) => Err(anyhow::Error::new(d.clone())),
                 _ => Err(anyhow!("{msg}")),
             })
             .collect()
@@ -919,7 +960,7 @@ fn write_to_set(
     if backends.len() == 1 {
         return vec![match backends[0].put_pack(&members) {
             Ok(flags) => flags.into_iter().map(Ok).collect(),
-            Err(e) => failed_all(&e),
+            Err(e) => failed_all(&e, backends[0].name()),
         }];
     }
     // One copy of each object (two files of the push may share a block);
@@ -951,8 +992,10 @@ fn write_to_set(
             crate::packs::build(&group, target)
         })
         .collect();
-    let mut out = Vec::with_capacity(backends.len());
-    for backend in backends {
+    // One thread per storage of the set: a slow storage does not hold back
+    // the fast ones, and one that fails leaves the others' writes as they
+    // are.
+    let write_one = |backend: &dyn Storage| -> Vec<Result<bool>> {
         let mut flags: Vec<Option<Result<bool>>> = (0..jobs.len()).map(|_| None).collect();
         let mut error = None;
         for (idx, (id, data, locs)) in bins.iter().zip(&built) {
@@ -981,11 +1024,27 @@ fn write_to_set(
             // The whole batch counts as not written on this storage; its
             // blocks are tried there again at the next push (a pack that
             // did go is found then and not written twice).
-            Some(e) => out.push(failed_all(&e)),
-            None => out.push(flags.into_iter().map(|f| f.unwrap_or(Ok(false))).collect()),
+            Some(e) => failed_all(&e, backend.name()),
+            None => flags.into_iter().map(|f| f.unwrap_or(Ok(false))).collect(),
         }
-    }
-    out
+    };
+    let write_one = &write_one;
+    std::thread::scope(|s| {
+        let handles: Vec<_> = backends
+            .iter()
+            .map(|&backend| s.spawn(move || write_one(backend)))
+            .collect();
+        handles
+            .into_iter()
+            .zip(backends)
+            .map(|(h, backend)| {
+                h.join().unwrap_or_else(|_| {
+                    let e = anyhow!("the writer of storage {} stopped", backend.name());
+                    failed_all(&e, backend.name())
+                })
+            })
+            .collect()
+    })
 }
 
 /// The target sets of one block: the storages it goes to (by index),
@@ -1035,13 +1094,15 @@ fn apply_upload(
                 pack: None,
             });
         }
-        // A pool with no disk attached (or no room) is left out for the rest
-        // of this push and tried again next time.
+        // A pool with no disk attached (or no room), and a storage that
+        // cannot be reached, are left out for the rest of this push and
+        // tried again next time: the others' packs are published.
         Err(e)
             if matches!(
                 pool::pool_error(&e),
                 Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
-            ) || crate::freespace::low_space(&e).is_some() =>
+            ) || crate::freespace::low_space(&e).is_some()
+                || health::is_network_error(&e) =>
         {
             if !report.storages_unavailable.contains(&d.storage) {
                 report.storages_unavailable.push(d.storage);
@@ -1199,6 +1260,9 @@ fn canonical(path: &Path) -> std::io::Result<PathBuf> {
     }
     Ok(p)
 }
+
+/// How long joining waits for the bundled storages to answer, all together.
+const REACHABLE_WITHIN: std::time::Duration = std::time::Duration::from_secs(8);
 
 impl Engine {
     // ----- lifecycle -------------------------------------------------------
@@ -1377,6 +1441,232 @@ impl Engine {
         Ok(engine)
     }
 
+    /// Join without reaching any storage: the vault keys come from the
+    /// pairing (`Bundle::vault_epochs`), the storages are only written to
+    /// the settings, and `state/pending-join.json` makes the next sync
+    /// finish what needs a storage (`finish_pending_join`): check the vault
+    /// and the keys, enrol this device and read the vault's records.
+    #[allow(clippy::too_many_arguments)]
+    fn join_deferred(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        bundle: &crate::pair::Bundle,
+        epochs: &[crate::pair::BundleEpoch],
+        storages: &[&crate::pair::BundleStorage],
+        signer: Option<crypto::SigningKey>,
+        kem: Option<crate::kem::DecapsKey>,
+        mut notes: Vec<String>,
+    ) -> Result<(Engine, Vec<String>)> {
+        crypto::check_passphrase(passphrase)?;
+        ensure_no_vault(home)?;
+        let mut by_epoch = BTreeMap::new();
+        for e in epochs {
+            by_epoch.insert(e.epoch, SecretKey::from_hex(&e.key)?);
+        }
+        let master = by_epoch
+            .get(&0)
+            .cloned()
+            .ok_or_else(|| anyhow!("the pairing did not carry the vault key of epoch 0"))?;
+        let vault_id = VaultId::from_hex(&bundle.vault_id)?;
+        let mut vault_epochs = membership::VaultEpochs::genesis(&master);
+        vault_epochs.keys = by_epoch;
+        vault_epochs.kem = Some(kem.unwrap_or_else(crate::kem::DecapsKey::generate));
+        util::private_home(home)?;
+        let keys = Keys {
+            master,
+            signer: signer.unwrap_or_else(crypto::SigningKey::generate),
+        };
+        let vault = LocalVault {
+            format_version: crate::FORMAT_VERSION,
+            vault_id,
+            device_id: ledger::device_id_for(&keys.signer.public()),
+            device_name: device_name.to_string(),
+            // The vault's own date is read from its storage later.
+            created_utc: util::now_utc(),
+            member: false,
+        };
+        let mut engine = Self::write_new(home, vault, keys, passphrase, vault_epochs)?;
+        for s in storages {
+            engine.add_storage_deferred(s.spec.clone(), s.secret.clone())?;
+        }
+        std::fs::create_dir_all(engine.home.join("state"))?;
+        util::write_json(
+            &engine.pending_join_path(),
+            &PendingJoin {
+                storages: storages.iter().map(|s| s.spec.name().to_string()).collect(),
+                since_utc: util::now_utc(),
+            },
+        )?;
+        notes.push(
+            "joined without reaching a storage: this device is set up with the vault's keys; the next sync (the background service does it) finishes joining as soon as a storage can be reached".into(),
+        );
+        Ok((engine, notes))
+    }
+
+    /// Keep a storage's settings and secret without contacting it (a join
+    /// that is finished later).
+    fn add_storage_deferred(&mut self, spec: StorageSpec, secret: Option<String>) -> Result<()> {
+        if self.config.storages.iter().any(|s| s.name() == spec.name()) {
+            bail!("a storage named {} already exists", spec.name());
+        }
+        if let Some(secret) = secret {
+            let reference = match &spec {
+                StorageSpec::S3 { secret_ref, .. } if !secret_ref.is_empty() => secret_ref.clone(),
+                _ => spec.name().to_string(),
+            };
+            let mut store = self.secret_store()?;
+            store.secrets.insert(reference, secret);
+            self.forget_storages();
+            store.save(
+                &self.home,
+                &self.keys,
+                &self.vault.vault_id,
+                &self.vault.device_id,
+            )?;
+        }
+        self.config.storages.push(spec);
+        self.config.save(&self.home)
+    }
+
+    fn pending_join_path(&self) -> PathBuf {
+        self.home.join("state").join("pending-join.json")
+    }
+
+    /// The storages a join without storage access is still waiting for
+    /// (`None`: joining is complete).
+    pub fn join_pending(&self) -> Option<Vec<String>> {
+        util::read_json::<PendingJoin>(&self.pending_join_path())
+            .ok()
+            .map(|p| p.storages)
+    }
+
+    /// Finish a join that was made without reaching a storage: the first
+    /// storage that answers must hold this vault (same id and format) and
+    /// open with this device's vault key (not one from before a removal);
+    /// then the storages are added as usual, the registry and ledger are
+    /// read and this device's enrolment is published. Without a pending
+    /// join it does nothing; while no storage answers it fails and the
+    /// next sync tries again.
+    fn finish_pending_join(&mut self) -> Result<()> {
+        let path = self.pending_join_path();
+        let Ok(pending) = util::read_json::<PendingJoin>(&path) else {
+            return Ok(());
+        };
+        // Until joining is finished nothing else works here: every sync
+        // asks the storages again, also one resting after failures (storage
+        // health, spec 79.1).
+        self.retry_storages_now();
+        let mut notes = Vec::new();
+        let mut found: Option<(StorageSpec, VaultMeta)> = None;
+        for name in &pending.storages {
+            let Some(spec) = self
+                .config
+                .storages
+                .iter()
+                .find(|s| s.name() == name)
+                .cloned()
+            else {
+                continue;
+            };
+            let got = self
+                .open_spec(&spec)
+                .and_then(|b| b.get(VaultMeta::STORAGE_KEY))
+                .and_then(|m| match m {
+                    Some(bytes) => Ok(serde_json::from_slice::<VaultMeta>(&bytes)?),
+                    None => Err(anyhow!("holds no vault")),
+                });
+            match got {
+                Ok(meta) => {
+                    found = Some((spec, meta));
+                    break;
+                }
+                Err(e) => notes.push(format!("{name}: {e:#}")),
+            }
+        }
+        let Some((first, meta)) = found else {
+            bail!(
+                "joining is not finished: no storage of the vault can be reached yet ({}); it finishes by itself when one can",
+                notes.join("; ")
+            );
+        };
+        if meta.format_version != crate::FORMAT_VERSION {
+            bail!("{}", crate::format_mismatch(meta.format_version));
+        }
+        if meta.vault_id != self.vault.vault_id {
+            bail!(
+                "storage {} holds another vault than the one paired with: run `varsto reset --yes` and pair again",
+                first.name()
+            );
+        }
+        {
+            let backend = self.open_spec(&first)?;
+            let refs: Vec<&dyn Storage> = vec![backend.as_ref()];
+            let kem = self
+                .epochs
+                .kem
+                .as_ref()
+                .ok_or_else(|| anyhow!("this device has no K8"))?;
+            let newest = self
+                .epochs
+                .keys
+                .values()
+                .next_back()
+                .cloned()
+                .ok_or_else(|| anyhow!("this device holds no vault key"))?;
+            let m = crate::membership3::Membership::join(
+                members3::bin(&meta.vault_id)?,
+                &refs,
+                &self.keys.signer,
+                kem,
+                newest,
+            )?;
+            if m.devices.devices.is_empty() {
+                bail!(
+                    "this vault key does not open the records on storage {}: run `varsto reset --yes` and pair again",
+                    first.name()
+                );
+            }
+        }
+        self.vault.created_utc = meta.created_utc;
+        util::write_json(&self.home.join("vault.json"), &self.vault)?;
+        let order = std::iter::once(first.name().to_string()).chain(
+            pending
+                .storages
+                .iter()
+                .filter(|n| n.as_str() != first.name())
+                .cloned(),
+        );
+        for name in order {
+            let Some(spec) = self
+                .config
+                .storages
+                .iter()
+                .find(|s| s.name() == name)
+                .cloned()
+            else {
+                continue;
+            };
+            self.config.storages.retain(|s| s.name() != name);
+            if let Err(e) = self.add_storage_internal(spec.clone(), None) {
+                // Kept as it was: the other storages are added when they answer.
+                self.config.storages.retain(|s| s.name() != name);
+                self.config.storages.push(spec);
+                self.config.save(&self.home)?;
+                if name == first.name() {
+                    return Err(e);
+                }
+                log::warn!("storage {name} is not reachable yet: {e:#}");
+            }
+        }
+        self.pull_registry()?;
+        self.pull_ledger()?;
+        self.push_own_batches()?;
+        let _ = std::fs::remove_file(&path);
+        log::info!("joining finished through storage {}", first.name());
+        Ok(())
+    }
+
     /// Join with what a paired device sent (`pair::Bundle`, with the vault
     /// key the pairing opened in `vault_key`) and the keys of this device's
     /// hello (`keys`: the folder grants the other device wrote are sealed
@@ -1413,8 +1703,11 @@ impl Engine {
         crate::names::check_display_name(device_name)?;
         let mut notes = Vec::new();
         let mut first = None;
+        // All storages are asked at once with a short budget: a dead one
+        // costs that budget once, not once each in turn.
+        let mut answers = Self::reachable_all(&bundle.storages, REACHABLE_WITHIN);
         for (i, s) in bundle.storages.iter().enumerate() {
-            match Self::reachable(s) {
+            match answers[i].take().unwrap_or_else(|| Ok(())) {
                 Ok(()) => {
                     first = Some(i);
                     break;
@@ -1423,6 +1716,31 @@ impl Engine {
             }
         }
         let Some(first) = first else {
+            // No storage answers, but the sender gave every vault key and
+            // the settings of a network storage: set this device up now and
+            // finish joining when one can be reached.
+            if let Some(epochs) = &bundle.vault_epochs {
+                let network: Vec<&crate::pair::BundleStorage> = bundle
+                    .storages
+                    .iter()
+                    .filter(|s| {
+                        matches!(s.spec, StorageSpec::S3 { .. } | StorageSpec::Rclone { .. })
+                    })
+                    .collect();
+                if !network.is_empty() {
+                    return Self::join_deferred(
+                        home,
+                        device_name,
+                        passphrase,
+                        bundle,
+                        epochs,
+                        &network,
+                        signer,
+                        kem,
+                        notes,
+                    );
+                }
+            }
             bail!(
                 "none of the vault's storages can be reached from this device: {}. Add a storage both devices can reach (an S3 bucket or an rclone remote) on {} and pair again",
                 if notes.is_empty() { "it has none".to_string() } else { notes.join("; ") },
@@ -1447,8 +1765,10 @@ impl Engine {
             );
         }
         notes.push(format!("{}: joined through it", chosen.spec.name()));
-        for s in bundle.storages.iter().skip(first + 1) {
-            let r = Self::reachable(s)
+        for (i, s) in bundle.storages.iter().enumerate().skip(first + 1) {
+            let r = answers[i]
+                .take()
+                .unwrap_or_else(|| Ok(()))
                 .and_then(|()| engine.add_storage_internal(s.spec.clone(), s.secret.clone()));
             notes.push(match r {
                 Ok(()) => format!("{}: added", s.spec.name()),
@@ -1456,6 +1776,46 @@ impl Engine {
             });
         }
         Ok((engine, notes))
+    }
+
+    /// `reachable` for every storage at once, each on its own thread, waiting
+    /// at most `within` in all. One answer per storage; a storage that has
+    /// not answered by then is a network error (its thread is left to end by
+    /// itself: every network call has its own limits).
+    fn reachable_all(
+        storages: &[crate::pair::BundleStorage],
+        within: std::time::Duration,
+    ) -> Vec<Option<Result<()>>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for (i, s) in storages.iter().enumerate() {
+            let (tx, s) = (tx.clone(), s.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send((i, Self::reachable(&s)));
+            });
+        }
+        drop(tx);
+        let deadline = std::time::Instant::now() + within;
+        let mut out: Vec<Option<Result<()>>> = storages.iter().map(|_| None).collect();
+        let mut got = 0;
+        while got < storages.len() {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left) {
+                Ok((i, r)) => {
+                    out[i] = Some(r);
+                    got += 1;
+                }
+                Err(_) => break,
+            }
+        }
+        for (i, slot) in out.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(Err(crate::storage::network_unavailable(
+                    storages[i].spec.name().to_string(),
+                    format!("no answer within {} s", within.as_secs()),
+                )));
+            }
+        }
+        out
     }
 
     /// Whether a paired storage holds the vault and can be opened from here.
@@ -1527,6 +1887,16 @@ impl Engine {
             vault_key: self.export_vault_key()?,
             from: self.vault.device_name.clone(),
             storages,
+            vault_epochs: Some(
+                self.epochs
+                    .keys
+                    .iter()
+                    .map(|(e, k)| crate::pair::BundleEpoch {
+                        epoch: *e,
+                        key: k.to_hex(),
+                    })
+                    .collect(),
+            ),
         })
     }
 
@@ -1572,6 +1942,7 @@ impl Engine {
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             storages_open: Default::default(),
+            health: health::Health::new(home),
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
@@ -1679,6 +2050,7 @@ impl Engine {
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             storages_open: Default::default(),
+            health: health::Health::new(home),
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
@@ -1705,11 +2077,12 @@ impl Engine {
             // A real fork was found earlier: this identity signs nothing more.
             engine.forked_self = true;
         }
-        // Command-line runs use the peers of the directory (accepted peer
-        // records), over TLS on TCP only; the service adds LAN peers and
-        // the QUIC node.
+        // Command-line runs use the peers of the directory saved here
+        // (accepted peer records; no storage is asked while opening), over
+        // TLS on TCP only; a sync reads the storages' records first. The
+        // service adds LAN peers and the QUIC node.
         if engine.config.p2p.enabled {
-            if let Some(p) = engine.p2p_peers_tcp() {
+            if let Some(p) = engine.p2p_peers_local() {
                 engine.set_peers(Some(std::sync::Arc::new(p)));
             }
         }
@@ -1864,6 +2237,9 @@ impl Engine {
         }
         self.learn_conditional_writes();
         self.forget_storages();
+        // A storage marked down is tried again by the next operation
+        // (unless it rests: `health`).
+        self.health.end_run();
     }
 
     /// Remember in `config.json` what the S3 storages found out about
@@ -1939,10 +2315,15 @@ impl Engine {
             None => backend,
         };
         let backend: Box<dyn Storage> = Box::new(crate::storage::LoggedStorage::new(backend, kind));
-        Ok(match &self.storage_calls {
+        let backend: Box<dyn Storage> = match &self.storage_calls {
             Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
             None => backend,
-        })
+        };
+        // Outermost: a storage marked down answers at once, uncounted.
+        Ok(Box::new(health::HealthStorage::new(
+            backend,
+            self.health.clone(),
+        )))
     }
 
     /// Tests: write packs of `bytes` on hot storages instead of 64 MiB
@@ -2331,6 +2712,10 @@ impl Engine {
             if spec.is_cold() && !include_cold {
                 continue;
             }
+            // Down in this run (`health`): left out, not waited for again.
+            if self.storage_down(spec.name()) {
+                continue;
+            }
             out.push((spec.clone(), self.open_spec(spec)?));
         }
         Ok(out)
@@ -2357,15 +2742,34 @@ impl Engine {
         if self.vault.member {
             bail!("this device is a member of a shared folder only; it cannot create folders in the owner's vault");
         }
-        self.ensure_unique_folder_name(name)?;
+        // The name is checked against the folders this device knows, and
+        // below against the records as read now (the storages when they
+        // answer): adding a folder does not wait for a storage.
+        self.ensure_unique_folder_name_known(name)?;
         crate::names::check_display_name(name)?;
         fs::create_dir_all(path)?;
         // Format 3: the folder record (this device the owner), a random K9₀
         // granted to this device, and the escrow under the recovery key when
         // this session holds it (else `status` warns until it is written).
+        // They are kept on this device first; a storage that does not
+        // answer gets them from the outbox later.
         let k1 = self.f3.recovery.clone();
+        let wanted = name.trim().to_lowercase();
         let id = self
-            .with_enrolled(|m| m.create_folder(name, BTreeMap::new(), k1.as_ref()))?
+            .with_enrolled_at(members3::Reach::StoragesOrLocal, |m| {
+                if let Some(st) = m
+                    .registry
+                    .folders
+                    .values()
+                    .find(|s| !s.is_removed() && s.name.to_lowercase() == wanted)
+                {
+                    bail!(
+                        "the vault already has a folder named {}: attach that one, or choose another name",
+                        st.name
+                    );
+                }
+                m.create_folder(name, BTreeMap::new(), k1.as_ref())
+            })?
             .ok_or_else(|| {
                 anyhow!("add a storage first: a folder's records live on the vault's storages")
             })?;
@@ -2455,7 +2859,14 @@ impl Engine {
             })
         };
         if keyless(self) && !self.vault.member {
-            let _ = self.refresh_members();
+            // This device's copy of the records first (a grant the last
+            // sync brought); the storages only when that has no key.
+            if let Err(e) = self.load_members3_local() {
+                log::debug!("membership not read from this device's copy: {e:#}");
+            }
+            if keyless(self) {
+                let _ = self.refresh_members();
+            }
         }
         let rec = self
             .keyring
@@ -2499,6 +2910,15 @@ impl Engine {
             bail!("a folder needs a name");
         }
         let _ = self.pull_registry();
+        self.ensure_unique_folder_name_known(name)
+    }
+
+    /// `ensure_unique_folder_name` against the folders this device knows,
+    /// without reading the storages.
+    fn ensure_unique_folder_name_known(&self, name: &str) -> Result<()> {
+        if name.trim().is_empty() {
+            bail!("a folder needs a name");
+        }
         if let Some(f) = self
             .keyring
             .folders
@@ -3572,6 +3992,32 @@ impl Engine {
         self.push_with_scan(folder, None)
     }
 
+    /// `push` after a change that is already saved on this device. When the
+    /// upload fails (a storage is down, no network), the change stays and the
+    /// report says "upload pending"; the next sync or push uploads it.
+    /// Errors that mean nothing could be published at all (removed device,
+    /// forked ledger, paused folder) are still returned.
+    fn push_after_local(&mut self, folder: &str) -> Result<PushReport> {
+        match self.push(folder) {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                if self.ensure_active().is_err()
+                    || self.ensure_ledger_writable().is_err()
+                    || self.forked_self
+                    || folder_safety::paused_error(&e).is_some()
+                {
+                    return Err(e);
+                }
+                log::warn!("{folder}: saved here, upload pending: {e:#}");
+                Ok(PushReport {
+                    folder: folder.to_string(),
+                    upload_pending: Some(format!("{e:#}")),
+                    ..Default::default()
+                })
+            }
+        }
+    }
+
     /// `push` with the scan a pull of the same folder just made, so a sync
     /// walks the folder once (`sync_folders`).
     fn push_with_scan(&mut self, folder: &str, scan: Option<ScanOutcome>) -> Result<PushReport> {
@@ -3642,14 +4088,21 @@ impl Engine {
             }
         }
         // A folder added with many pictures shows its first thumbnails
-        // before the (possibly hours long) upload, not only after it.
-        report.thumbnails = self.make_thumbnails(
-            &rec,
-            &root,
-            &mut state,
-            THUMBS_EARLY_PER_PASS,
-            THUMBS_EARLY_TIME,
-        )?;
+        // before the (possibly hours long) upload, not only after it. Best
+        // effort: a storage that cannot take the thumbnail record never
+        // holds back the upload (the pictures are tried again next push).
+        report.thumbnails = self
+            .make_thumbnails(
+                &rec,
+                &root,
+                &mut state,
+                THUMBS_EARLY_PER_PASS,
+                THUMBS_EARLY_TIME,
+            )
+            .unwrap_or_else(|e| {
+                log::warn!("push {}: thumbnails not published: {e:#}", rec.name);
+                0
+            });
         // One action (design section 3, "Writer"): packs, then one map
         // delta listing their members, then the manifest delta and the trash
         // record, then one batch with `pack_stored` for every (pack,
@@ -3659,8 +4112,12 @@ impl Engine {
         let written = self.upload_missing(&rec, &root, &state, &mut report)?;
         let view3 = self.view3()?;
         self.publish_map3(&folder, epoch, &written, &view3)?;
-        report.thumbnails +=
-            self.make_thumbnails(&rec, &root, &mut state, THUMBS_PER_PASS, THUMBS_PASS_TIME)?;
+        report.thumbnails += self
+            .make_thumbnails(&rec, &root, &mut state, THUMBS_PER_PASS, THUMBS_PASS_TIME)
+            .unwrap_or_else(|e| {
+                log::warn!("push {}: thumbnails not published: {e:#}", rec.name);
+                0
+            });
         if let Some(seq) = self.publish_manifest(&folder, epoch, &state)? {
             report.manifest_seq = Some(seq);
             state.published_seq = seq;
@@ -6061,7 +6518,7 @@ impl Engine {
             return Err(e.context(format!("write {}", disk.display())));
         }
         fs::rename(&tmp, &disk).with_context(|| format!("write {}", disk.display()))?;
-        self.push(folder)
+        self.push_after_local(folder)
     }
 
     /// Create a new file inside a folder, never replacing one: refused when
@@ -6196,7 +6653,7 @@ impl Engine {
                     fs::create_dir_all(parent)?;
                 }
                 fs::rename(&ph, placeholder_path(&dst))?;
-                return self.push(folder);
+                return self.push_after_local(folder);
             }
             bail!("unknown file {from}");
         }
@@ -6207,7 +6664,7 @@ impl Engine {
             fs::create_dir_all(parent)?;
         }
         fs::rename(&src, &dst).with_context(|| format!("move {from} to {to}"))?;
-        self.push(folder)
+        self.push_after_local(folder)
     }
 
     pub fn list_files(&self, folder: &str) -> Result<Vec<FileEntry>> {
@@ -6282,11 +6739,35 @@ impl Engine {
     }
 
     fn sync_inner(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        // A new run: storages that rest after failures are left out from
+        // the start, the others are tried (`health`).
+        if self.cycle.is_none() {
+            self.health.begin_run();
+        }
+        // The upkeep steps below reuse the ledger pull of the folders'
+        // sync instead of listing every storage again.
+        let out = self.sync_round(|e| e.sync_round_inner(folder));
+        if out.is_err() {
+            self.finish_storages();
+        }
+        out
+    }
+
+    fn sync_round_inner(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        // A join made without reaching a storage is finished first.
+        self.finish_pending_join()?;
+        // Peers opened from the saved directory: read the records now.
+        self.refresh_saved_peers();
         // Every folder's pull and push record into one ledger batch, and the
         // ledger is pulled once.
         let (mut out, seq) = self.one_batch_seq(|e| e.sync_folders(folder))?;
         for (_, push) in out.iter_mut() {
             push.batch_seq = push.batch_seq.or(seq);
+        }
+        // Records and organization objects that reached only some storages
+        // go to the others now that they may answer (`health`).
+        if let Err(e) = self.heal_partial_writes() {
+            log::debug!("partial writes not healed yet: {e:#}");
         }
         // System, version and platform, signed (an organization's platform
         // policy is checked against them); republished only when changed.
@@ -6304,6 +6785,16 @@ impl Engine {
         let _ = self.ledger_lost_everywhere(false);
         // The other devices' trash records, when due (`trash`).
         let _ = self.trash_refresh(false);
+        // The storages this run could not reach, for every folder's report.
+        let down: Vec<String> = self
+            .storage_health()
+            .into_iter()
+            .filter(|h| h.down_now)
+            .map(|h| h.storage)
+            .collect();
+        for (pull, _) in out.iter_mut() {
+            pull.storages_down = down.clone();
+        }
         self.finish_storages();
         Ok(out)
     }
@@ -6319,8 +6810,15 @@ impl Engine {
         // A lost or damaged local ledger is restored before anything else.
         self.ensure_ledger_writable()?;
         // A folder another device converted into a Strongroom must be
-        // adopted before it is synced under its old key.
-        self.pull_registry()?;
+        // adopted before it is synced under its old key. With no storage
+        // reachable the folders still sync with peers, on the membership
+        // known here.
+        if let Err(e) = self.pull_registry() {
+            if !is_network_error(&e) {
+                return Err(e);
+            }
+            log::warn!("membership not read, no storage answered: {e:#}");
+        }
         self.finish_strongroom_conversions();
         // The restic device keeps every folder: new ones are attached in
         // its mirror as soon as their record is here.
@@ -6342,8 +6840,17 @@ impl Engine {
         if names.is_empty() {
             // Nothing attached yet (a device that just joined): still learn the
             // other devices and where the blocks are.
-            self.pull_ledger()?;
+            if let Err(e) = self.pull_ledger() {
+                if !is_network_error(&e) {
+                    return Err(e);
+                }
+                log::warn!("ledger not pulled, no storage answered: {e:#}");
+            }
         }
+        // A folder that fails is reported and the others go on; the sync
+        // fails only when every folder failed (`first_failure`).
+        let mut first_failure: Option<anyhow::Error> = None;
+        let mut synced = 0usize;
         for name in names {
             // A paused folder (`folder_safety`) is reported and skipped; the
             // other folders sync as usual.
@@ -6358,24 +6865,64 @@ impl Engine {
                     pull.paused = Some(p);
                     Ok((pull, push))
                 };
+            let failed = |e: anyhow::Error,
+                          mut pull: PullReport,
+                          first: &mut Option<anyhow::Error>|
+             -> (PullReport, PushReport) {
+                log::warn!(folder = name.as_str(); "folder not synced: {e:#}");
+                if pull.folder.is_empty() {
+                    pull.folder = name.clone();
+                }
+                pull.error = Some(format!("{e:#}"));
+                let push = PushReport {
+                    folder: pull.folder.clone(),
+                    ..Default::default()
+                };
+                first.get_or_insert(e);
+                (pull, push)
+            };
             let mut pull = match self.pull(&name) {
                 Ok(p) => p,
                 Err(e) => {
                     self.last_scan = None;
-                    out.push(paused(e, PullReport::default())?);
+                    if folder_safety::paused_error(&e).is_some() {
+                        out.push(paused(e, PullReport::default())?);
+                        synced += 1;
+                    } else {
+                        out.push(failed(e, PullReport::default(), &mut first_failure));
+                    }
                     continue;
                 }
             };
             // The pull scanned the folder; the push need not walk it again.
             let scan = self.last_scan.take();
             if self.keyring.find(&name).is_none() {
+                synced += 1;
                 continue; // converted while pulling
             }
             // Selective sync turned off: the placeholders become files.
-            pull.files_updated += self.fill_placeholders(&name, &mut pull.files_unavailable)?;
+            match self.fill_placeholders(&name, &mut pull.files_unavailable) {
+                Ok(n) => pull.files_updated += n,
+                Err(e) => {
+                    out.push(failed(e, pull, &mut first_failure));
+                    continue;
+                }
+            }
             match self.push_with_scan(&name, scan) {
-                Ok(push) => out.push((pull, push)),
-                Err(e) => out.push(paused(e, pull)?),
+                Ok(push) => {
+                    out.push((pull, push));
+                    synced += 1;
+                }
+                Err(e) if folder_safety::paused_error(&e).is_some() => {
+                    out.push(paused(e, pull)?);
+                    synced += 1;
+                }
+                Err(e) => out.push(failed(e, pull, &mut first_failure)),
+            }
+        }
+        if synced == 0 {
+            if let Some(e) = first_failure {
+                return Err(e);
             }
         }
         if self.block_cache_root().is_dir() {
@@ -6554,6 +7101,7 @@ impl Engine {
             });
         }
         Ok(StatusReport {
+            storages_down: self.storage_health(),
             vault_id: self.vault.vault_id.to_string(),
             device_id: self.vault.device_id.to_string(),
             device_name: self.vault.device_name.clone(),
@@ -7001,6 +7549,15 @@ impl Engine {
 /// devices keep working.
 /// Refuse to set up a vault where one already is, saying which one and
 /// how to start over.
+/// `state/pending-join.json`: a join made without reaching a storage,
+/// finished by the next sync that can (`Engine::finish_pending_join`).
+#[derive(Serialize, Deserialize)]
+struct PendingJoin {
+    /// The names of the storages taken over from the pairing.
+    storages: Vec<String>,
+    since_utc: i64,
+}
+
 pub fn ensure_no_vault(home: &Path) -> Result<()> {
     let p = home.join("vault.json");
     if !p.exists() {

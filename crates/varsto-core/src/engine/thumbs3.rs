@@ -152,7 +152,7 @@ impl Engine {
         let view = self.view3()?;
         let mut fresh: Vec<ThumbsBody> = Vec::new();
         let mut top: BTreeMap<String, u64> = applied.seqs.clone();
-        self.each_store(&storages, &view, |_, store, counter| {
+        let read = self.each_store(&storages, &view, |_, store, counter| {
             for d in &writers {
                 let stream = records3::thumbs_stream(folder, *d);
                 let after = applied.seqs.get(&hex::encode(d)).copied().unwrap_or(0);
@@ -164,7 +164,17 @@ impl Engine {
                 }
             }
             Ok(())
-        })?;
+        });
+        if let Err(e) = read {
+            // Offline: stamp the throttle too, or every missing picture
+            // would try the storages again.
+            applied.checked_utc = now;
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            let _ = util::write_json(&path, &applied);
+            return Err(e);
+        }
         let mut added = 0;
         for (h, j) in records3::thumbnails(fresh.iter()) {
             if !self.thumb_file(&rec.folder_id, &h).is_file() {
@@ -401,7 +411,10 @@ impl Engine {
         if let Some(t) = self.thumb_get(&rec.folder_id, &h) {
             return Ok(Some(t));
         }
-        self.pull_thumbs(&rec, false)?;
+        // A storage that cannot be reached means no picture for now, not an error.
+        if let Err(e) = self.pull_thumbs(&rec, false) {
+            log::debug!("thumbnail records could not be read: {e:#}");
+        }
         Ok(self.thumb_get(&rec.folder_id, &h))
     }
 }

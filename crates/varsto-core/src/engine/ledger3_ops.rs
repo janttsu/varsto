@@ -455,7 +455,15 @@ impl Engine {
             done.extend(announced.iter().map(hex::encode));
             util::write_json(&self.home.join("state").join(ANNOUNCED_FILE), &done)?;
         }
-        self.push_own_batches3()?;
+        // The batch is sealed and kept here: a storage that does not answer
+        // gets it with the next push, so an action done offline stands. A
+        // fork of this device's ledger stays an error.
+        if let Err(e) = self.push_own_batches3() {
+            if self.forked_self {
+                return Err(e);
+            }
+            log::warn!("ledger batch kept on this device, not pushed yet: {e:#}");
+        }
         Ok(last)
     }
 
@@ -628,33 +636,44 @@ impl Engine {
         let head = self.f3.ledger.head(&me);
         // Transferrers carry the ledger too (F-048).
         for (spec, backend) in self.metadata_storages(false)? {
-            let mut done = self.f3.ledger.pushed(spec.name()).min(head.seq);
-            // A storage that lost the newest batch it was known to hold (or
-            // a new storage under a known name) is filled from the start.
-            if done > head.dropped && !backend.exists(&ledger3::checkpoint::batch_key(&me, done))? {
-                done = 0;
-            }
-            for seq in done.max(head.dropped) + 1..=head.seq {
-                let Some(rec) = self.f3.ledger.get(&me, seq)? else {
-                    continue;
-                };
-                let key = ledger3::checkpoint::batch_key(&me, seq);
-                let bytes = rec.encode();
-                if !backend.put_if_absent(&key, &bytes)? {
-                    let same = backend
-                        .get_bounded(&key, crate::record::MAX_PART_READ)?
-                        .is_some_and(|b| b == bytes);
-                    if !same {
-                        let theirs = backend
+            // One storage that cannot be reached is left as it is: the
+            // batches are sealed here and go there at a later push (`health`).
+            let pushed = (|| -> Result<()> {
+                let mut done = self.f3.ledger.pushed(spec.name()).min(head.seq);
+                // A storage that lost the newest batch it was known to hold (or
+                // a new storage under a known name) is filled from the start.
+                if done > head.dropped
+                    && !backend.exists(&ledger3::checkpoint::batch_key(&me, done))?
+                {
+                    done = 0;
+                }
+                for seq in done.max(head.dropped) + 1..=head.seq {
+                    let Some(rec) = self.f3.ledger.get(&me, seq)? else {
+                        continue;
+                    };
+                    let key = ledger3::checkpoint::batch_key(&me, seq);
+                    let bytes = rec.encode();
+                    if !backend.put_if_absent(&key, &bytes)? {
+                        let same = backend
                             .get_bounded(&key, crate::record::MAX_PART_READ)?
-                            .and_then(|b| crate::record::SignedRecord::decode(&b).ok());
-                        if theirs.is_some_and(|r| r.verify(&self.keys.signer.public()).is_ok()) {
-                            self.forked_self = true;
-                            bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
+                            .is_some_and(|b| b == bytes);
+                        if !same {
+                            let theirs = backend
+                                .get_bounded(&key, crate::record::MAX_PART_READ)?
+                                .and_then(|b| crate::record::SignedRecord::decode(&b).ok());
+                            if theirs.is_some_and(|r| r.verify(&self.keys.signer.public()).is_ok())
+                            {
+                                self.forked_self = true;
+                                bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
+                            }
+                            log::warn!(storage = backend.name(), seq = seq; "ledger: junk under this device's batch name");
                         }
-                        log::warn!(storage = backend.name(), seq = seq; "ledger: junk under this device's batch name");
                     }
                 }
+                Ok(())
+            })();
+            if self.tolerate(spec.name(), pushed)?.is_none() {
+                continue;
             }
             self.f3.ledger.set_pushed(spec.name(), head.seq)?;
         }
@@ -664,7 +683,14 @@ impl Engine {
     /// Pull the membership and every known device's new batches from every
     /// hot metadata storage. Returns the devices found forked.
     pub(crate) fn pull_ledger3(&mut self) -> Result<Vec<DeviceId>> {
-        self.refresh_members()?;
+        // With no storage reachable the peers still give their batches
+        // (the head exchange below), on the membership known here.
+        if let Err(e) = self.refresh_members() {
+            if !is_network_error(&e) {
+                return Err(e);
+            }
+            log::warn!("membership not read, no storage answered: {e:#}");
+        }
         // Replicas the vault enrolled, and other devices' names for this
         // device's storages (`storages3_ops`).
         self.refresh_replicas();
@@ -707,118 +733,134 @@ impl Engine {
         // storage view for the rollback judge (they may lag).
         for (spec, backend) in self.metadata_storages(false)? {
             let mut shown: BTreeMap<Id16, u64> = BTreeMap::new();
-            for (dev, pk) in &keys {
-                let head = self.f3.ledger.head(dev);
-                if !self.keep3(dev, head.seq + 1) {
-                    continue;
-                }
-                let prefix = format!("ledger/{}/", hex::encode(dev));
-                let after = if head.forked || head.seq <= 1 {
-                    String::new()
-                } else {
-                    ledger3::checkpoint::batch_key(dev, head.seq - 1)
-                };
-                let names = backend.list_after(&prefix, &after)?;
-                let newest = |names: &[String]| {
-                    names
+            // A storage that cannot be reached is skipped (and told to the
+            // rollback judge as such); what the others and the peers gave
+            // is kept.
+            let pulled = (|| -> Result<()> {
+                for (dev, pk) in &keys {
+                    let head = self.f3.ledger.head(dev);
+                    if !self.keep3(dev, head.seq + 1) {
+                        continue;
+                    }
+                    let prefix = format!("ledger/{}/", hex::encode(dev));
+                    let after = if head.forked || head.seq <= 1 {
+                        String::new()
+                    } else {
+                        ledger3::checkpoint::batch_key(dev, head.seq - 1)
+                    };
+                    let names = backend.list_after(&prefix, &after)?;
+                    let newest = |names: &[String]| {
+                        names
+                            .iter()
+                            .filter_map(|n| n.strip_prefix(&prefix))
+                            .filter_map(ledger3::LedgerObject::parse)
+                            .map(|o| match o {
+                                ledger3::LedgerObject::Batch(s) => s,
+                                ledger3::LedgerObject::Checkpoint(s, _) => s,
+                            })
+                            .max()
+                            .unwrap_or(0)
+                    };
+                    let mut top = newest(&names);
+                    if top < head.seq && !after.is_empty() {
+                        top = newest(&backend.list(&prefix)?);
+                    }
+                    shown.insert(*dev, top);
+                    // The newest checkpoint first: it stands in for batches a
+                    // pruning device deleted (other devices' only; one of this
+                    // device's own is its own).
+                    let newest_cp = names
                         .iter()
                         .filter_map(|n| n.strip_prefix(&prefix))
                         .filter_map(ledger3::LedgerObject::parse)
-                        .map(|o| match o {
-                            ledger3::LedgerObject::Batch(s) => s,
-                            ledger3::LedgerObject::Checkpoint(s, _) => s,
+                        .filter_map(|o| match o {
+                            ledger3::LedgerObject::Checkpoint(s, 0) => Some(s),
+                            _ => None,
                         })
-                        .max()
-                        .unwrap_or(0)
-                };
-                let mut top = newest(&names);
-                if top < head.seq && !after.is_empty() {
-                    top = newest(&backend.list(&prefix)?);
-                }
-                shown.insert(*dev, top);
-                // The newest checkpoint first: it stands in for batches a
-                // pruning device deleted (other devices' only; one of this
-                // device's own is its own).
-                let newest_cp = names
-                    .iter()
-                    .filter_map(|n| n.strip_prefix(&prefix))
-                    .filter_map(ledger3::LedgerObject::parse)
-                    .filter_map(|o| match o {
-                        ledger3::LedgerObject::Checkpoint(s, 0) => Some(s),
-                        _ => None,
-                    })
-                    .filter(|s| self.keep3(dev, *s))
-                    .max();
-                if let (Some(s), false) = (newest_cp, *dev == me) {
-                    self.pull_checkpoint(backend.as_ref(), dev, pk, s)?;
-                }
-                for name in names {
-                    let Some(file) = name.strip_prefix(&prefix) else {
-                        continue;
-                    };
-                    let Some(ledger3::LedgerObject::Batch(seq)) =
-                        ledger3::LedgerObject::parse(file)
-                    else {
-                        continue;
-                    };
-                    let head = self.f3.ledger.head(dev);
-                    if !self.keep3(dev, seq)
-                        || self.f3.ledger.get(dev, seq)?.is_some()
-                        || (head.base.as_ref().is_some_and(|b| seq <= b.seq) && !head.forked)
-                    {
-                        continue;
+                        .filter(|s| self.keep3(dev, *s))
+                        .max();
+                    if let (Some(s), false) = (newest_cp, *dev == me) {
+                        self.pull_checkpoint(backend.as_ref(), dev, pk, s)?;
                     }
-                    let Some(bytes) = backend.get_bounded(&name, crate::record::MAX_PART_READ)?
-                    else {
-                        continue;
-                    };
-                    let Ok(rec) = crate::record::SignedRecord::decode(&bytes) else {
-                        // One storage holding a damaged or planted object
-                        // does not stop the pull: another may hold the batch.
-                        log::warn!(storage = backend.name(); "ledger: {name} is not a record");
-                        if *dev != me {
-                            malformed += 1;
+                    for name in names {
+                        let Some(file) = name.strip_prefix(&prefix) else {
+                            continue;
+                        };
+                        let Some(ledger3::LedgerObject::Batch(seq)) =
+                            ledger3::LedgerObject::parse(file)
+                        else {
+                            continue;
+                        };
+                        let head = self.f3.ledger.head(dev);
+                        if !self.keep3(dev, seq)
+                            || self.f3.ledger.get(dev, seq)?.is_some()
+                            || (head.base.as_ref().is_some_and(|b| seq <= b.seq) && !head.forked)
+                        {
+                            continue;
                         }
-                        continue;
-                    };
-                    if *dev == me && seq > head.seq {
-                        if rec.verify(pk).is_ok() {
-                            // Another copy of this identity published ahead of us.
-                            forks.insert(DeviceId::from_bytes(dev));
-                            self.forked_self = true;
+                        let Some(bytes) =
+                            backend.get_bounded(&name, crate::record::MAX_PART_READ)?
+                        else {
+                            continue;
+                        };
+                        let Ok(rec) = crate::record::SignedRecord::decode(&bytes) else {
+                            // One storage holding a damaged or planted object
+                            // does not stop the pull: another may hold the batch.
+                            log::warn!(storage = backend.name(); "ledger: {name} is not a record");
+                            if *dev != me {
+                                malformed += 1;
+                            }
+                            continue;
+                        };
+                        if *dev == me && seq > head.seq {
+                            if rec.verify(pk).is_ok() {
+                                // Another copy of this identity published ahead of us.
+                                forks.insert(DeviceId::from_bytes(dev));
+                                self.forked_self = true;
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                    let key = self.key_for3(&rec.key_id);
-                    match self
-                        .f3
-                        .ledger
-                        .ingest_named(&name, rec, pk, key.as_ref(), limit)
-                    {
-                        Ok(Ingest::Fork) => {
-                            forks.insert(DeviceId::from_bytes(dev));
-                        }
-                        Ok(Ingest::Refused) => {
-                            refused += 1;
-                            log::warn!(storage = backend.name(), seq = seq; "ledger batch refused");
-                        }
-                        Ok(_) => {}
-                        Err(e) => {
-                            malformed += 1;
-                            log::warn!(storage = backend.name(), seq = seq, error:% = e; "ledger batch skipped");
+                        let key = self.key_for3(&rec.key_id);
+                        match self
+                            .f3
+                            .ledger
+                            .ingest_named(&name, rec, pk, key.as_ref(), limit)
+                        {
+                            Ok(Ingest::Fork) => {
+                                forks.insert(DeviceId::from_bytes(dev));
+                            }
+                            Ok(Ingest::Refused) => {
+                                refused += 1;
+                                log::warn!(storage = backend.name(), seq = seq; "ledger batch refused");
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                malformed += 1;
+                                log::warn!(storage = backend.name(), seq = seq, error:% = e; "ledger batch skipped");
+                            }
                         }
                     }
                 }
-            }
-            if let Some(storage) = super::verify::storage_identity(backend.as_ref())
-                .ok()
+                Ok(())
+            })();
+            let reachable = self.tolerate(spec.name(), pulled)?.is_some();
+            let id = if reachable {
+                let id = super::verify::storage_identity(backend.as_ref()).ok();
+                if let Some(id) = &id {
+                    self.health.remember_id(spec.name(), id);
+                }
+                id
+            } else {
+                self.health.known_id(spec.name())
+            };
+            if let Some(storage) = id
                 .and_then(|id| crate::record::kinds::parse_id16(&id))
                 .filter(|_| !spec.is_carrier())
             {
                 views.push(crate::p2p::v3::heads::StorageView {
                     storage,
                     name: spec.name().to_string(),
-                    reachable: true,
+                    reachable,
                     shown,
                 });
             }

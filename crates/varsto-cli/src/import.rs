@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! `varsto import`: bring a git-annex repository, a cloud drive (any rclone
-//! remote: Dropbox, OneDrive, ...) or a local directory into a Varsto
-//! folder, one folder per source; see `docs/import-git-annex.md`,
-//! `docs/import-cloud.md` and `docs/import-local.md`.
+//! remote: Dropbox, OneDrive, ...), a local directory or a torrent into a
+//! Varsto folder, one folder per source; see `docs/import-git-annex.md`,
+//! `docs/import-cloud.md`, `docs/import-local.md` and `docs/torrents.md`
+//! (torrents: `crate::torrent`).
 
 use crate::{confirm, fmt_bytes, passphrase, plural, print, show, Cli};
 use anyhow::Result;
@@ -84,7 +85,34 @@ pub enum ImportCmd {
         #[command(flatten)]
         target: Target,
     },
-    /// Imported folders: how much is in, what is missing and where it is.
+    /// Download a torrent (a .torrent file or a magnet link) larger than
+    /// this disk into a folder, batch by batch, through a local
+    /// transmission-daemon (Linux); `import jobs` drives and shows the jobs.
+    Torrent(crate::torrent::TorrentAddArgs),
+    /// Import a YouTube channel (https://www.youtube.com/@name), playlist or
+    /// single video with the local yt-dlp. Listed flat, then downloaded one
+    /// video at a time and politely (25-65 s between videos, 2 s between
+    /// requests, 600 kB/s) into a spool that keeps the disk above a reserve;
+    /// each video is stored encrypted in the folder and leaves the spool once
+    /// the folder's policy holds. A video any folder has is never downloaded
+    /// again. The background service carries on (`import jobs`). Only for
+    /// content you may keep a copy of.
+    Youtube(Box<crate::youtube::AddArgs>),
+    /// The import jobs of this device, torrents and YouTube alike: list,
+    /// status, run in the terminal, pause, resume, remove. A job is named
+    /// `torrent:<hash>` or `youtube:<id>` (or by its id, folder or name).
+    Jobs {
+        #[command(subcommand)]
+        cmd: crate::import_jobs_cmd::JobsCmd,
+    },
+    /// Register YouTube videos you have already by the `[<id>]` in their file
+    /// names (yt-dlp's default names): a folder of the vault (recorded for
+    /// every device) or a directory outside Varsto (this device only). No
+    /// YouTube import downloads them again.
+    #[command(name = "youtube-scan")]
+    YoutubeScan { target: String },
+    /// Imported folders: how much is in, what is missing and where it is
+    /// (with the torrent jobs that are not complete).
     Status {
         folder: Option<String>,
         /// List the files still awaiting import with the copies that should have them.
@@ -197,6 +225,15 @@ impl Drop for ProgressLine {
 }
 
 pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
+    // Torrent and YouTube jobs open the engine themselves (list and status
+    // without the passphrase).
+    match cmd {
+        ImportCmd::Torrent(a) => return crate::torrent::add(cli, home, a),
+        ImportCmd::Youtube(a) => return crate::youtube::add(cli, home, a),
+        ImportCmd::Jobs { cmd } => return crate::import_jobs_cmd::jobs(cli, home, cmd),
+        ImportCmd::YoutubeScan { target } => return crate::youtube::scan(cli, home, target),
+        _ => {}
+    }
     let mut engine = Engine::open(home, &passphrase()?)?;
     let progress_on = !cli.json && std::io::stderr().is_terminal();
     match cmd {
@@ -255,7 +292,24 @@ pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
                 print(cli, &list, |l| describe_missing(l))?;
             } else {
                 let list = engine.import_status(folder.as_deref())?;
-                print(cli, &list, describe_status)?;
+                let jobs: Vec<String> = varsto_core::engine::torrent_jobs_at(home)
+                    .iter()
+                    .filter(|j| j.state != varsto_core::engine::JobState::Complete)
+                    .filter(|j| {
+                        folder
+                            .as_deref()
+                            .is_none_or(|f| f.eq_ignore_ascii_case(&j.folder))
+                    })
+                    .map(varsto_core::engine::TorrentJob::line)
+                    .collect();
+                print(cli, &list, |l| {
+                    let mut out = describe_status(l);
+                    for line in &jobs {
+                        out.push('\n');
+                        out += line;
+                    }
+                    out
+                })?;
             }
         }
         ImportCmd::Verify { folder } => {
@@ -265,6 +319,10 @@ pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
                 std::process::exit(1);
             }
         }
+        ImportCmd::Torrent(_)
+        | ImportCmd::Youtube(_)
+        | ImportCmd::Jobs { .. }
+        | ImportCmd::YoutubeScan { .. } => unreachable!("handled above"),
         ImportCmd::Cleanup {
             folder,
             yes,

@@ -26,6 +26,9 @@ Status of the documents that will define formats and protocols. Sections 32 to 6
 | Minimum free disk space | released in 0.0.1-alpha.14: [alpha-0-format.md](alpha-0-format.md) section 53 |
 | Shared folder roles (read-only members) | released in 0.0.1-alpha.14: [alpha-0-format.md](alpha-0-format.md) section 55 |
 | Change history of files (`varsto changes`) | released in 0.0.1-alpha.14: [alpha-0-format.md](alpha-0-format.md) section 57 |
+| Working offline (storage health, S3 and rclone timeouts, the service without network I/O under its lock, local actions; peers from the saved directory; membership outbox) | on main and in the daily builds (format 3), not in a release yet: [alpha-0-format.md](alpha-0-format.md) section 79, with 77.8 and 77.6 |
+| Torrents through a local transmission daemon (`varsto import torrent`) | on main and in the daily builds (format 3), not in a release yet: [alpha-0-format.md](alpha-0-format.md) section 81 |
+| YouTube channels through yt-dlp (`varsto import youtube`) | on main and in the daily builds (format 3), not in a release yet: [alpha-0-format.md](alpha-0-format.md) section 82 |
 
 Storage format version history (which releases read which formats): see [format-versions.md](format-versions.md).
 

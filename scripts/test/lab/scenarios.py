@@ -355,7 +355,7 @@ def scenario(name):
 @scenario("reset")
 def s_reset():
     for vm in lab.DEVICES:
-        run(vm, "pkill -x varsto; sleep 0.5; rm -rf ~/.local/share/varsto ~/data ~/sel ~/sr ~/nc-home ~/nc-docs ~/*.log; mkdir -p ~/data", check_rc=False)
+        run(vm, "pkill -x varsto; sleep 0.5; rm -rf ~/.local/share/varsto ~/data ~/sel ~/sr ~/shelf ~/Varsto ~/nc-home ~/nc-docs ~/*.log; mkdir -p ~/data", check_rc=False)
         fix_clock(vm)
     s3 = lab.DIR / "s3"
     for d in s3.glob("*"):
@@ -1284,7 +1284,11 @@ def s_outage():
         r = v("vl-laptop", "sync", check_rc=False)
         secs = time.time() - t0
         CTX["outage_fail_secs"] = round(secs, 1)
-        check(isinstance(r, dict) and r.get("_failed"), "sync claimed success with the storage down")
+        # Working offline (spec 79.1): the sync either fails at once or finishes the local
+        # part and names the storage it could not reach; it never claims the storage got it.
+        failed = isinstance(r, dict) and r.get("_failed")
+        check(failed or "cloud" in storages_down("vl-laptop"),
+              f"sync claimed success with the storage down and did not name it: {str(r)[:300]}")
         check(secs < 60, f"sync took {secs:.0f} s to give up on a storage that refuses connections")
     finally:
         lab.cmd_services(None)
@@ -1308,7 +1312,9 @@ def s_blackhole():
         r = v("vl-laptop", "sync", check_rc=False)
         secs = time.time() - t0
         CTX["blackhole_fail_secs"] = round(secs, 1)
-        check(isinstance(r, dict) and r.get("_failed"), "sync claimed success with no network")
+        failed = isinstance(r, dict) and r.get("_failed")
+        check(failed or "cloud" in storages_down("vl-laptop"),
+              f"sync claimed success with no network and did not name the storage: {str(r)[:300]}")
         check(secs < 150, f"sync took {secs:.0f} s to give up on an unreachable storage")
     finally:
         lab.ssh("vl-rhome", "sudo nft -f /etc/nftables.conf")
@@ -2846,6 +2852,548 @@ def s_mailbox_offline_disk():
     dl_clean()
 
 
+TRACKER_PY = r"""
+import socketserver, http.server, urllib.parse, struct, socket, time
+peers = {}
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query, keep_blank_values=True)
+        port = int(q.get("port", ["0"])[0])
+        ip = self.client_address[0]
+        if port:
+            peers[(ip, port)] = time.time()
+        compact = b"".join(socket.inet_aton(i) + struct.pack(">H", p) for (i, p) in peers if (i, p) != (ip, port))
+        body = b"d8:intervali15e5:peers" + str(len(compact)).encode() + b":" + compact + b"e"
+        self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+socketserver.ThreadingTCPServer.allow_reuse_address = True
+socketserver.ThreadingTCPServer(("0.0.0.0", 6969), H).serve_forever()
+"""
+
+
+def ensure_transmission(vm):
+    """transmission-daemon and transmission-create on `vm`: the image's,
+    Debian's packages, or (the device VMs have no internet) the packages and
+    their dependencies downloaded by the build VM and installed with dpkg."""
+    have = "command -v transmission-daemon >/dev/null && command -v transmission-create >/dev/null"
+    if run(vm, have, check_rc=False).returncode == 0:
+        return
+    run(vm, "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq transmission-daemon transmission-cli >/dev/null 2>&1",
+        check_rc=False)
+    if run(vm, have, check_rc=False).returncode != 0:
+        b = lab.BUILD_VM
+        run(b, "test -n \"$(ls ~/tdebs/*.deb 2>/dev/null)\" || { sudo apt-get update -qq >/dev/null 2>&1; rm -rf ~/tdebs; mkdir -p ~/tdebs; "
+               "cd ~/tdebs && apt-get download $(apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts "
+               "--no-breaks --no-replaces --no-enhances transmission-daemon transmission-cli | grep '^[a-z]' | sort -u) "
+               ">/dev/null 2>&1; true; }")
+        r = subprocess.run(lab.ssh_cmd(b, "tar cf - -C ~/tdebs ."), capture_output=True)
+        check(r.returncode == 0 and r.stdout, f"no transmission packages from {b}: {r.stderr[-300:]!r}")
+        r = subprocess.run(lab.ssh_cmd(vm, "rm -rf ~/tdebs && mkdir -p ~/tdebs && tar xf - -C ~/tdebs"), input=r.stdout,
+                           capture_output=True)
+        check(r.returncode == 0, f"copying the packages to {vm}: {r.stderr[-300:]!r}")
+        run(vm, "sudo DEBIAN_FRONTEND=noninteractive dpkg -i --skip-same-version ~/tdebs/*.deb >/dev/null 2>&1; true")
+    check(run(vm, have, check_rc=False).returncode == 0, f"no transmission-daemon on {vm}")
+    # The packaged system service runs as another user; ours run as varsto.
+    run(vm, "sudo systemctl disable --now transmission-daemon >/dev/null 2>&1; true", check_rc=False)
+
+
+def start_transmission(vm, conf, download_dir):
+    run(vm, f"pkill -x transmission-da; sleep 1; rm -rf {conf}; mkdir -p {conf} {download_dir}; "
+            f"nohup transmission-daemon --foreground --config-dir {conf} --download-dir {download_dir} "
+            f"--no-incomplete-dir --no-auth --rpc-bind-address 127.0.0.1 --allowed 127.0.0.1 --port 9091 "
+            f"--peerport 51413 --no-dht --no-portmap > ~/transmission.log 2>&1 &", check_rc=False)
+    for _ in range(30):
+        if run(vm, "transmission-remote 127.0.0.1:9091 -l >/dev/null 2>&1", check_rc=False).returncode == 0:
+            return
+        time.sleep(1)
+    raise Fail(f"transmission-daemon did not start on {vm}: " + run(vm, "tail -5 ~/transmission.log", check_rc=False).stdout)
+
+
+def seed_torrent(seed, name, torrent):
+    """Make `torrent` of ~/seed/<name> on the seed, have its daemon verify and
+    seed it; the SHA-256 of every file by path below the seed directory."""
+    run(seed, f"transmission-create -o ~/{torrent} -s 1024 -t http://10.78.1.11:6969/announce ~/seed/{name} >/dev/null")
+    run(seed, f"transmission-remote 127.0.0.1:9091 -a ~/{torrent} -w /home/varsto/seed >/dev/null")
+    for _ in range(120):
+        lines = [x for x in run(seed, "transmission-remote 127.0.0.1:9091 -l", check_rc=False).stdout.splitlines() if name in x]
+        if lines and "100%" in lines[0]:
+            break
+        time.sleep(2)
+    else:
+        raise Fail(f"the seed did not verify {name}: " + run(seed, "transmission-remote 127.0.0.1:9091 -l").stdout)
+    return {line[66:].removeprefix("./"): line[:64] for line in
+            run(seed, f"cd ~/seed && find {name} -type f -print0 | sort -z | xargs -0 sha256sum").stdout.splitlines() if line}
+
+
+def drive_torrent(lap, h, reserve, minutes=25):
+    """`varsto import jobs run` in the background until the job is complete, polling the
+    spool's free space; (state, lowest free bytes, seconds)."""
+    run(lap, f"{ENV} nohup varsto import jobs run {h} --interval 2 > ~/torrent-run.log 2>&1 &")
+    size = int(run(lap, "df -B1 --output=size /mnt/spool | tail -1").stdout)
+    lowest, state, t0 = size, None, time.time()
+    try:
+        while time.time() - t0 < minutes * 60:
+            avail = int(run(lap, "df -B1 --output=avail /mnt/spool | tail -1").stdout)
+            lowest = min(lowest, avail)
+            st = v(lap, f"import jobs status {h}", check_rc=False)
+            state = st.get("state") if isinstance(st, dict) else None
+            if state == "complete":
+                break
+            time.sleep(2)
+    finally:
+        run(lap, "pkill -f '[v]arsto import jobs run'; true", check_rc=False)
+    check(state == "complete", f"the job did not complete ({state}): " +
+          run(lap, "tail -20 ~/torrent-run.log", check_rc=False).stdout[-1500:])
+    check(lowest >= reserve, f"the spool fell to {lowest} bytes free, below the {reserve} byte reserve")
+    return state, lowest, round(time.time() - t0, 1)
+
+
+@scenario("torrent-spool")
+def s_torrent_spool():
+    """The desktop seeds a generated 2 GB torrent (20 files of 100 MiB) with
+    transmission-daemon behind a tiny tracker; the laptop's Varsto downloads
+    it through its own transmission-daemon into a 512 MB tmpfs with a 20 %
+    reserve, batch by batch, into a new folder on the S3 bucket chosen with
+    `--storage cheapest` (the bucket priced below a local directory storage).
+    Every file must be in the folder, the tmpfs must never fall below the
+    reserve (df polled during the run), and the tmpfs must be empty at the
+    end. Then a second torrent holding 10 of the same files and 3 new ones is
+    added to the same folder: the 10 are present (never downloaded, the
+    daemon reports nothing downloaded for them), the 3 new ones are stored."""
+    s_reset()
+    seed, lap = "vl-desktop", "vl-laptop"
+    for vm in (seed, lap):
+        ensure_transmission(vm)
+    # The seed: data, tracker, daemon.
+    run(seed, "pkill -f '[t]racker.py'; rm -rf ~/seed ~/big.torrent ~/more.torrent; mkdir -p ~/seed/Bigset/sub; true")
+    run(seed, "for i in $(seq -w 1 20); do d=~/seed/Bigset; [ $((10#$i % 3)) -eq 0 ] && d=~/seed/Bigset/sub; "
+              "head -c 100M /dev/urandom > $d/part-$i.bin; done")
+    run(seed, f"cat > ~/tracker.py <<'PY'\n{TRACKER_PY}\nPY\nnohup python3 ~/tracker.py > ~/tracker.log 2>&1 &")
+    start_transmission(seed, "/home/varsto/tr-seed", "/home/varsto/seed")
+    sums = seed_torrent(seed, "Bigset", "big.torrent")
+    check(len(sums) == 20, f"seed files: {len(sums)}")
+    r = subprocess.run(lab.ssh_cmd(seed, "cat ~/big.torrent"), capture_output=True)
+    subprocess.run(lab.ssh_cmd(lap, "cat > ~/big.torrent"), input=r.stdout, check=True)
+
+    # The laptop: a 512 MB spool, its own daemon, a vault on the bucket and
+    # a dearer local storage, so that "cheapest" means the bucket.
+    run(lap, "sudo umount /mnt/spool 2>/dev/null; sudo mkdir -p /mnt/spool && sudo mount -t tmpfs -o size=512m tmpfs /mnt/spool "
+             "&& sudo chown varsto:varsto /mnt/spool")
+    start_transmission(lap, "/home/varsto/tr-dl", "/mnt/spool")
+    init_vault(lap, "laptop")
+    v(lap, f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+           f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
+    v(lap, "storage add-local shelf /home/varsto/shelf --place home", json_out=False)
+    v(lap, "storage price cloud --gb-month 0.006 --currency EUR", json_out=False)
+    v(lap, "storage price shelf --gb-month 0.02 --currency EUR", json_out=False)
+    job = v(lap, "import torrent /home/varsto/big.torrent --folder big --storage cheapest --free-min 20% --download-dir /mnt/spool")
+    h = job["hash"]
+    check(job["state"] == "downloading" and len(job["files"]) == 20, f"job: {str(job)[:400]}")
+    check(job["storages"] == ["cloud"], f"cheapest chose {job['storages']}")
+    size = int(run(lap, "df -B1 --output=size /mnt/spool | tail -1").stdout)
+    reserve = size * 20 // 100
+    _, lowest, secs = drive_torrent(lap, h, reserve)
+    CTX["torrent_secs"], CTX["torrent_lowest_free"], CTX["torrent_reserve"] = secs, lowest, reserve
+    check(run(lap, "find /mnt/spool -mindepth 1 | head -5").stdout.strip() == "", "the spool is not empty")
+    st = v(lap, f"import jobs status torrent:{h}")
+    check(st.get("job") == f"torrent:{h}" and st.get("job_kind") == "torrent", f"status names the job: {str(st)[:200]}")
+    # One list for every kind of job (`import jobs`, the Import page's rows).
+    rows = v(lap, "import jobs list")
+    check([r["id"] for r in rows] == [f"torrent:{h}"] and rows[0]["kind"] == "torrent" and rows[0]["finished"]
+          and rows[0]["done"] == rows[0]["total"] == 20, f"import jobs list: {str(rows)[:400]}")
+    check(st["batches"] >= 4 and st["bytes_stored"] == 20 * (100 << 20), f"batches {st['batches']}, stored {st['bytes_stored']}")
+    files = {f["path"]: f for f in v(lap, "folder files big")}
+    check(set(files) == set(sums), f"folder files differ: {sorted(set(sums) ^ set(files))[:6]}")
+    check(all(f["size"] == 100 << 20 for f in files.values()), "a file has the wrong size")
+    check(not run(lap, "find /home/varsto/shelf -path '*packs*' -type f | head -1", check_rc=False).stdout.strip(),
+          "the dearer local storage holds packs of the torrent folder")
+    # Two files read back from the bucket match the seed.
+    for p in ("Bigset/part-01.bin", "Bigset/sub/part-12.bin"):
+        v(lap, f"folder fetch big {shlex.quote(p)}", json_out=False)
+        root = next(f["path"] for f in v(lap, "status")["folders"] if f["name"] == "big")
+        got = run(lap, f"sha256sum {shlex.quote(root + '/' + p)}").stdout[:64]
+        check(got == sums[p], f"{p}: content differs from the seed")
+    # The folder is an import like the others.
+    imports = v(lap, "import status big")
+    check([s["folder"] for s in imports] == ["big"] and imports[0]["kind"] == "dir", f"import status: {str(imports)[:300]}")
+    ver = v(lap, "import verify big")
+    check(ver["blocks_without_storage_copy"] == 0, f"import verify: {str(ver)[:300]}")
+    v(lap, f"import jobs remove {h}", json_out=False)
+
+    # A second torrent with the same top directory (its name is the first path
+    # component): 10 files the folder holds, hard links to the seed's, and 3 new.
+    run(seed, "rm -rf ~/seed/v2 && mkdir -p ~/seed/v2/Bigset/sub && for i in $(seq -w 1 10); do d=; "
+              "[ $((10#$i % 3)) -eq 0 ] && d=sub/; ln ~/seed/Bigset/${d}part-$i.bin ~/seed/v2/Bigset/${d}part-$i.bin; done; "
+              "for i in 21 22 23; do head -c 100M /dev/urandom > ~/seed/v2/Bigset/part-$i.bin; done")
+    run(seed, "transmission-create -o ~/more.torrent -s 1024 -t http://10.78.1.11:6969/announce ~/seed/v2/Bigset >/dev/null")
+    run(seed, "transmission-remote 127.0.0.1:9091 -a ~/more.torrent -w /home/varsto/seed/v2 >/dev/null")
+    for _ in range(120):
+        lines = run(seed, "transmission-remote 127.0.0.1:9091 -l", check_rc=False).stdout.splitlines()
+        if sum(1 for x in lines if "100%" in x) >= 2:
+            break
+        time.sleep(2)
+    else:
+        raise Fail("the seed did not verify the second torrent")
+    r = subprocess.run(lab.ssh_cmd(seed, "cat ~/more.torrent"), capture_output=True)
+    subprocess.run(lab.ssh_cmd(lap, "cat > ~/more.torrent"), input=r.stdout, check=True)
+    job2 = v(lap, "import torrent /home/varsto/more.torrent --folder big --free-min 20% --download-dir /mnt/spool")
+    h2 = job2["hash"]
+    present = [f["path"] for f in job2["files"] if f["done"] and f["outcome"] == "present"]
+    check(len(present) == 10 and job2["existing_folder"], f"present at add: {present}")
+    drive_torrent(lap, h2, reserve)
+    st2 = v(lap, f"import jobs status {h2}")
+    check(st2["bytes_stored"] == 3 * (100 << 20) and st2["bytes_deduped"] == 10 * (100 << 20),
+          f"second torrent stored {st2['bytes_stored']}, deduped {st2['bytes_deduped']}")
+    # The daemon never fetched the present files.
+    info = run(lap, f"transmission-remote 127.0.0.1:9091 -t {h2} -f", check_rc=False).stdout
+    for p in present:
+        line = next((x for x in info.splitlines() if x.rstrip().endswith(p)), "")
+        m = re.search(r":\s+(\d+)(?:\.\d+)?%", line)  # "0%" or "0.00%"
+        # Only pieces shared with a neighbouring file (1 MiB of 100) may be there.
+        check(m and int(m.group(1)) <= 2, f"{p} was downloaded: {line!r}")
+    files = {f["path"] for f in v(lap, "folder files big")}
+    check({f"Bigset/part-{i}.bin" for i in (21, 22, 23)} <= files, f"new files missing: {sorted(files)[-5:]}")
+    check(run(lap, "find /mnt/spool -mindepth 1 | head -5").stdout.strip() == "", "the spool is not empty after the second job")
+    v(lap, f"import jobs remove {h2}", json_out=False)
+    for vm in (seed, lap):
+        run(vm, "pkill -x transmission-da; pkill -f '[t]racker.py'; rm -rf ~/seed ~/tr-seed ~/tr-dl ~/shelf ~/big.torrent ~/more.torrent; true",
+            check_rc=False)
+    run(lap, "sudo umount /mnt/spool; true", check_rc=False)
+YT_FAKE = r'''#!/usr/bin/env bash
+# A fake yt-dlp for the lab (no network): lists ~/yt-listing.txt, prints a size of
+# 2 MB for a probe, fails the private video, writes 2 MB of random data and an info file.
+echo "$*" >> ~/yt-calls.log
+mode=download; out=''; prev=''
+for a in "$@"; do
+  case "$a" in --flat-playlist) mode=list ;; --skip-download) mode=probe ;; esac
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  prev="$a"
+done
+url="${@: -1}"; id="${url##*v=}"
+case "$mode" in
+  list) cat ~/yt-listing.txt; exit 0 ;;
+  probe)
+    if [ "$id" = labPRIVATE1 ]; then echo "ERROR: [youtube] $id: Private video" >&2; exit 1; fi
+    echo 2000000; exit 0 ;;
+esac
+base="${out%%\%(id)s.\%(ext)s}"
+head -c 2000000 /dev/urandom > "$base$id.mp4"
+printf '{"id":"%s","title":"Lab episode %s","channel":"Lab Channel","upload_date":"20240601"}' "$id" "$id" > "$base$id.info.json"
+'''
+
+
+@scenario("youtube-spool")
+def s_youtube_spool():
+    """Spec 82 with a fake yt-dlp on the VM (nothing goes to the network): a channel of
+    four videos, one private and one the vault has in another folder. `import youtube` lists,
+    downloads one at a time into the spool, stores each in the folder and empties the spool;
+    the private video is recorded as failed and the job goes on; the one in the other folder
+    is never downloaded. A later listing with one more video downloads only that one, and
+    `import youtube-scan` of a directory registers a video by its file name."""
+    dl_clean()
+    vm = DL_VM
+    run(vm, "rm -rf ~/yt-dl ~/yt-old ~/yt-mine ~/yt-calls.log ~/yt-listing.txt ~/fake-yt-dlp ~/Varsto/lab-channel; true",
+        check_rc=False)
+    dl_init()
+    dl("storage add-local box /home/varsto/dl-box --place cloud", json_out=False)
+    run(vm, "mkdir -p ~/yt-old && head -c 1000 /dev/urandom > ~/yt-old/'Earlier [labOLDVID04].mp4'")
+    dl_folder_add("yt-old", "/home/varsto/yt-old")
+    dl("push yt-old")
+    run(vm, f"cat > ~/fake-yt-dlp <<'EOF'\n{YT_FAKE}EOF\nchmod +x ~/fake-yt-dlp")
+    ids = ["labVIDEO001", "labPRIVATE1", "labOLDVID04", "labVIDEO002"]
+    listing = "".join(f"{i}\\thttps://www.youtube.com/watch?v={i}\\tLab episode {i}\\n" for i in ids)
+    run(vm, f"printf '{listing}' > ~/yt-listing.txt")
+    job = dl("import youtube https://www.youtube.com/@LabChannel --folder lab-channel --storage box "
+             "--download-dir /home/varsto/yt-dl --ytdlp-path /home/varsto/fake-yt-dlp")
+    check(isinstance(job, dict) and job.get("state") == "waiting_retry", f"import youtube: {str(job)[:400]}")
+    by_id = {x["id"]: x for x in job["videos"]}
+    check(by_id["labVIDEO001"]["status"] == "stored" and by_id["labVIDEO002"]["status"] == "stored",
+          f"stored: {by_id}")
+    check(by_id["labOLDVID04"]["status"] == "already_stored", f"already: {by_id['labOLDVID04']}")
+    check(by_id["labPRIVATE1"]["status"] == "failed"
+          and "Private video" in (by_id["labPRIVATE1"].get("last_error") or ""), f"private: {by_id['labPRIVATE1']}")
+    calls = run(vm, "cat ~/yt-calls.log").stdout
+    check("labOLDVID04" not in calls, "the video in the vault was never asked for")
+    check("--sleep-interval 25 --max-sleep-interval 65 --sleep-requests 2 --limit-rate 600K" in calls,
+          "polite defaults")
+    left = run(vm, f"find {job['spool_dir']} -name '*.mp4' | wc -l").stdout.strip()
+    check(left == "0", f"the spool still holds {left} video(s)")
+    files = dl("folder files lab-channel")
+    names = {f["path"] for f in files}
+    check("Lab Channel/2024-06-01 Lab episode labVIDEO001 [labVIDEO001].mp4" in names, f"files: {sorted(names)}")
+    fsck_clean(vm, "after the YouTube job", home=DL)
+    # One more video: only it is downloaded.
+    run(vm, "printf 'labVIDEO003\\thttps://www.youtube.com/watch?v=labVIDEO003\\tNew\\n' >> ~/yt-listing.txt")
+    before = int(run(vm, "wc -l < ~/yt-calls.log").stdout.strip())
+    rows = dl("import jobs list")
+    row = next((r for r in rows if r["id"] == f"youtube:{job['id']}"), None)
+    check(row is not None and row["kind"] == "youtube" and row["already_stored"] == 1
+          and [f["id"] for f in row["failed"]] == ["labPRIVATE1"] and "Private video" in row["failed"][0]["reason"]
+          and "retry" in row["actions"], f"import jobs list: {str(rows)[:600]}")
+    dl(f"import jobs run youtube:{job['id'][:8]} --retry-failed")
+    new = run(vm, f"tail -n +{before + 1} ~/yt-calls.log").stdout
+    check("labVIDEO003" in new and "labVIDEO001" not in new and "labVIDEO002" not in new,
+          f"calls of the second run: {new[-600:]}")
+    run(vm, "mkdir -p ~/yt-mine && touch ~/yt-mine/'Mine [labMINE0005].webm'")
+    scan = dl("import youtube-scan /home/varsto/yt-mine")
+    check(scan.get("videos") == 1, f"scan: {scan}")
+
+
+# ----- working offline (spec section 79) -------------------------------------------------------
+
+S3B_PORT = 9901
+S3B_BUCKET = "vault2"
+
+
+def start_s3b():
+    """A second S3 server on the host (port 9901, the same directory as the first, bucket
+    vault2), so that one storage can go away while the other answers. Returns its Popen."""
+    (lab.DIR / "s3" / S3B_BUCKET).mkdir(parents=True, exist_ok=True)
+    p = subprocess.Popen(["rclone", "serve", "s3", "--addr", f"{lab.WAN_HOST}:{S3B_PORT}",
+                          "--auth-key", f"{lab.S3['key']},{lab.S3['secret']}", "--vfs-cache-mode", "off",
+                          "--dir-cache-time", "5s", str(lab.DIR / "s3")],
+                         stdout=open(lab.DIR / "run" / "s3b.log", "a"), stderr=subprocess.STDOUT, start_new_session=True)
+    time.sleep(1.5)
+    return p
+
+
+def stop_s3b(p):
+    if p is not None and p.poll() is None:
+        p.terminate()  # our own child, by its handle
+        try:
+            p.wait(10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+
+def block_wan(src=None, port=None):
+    """The home router drops (no answer, like a dead link) what goes from the home LAN to
+    the WAN: everything, or only from one device (`src`), or only to one port of the host."""
+    m = ""
+    if src:
+        m += f" ip saddr {src}"
+    if port:
+        m += f" ip daddr {lab.WAN_HOST} tcp dport {port}"
+    lab.ssh("vl-rhome", f"sudo nft insert rule ip filter forward iifname eth0 oifname eth1{m} drop")
+
+
+def unblock_wan():
+    lab.ssh("vl-rhome", "sudo nft -f /etc/nftables.conf")
+
+
+def storages_down(vm):
+    st = v(vm, "status")
+    return [d.get("storage") for d in st.get("storages_down") or []]
+
+
+@scenario("offline-storage-down-mid-sync")
+def s_offline_storage_down():
+    """Spec 79.1: two S3 storages with two copies of every block; the second one stops
+    answering (black-holed, connections time out). A change still syncs: the laptop's sync
+    succeeds within seconds, lists the storage as down, and the desktop (which also cannot
+    reach it) gets the change from the first storage. Once the storage answers again the
+    next sync writes what it missed there (packs and records) and fsck is clean on both."""
+    s_reset()
+    s3b = start_s3b()
+    try:
+        keys = init_vault("vl-laptop", "laptop")
+        v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                       f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
+        v("vl-laptop", f"storage add-s3 cloud2 --insecure-http --endpoint http://{lab.WAN_HOST}:{S3B_PORT} --region us-east-1 "
+                       f"--bucket {S3B_BUCKET} --access-key-id {lab.S3['key']} --place cloud2", json_out=False)
+        gen_data("vl-laptop", "/home/varsto/data/docs", seed=7, big_mb=2, small=30)
+        folder_add("vl-laptop", "docs", "/home/varsto/data/docs")
+        v("vl-laptop", "policy set docs --min-copies 2", json_out=False)
+        v("vl-laptop", "push docs")
+        check(bucket_packs() and bucket_packs(S3B_BUCKET), f"packs: {len(bucket_packs())} in {BUCKET}, {len(bucket_packs(S3B_BUCKET))} in {S3B_BUCKET}")
+        join_and_attach("vl-laptop", "vl-desktop", "desktop", {"docs": "/home/varsto/data/docs"}, keys["vault_words"])
+        before = len(bucket_packs(S3B_BUCKET))
+        block_wan(port=S3B_PORT)
+        try:
+            run("vl-laptop", "head -c 3000000 /dev/urandom > ~/data/docs/while-down.bin && echo one-down > ~/data/docs/one-down.txt")
+            t0 = time.time()
+            r = v("vl-laptop", "sync", check_rc=False)
+            secs = time.time() - t0
+            CTX["offline_one_down_sync_secs"] = round(secs, 1)
+            check(not (isinstance(r, dict) and r.get("_failed")), f"sync failed with one storage of two down: {str(r)[:400]}")
+            check(secs < 120, f"sync took {secs:.0f} s with one storage black-holed")
+            down = storages_down("vl-laptop")
+            check("cloud2" in down, f"status does not list cloud2 as down: {down}")
+            check("cloud" not in down, f"status lists cloud as down: {down}")
+            wait_file("vl-desktop", "~/data/docs/one-down.txt", "one-down", secs=90)
+            a = run("vl-laptop", "sha256sum ~/data/docs/while-down.bin").stdout.split()[0]
+            b = run("vl-desktop", "sha256sum ~/data/docs/while-down.bin", check_rc=False).stdout.split()
+            check(b and b[0] == a, "the file written while a storage was down differs on the desktop")
+        finally:
+            unblock_wan()
+        # Healing: `sync` by hand tries the resting storage at once.
+        v("vl-laptop", "sync")
+        v("vl-laptop", "sync")
+        check(not storages_down("vl-laptop"), f"cloud2 still listed as down after it answers: {storages_down('vl-laptop')}")
+        check(len(bucket_packs(S3B_BUCKET)) > before, f"cloud2 got no pack after it came back ({before} before)")
+        fsck_clean("vl-laptop", "after the storage came back")
+        v("vl-desktop", "sync")
+        fsck_clean("vl-desktop", "after the storage came back")
+    finally:
+        unblock_wan()
+        stop_s3b(s3b)
+
+
+@scenario("offline-lan-only")
+def s_offline_lan_only():
+    """Spec 77.8 "Offline" and 79.1: the home LAN loses the internet (every storage
+    black-holed). The desktop opens the vault at once (no storage is asked while opening),
+    reaches the laptop from the saved peer directory and fetches the content of a file of a
+    selective folder from it; a sync gives up within seconds and lists the storage as down
+    instead of hanging; after the link is back everything syncs and fsck is clean."""
+    fresh_pair()
+    stun = " ".join(f"--stun {x}" for x in lab.STUN)
+    for vm in ("vl-laptop", "vl-desktop"):
+        v(vm, f"p2p enable {stun}", json_out=False)
+    run("vl-laptop", "head -c 5000000 /dev/urandom > ~/data/docs/lan-only.bin")
+    v("vl-laptop", "push docs")
+    sha = run("vl-laptop", "sha256sum ~/data/docs/lan-only.bin").stdout.split()[0]
+    # The desktop holds the folder as placeholders (selective) and knows the file.
+    v("vl-desktop", "folder detach docs", json_out=False)
+    run("vl-desktop", "rm -rf ~/sel")
+    v("vl-desktop", "folder attach docs /home/varsto/sel --selective", json_out=False)
+    v("vl-desktop", "sync")
+    check(run("vl-desktop", "test -e ~/sel/lan-only.bin.varsto-placeholder", check_rc=False).returncode == 0,
+          "the desktop has no placeholder for the new file")
+    for vm in ("vl-laptop", "vl-desktop"):
+        start_service(vm)
+    try:
+        # Peer records travel through the bucket and are saved on each device.
+        saved = False
+        for _ in range(30):
+            if run("vl-desktop", "test -s ~/.local/share/varsto/peer-records.json", check_rc=False).returncode == 0:
+                saved = True
+                break
+            time.sleep(3)
+        check(saved, "the desktop saved no peer directory")
+        time.sleep(10)
+        kill_services("vl-desktop")
+        block_wan()
+        try:
+            t0 = time.time()
+            st = v("vl-desktop", "status")
+            secs = time.time() - t0
+            CTX["offline_lan_status_secs"] = round(secs, 1)
+            check(secs < 20, f"status took {secs:.0f} s with no storage reachable")
+            check(st.get("folders"), f"status without storages: {str(st)[:300]}")
+            t0 = time.time()
+            r = v("vl-desktop", "folder fetch docs lan-only.bin", json_out=False, check_rc=False)
+            CTX["offline_lan_fetch_secs"] = round(time.time() - t0, 1)
+            got = run("vl-desktop", "sha256sum ~/sel/lan-only.bin 2>/dev/null || true").stdout.split()
+            check(got and got[0] == sha, f"the file did not come from the laptop over the LAN: {str(r)[-400:]}")
+            t0 = time.time()
+            v("vl-desktop", "sync", check_rc=False)
+            secs = time.time() - t0
+            CTX["offline_lan_sync_secs"] = round(secs, 1)
+            check(secs < 120, f"sync took {secs:.0f} s with no storage reachable")
+            check("cloud" in storages_down("vl-desktop"), f"status does not list cloud as down: {storages_down('vl-desktop')}")
+        finally:
+            unblock_wan()
+        run("vl-desktop", "echo back > ~/sel/back.txt")
+        v("vl-desktop", "sync")
+        wait_file("vl-laptop", "~/data/docs/back.txt", "back", secs=90)
+        check(not storages_down("vl-desktop"), f"cloud still listed as down: {storages_down('vl-desktop')}")
+        fsck_clean("vl-desktop", "after the link came back")
+    finally:
+        unblock_wan()
+        kill_services("vl-laptop", "vl-desktop")
+
+
+@scenario("offline-pair-join-without-storage")
+def s_offline_pair_join():
+    """Spec 68: the new device cannot reach the storage while it pairs (its own uplink is
+    black-holed; the LAN works). It joins at once with the keys from the pairing,
+    `state/pending-join.json` holds the rest, and a sync says joining is not finished. Once
+    the storage answers, the next sync finishes joining: the device is listed on the laptop and
+    the folder the offer named arrives."""
+    s_reset()
+    init_vault("vl-laptop", "laptop")
+    v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                   f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
+    gen_data("vl-laptop", "/home/varsto/data/docs", seed=9, big_mb=1, small=15)
+    folder_add("vl-laptop", "docs", "/home/varsto/data/docs")
+    v("vl-laptop", "push docs")
+    want = tree_hashes("vl-laptop", "/home/varsto/data/docs")
+    block_wan(src="10.78.1.11")
+    try:
+        run("vl-laptop", f"{ENV} nohup varsto pair offer --yes --folders docs > ~/pair.log 2>&1 &")
+        code = None
+        for _ in range(30):
+            m = re.search(r"Pairing code: (\d{3}-\d{3}-\d{3})", run("vl-laptop", "cat ~/pair.log").stdout)
+            if m:
+                code = m.group(1)
+                break
+            time.sleep(0.5)
+        check(code, "no pairing code: " + run("vl-laptop", "cat ~/pair.log").stdout[-300:])
+        t0 = time.time()
+        out = run("vl-desktop", f"{ENV} varsto pair join --name desktop --code {code} 2>&1", check_rc=False).stdout
+        CTX["offline_pair_join_secs"] = round(time.time() - t0, 1)
+        check("joined vault" in out, out[-500:])
+        check("joined without reaching a storage" in out, "the join did not say it was deferred: " + out[-500:])
+        check(run("vl-desktop", "test -s ~/.local/share/varsto/state/pending-join.json", check_rc=False).returncode == 0,
+              "no state/pending-join.json")
+        r = v("vl-desktop", "sync", check_rc=False)
+        check(isinstance(r, dict) and r.get("_failed") and "joining is not finished" in (r.get("_err", "") + str(r.get("_out"))),
+              f"sync without a storage: {str(r)[:400]}")
+    finally:
+        unblock_wan()
+        run("vl-laptop", "pkill -f 'varsto pair offer'", check_rc=False)
+    v("vl-desktop", "sync")
+    check(run("vl-desktop", "test -e ~/.local/share/varsto/state/pending-join.json", check_rc=False).returncode != 0,
+          "pending-join.json is still there after a sync that reached the storage")
+    v("vl-laptop", "sync")
+    devs = v("vl-laptop", "status").get("devices") or {}
+    names = list(devs.values()) if isinstance(devs, dict) else [d.get("name") for d in devs]
+    check("desktop" in names, f"the laptop does not list the desktop: {names}")
+    v("vl-desktop", "folder attach docs /home/varsto/data/docs", json_out=False)
+    v("vl-desktop", "sync")
+    same_tree(want, tree_hashes("vl-desktop", "/home/varsto/data/docs"), "after the deferred join")
+
+
+@scenario("offline-approve-then-flush")
+def s_offline_approve():
+    """Spec 77.6 "Offline": the owner approves a folder request while its uplink is
+    black-holed. The approval is kept on the owner's device (records mirror and outbox) and
+    the command succeeds; the requester gets nothing yet. Once the owner's sync reaches the
+    storage the outbox is flushed and the requester reads its grant and gets the files."""
+    fresh_pair()
+    join_s3("vl-work", "work", CTX["vault_words"])
+    req = v("vl-work", "folder request docs")
+    pending = []
+    for _ in range(12):
+        v("vl-laptop", "sync", check_rc=False)
+        pending = [p for p in v("vl-laptop", "folder requests docs") if p["device"] == "work"]
+        if pending:
+            break
+        time.sleep(3)
+    check(pending and pending[0]["fingerprint"] == req["fingerprint"], f"the laptop does not list work's request: {pending}")
+    block_wan(src="10.78.1.10")
+    try:
+        t0 = time.time()
+        r = v("vl-laptop", "folder approve docs work --yes", json_out=False, check_rc=False)
+        CTX["offline_approve_secs"] = round(time.time() - t0, 1)
+        check(not (isinstance(r, dict) and r.get("_failed")), f"approve failed offline: {str(r)[:400]}")
+        v("vl-work", "sync", check_rc=False)
+        m = v("vl-work", "folder members docs", check_rc=False)
+        role = m.get("your_role") if isinstance(m, dict) and not m.get("_failed") else None
+        check(not role, f"work got a role before the approval left the laptop: {role}")
+    finally:
+        unblock_wan()
+    v("vl-laptop", "sync")
+    wait_role("vl-work", "docs")
+    v("vl-work", "folder attach docs /home/varsto/data/docs", json_out=False)
+    v("vl-work", "sync")
+    same_tree(tree_hashes("vl-laptop", "/home/varsto/data/docs"), tree_hashes("vl-work", "/home/varsto/data/docs"),
+              "after the approval was flushed")
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_approval_flow, s_recovery_escrow, s_member_removal,
@@ -2853,7 +3401,8 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale, s_format3_scale,
              s_backup, s_gc_settling, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_mailbox_offline_disk,
              s_scrub, s_restic, s_ledger_loss, s_ledger_withhold, s_ledger_rollback, s_rollback_warning,
-             s_upgrade, s_forward, s_pair_fallback]
+             s_upgrade, s_forward, s_pair_fallback, s_torrent_spool, s_youtube_spool,
+             s_offline_storage_down, s_offline_lan_only, s_offline_pair_join, s_offline_approve]
 
 # What a run must contain (the format 3 switch): the old scenarios, updated, and the new ones.
 REQUIRED = {"reset", "init-and-s3-through-nat", "pair-over-lan", "sync-to-second-device", "join-with-recovery-words",
@@ -2867,7 +3416,12 @@ REQUIRED = {"reset", "init-and-s3-through-nat", "pair-over-lan", "sync-to-second
             "pair-wrong-address-falls-back",
             # new: design section 12, "tests that define done"
             "format3-scale", "approval-flow", "recovery-escrow", "rollback-warning", "member-removal", "gc-settling",
-            "mailbox-offline-disk"}
+            "mailbox-offline-disk",
+            # torrents through a local transmission-daemon (spec 81), YouTube through yt-dlp (spec 82)
+            "torrent-spool", "youtube-spool",
+            # working offline (spec 79, 77.8 "Offline", 77.6 "Offline", 68)
+            "offline-storage-down-mid-sync", "offline-lan-only", "offline-pair-join-without-storage",
+            "offline-approve-then-flush"}
 
 
 def self_check():
@@ -2890,7 +3444,9 @@ def self_check():
     if names[:1] != ["reset"]:
         problems.append("the first scenario must be reset (it empties the bucket)")
     for n in ("format3-scale", "approval-flow", "recovery-escrow", "rollback-warning", "member-removal", "gc-settling",
-              "mailbox-offline-disk", "upgrade-from-alpha-15", "ledger-rollback", "forwarding-and-viz"):
+              "mailbox-offline-disk", "upgrade-from-alpha-15", "ledger-rollback", "forwarding-and-viz", "torrent-spool",
+              "youtube-spool", "offline-storage-down-mid-sync", "offline-lan-only",
+              "offline-pair-join-without-storage", "offline-approve-then-flush"):
         f = next((f for f in SCENARIOS if f.scenario == n), None)
         if f is not None and not (f.__doc__ or "").strip():
             problems.append(f"scenario {n} has no docstring saying what it asserts")

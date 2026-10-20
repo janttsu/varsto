@@ -194,7 +194,10 @@ impl Engine {
         };
         let mut refused = RecordsRefused::default();
         let mut changed: BTreeMap<Id16, BTreeSet<String>> = BTreeMap::new();
-        for (_, backend) in self.record_storages()? {
+        // A storage that cannot be reached is skipped; the records come
+        // from the others. Only when none answers is the pull an error.
+        let (mut answered, mut unreachable) = (0usize, None::<anyhow::Error>);
+        for (spec, backend) in self.record_storages()? {
             let store = RecordStore {
                 storage: backend.as_ref(),
                 acceptor: Acceptor {
@@ -203,19 +206,34 @@ impl Engine {
                     trust: &trust,
                 },
             };
-            {
-                let mut t = table.write().unwrap_or_else(|e| e.into_inner());
-                let r = blockmap::pull(&mut t, &store, view, &mut refused)?;
-                for (d, seq, why) in r.skipped {
-                    log::debug!(device = hex::encode(d).as_str(), seq = seq; "block map record skipped: {why}");
+            let pulled = (|| -> Result<()> {
+                {
+                    let mut t = table.write().unwrap_or_else(|e| e.into_inner());
+                    let r = blockmap::pull(&mut t, &store, view, &mut refused)?;
+                    for (d, seq, why) in r.skipped {
+                        log::debug!(device = hex::encode(d).as_str(), seq = seq; "block map record skipped: {why}");
+                    }
                 }
+                let r = manifests.pull(&store, view, &me, &mut refused)?;
+                for (d, paths) in r.changed {
+                    changed.entry(d).or_default().extend(paths);
+                }
+                for x in &r.refused {
+                    log::warn!("manifest refused: {x}");
+                }
+                Ok(())
+            })();
+            match pulled {
+                Ok(()) => answered += 1,
+                Err(e) if self.health.failed(spec.name(), &e) => {
+                    unreachable.get_or_insert(e);
+                }
+                Err(e) => return Err(e),
             }
-            let r = manifests.pull(&store, view, &me, &mut refused)?;
-            for (d, paths) in r.changed {
-                changed.entry(d).or_default().extend(paths);
-            }
-            for x in &r.refused {
-                log::warn!("manifest refused: {x}");
+        }
+        if answered == 0 {
+            if let Some(e) = unreachable {
+                return Err(e.context("no storage could be reached for the folder's records"));
             }
         }
         if refused.total() > 0 {
@@ -320,6 +338,9 @@ impl Engine {
                 let mut writer = MapWriter::from_view(*folder, me, epoch, view, highest);
                 let mut t = table.write().unwrap_or_else(|e| e.into_inner());
                 let p = writer.publish(&rw, &refs, written, lamport, Some(&t), view)?;
+                // A storage left out because it is down gets the record later.
+                let names: Vec<String> = p.sealed.parts.iter().map(|(n, _)| n.clone()).collect();
+                self.heal_later(&storages, super::records3_io::Copies::Hot, &names);
                 let folder_pack = |p: &[u8; 32]| view.pack_folder(p).is_none_or(|f| f == *folder);
                 p.apply_to(&mut t, &folder_pack)?;
                 p.events
@@ -378,7 +399,6 @@ impl Engine {
             folder: *folder,
             epoch,
         };
-        let refs: Vec<&dyn Storage> = storages.iter().map(|(_, b)| &**b).collect();
         let published = {
             let keys = self.keys3(&vault_keys);
             let signer = DeviceSigner {
@@ -390,41 +410,27 @@ impl Engine {
                 signer: &signer,
                 keys: &keys,
             };
-            let highest = RecordStore {
-                storage: refs[0],
-                acceptor: Acceptor {
-                    vault,
-                    keys: &keys,
-                    trust: &crate::membership3::Trust {
-                        devices: &self.f3.members.devices,
-                        revoked: &self.f3.members.revoked,
-                        folders: None,
-                        members: None,
-                    },
-                },
-            }
-            .highest_seq(&crate::manifest3::stream(*folder, me))?;
+            // The storages that answer decide the number, and the first of
+            // them whether it is free; one that is down gets the record
+            // later (`put_record_parts3`).
+            let stream = crate::manifest3::stream(*folder, me);
+            let highest = self.highest_seq3(&storages, &stream)?;
             writer.resume(highest);
             let mut out = None;
             for _ in 0..4 {
                 let Some(p) = writer.seal(&rw, &key, &current, lamport, now)? else {
                     break;
                 };
-                let mut taken = false;
-                for (name, bytes) in &p.sealed.parts {
-                    if !refs[0].put_if_absent(name, bytes)? {
-                        taken = true;
-                        break;
-                    }
-                }
-                if taken {
+                let seq = p.sealed.published.seq;
+                if !self.put_record_parts3(
+                    &storages,
+                    super::records3_io::Copies::Hot,
+                    &stream,
+                    seq,
+                    &p.sealed.parts,
+                )? {
                     writer.abandon(p);
                     continue;
-                }
-                for s in &refs[1..] {
-                    for (name, bytes) in &p.sealed.parts {
-                        s.put_if_absent(name, bytes)?;
-                    }
                 }
                 out = Some(p.sealed.published.clone());
                 writer.commit(p);

@@ -53,6 +53,10 @@
   <symbol id="i-trash" viewBox="0 0 20 20"><path d="M4 5.5h12M8 5.5V4h4v1.5"/><path d="M5.5 5.5l.8 10.2A1.5 1.5 0 0 0 7.8 17h4.4a1.5 1.5 0 0 0 1.5-1.3l.8-10.2"/><path d="M8.5 8.5v5.5M11.5 8.5v5.5"/></symbol>
   <symbol id="i-help" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.2"/><path d="M7.7 7.9a2.4 2.4 0 0 1 4.6.8c0 1.6-2.3 2-2.3 3.4"/><path d="M10 14.3v.3"/></symbol>
   <symbol id="i-backup" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="4" rx="1.2"/><path d="M4.5 8v7A1.5 1.5 0 0 0 6 16.5h8a1.5 1.5 0 0 0 1.5-1.5V8"/><path d="M8 11h4"/></symbol>
+  <symbol id="i-annex" viewBox="0 0 20 20"><circle cx="6" cy="4.5" r="1.8"/><circle cx="6" cy="15.5" r="1.8"/><circle cx="14" cy="8" r="1.8"/><path d="M6 6.3v7.4M14 9.8c0 2.6-3 3-6.6 4.6"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 20 20"><path d="M6 15.5a3.5 3.5 0 0 1-.4-7A5 5 0 0 1 15 9.3a3.2 3.2 0 0 1-.4 6.2z"/></symbol>
+  <symbol id="i-torrent" viewBox="0 0 20 20"><path d="M5 3.5v6a5 5 0 0 0 10 0v-6"/><path d="M5 3.5h3v6a2 2 0 0 0 4 0v-6h3"/><path d="M5 6.5h3M12 6.5h3"/></symbol>
+  <symbol id="i-video" viewBox="0 0 20 20"><rect x="2.5" y="4.5" width="15" height="11" rx="2.5"/><path d="m8.5 7.5 4 2.5-4 2.5z"/></symbol>
 </svg>
 
 <aside class="sidebar">
@@ -230,6 +234,7 @@
       <div id="foldersafety"></div>
       <div id="policybanner" class="notice warn hidden"></div>
       <div id="spacebanner" class="notice warn hidden" role="status"></div>
+      <div id="storagebanner" class="notice warn hidden" role="status"></div>
       <div id="movebanner" class="notice hidden" role="status"></div>
       <div id="orgblockbanner" class="notice warn hidden"></div>
       <div id="helpnext" class="notice helpnext hidden">
@@ -623,32 +628,100 @@
 
     <!-- Import -->
     <div class="page hidden" data-page="import">
-      <form id="importform" class="card narrow">
+      <div id="importjobs-card" class="card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-activity"/></svg>In progress</h2>
+        <ul id="importjobs" class="list ij-list"></ul>
+        <p id="importjobs-empty" class="muted small">Nothing is being imported right now.</p>
+      </div>
+      <form id="importform" class="card narrow" novalidate>
         <h2 class="card-title"><svg class="icon accent"><use href="#i-plus"/></svg>Import into Varsto</h2>
         <p class="muted small">Bring files that live elsewhere under Varsto's care. Each source becomes one folder; importing the same source again brings over what changed and never deletes anything in Varsto.</p>
-        <label>Source <select name="kind" id="import-kind">
-          <option value="dir">A folder on this device</option>
-          <option value="annex">A git-annex repository</option>
-          <option value="dropbox">Dropbox</option>
-          <option value="onedrive">OneDrive</option>
-          <option value="rclone">Another cloud drive (rclone)</option>
-        </select></label>
-        <div id="import-cli" class="hidden">
-          <p class="muted small">This import runs on the command line, where its progress and report are shown:</p>
-          <pre id="import-cli-cmd" class="log" data-no-i18n></pre>
-          <p id="import-cli-note" class="muted small"></p>
+        <h3 class="ij-step">1. What do you want to import?</h3>
+        <div id="import-sources" class="ij-sources" role="radiogroup" aria-label="What to import">
+          <button type="button" class="ij-source" data-kind="dir" role="radio" aria-checked="true"><svg class="icon"><use href="#i-folders"/></svg><span class="ij-source-title">Local folder or disk</span><span class="ij-source-sub">A folder of this device, an external disk or a memory card</span></button>
+          <button type="button" class="ij-source" data-kind="git-annex" role="radio" aria-checked="false"><svg class="icon"><use href="#i-annex"/></svg><span class="ij-source-title">git-annex repository</span><span class="ij-source-sub">A clone on this device or on a disk, one disk after another</span></button>
+          <button type="button" class="ij-source" data-kind="cloud" role="radio" aria-checked="false"><svg class="icon"><use href="#i-cloud"/></svg><span class="ij-source-title">Cloud drive</span><span class="ij-source-sub">Dropbox, OneDrive, Google Drive or any rclone remote</span></button>
+          <button type="button" class="ij-source" data-kind="torrent" role="radio" aria-checked="false"><svg class="icon"><use href="#i-torrent"/></svg><span class="ij-source-title">Torrent</span><span class="ij-source-sub">A magnet link or a .torrent file, even one larger than this disk</span></button>
+          <button type="button" class="ij-source" data-kind="youtube" role="radio" aria-checked="false"><svg class="icon"><use href="#i-video"/></svg><span class="ij-source-title">YouTube</span><span class="ij-source-sub">A video, a playlist or a whole channel</span></button>
         </div>
-        <div id="import-dir-fields">
-          <label>Folder to import <input name="source" placeholder="/Volumes/Old drive/Photos" autocomplete="off"><span class="hint muted">it is only read, unless you choose to remove its files below</span></label>
+        <input type="hidden" name="kind" id="import-kind" value="dir">
+        <h3 class="ij-step" id="import-step2">2. Details</h3>
+        <div id="import-unavailable" class="notice warn hidden"></div>
+        <div id="import-fields">
+          <div data-kinds="dir">
+            <label>Folder to import <input name="source_dir" placeholder="/Volumes/Old drive/Photos" autocomplete="off"><span class="hint muted">it is only read, unless you choose to remove its files below</span></label>
+          </div>
+          <div data-kinds="git-annex">
+            <label>Repository <input name="source_annex" placeholder="/Volumes/Archive disk/annex" autocomplete="off"><span class="hint muted">a clone of the repository; nothing is changed in it</span></label>
+            <label>Commit <input name="git_ref" value="HEAD" autocomplete="off"><span class="hint muted">a branch, a tag or HEAD</span></label>
+            <label class="inline"><input type="checkbox" name="no_verify"> Do not check the content against the keys' hashes (faster)</label>
+            <p class="muted small">Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next.</p>
+          </div>
+          <div data-kinds="cloud">
+            <label>Provider <select name="cloud_kind" id="import-cloud-kind">
+              <option value="dropbox">Dropbox</option>
+              <option value="onedrive">OneDrive</option>
+              <option value="rclone">Another rclone remote (Google Drive, S3, SFTP and more)</option>
+            </select></label>
+            <label>Remote <input name="source_cloud" id="import-remote" placeholder="mydropbox:" autocomplete="off"><span class="hint muted">an rclone remote and an optional path, such as mydropbox:Photos</span></label>
+            <label>Parallel downloads <input name="transfers" type="number" min="1" max="32" step="1" value="4" inputmode="numeric"></label>
+            <details class="ij-help">
+              <summary class="small">No remote yet?</summary>
+              <p class="muted small">Signing in to a cloud drive is done once, in rclone, which opens your browser for it; that is why this step is a command. Run it in a terminal of this device, then come back:</p>
+              <pre id="import-cloud-cmd" class="log" data-no-i18n></pre>
+            </details>
+          </div>
+          <div data-kinds="torrent">
+            <label>Magnet link <input name="magnet" placeholder="magnet:?xt=urn:btih:..." autocomplete="off"></label>
+            <label>Or a .torrent file <input type="file" id="import-torrent-file" accept=".torrent,application/x-bittorrent"></label>
+            <p class="muted small">A local transmission-daemon downloads the torrent a batch at a time, so that the download disk keeps its reserve free; each file is stored in the folder and leaves the disk once it is safe.</p>
+          </div>
+          <div data-kinds="youtube">
+            <label>Address <input name="url" id="import-yt-url" placeholder="https://www.youtube.com/@channel" autocomplete="off"></label>
+            <div class="field-group">
+              <span class="field-caption">What to import</span>
+              <div class="ij-toggle" role="radiogroup" aria-label="What to import">
+                <label class="inline"><input type="radio" name="yt_scope" value="video"> One video</label>
+                <label class="inline"><input type="radio" name="yt_scope" value="list" checked> Whole channel or playlist</label>
+              </div>
+              <span id="import-yt-detected" class="hint muted"></span>
+            </div>
+            <p class="muted small">Only archive what you may keep a copy of: your own uploads, videos whose licence allows copies, or what the law where you live lets you keep. Videos are downloaded one at a time and slowly, as set under Advanced.</p>
+          </div>
           <label>Name in Varsto <input name="folder" placeholder="named after the source" autocomplete="off"></label>
-          <label>On this device <select name="where" id="import-where">
-            <option value="selective">Placeholders only: files stay on the storages</option>
-            <option value="full">A full copy in a directory of this device</option>
-          </select></label>
-          <label id="import-dest-label" class="hidden">Directory for the copy <input name="dest" placeholder="/Users/me/Varsto/Photos" autocomplete="off"></label>
-          <label class="inline"><input type="checkbox" name="remove_source" id="import-remove"> Remove source files once they are safely stored and the policy is met</label>
-          <p class="muted small">A file is removed from the source only when it has not changed since it was imported, Varsto still has the same file, every block of it is on a storage that reads it back intact, and the folder's durability policy is met for it (for example, checked by another of your devices). Files that do not qualify yet stay; import again later, or use Remove safe files below. Varsto's own folders and git-annex repositories are never emptied, and nothing outside the source is touched.</p>
-          <div class="actions"><button type="submit" id="import-go">Import</button></div>
+          <div data-kinds="dir git-annex cloud">
+            <label>On this device <select name="where" id="import-where">
+              <option value="selective">Placeholders only: files stay on the storages</option>
+              <option value="full">A full copy in a directory of this device</option>
+            </select></label>
+            <label id="import-dest-label" class="hidden">Directory for the copy <input name="dest" placeholder="/Users/me/Varsto/Photos" autocomplete="off"></label>
+          </div>
+          <div data-kinds="dir">
+            <label class="inline"><input type="checkbox" name="remove_source" id="import-remove"> Remove source files once they are safely stored and the policy is met</label>
+            <p class="muted small">A file is removed from the source only when it has not changed since it was imported, Varsto still has the same file, every block of it is on a storage that reads it back intact, and the folder's durability policy is met for it (for example, checked by another of your devices). Files that do not qualify yet stay; import again later, or use Remove safe files below. Varsto's own folders and git-annex repositories are never emptied, and nothing outside the source is touched.</p>
+          </div>
+          <div data-kinds="torrent youtube">
+            <label>Storage <select name="storage" id="import-storage"></select><span class="hint muted">where the folder's files are kept</span></label>
+            <label>Keep free on the download disk <input name="free_min" value="15%" autocomplete="off"><span class="hint muted">a share (15%) or an amount (20GB); never less than Varsto's own minimum</span></label>
+            <label>Download directory <input name="download_dir" id="import-download-dir" placeholder="transmission's own download directory" autocomplete="off"><span class="hint muted">not inside a Varsto folder</span></label>
+            <label>Copies on storages before a file leaves the download disk <input name="min_copies" type="number" min="1" max="16" step="1" value="1" inputmode="numeric"></label>
+          </div>
+          <div data-kinds="torrent">
+            <label class="inline"><input type="checkbox" name="verify_existing"> Download files the folder has already and compare them</label>
+          </div>
+          <details data-kinds="youtube" class="ij-advanced">
+            <summary>Advanced</summary>
+            <label>Pause between videos (seconds) <input name="sleep" value="25-65" autocomplete="off"><span class="hint muted">chosen at random in this range</span></label>
+            <label>Pause between requests (seconds) <input name="sleep_requests" type="number" min="0" step="1" value="2" inputmode="numeric"></label>
+            <label>Download rate limit <input name="rate" value="600K" autocomplete="off"><span class="hint muted">600K, 1.5M, or none</span></label>
+            <label>Fragments at a time <input name="concurrent_fragments" type="number" min="1" max="16" step="1" value="1" inputmode="numeric"></label>
+            <label>Format <input name="format" placeholder="the best yt-dlp finds" autocomplete="off"><span class="hint muted">yt-dlp's --format</span></label>
+            <label>Cookies from a browser <input name="cookies_from_browser" placeholder="none" autocomplete="off"><span class="hint muted">for videos that need a sign-in you have, such as firefox</span></label>
+            <label>Subtitles <input name="subs" placeholder="none" autocomplete="off"><span class="hint muted">languages, such as en,fi</span></label>
+            <label class="inline"><input type="checkbox" name="thumbnails"> Keep thumbnails</label>
+            <label>List the channel again for new videos every (hours) <input name="refresh_hours" type="number" min="0" step="1" value="24" inputmode="numeric"><span class="hint muted">0: list once</span></label>
+          </details>
+          <div class="actions"><button type="submit" id="import-go">Start import</button></div>
         </div>
       </form>
       <div id="import-result" class="card hidden">
@@ -659,6 +732,10 @@
           <div class="actions"><button type="button" id="import-cleanup-go" class="secondary danger">Remove these files from the source</button></div>
         </div>
         <details id="import-waiting-box" class="hidden"><summary class="small">Files that stay for now</summary><ul id="import-waiting" class="list compact-list"></ul></details>
+      </div>
+      <div id="importdone-card" class="card hidden">
+        <h2 class="card-title">Finished</h2>
+        <ul id="importdone" class="list ij-list"></ul>
       </div>
       <div class="card">
         <h2 class="card-title">Imported folders</h2>

@@ -57,14 +57,38 @@ pub struct Bundle {
     /// Name of the device that sent it.
     pub from: String,
     pub storages: Vec<BundleStorage>,
+    /// Every vault key epoch the sending device holds, so that a joining
+    /// device can be set up without reaching a storage (the rest of
+    /// joining is finished when one can be reached). Like `vault_key` it is
+    /// empty on the wire (`v3` seals each key to the joiner's K8 and the
+    /// joining side puts the opened keys back in). `None`: the sender does
+    /// not offer an offline join (an organization's approval).
+    #[serde(default)]
+    pub vault_epochs: Option<Vec<BundleEpoch>>,
 }
 
-crate::redacted_debug!(Bundle { vault_id, from, storages ; vault_key });
+crate::redacted_debug!(Bundle { vault_id, from, storages ; vault_key, vault_epochs });
 
 impl Drop for Bundle {
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.vault_key.zeroize();
+    }
+}
+
+/// The vault key K3 of one epoch, hex.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct BundleEpoch {
+    pub epoch: u32,
+    pub key: String,
+}
+
+crate::redacted_debug!(BundleEpoch { epoch ; key });
+
+impl Drop for BundleEpoch {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
     }
 }
 
@@ -545,6 +569,33 @@ fn why(e: &anyhow::Error) -> &'static str {
     }
 }
 
+/// Longest a typed host name may take to resolve.
+const RESOLVE_WITHIN: Duration = Duration::from_secs(5);
+
+/// `host:port` (or an address) as socket addresses, giving up after
+/// `limit`: a resolver on a dead network can hold a call for minutes. The
+/// lookup runs on its own thread, which is left to finish alone on a timeout.
+fn resolve_within(host: &str, limit: Duration) -> Result<Vec<SocketAddr>, String> {
+    use std::net::ToSocketAddrs;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let owned = host.to_string();
+    std::thread::spawn(move || {
+        let _ = tx.send(
+            owned
+                .to_socket_addrs()
+                .map(|it| it.collect::<Vec<_>>())
+                .map_err(|_| "not an address".to_string()),
+        );
+    });
+    match rx.recv_timeout(limit) {
+        Ok(r) => r,
+        Err(_) => Err(format!(
+            "the name did not resolve within {} s",
+            limit.as_secs()
+        )),
+    }
+}
+
 /// Join: the typed address first (when given), then the addresses of the
 /// pairing link (those on a subnet this device is on first), then the other
 /// device is looked for on the local network by its code. Each attempt has a
@@ -559,17 +610,16 @@ pub fn join(
     progress: &mut dyn FnMut(Step),
     net: &dyn Connector,
 ) -> Result<Bundle> {
-    use std::net::ToSocketAddrs;
     normalize(code)?;
     let mut tried: Vec<Tried> = Vec::new();
     let mut seen: Vec<SocketAddr> = Vec::new();
     let mut first: Vec<SocketAddr> = Vec::new();
     if let Some(t) = typed.map(str::trim).filter(|t| !t.is_empty()) {
-        match t.to_socket_addrs() {
-            Ok(it) => first.extend(it),
-            Err(_) => tried.push(Tried {
+        match resolve_within(t, RESOLVE_WITHIN) {
+            Ok(addrs) => first.extend(addrs),
+            Err(why) => tried.push(Tried {
                 what: t.to_string(),
-                why: "not an address".into(),
+                why,
             }),
         }
     }
@@ -638,11 +688,20 @@ pub mod v3;
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_typed_address_resolves_within_a_limit() {
+        let a = resolve_within("127.0.0.1:4242", Duration::from_secs(5)).unwrap();
+        assert_eq!(a, vec!["127.0.0.1:4242".parse::<SocketAddr>().unwrap()]);
+        // No port: not an address, answered at once.
+        assert!(resolve_within("not an address", Duration::from_secs(5)).is_err());
+    }
+
     pub(super) fn bundle() -> Bundle {
         Bundle {
             vault_id: "v".into(),
             vault_key: "k".repeat(64),
             from: "laptop".into(),
+            vault_epochs: None,
             storages: vec![BundleStorage {
                 spec: StorageSpec::LocalDir {
                     name: "primary".into(),

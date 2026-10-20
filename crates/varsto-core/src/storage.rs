@@ -79,6 +79,101 @@ pub fn too_large(key: &str, size: u64, max: u64) -> anyhow::Error {
     })
 }
 
+/// A storage call that failed because the network, not the storage, did
+/// not answer: no route, a name that does not resolve, a refused or reset
+/// connection, a timeout, a killed stuck `rclone`. It says nothing about
+/// the objects: retry later, and meanwhile work with what is local. Found
+/// with `is_network_error`.
+#[derive(Debug, thiserror::Error)]
+#[error("{what}: the network does not answer ({detail})")]
+pub struct NetworkUnavailable {
+    pub what: String,
+    pub detail: String,
+}
+
+/// The error of a call that failed on the network (`NetworkUnavailable`).
+pub fn network_unavailable(what: impl Into<String>, detail: impl Into<String>) -> anyhow::Error {
+    anyhow::Error::new(NetworkUnavailable {
+        what: what.into(),
+        detail: detail.into(),
+    })
+}
+
+/// Whether `e` is a failure of the network (see `NetworkUnavailable`), as
+/// opposed to a refusal by the storage, a missing object or a bad object
+/// (a refused key, a damaged object, a full disk). This is the one
+/// classifier of Varsto: the storage health layer (`engine::health`, spec
+/// 79.1) counts exactly these towards "this storage is offline".
+///
+/// True for a `NetworkUnavailable` or an `engine::StorageDown` anywhere in
+/// the chain, a `ureq` timeout, unknown host or failed connection, a bare
+/// `std::io::Error` of a connection kind (so errors from other transports
+/// count too), and for messages that say so (HTTP 502/503/504, an rclone
+/// remote that cannot be dialled, ...).
+pub fn is_network_error(e: &anyhow::Error) -> bool {
+    for c in e.chain() {
+        if c.downcast_ref::<NetworkUnavailable>().is_some()
+            || c.downcast_ref::<crate::engine::StorageDown>().is_some()
+        {
+            return true;
+        }
+        if let Some(u) = c.downcast_ref::<ureq::Error>() {
+            match u {
+                ureq::Error::Timeout(_)
+                | ureq::Error::HostNotFound
+                | ureq::Error::ConnectionFailed => return true,
+                ureq::Error::Io(io) if io_is_network(io.kind()) => return true,
+                _ => {}
+            }
+        }
+        if let Some(io) = c.downcast_ref::<std::io::Error>() {
+            if io_is_network(io.kind()) {
+                return true;
+            }
+        }
+    }
+    let text = format!("{e:#}").to_ascii_lowercase();
+    const MARKERS: [&str; 17] = [
+        "http 502",
+        "http 503",
+        "http 504",
+        "connection refused",
+        "connection reset",
+        "connection aborted",
+        "timed out",
+        "i/o timeout",
+        "deadline exceeded",
+        "no such host",
+        "name resolution",
+        "network is unreachable",
+        "no route to host",
+        "host is down",
+        "dial tcp",
+        "tls handshake timeout",
+        "timeout awaiting response",
+    ];
+    MARKERS.iter().any(|m| text.contains(m))
+}
+
+/// The `std::io::Error` kinds that mean the network failed. Not
+/// `UnexpectedEof`: a short read of a local file is a damaged object.
+fn io_is_network(kind: std::io::ErrorKind) -> bool {
+    use std::io::ErrorKind::*;
+    matches!(
+        kind,
+        ConnectionRefused
+            | ConnectionReset
+            | ConnectionAborted
+            | NotConnected
+            | TimedOut
+            | BrokenPipe
+            | AddrNotAvailable
+            | HostUnreachable
+            | NetworkUnreachable
+            | NetworkDown
+    )
+}
+
 /// Run one storage operation so that a panic in it (a malformed object name
 /// or index met on the way) is an error for this object, not the end of the
 /// whole pass.
