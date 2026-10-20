@@ -181,6 +181,80 @@ impl VaultEpochs {
     }
 }
 
+// ----- keys of epochs not finished -------------------------------------------
+
+/// Keys of vault and folder epochs this device started and has not
+/// finished (`membership3::PendingKey`), encrypted like `vault-keys.enc`.
+const PENDING_KEYS_FILE: &str = "pending-keys3.enc";
+
+fn pending_file_key(keys: &Keys) -> SecretKey {
+    keys.master.derive("local-pending-keys", &[])
+}
+
+fn pending_aad(vault: &VaultId, device: &DeviceId) -> Vec<u8> {
+    crypto::aad(
+        "local-pending-keys",
+        &[vault.as_str().as_bytes(), device.as_str().as_bytes()],
+    )
+}
+
+/// The epoch keys kept before their epoch records left this device.
+pub(super) fn load_pending_keys(
+    home: &Path,
+    keys: &Keys,
+    vault: &VaultId,
+    device: &DeviceId,
+) -> Result<Vec<crate::membership3::PendingKey>> {
+    let p = home.join("state").join(PENDING_KEYS_FILE);
+    if !p.exists() {
+        return Ok(Vec::new());
+    }
+    let plain = Zeroizing::new(
+        crypto::decrypt(
+            &pending_file_key(keys),
+            &pending_aad(vault, device),
+            &fs::read(&p)?,
+        )
+        .context("open pending-keys3.enc")?,
+    );
+    Ok(serde_json::from_slice(&plain)?)
+}
+
+/// Keep (`keep`) or drop one epoch key in `pending-keys3.enc`; the file
+/// goes when nothing is left in it.
+pub(super) fn update_pending_keys(
+    home: &Path,
+    keys: &Keys,
+    vault: &VaultId,
+    device: &DeviceId,
+    key: &crate::membership3::PendingKey,
+    keep: bool,
+) -> Result<()> {
+    let mut list = load_pending_keys(home, keys, vault, device)?;
+    let had = list.contains(key);
+    if keep == had {
+        return Ok(());
+    }
+    if keep {
+        list.push(key.clone());
+    } else {
+        list.retain(|k| k != key);
+    }
+    let p = home.join("state").join(PENDING_KEYS_FILE);
+    if list.is_empty() {
+        return match fs::remove_file(&p) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        };
+    }
+    let plain = Zeroizing::new(serde_json::to_vec(&list)?);
+    let blob = crypto::encrypt(&pending_file_key(keys), &pending_aad(vault, device), &plain)?;
+    if let Some(dir) = p.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    util::write_atomic(&p, &blob)
+}
+
 // ----- results and local markers ---------------------------------------------
 
 /// A revocation this device accepted (kept in `devices.json`).
@@ -599,7 +673,13 @@ impl Engine {
             bail!("a member device cannot remove devices from the owner's vault");
         }
         self.ensure_active()?;
-        self.pull_ledger()?;
+        // Up to date first when the storages answer: the cut-off is the
+        // newest batch of the device held here. Without them the cut-off is
+        // what this device has (the removed device's later batches stop
+        // counting), and the vault epoch itself still needs a storage.
+        if let Err(e) = self.pull_ledger() {
+            log::warn!("removing a device without reading the storages first: {e:#}");
+        }
         let me = self.vault.device_id.clone();
         let wanted = name_or_id.trim();
         if let Some(o) = &self.org {
@@ -640,7 +720,13 @@ impl Engine {
             bail!("{wanted} is not a current device of this vault");
         }
         let report = self.revoke_many(std::slice::from_ref(&target), wipe)?;
-        self.org_after_revoke(&target, wipe, report.key_epoch)?;
+        // The removal happened: an organization roster or log that cannot
+        // be written now does not turn it into an error.
+        if let Err(e) = self.org_after_revoke(&target, wipe, report.key_epoch) {
+            log::warn!(
+                "the device was removed, but the organization's records were not updated: {e:#}"
+            );
+        }
         Ok(report)
     }
 

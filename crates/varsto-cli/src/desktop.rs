@@ -2149,10 +2149,21 @@ fn api_unlocked(
     match (method, path) {
         (Method::Get, "/api/status") => {
             let mut v = serde_json::to_value(engine.status()?)?;
-            if let Ok(list) = engine.f3_missing_escrows() {
-                if !list.is_empty() {
+            // From this device's copy of the records: no network per poll.
+            match engine.f3_missing_escrows() {
+                Ok(list) if !list.is_empty() => {
                     v["recovery_warnings"] = json!(list.iter().map(|m| &m.warning).collect::<Vec<_>>());
                 }
+                Ok(_) => {}
+                Err(e) => log::debug!("recovery copies not checked: {e:#}"),
+            }
+            let waiting = engine.records_waiting3();
+            if waiting > 0 {
+                v["records_waiting"] = json!(waiting);
+                v["records_waiting_text"] = json!(format!(
+                    "{waiting} {} waiting to upload",
+                    if waiting == 1 { "change" } else { "changes" }
+                ));
             }
             Ok(v)
         }
@@ -3672,7 +3683,7 @@ mod f3_api {
                     }
                     Ok(json!({ "written": written }))
                 }
-                (Method::Post, "/api/pair/answer") => answer_pair(engine, input),
+                (Method::Post, "/api/pair/answer") => answer_pair(engine, service, input),
                 _ => bail!("unknown route {path}"),
             }
         }
@@ -3770,8 +3781,10 @@ mod f3_api {
                 .ask
                 .clone();
             let Some(j) = ask else { return };
+            // From this device's copy of the records: the page asks every
+            // second, and the pairing must not wait on a storage.
             let folders: Vec<Value> = engine
-                .and_then(|e| e.f3_folders().ok())
+                .and_then(|e| e.f3_folders_local().ok())
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|f| f.your_role.as_deref() == Some("owner"))
@@ -3781,9 +3794,15 @@ mod f3_api {
         }
 
         /// The person's answer: with `allow`, the grants for the ticked
-        /// folders (by default none) are written first, then the vault key
-        /// is sent; without, the joining device is declined.
-        fn answer_pair(engine: &mut Engine, input: &Value) -> Result<Value> {
+        /// folders (by default none) are made first, then the vault key
+        /// is sent; without, the joining device is declined. The grants are
+        /// kept on this device and reach the storages with the sync this
+        /// asks for: the pairing never waits on a storage.
+        fn answer_pair(
+            engine: &mut Engine,
+            service: &mut ServiceState,
+            input: &Value,
+        ) -> Result<Value> {
             let g = gate().ok_or_else(|| anyhow!("no pairing offer is open"))?;
             let ask = g
                 .state
@@ -3829,6 +3848,7 @@ mod f3_api {
             g.cv.notify_all();
             drop(st);
             if !granted.is_empty() {
+                service.request_sync();
                 varsto_core::events::publish("folder.changed", json!({"what": "pair-grant"}));
             }
             Ok(json!({"ok": true, "allowed": allow, "granted": granted}))

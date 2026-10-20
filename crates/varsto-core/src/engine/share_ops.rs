@@ -172,8 +172,11 @@ impl Engine {
             req.name.clone()
         };
         let k8 = req.key.to_bytes();
+        // The folder record and the member's grant are kept here first;
+        // without the storages they wait to upload (`status` counts them)
+        // and the member finds its grant once they did.
         let (device, owner_fingerprint) = self
-            .with_enrolled(|m| {
+            .with_enrolled_at(members3::Reach::StoragesOrLocal, |m| {
                 let d = m.add_member(&id, &name, &req.k6, &k8, role.role3())?;
                 let me = m.devices.get(&m.me).cloned().expect("enrolled");
                 Ok((
@@ -216,8 +219,13 @@ impl Engine {
             .find(folder)
             .cloned()
             .ok_or_else(|| anyhow!("unknown folder {folder}"))?;
-        // Up to date first: the cut-offs are the newest batches held here.
-        self.pull_ledger_once()?;
+        // Up to date first when the storages answer: the cut-offs are the
+        // newest batches held here. The folder epoch itself still needs a
+        // storage (it decides the number), and its key is kept here before
+        // the epoch record leaves this device.
+        if let Err(e) = self.pull_ledger_once() {
+            log::warn!("removing members without reading the storages first: {e:#}");
+        }
         let list = self.share_members(folder)?;
         let who = who.trim();
         let all = who.eq_ignore_ascii_case("all");
@@ -520,15 +528,45 @@ impl Engine {
         let mut epochs = membership::VaultEpochs::genesis(&keys.master);
         epochs.kem = Some(kem);
         let mut engine = Self::write_new(home, vault, keys, passphrase, epochs)?;
-        engine.save_epochs()?;
-        engine.save_member_state(&folder, &anchor)?;
+        // From here a failure takes the new home back out again (the
+        // request stays), so that accepting again needs no `varsto reset`.
+        let made = (|| -> Result<()> {
+            engine.save_epochs()?;
+            engine.save_member_state(&folder, &anchor)?;
+            engine.add_storage_internal(storage, secret)?;
+            // The grants were read above; the next sync reads again when
+            // the storage does not answer now.
+            if let Err(e) = engine.refresh_members() {
+                log::warn!("the shared folder's records were not read again: {e:#}");
+            }
+            engine.pending.push(Event::DeviceEnrolled {
+                name: engine.vault.device_name.clone(),
+            });
+            engine.commit_batch()?;
+            Ok(())
+        })();
+        if let Err(e) = made {
+            drop(engine);
+            undo_member_home(home);
+            return Err(e);
+        }
         ShareRequest::clear(home);
-        engine.add_storage_internal(storage, secret)?;
-        engine.refresh_members()?;
-        engine.pending.push(Event::DeviceEnrolled {
-            name: engine.vault.device_name.clone(),
-        });
-        engine.commit_batch()?;
         Ok(engine)
+    }
+}
+
+/// Take a member home that `accept_share` began back out, keeping the
+/// share request (its keys are the ones the owner shared with).
+fn undo_member_home(home: &Path) {
+    let request = home.join("share-request.json");
+    let kept = fs::read(&request).ok();
+    if let Err(e) = reset_device(home) {
+        log::warn!("the unfinished member home was not removed: {e:#}");
+    }
+    let _ = fs::remove_file(home.join(members3::MEMBER_FILE));
+    if let Some(b) = kept {
+        if let Err(e) = util::write_atomic(&request, &b) {
+            log::warn!("the share request could not be put back: {e:#}");
+        }
     }
 }

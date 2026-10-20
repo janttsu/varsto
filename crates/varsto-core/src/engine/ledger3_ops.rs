@@ -455,7 +455,15 @@ impl Engine {
             done.extend(announced.iter().map(hex::encode));
             util::write_json(&self.home.join("state").join(ANNOUNCED_FILE), &done)?;
         }
-        self.push_own_batches3()?;
+        // The batch is sealed and kept here: a storage that does not answer
+        // gets it with the next push, so an action done offline stands. A
+        // fork of this device's ledger stays an error.
+        if let Err(e) = self.push_own_batches3() {
+            if self.forked_self {
+                return Err(e);
+            }
+            log::warn!("ledger batch kept on this device, not pushed yet: {e:#}");
+        }
         Ok(last)
     }
 

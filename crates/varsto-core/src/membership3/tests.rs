@@ -165,6 +165,7 @@ fn device_id_is_the_hash_of_k6() {
     Writer {
         vault: VAULT,
         storages: &st,
+        local: None,
         device: fake,
         key: &a.sign,
     }
@@ -287,6 +288,7 @@ fn grants_and_folder_records_from_non_owners_are_refused() {
         Writer {
             vault: VAULT,
             storages: &st,
+            local: None,
             device: mc.me,
             key: &c.sign,
         }
@@ -332,6 +334,7 @@ fn grants_and_folder_records_from_non_owners_are_refused() {
     Writer {
         vault: VAULT,
         storages: &st,
+        local: None,
         device: mc.me,
         key: &c.sign,
     }
@@ -1135,6 +1138,7 @@ fn a_folder_removal_counts_from_an_owner_and_device_details_travel_in_the_record
     Writer {
         vault: VAULT,
         storages: &st,
+        local: None,
         device: mb.me,
         key: &b.sign,
     }
@@ -1153,4 +1157,316 @@ fn a_folder_removal_counts_from_an_owner_and_device_details_travel_in_the_record
     mb.refresh().unwrap();
     assert!(mb.registry.get(&f).unwrap().is_removed());
     assert!(ma.registry.get(&f).unwrap().is_removed());
+}
+
+// ----- offline: this device's copy first, the outbox, keys first ----------
+
+/// A storage that can be down (every call fails) or refuse writes under
+/// one prefix.
+#[derive(Default)]
+struct Flaky {
+    inner: Mem,
+    down: std::sync::atomic::AtomicBool,
+    refuse: Mutex<Option<String>>,
+}
+
+impl Flaky {
+    fn set_down(&self, down: bool) {
+        self.down.store(down, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn refuse_puts(&self, prefix: Option<&str>) {
+        *self.refuse.lock().unwrap() = prefix.map(str::to_string);
+    }
+    fn check(&self) -> Result<()> {
+        if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+            anyhow::bail!("storage is unreachable");
+        }
+        Ok(())
+    }
+}
+
+impl Storage for Flaky {
+    fn name(&self) -> &str {
+        "flaky"
+    }
+    fn put_if_absent(&self, key: &str, data: &[u8]) -> Result<bool> {
+        self.check()?;
+        if let Some(p) = self.refuse.lock().unwrap().as_deref() {
+            if key.starts_with(p) {
+                anyhow::bail!("write of {key} failed");
+            }
+        }
+        self.inner.put_if_absent(key, data)
+    }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.check()?;
+        self.inner.get(key)
+    }
+    fn exists(&self, key: &str) -> Result<bool> {
+        self.check()?;
+        self.inner.exists(key)
+    }
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.check()?;
+        self.inner.list(prefix)
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        self.check()?;
+        self.inner.delete(key)
+    }
+}
+
+#[test]
+fn records_are_kept_here_first_and_wait_for_a_storage_that_is_down() {
+    let s = Mem::default();
+    let down = Flaky::default();
+    down.set_down(true);
+    let (mirror, outbox) = (Mem::default(), Mem::default());
+    // Reads: the storage that answers and this device's copy; writes: the
+    // storage that is down first (it used to decide alone), then the other.
+    let reads: Vec<&dyn Storage> = vec![&s, &mirror];
+    let remotes: Vec<&dyn Storage> = vec![&down, &s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b) = (Dev::new(), Dev::new());
+    let mut ma = Membership::open(VAULT, &reads, &a.sign, &a.kem, keys.clone()).unwrap();
+    ma.write_through(
+        &remotes,
+        Local {
+            mirror: &mirror,
+            outbox: &outbox,
+        },
+    );
+    ma.enrol("laptop").unwrap();
+    let f = ma.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    // Nothing failed and the folder is here at once, key included.
+    assert!(ma.read_my_grants().holds(&f, 0));
+    assert_eq!(ma.registry.get(&f).unwrap().name, "Docs");
+    // The storage that answered has the records; the one that is down
+    // gets them from the outbox later.
+    assert!(!s.list("vault/folders/").unwrap().is_empty());
+    let waiting = outbox_waiting(&outbox).unwrap();
+    assert_eq!(waiting, 3, "the device, folder and grant records wait");
+    let r = flush_outbox(&outbox, &remotes).unwrap();
+    assert_eq!(
+        r,
+        Flushed {
+            sent: 0,
+            waiting,
+            conflicts: 0
+        }
+    );
+    down.set_down(false);
+    let r = flush_outbox(&outbox, &remotes).unwrap();
+    assert_eq!(
+        r,
+        Flushed {
+            sent: waiting,
+            waiting: 0,
+            conflicts: 0
+        }
+    );
+    assert_eq!(outbox_waiting(&outbox).unwrap(), 0);
+    // The storage that was down now gives another device the folder.
+    let only_down: Vec<&dyn Storage> = vec![&down];
+    let mb = Membership::open(VAULT, &only_down, &b.sign, &b.kem, keys.clone()).unwrap();
+    assert_eq!(mb.registry.get(&f).unwrap().name, "Docs");
+    assert_eq!(mb.devices.get(&ma.me).unwrap().name, "laptop");
+}
+
+#[test]
+fn without_any_storage_records_wait_and_a_flush_sends_them_once() {
+    let s = Flaky::default();
+    let (mirror, outbox) = (Mem::default(), Mem::default());
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b) = (Dev::new(), Dev::new());
+    let st: Vec<&dyn Storage> = vec![&s];
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let f = ma.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    // The phone reads the vault once into its own copy, then goes offline.
+    let phone_reads: Vec<&dyn Storage> = vec![&mirror];
+    for name in s.list("vault/").unwrap() {
+        mirror
+            .put_if_absent(&name, &s.get(&name).unwrap().unwrap())
+            .unwrap();
+    }
+    s.set_down(true);
+    let none: Vec<&dyn Storage> = Vec::new();
+    let mut offline = Membership::open(VAULT, &phone_reads, &b.sign, &b.kem, keys.clone()).unwrap();
+    offline.write_through(
+        &none,
+        Local {
+            mirror: &mirror,
+            outbox: &outbox,
+        },
+    );
+    // A request made offline: kept here, nothing fails.
+    offline.request_folder(&f, Role::Editor).unwrap();
+    assert_eq!(outbox_waiting(&outbox).unwrap(), 1);
+    // Its seq comes from this device's copy; a second request numbers on.
+    offline.request_folder(&f, Role::Viewer).unwrap();
+    assert_eq!(outbox_waiting(&outbox).unwrap(), 2);
+    let storages: Vec<&dyn Storage> = vec![&s];
+    assert_eq!(flush_outbox(&outbox, &storages).unwrap().waiting, 2);
+    s.set_down(false);
+    assert_eq!(flush_outbox(&outbox, &storages).unwrap().sent, 2);
+    // Sent once: a second flush has nothing to do.
+    assert_eq!(
+        flush_outbox(&outbox, &storages).unwrap(),
+        Flushed::default()
+    );
+    ma.refresh().unwrap();
+    let reqs = ma.list_requests(&f).unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(reqs[0].device, mb.me);
+    assert_eq!(
+        reqs[0].role_wanted,
+        Role::Viewer,
+        "the newest request counts"
+    );
+    mb.refresh().unwrap();
+}
+
+#[test]
+fn a_numbered_record_is_decided_by_the_first_storage_that_answers() {
+    let down = Flaky::default();
+    down.set_down(true);
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&down, &s];
+    let a = Dev::new();
+    let me = device_id(&a.sign.public());
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let mut ring = KeyRing::vault_only(me, &keys);
+    ring.extra.push((KeyId::Epoch(1), SecretKey::random()));
+    let stream = StreamRef::new(Kind::Epoch, VAULT_SCOPE, me);
+    let w = Writer {
+        vault: VAULT,
+        storages: &st,
+        local: None,
+        device: me,
+        key: &a.sign,
+    };
+    let note = |t: &str| Note { text: t.into() };
+    // The first storage is down: the second one decides, no error.
+    w.write(&ring, &stream, Some(1), &KeyId::Epoch(1), &note("one"))
+        .unwrap();
+    assert!(!s.list("vault/epochs/").unwrap().is_empty());
+    // The number is taken where it was decided: `Taken`.
+    let e = w
+        .write(&ring, &stream, Some(1), &KeyId::Epoch(1), &note("two"))
+        .unwrap_err();
+    assert!(e.downcast_ref::<Taken>().is_some(), "{e:#}");
+    // No storage answers: a numbered record is not written at all.
+    let only_down: Vec<&dyn Storage> = vec![&down];
+    let w2 = Writer {
+        vault: VAULT,
+        storages: &only_down,
+        local: None,
+        device: me,
+        key: &a.sign,
+    };
+    let mut ring2 = KeyRing::vault_only(me, &keys);
+    ring2.extra.push((KeyId::Epoch(2), SecretKey::random()));
+    let e = w2
+        .write(&ring2, &stream, Some(2), &KeyId::Epoch(2), &note("three"))
+        .unwrap_err();
+    assert!(e.downcast_ref::<Taken>().is_none(), "{e:#}");
+    down.set_down(false);
+    assert!(down.list("vault/epochs/").unwrap().is_empty());
+}
+
+#[test]
+fn a_removal_that_stops_after_its_epoch_record_is_finished_with_the_key_kept_first() {
+    let s = Flaky::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b) = (Dev::new(), Dev::new());
+    let kept: std::cell::RefCell<Vec<(PendingKey, bool)>> = Default::default();
+    let hook = |k: &PendingKey, keep: bool| -> Result<()> {
+        kept.borrow_mut().push((k.clone(), keep));
+        Ok(())
+    };
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mb = device(&st, &b, &keys, "phone");
+    ma.refresh().unwrap();
+    ma.keep_keys_with(&hook);
+    // The vault grants cannot be written: the removal stops right after
+    // its epoch record.
+    s.refuse_puts(Some("vault/grants/vault/"));
+    assert!(ma.remove_device(&mb.me, 0, false, None).is_err());
+    let log = kept.borrow().clone();
+    assert_eq!(log.len(), 1, "kept once, not dropped");
+    assert!(log[0].1);
+    assert!(matches!(&log[0].0, PendingKey::Vault { epoch: 1, .. }));
+    // The key was kept before the record left, and is held.
+    assert!(ma.vault_keys.keys.contains_key(&1));
+    // A later open with the old keys only (the process stopped there)
+    // finishes the epoch from the kept key.
+    s.refuse_puts(None);
+    let mut again = Membership::open(VAULT, &st, &a.sign, &a.kem, keys.clone()).unwrap();
+    assert!(!again.vault_keys.keys.contains_key(&1));
+    let done = again.resume_pending(&[log[0].0.clone()]).unwrap();
+    assert_eq!(done.len(), 1);
+    assert!(again.vault_keys.keys.contains_key(&1));
+    assert!(again.is_revoked(&mb.me), "the revocation was written");
+    // A pending key whose number another record holds is done with too.
+    let other = PendingKey::Vault {
+        epoch: 1,
+        k3: [7; 32],
+        targets: Vec::new(),
+        wipe: false,
+    };
+    assert_eq!(again.resume_pending(&[other]).unwrap().len(), 1);
+}
+
+#[test]
+fn a_folder_epoch_that_stops_after_its_record_is_finished_from_the_kept_key() {
+    let s = Flaky::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let kept: std::cell::RefCell<Vec<(PendingKey, bool)>> = Default::default();
+    let hook = |k: &PendingKey, keep: bool| -> Result<()> {
+        kept.borrow_mut().push((k.clone(), keep));
+        Ok(())
+    };
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut mc = device(&st, &c, &keys, "tablet");
+    ma.refresh().unwrap();
+    let f = ma.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    ma.approve(&f, &mb.me.clone(), Role::Editor).unwrap();
+    ma.approve(&f, &mc.me.clone(), Role::Editor).unwrap();
+    ma.keep_keys_with(&hook);
+    // No grant of the folder can be written: the epoch stops right after
+    // its record.
+    s.refuse_puts(Some(&format!("vault/grants/{}/", hex::encode(f))));
+    let gone = Removed {
+        device: mc.me,
+        cutoff: 0,
+    };
+    assert!(ma.start_folder_epoch(&f, &[gone], None).is_err());
+    let log = kept.borrow().clone();
+    assert_eq!(log.len(), 1);
+    assert!(log[0].1);
+    assert!(matches!(&log[0].0, PendingKey::Folder { epoch: 1, .. }));
+    s.refuse_puts(None);
+    let mut again = Membership::open(VAULT, &st, &a.sign, &a.kem, keys.clone()).unwrap();
+    assert!(!again.read_my_grants().holds(&f, 1));
+    let done = again.resume_pending(&[log[0].0.clone()]).unwrap();
+    assert_eq!(done.len(), 1);
+    assert!(
+        again.read_my_grants().holds(&f, 1),
+        "this device holds the new key"
+    );
+    mb.refresh().unwrap();
+    assert!(
+        mb.read_my_grants().holds(&f, 1),
+        "the device that stays got it"
+    );
+    mc.refresh().unwrap();
+    assert!(
+        !mc.read_my_grants().holds(&f, 1),
+        "the removed device did not"
+    );
 }
