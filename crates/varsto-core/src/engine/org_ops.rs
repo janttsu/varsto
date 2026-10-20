@@ -276,9 +276,55 @@ impl Engine {
         self.metadata_storages(false)
     }
 
-    /// The names under `prefix` on every storage, listed once.
+    /// The names under `prefix` on every storage, listed once. A storage
+    /// that cannot be reached lists nothing; when none answers, that is
+    /// the error.
     fn org_listing(storages: &[&dyn Storage], prefix: &str) -> Result<Vec<Vec<String>>> {
-        storages.iter().map(|b| b.list(prefix)).collect()
+        let mut out = Vec::with_capacity(storages.len());
+        let (mut answered, mut unreachable) = (0usize, None);
+        for b in storages {
+            match b.list(prefix) {
+                Ok(names) => {
+                    answered += 1;
+                    out.push(names);
+                }
+                Err(e) if is_network_error(&e) => {
+                    log::warn!(storage = b.name(); "organization records not read here: {e:#}");
+                    unreachable.get_or_insert(e);
+                    out.push(Vec::new());
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        match unreachable {
+            Some(e) if answered == 0 => Err(e),
+            _ => Ok(out),
+        }
+    }
+
+    /// Copy organization objects that only some of `storages` hold to the
+    /// others (a claim that reached only some of them while one was down).
+    /// Best effort.
+    fn heal_org(storages: &[&dyn Storage], listing: &[Vec<String>]) {
+        let all: BTreeSet<&String> = listing.iter().flatten().collect();
+        for (i, b) in storages.iter().enumerate() {
+            let have: BTreeSet<&String> = listing[i].iter().collect();
+            for name in all.iter().filter(|n| !have.contains(*n)) {
+                let Some(from) = listing.iter().position(|l| l.contains(*name)) else {
+                    continue;
+                };
+                let got = match storages[from].get(name) {
+                    Ok(Some(bytes)) => bytes,
+                    _ => continue,
+                };
+                if let Err(e) = b.put_if_absent(name, &got) {
+                    log::debug!(storage = b.name(); "{name} not copied: {e:#}");
+                    if is_network_error(&e) {
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     /// The objects of one sequence number from every storage, in name
@@ -299,7 +345,13 @@ impl Engine {
                 if org::seq_from_name(name) != Some(seq) {
                     continue;
                 }
-                if let Some(blob) = b.get(k)? {
+                // A storage that cannot be reached is skipped: another
+                // one may hold the object.
+                let got = match b.get(k) {
+                    Err(e) if is_network_error(&e) => continue,
+                    other => other?,
+                };
+                if let Some(blob) = got {
                     let hash = hex::encode(crypto::hash(&blob));
                     if !out.iter().any(|(_, h, _)| *h == hash) {
                         out.push((name.to_string(), hash, blob));
@@ -312,11 +364,13 @@ impl Engine {
     }
 
     /// Claim a sequence number: the lowest attempt that is free on the
-    /// first storage takes `bytes` with put-if-absent, so two writers of
-    /// the same sequence number cannot both succeed there. An occupied
-    /// attempt whose object `valid` accepts means another writer won (an
-    /// error); junk is skipped. The name is then written to the other
-    /// storages where it is free.
+    /// first hot storage that answers takes `bytes` with put-if-absent, so
+    /// two writers of the same sequence number cannot both succeed there.
+    /// An occupied attempt whose object `valid` accepts means another
+    /// writer won (an error); junk is skipped. The name is then written to
+    /// the other storages (cold ones too) where it is free; one that cannot
+    /// be reached gets it later (`heal_partial_writes`, and `sync_org`
+    /// copies what only some storages hold).
     fn org_claim(
         &self,
         name_of: impl Fn(u32) -> String,
@@ -324,32 +378,66 @@ impl Engine {
         bytes: &[u8],
         conflict: &str,
     ) -> Result<String> {
-        let storages = self.metadata_storages(true)?;
-        let Some((_, first)) = storages.first() else {
+        let mut storages = self.metadata_storages(true)?;
+        if storages.is_empty() {
             bail!("this device has no storage to publish the organization to");
-        };
+        }
+        // Hot storages decide; a cold one only when no hot one is there.
+        storages.sort_by_key(|(s, _)| s.is_cold());
         let mut chosen = None;
-        for attempt in 1..=org::ATTEMPTS {
-            let name = name_of(attempt);
-            if first.put_if_absent(&name, bytes)? {
-                chosen = Some(name);
-                break;
-            }
-            if let Some(other) = first.get(&name)? {
-                if other == bytes {
-                    chosen = Some(name);
+        let mut decided_on = None;
+        let mut unreachable = None::<anyhow::Error>;
+        for (i, (spec, first)) in storages.iter().enumerate() {
+            let claim = (|| -> Result<Option<String>> {
+                for attempt in 1..=org::ATTEMPTS {
+                    let name = name_of(attempt);
+                    if first.put_if_absent(&name, bytes)? {
+                        return Ok(Some(name));
+                    }
+                    if let Some(other) = first.get(&name)? {
+                        if other == bytes {
+                            return Ok(Some(name));
+                        }
+                        if valid(&other) {
+                            bail!("{conflict}");
+                        }
+                    }
+                }
+                Ok(None)
+            })();
+            match claim {
+                Ok(c) => {
+                    chosen = c;
+                    decided_on = Some(i);
                     break;
                 }
-                if valid(&other) {
-                    bail!("{conflict}");
+                Err(e) if self.health.failed(spec.name(), &e) => {
+                    unreachable.get_or_insert(e);
                 }
+                Err(e) => return Err(e),
             }
         }
+        let Some(first) = decided_on else {
+            return Err(unreachable
+                .unwrap_or_else(|| anyhow!("no storage to publish the organization to"))
+                .context("no storage could be reached to publish the organization"));
+        };
         let Some(name) = chosen else {
             bail!("the storage holds too many junk objects under this sequence number; remove them under org/ and try again");
         };
-        for (_, b) in storages.iter().skip(1) {
-            b.put_if_absent(&name, bytes)?;
+        for (i, (spec, b)) in storages.iter().enumerate() {
+            if i == first {
+                continue;
+            }
+            let put = if i < first {
+                // Skipped above: it could not be reached.
+                None
+            } else {
+                self.tolerate(spec.name(), b.put_if_absent(&name, bytes))?
+            };
+            if put.is_none() {
+                self.health.queue_heal(spec.name(), [name.clone()]);
+            }
         }
         Ok(name)
     }
@@ -1350,6 +1438,8 @@ impl Engine {
         // Manifests: contiguous from the one after the newest held; the
         // first one pins the root key.
         let listing = Self::org_listing(&storages, MANIFEST_PREFIX)?;
+        // What a claim wrote to only some storages reaches the others.
+        Self::heal_org(&storages, &listing);
         loop {
             let want = state.manifest_seq() + 1;
             let mut adopted = false;
@@ -1382,6 +1472,8 @@ impl Engine {
         // order, see `org::object_name`); if another one sorts first, step
         // back one and adopt that.
         let listing = Self::org_listing(&storages, ROSTER_PREFIX)?;
+        // What a claim wrote to only some storages reaches the others.
+        Self::heal_org(&storages, &listing);
         let newest = state.roster_seq();
         if newest > 0 {
             let before = match state.roster_history.get(&(newest - 1)).cloned() {
@@ -1431,6 +1523,8 @@ impl Engine {
 
         // Log entries: one chain per device that is or was an administrator.
         let listing = Self::org_listing(&storages, LOG_PREFIX)?;
+        // What a claim wrote to only some storages reaches the others.
+        Self::heal_org(&storages, &listing);
         let mut issuers: BTreeSet<DeviceId> = BTreeSet::new();
         for names in &listing {
             for k in names {

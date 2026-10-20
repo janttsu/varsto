@@ -275,7 +275,11 @@ fn from_peers(
     })
 }
 
-/// Every storage in order; a copy that does not match its name is skipped.
+/// Every storage in order; a copy that does not match its name is skipped,
+/// and so is a storage that fails: the next one is asked (one that cannot
+/// be reached is marked down by the health layer and answers at once from
+/// then on). The first failure is the answer only when no storage had the
+/// object.
 fn from_storages(
     object: &ObjectName,
     storages: &[(StorageSpec, Box<dyn Storage>)],
@@ -284,7 +288,8 @@ fn from_storages(
     let t = Instant::now();
     let key = chunk_storage_key(object);
     let mut needs_disk: Option<PoolError> = None;
-    for (_, backend) in storages {
+    let mut failed: Option<anyhow::Error> = None;
+    for (spec, backend) in storages {
         match crate::storage::guarded(&key, || {
             backend.get_bounded(&key, crate::storage::MAX_BLOCK_OBJECT)
         }) {
@@ -305,12 +310,20 @@ fn from_storages(
                 Some(nd @ PoolError::NeedsDisk { .. }) => {
                     needs_disk.get_or_insert(nd.clone());
                 }
-                _ => return Fetched::Failed(e),
+                _ => {
+                    log::debug!(storage = spec.name(); "{key} not read, trying the next storage: {e:#}");
+                    failed.get_or_insert(e);
+                }
             },
         }
     }
     stats.record(Source::Storages, t.elapsed().as_secs_f64(), None);
-    Fetched::Missing(needs_disk)
+    match (failed, needs_disk) {
+        // A pool disk that is away says what to do; it wins.
+        (_, Some(nd)) => Fetched::Missing(Some(nd)),
+        (Some(e), None) => Fetched::Failed(e),
+        (None, None) => Fetched::Missing(None),
+    }
 }
 
 /// Fetch one object from the source `stats` picks, falling back to the
@@ -452,6 +465,69 @@ mod tests {
         // Without peers, everything goes to the storages and vice versa.
         assert_eq!(st.choose(false, true), Source::Storages);
         assert_eq!(st.choose(true, false), Source::Peers);
+    }
+
+    /// A storage that cannot be reached.
+    struct Refusing;
+
+    fn refused<T>() -> anyhow::Result<T> {
+        Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "down").into())
+    }
+
+    impl Storage for Refusing {
+        fn name(&self) -> &str {
+            "dead"
+        }
+        fn put_if_absent(&self, _: &str, _: &[u8]) -> anyhow::Result<bool> {
+            refused()
+        }
+        fn get(&self, _: &str) -> anyhow::Result<Option<Vec<u8>>> {
+            refused()
+        }
+        fn exists(&self, _: &str) -> anyhow::Result<bool> {
+            refused()
+        }
+        fn list(&self, _: &str) -> anyhow::Result<Vec<String>> {
+            refused()
+        }
+        fn delete(&self, _: &str) -> anyhow::Result<()> {
+            refused()
+        }
+    }
+
+    #[test]
+    fn a_failing_storage_is_passed_over() {
+        let t = tempfile::tempdir().unwrap();
+        let good =
+            crate::storage::LocalDirStorage::new("good".into(), t.path().to_path_buf()).unwrap();
+        let ct = b"cipher text of one block".to_vec();
+        let object = ObjectName::from_bytes(&crypto::hash(&ct));
+        good.put_if_absent(&chunk_storage_key(&object), &ct)
+            .unwrap();
+        let spec = |name: &str| StorageSpec::LocalDir {
+            name: name.into(),
+            path: t.path().to_path_buf(),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+            min_free: None,
+        };
+        let storages: Vec<(StorageSpec, Box<dyn Storage>)> = vec![
+            (spec("dead"), Box::new(Refusing)),
+            (spec("good"), Box::new(good)),
+        ];
+        match from_storages(&object, &storages, &FetchStats::default()) {
+            Fetched::Got { bytes, from_peer } => {
+                assert_eq!(bytes, ct);
+                assert!(!from_peer);
+            }
+            _ => panic!("the second storage was not asked"),
+        }
+        // With no other storage the failure is the answer.
+        assert!(matches!(
+            from_storages(&object, &storages[..1], &FetchStats::default()),
+            Fetched::Failed(_)
+        ));
     }
 
     /// One round of `n` objects of `bytes` each, taking `secs` in all.

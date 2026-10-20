@@ -594,11 +594,15 @@ impl Engine {
             );
         }
         let me = self.vault.device_id.clone();
-        let metadata: OpenStorages = self
+        // Hot storages first: the first one that answers decides the
+        // snapshot's number; cold ones take it best effort (one that is
+        // down gets it later, `heal_partial_writes`).
+        let mut metadata: OpenStorages = self
             .metadata_storages(true)?
             .into_iter()
             .filter(|(s, _)| !s.is_carrier())
             .collect();
+        metadata.sort_by_key(|(s, _)| s.is_cold());
         if metadata.is_empty() {
             bail!("no storage of this device can keep the snapshot: add one first");
         }
@@ -652,7 +656,14 @@ impl Engine {
         let stream = snapshot3::stream(fb, self.me3());
         let key = KeyId::Meta { folder: fb, epoch };
         let mut writer = self.load_snap_writer(&fb);
-        let highest = self.highest_seq3(&metadata, &stream)?;
+        // Cold storages are not read for the number (they may be slow,
+        // costly or away); the hot ones that answer and what this device
+        // wrote decide it.
+        let hot = match metadata.iter().position(|(s, _)| s.is_cold()) {
+            Some(0) | None => metadata.len(),
+            Some(n) => n,
+        };
+        let highest = self.highest_seq3(&metadata[..hot], &stream)?;
         writer.resume(highest.max(src.last_seq));
         let lamport = self.tick()?;
         let published = self.with_writer3(|rw| {
@@ -660,21 +671,16 @@ impl Engine {
                 let p = writer.seal(rw, &key, &current, lamport, now, expires)?;
                 // A number an interrupted earlier attempt wrote is not
                 // reused.
-                let mut taken = false;
-                for (name, bytes) in &p.sealed.parts {
-                    if !metadata[0].1.put_if_absent(name, bytes)? {
-                        taken = true;
-                        break;
-                    }
-                }
-                if taken {
+                let seq = p.sealed.published.seq;
+                if !self.put_record_parts3(
+                    &metadata,
+                    super::records3_io::Copies::Backup,
+                    &stream,
+                    seq,
+                    &p.sealed.parts,
+                )? {
                     writer.abandon(p);
                     continue;
-                }
-                for (_, b) in &metadata[1..] {
-                    for (name, bytes) in &p.sealed.parts {
-                        b.put_if_absent(name, bytes)?;
-                    }
                 }
                 let out = p.sealed.published.clone();
                 writer.commit(p);
@@ -1187,8 +1193,12 @@ impl Engine {
                 if seqs.is_empty() {
                     continue;
                 }
-                for (_, backend) in &storages {
-                    snapshot3::reader::delete_records(backend.as_ref(), &fb, &d, &seqs)?;
+                for (spec, backend) in &storages {
+                    // A storage that cannot be reached keeps the records
+                    // until a later upkeep (the view says what is due).
+                    let deleted =
+                        snapshot3::reader::delete_records(backend.as_ref(), &fb, &d, &seqs);
+                    self.tolerate(spec.name(), deleted)?;
                 }
                 report.snapshots_deleted += seqs.len() as u64;
                 for s in &seqs {
