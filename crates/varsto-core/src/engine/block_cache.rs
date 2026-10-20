@@ -244,7 +244,7 @@ impl Engine {
             .unwrap_or(0);
         self.record_cached(&rec, &mut state, path, staged, now)?;
         self.save_state(&rec.folder_id, &state)?;
-        self.push(folder)
+        self.push_after_local(folder)
     }
 
     /// Make `staged` the content of `path`: a new version unless the content
@@ -739,7 +739,7 @@ impl Engine {
             state.accessed.insert(to.to_string(), t);
         }
         self.save_state(&rec.folder_id, &state)?;
-        self.push(folder)
+        self.push_after_local(folder)
     }
 
     /// Thumbnail of a picture of a folder kept encrypted here, made in

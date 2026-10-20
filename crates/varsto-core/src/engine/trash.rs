@@ -1244,7 +1244,25 @@ impl Engine {
 
     /// The trash of one folder or of every folder, newest deletion first.
     pub fn trash_list(&mut self, folder: Option<&str>) -> Result<Vec<TrashItem>> {
-        self.trash_refresh(true)?;
+        Ok(self.trash_list_checked(folder)?.0)
+    }
+
+    /// Like `trash_list`, and when the other devices' trash records could not
+    /// be read (a storage is down) the list comes from the cache kept here,
+    /// with a note that it may be stale.
+    pub fn trash_list_checked(
+        &mut self,
+        folder: Option<&str>,
+    ) -> Result<(Vec<TrashItem>, Option<String>)> {
+        let stale = match self.trash_refresh(true) {
+            Ok(()) => None,
+            Err(e) => {
+                log::warn!("the trash could not be refreshed: {e:#}");
+                Some(format!(
+                    "the trash may be out of date: the storages could not be reached ({e:#})"
+                ))
+            }
+        };
         let now = util::now_utc();
         let view = self.view()?;
         let mut out = Vec::new();
@@ -1276,7 +1294,7 @@ impl Engine {
                 .then(a.folder.cmp(&b.folder))
                 .then(a.path.cmp(&b.path))
         });
-        Ok(out)
+        Ok((out, stale))
     }
 
     /// Storages holding blocks of an entry, and whether a block can be read
