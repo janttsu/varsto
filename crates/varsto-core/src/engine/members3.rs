@@ -166,10 +166,57 @@ impl RecordTrust for EngineTrust<'_> {
 }
 
 /// A storage whose reads of membership records (`vault/`) are kept in a
-/// local mirror as well.
+/// local mirror as well. A read that fails because the storage cannot be
+/// reached answers "nothing there" and is remembered (`down`): the
+/// membership is read from the storages that answer, and only when none
+/// does is the read an error (`all_down`).
 struct Tee<'a> {
     inner: &'a dyn Storage,
     mirror: &'a crate::storage::LocalDirStorage,
+    failed: std::sync::Mutex<Option<anyhow::Error>>,
+}
+
+impl<'a> Tee<'a> {
+    fn new(inner: &'a dyn Storage, mirror: &'a crate::storage::LocalDirStorage) -> Tee<'a> {
+        Tee {
+            inner,
+            mirror,
+            failed: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// `r`, or `none` when the storage could not be reached.
+    fn read<T>(&self, r: Result<T>, none: T) -> Result<T> {
+        match r {
+            Err(e) if is_network_error(&e) => {
+                log::warn!(storage = self.inner.name(); "membership not read from this storage: {e:#}");
+                let mut f = self.failed.lock().unwrap_or_else(|e| e.into_inner());
+                f.get_or_insert(e);
+                Ok(none)
+            }
+            other => other,
+        }
+    }
+
+    fn down(&self) -> bool {
+        self.failed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
+    }
+
+    fn take_error(&self) -> Option<anyhow::Error> {
+        self.failed.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+}
+
+/// The error of the first storage when no storage of `teed` could be
+/// reached (nothing was read: the membership known here stays).
+fn all_down(teed: &[Tee<'_>]) -> Option<anyhow::Error> {
+    if teed.is_empty() || !teed.iter().all(|t| t.down()) {
+        return None;
+    }
+    teed.iter().find_map(|t| t.take_error())
 }
 
 impl Tee<'_> {
@@ -192,12 +239,12 @@ impl Storage for Tee<'_> {
         self.inner.put_if_absent(key, data)
     }
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        let got = self.inner.get(key)?;
+        let got = self.read(self.inner.get(key), None)?;
         self.keep(key, &got);
         Ok(got)
     }
     fn get_bounded(&self, key: &str, max: u64) -> Result<Option<Vec<u8>>> {
-        let got = self.inner.get_bounded(key, max)?;
+        let got = self.read(self.inner.get_bounded(key, max), None)?;
         self.keep(key, &got);
         Ok(got)
     }
@@ -205,10 +252,10 @@ impl Storage for Tee<'_> {
         self.inner.exists(key)
     }
     fn list(&self, prefix: &str) -> Result<Vec<String>> {
-        self.inner.list(prefix)
+        self.read(self.inner.list(prefix), Vec::new())
     }
     fn list_after(&self, prefix: &str, start_after: &str) -> Result<Vec<String>> {
-        self.inner.list_after(prefix, start_after)
+        self.read(self.inner.list_after(prefix, start_after), Vec::new())
     }
     fn delete(&self, key: &str) -> Result<()> {
         self.inner.delete(key)
@@ -326,13 +373,7 @@ impl Engine {
         // Every membership record read is kept in a local mirror, so that
         // a later process knows the membership without reading a storage.
         let mirror = self.records_mirror()?;
-        let teed: Vec<Tee> = open
-            .iter()
-            .map(|(_, b)| Tee {
-                inner: &**b,
-                mirror: &mirror,
-            })
-            .collect();
+        let teed: Vec<Tee> = open.iter().map(|(_, b)| Tee::new(&**b, &mirror)).collect();
         let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
         let lamport = self.clock.lamport;
         let kept = self.vault_kept3();
@@ -349,6 +390,11 @@ impl Engine {
                 self.vault_keys3(),
                 kept,
             )?;
+            // No storage answered: nothing was read, and an empty
+            // membership must not replace the one known here.
+            if let Some(e) = all_down(&teed) {
+                return Err(e.context("no storage could be reached to read the membership"));
+            }
             m.observe_lamport(lamport);
             for k in recovered {
                 if m.granted.get(&k.folder).is_none() {
@@ -444,15 +490,9 @@ impl Engine {
                 return Ok(());
             }
             let mirror = self.records_mirror()?;
-            let teed: Vec<Tee> = open
-                .iter()
-                .map(|(_, b)| Tee {
-                    inner: &**b,
-                    mirror: &mirror,
-                })
-                .collect();
+            let teed: Vec<Tee> = open.iter().map(|(_, b)| Tee::new(&**b, &mirror)).collect();
             let refs: Vec<&dyn Storage> = teed.iter().map(|t| t as &dyn Storage).collect();
-            return self.read_member3(&refs);
+            return self.read_member3_checked(&refs, || all_down(&teed));
         }
         self.with_enrolled(|_| Ok(()))?;
         // The organization's manifest, roster and log (`org_ops`), judged
@@ -504,6 +544,16 @@ impl Engine {
     /// A member device: read its grants and the folder epochs, and keep
     /// what they give as the engine's membership.
     fn read_member3(&mut self, storages: &[&dyn Storage]) -> Result<()> {
+        self.read_member3_checked(storages, || None)
+    }
+
+    /// `read_member3`, adopting nothing when `none_read` says no storage
+    /// could be reached.
+    fn read_member3_checked(
+        &mut self,
+        storages: &[&dyn Storage],
+        none_read: impl Fn() -> Option<anyhow::Error>,
+    ) -> Result<()> {
         let Some((folder, anchor)) = self.member_state() else {
             return Ok(());
         };
@@ -514,6 +564,9 @@ impl Engine {
             };
             crate::membership3::MemberView::read(storages, vault, self.me3(), kem, folder, anchor)?
         };
+        if let Some(e) = none_read() {
+            return Err(e.context("no storage could be reached to read the membership"));
+        }
         self.adopt_members(Members3::of_member(view), VaultKeys::default())
     }
 

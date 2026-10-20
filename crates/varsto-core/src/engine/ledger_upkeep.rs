@@ -180,12 +180,20 @@ impl Engine {
         Ok(rec.seq)
     }
 
-    /// Pull the ledger, once per `one_batch` action.
+    /// Pull the ledger, once per `one_batch` action, and once per sync
+    /// round (`sync_round`: the upkeep steps after a sync reuse its pull).
     pub(super) fn pull_ledger_once(&mut self) -> Result<Vec<DeviceId>> {
         if let Some(forks) = self.cycle.as_ref().and_then(|c| c.forks.clone()) {
             return Ok(forks);
         }
-        let forks = self.pull_ledger()?;
+        let forks = match self.health.round_forks() {
+            Some(forks) => forks,
+            None => {
+                let forks = self.pull_ledger()?;
+                self.health.set_round_forks(&forks);
+                forks
+            }
+        };
         if let Some(c) = self.cycle.as_mut() {
             c.forks = Some(forks.clone());
         }

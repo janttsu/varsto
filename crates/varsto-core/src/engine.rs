@@ -66,6 +66,7 @@ mod folder_safety;
 mod forward;
 mod fsck3_ops;
 mod guide;
+mod health;
 mod help;
 mod history;
 mod home_lock;
@@ -128,6 +129,7 @@ pub use forward::{
     ForwardFolder, ForwardOptions, ForwardReport, ForwardSettings, ForwardStatus, LEASE_SLOT_SECS,
     LEASE_WORK_SECS,
 };
+pub use health::{is_network_error, StorageDown, StorageHealth};
 pub use help::{help_without_vault, HelpObserved};
 pub use history::{
     history_kept, parse_utc, FolderHistory, HistoryItem, HistoryList, HistoryRestoreReport,
@@ -391,6 +393,14 @@ pub struct PullReport {
     /// `kept-aside/` or undone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kept_aside: Vec<String>,
+    /// The folder was not synced this time: why (a sync reports it and
+    /// goes on with the other folders).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Storages this sync could not reach and left out (`storage_health`
+    /// says more).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub storages_down: Vec<String>,
 }
 
 impl PullReport {
@@ -533,6 +543,10 @@ pub struct StatusReport {
     /// Destination devices of transferrers, by storage name.
     #[serde(default)]
     pub carrier_for: BTreeMap<String, Vec<String>>,
+    /// Storages that could not be reached and rest before the next try
+    /// (`Engine::storage_health`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub storages_down: Vec<StorageHealth>,
     /// The organization the vault belongs to, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub org: Option<OrgBrief>,
@@ -766,6 +780,9 @@ pub struct Engine {
     /// (one connection pool, one view of the packs) instead of opening the
     /// storage again (`open_spec`, `finish_storages`).
     storages_open: std::sync::Mutex<OpenedStorages>,
+    /// Storages that failed with a network error in this run, and those
+    /// resting after failures (`health`).
+    health: health::Health,
     /// The location view, kept up to date as batches arrive.
     view_cache: std::sync::Mutex<ledger_upkeep::ViewSlot>,
     /// Set while one action runs whose ledger events go into one batch.
@@ -898,16 +915,22 @@ fn write_to_set(
     backends: &[&dyn Storage],
     jobs: &[std::sync::Arc<UploadJob>],
 ) -> Vec<Vec<Result<bool>>> {
-    let failed_all = |e: &anyhow::Error| -> Vec<Result<bool>> {
+    let failed_all = |e: &anyhow::Error, storage: &str| -> Vec<Result<bool>> {
         // A full disk stays that error (the storage is left out, not the
-        // push), and so does a pool's "no disk".
+        // push), and so do a pool's "no disk" and a storage that cannot be
+        // reached (`health`).
         let low = crate::freespace::low_space(e).cloned();
         let pool = pool::pool_error(e).cloned();
+        let down = health::is_network_error(e).then(|| health::StorageDown {
+            storage: storage.to_string(),
+            reason: format!("{e:#}"),
+        });
         let msg = format!("{e:#}");
         jobs.iter()
-            .map(|_| match (&low, &pool) {
-                (Some(l), _) => Err(anyhow::Error::new(l.clone())),
-                (None, Some(p)) => Err(anyhow::Error::new(p.clone())),
+            .map(|_| match (&low, &pool, &down) {
+                (Some(l), _, _) => Err(anyhow::Error::new(l.clone())),
+                (None, Some(p), _) => Err(anyhow::Error::new(p.clone())),
+                (None, None, Some(d)) => Err(anyhow::Error::new(d.clone())),
                 _ => Err(anyhow!("{msg}")),
             })
             .collect()
@@ -919,7 +942,7 @@ fn write_to_set(
     if backends.len() == 1 {
         return vec![match backends[0].put_pack(&members) {
             Ok(flags) => flags.into_iter().map(Ok).collect(),
-            Err(e) => failed_all(&e),
+            Err(e) => failed_all(&e, backends[0].name()),
         }];
     }
     // One copy of each object (two files of the push may share a block);
@@ -951,8 +974,10 @@ fn write_to_set(
             crate::packs::build(&group, target)
         })
         .collect();
-    let mut out = Vec::with_capacity(backends.len());
-    for backend in backends {
+    // One thread per storage of the set: a slow storage does not hold back
+    // the fast ones, and one that fails leaves the others' writes as they
+    // are.
+    let write_one = |backend: &dyn Storage| -> Vec<Result<bool>> {
         let mut flags: Vec<Option<Result<bool>>> = (0..jobs.len()).map(|_| None).collect();
         let mut error = None;
         for (idx, (id, data, locs)) in bins.iter().zip(&built) {
@@ -981,11 +1006,27 @@ fn write_to_set(
             // The whole batch counts as not written on this storage; its
             // blocks are tried there again at the next push (a pack that
             // did go is found then and not written twice).
-            Some(e) => out.push(failed_all(&e)),
-            None => out.push(flags.into_iter().map(|f| f.unwrap_or(Ok(false))).collect()),
+            Some(e) => failed_all(&e, backend.name()),
+            None => flags.into_iter().map(|f| f.unwrap_or(Ok(false))).collect(),
         }
-    }
-    out
+    };
+    let write_one = &write_one;
+    std::thread::scope(|s| {
+        let handles: Vec<_> = backends
+            .iter()
+            .map(|&backend| s.spawn(move || write_one(backend)))
+            .collect();
+        handles
+            .into_iter()
+            .zip(backends)
+            .map(|(h, backend)| {
+                h.join().unwrap_or_else(|_| {
+                    let e = anyhow!("the writer of storage {} stopped", backend.name());
+                    failed_all(&e, backend.name())
+                })
+            })
+            .collect()
+    })
 }
 
 /// The target sets of one block: the storages it goes to (by index),
@@ -1035,13 +1076,15 @@ fn apply_upload(
                 pack: None,
             });
         }
-        // A pool with no disk attached (or no room) is left out for the rest
-        // of this push and tried again next time.
+        // A pool with no disk attached (or no room), and a storage that
+        // cannot be reached, are left out for the rest of this push and
+        // tried again next time: the others' packs are published.
         Err(e)
             if matches!(
                 pool::pool_error(&e),
                 Some(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
-            ) || crate::freespace::low_space(&e).is_some() =>
+            ) || crate::freespace::low_space(&e).is_some()
+                || health::is_network_error(&e) =>
         {
             if !report.storages_unavailable.contains(&d.storage) {
                 report.storages_unavailable.push(d.storage);
@@ -1829,6 +1872,7 @@ impl Engine {
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             storages_open: Default::default(),
+            health: health::Health::new(home),
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
@@ -1936,6 +1980,7 @@ impl Engine {
             chunker: ChunkerParams::DEFAULT,
             storage_calls: None,
             storages_open: Default::default(),
+            health: health::Health::new(home),
             view_cache: Default::default(),
             cycle: None,
             ledger_policy: Default::default(),
@@ -2121,6 +2166,9 @@ impl Engine {
         }
         self.learn_conditional_writes();
         self.forget_storages();
+        // A storage marked down is tried again by the next operation
+        // (unless it rests: `health`).
+        self.health.end_run();
     }
 
     /// Remember in `config.json` what the S3 storages found out about
@@ -2196,10 +2244,15 @@ impl Engine {
             None => backend,
         };
         let backend: Box<dyn Storage> = Box::new(crate::storage::LoggedStorage::new(backend, kind));
-        Ok(match &self.storage_calls {
+        let backend: Box<dyn Storage> = match &self.storage_calls {
             Some(calls) => Box::new(crate::storage::CountingStorage::new(backend, calls.clone())),
             None => backend,
-        })
+        };
+        // Outermost: a storage marked down answers at once, uncounted.
+        Ok(Box::new(health::HealthStorage::new(
+            backend,
+            self.health.clone(),
+        )))
     }
 
     /// Tests: write packs of `bytes` on hot storages instead of 64 MiB
@@ -2586,6 +2639,10 @@ impl Engine {
         let mut out = Vec::new();
         for spec in &self.config.storages {
             if spec.is_cold() && !include_cold {
+                continue;
+            }
+            // Down in this run (`health`): left out, not waited for again.
+            if self.storage_down(spec.name()) {
                 continue;
             }
             out.push((spec.clone(), self.open_spec(spec)?));
@@ -3899,14 +3956,21 @@ impl Engine {
             }
         }
         // A folder added with many pictures shows its first thumbnails
-        // before the (possibly hours long) upload, not only after it.
-        report.thumbnails = self.make_thumbnails(
-            &rec,
-            &root,
-            &mut state,
-            THUMBS_EARLY_PER_PASS,
-            THUMBS_EARLY_TIME,
-        )?;
+        // before the (possibly hours long) upload, not only after it. Best
+        // effort: a storage that cannot take the thumbnail record never
+        // holds back the upload (the pictures are tried again next push).
+        report.thumbnails = self
+            .make_thumbnails(
+                &rec,
+                &root,
+                &mut state,
+                THUMBS_EARLY_PER_PASS,
+                THUMBS_EARLY_TIME,
+            )
+            .unwrap_or_else(|e| {
+                log::warn!("push {}: thumbnails not published: {e:#}", rec.name);
+                0
+            });
         // One action (design section 3, "Writer"): packs, then one map
         // delta listing their members, then the manifest delta and the trash
         // record, then one batch with `pack_stored` for every (pack,
@@ -3916,8 +3980,12 @@ impl Engine {
         let written = self.upload_missing(&rec, &root, &state, &mut report)?;
         let view3 = self.view3()?;
         self.publish_map3(&folder, epoch, &written, &view3)?;
-        report.thumbnails +=
-            self.make_thumbnails(&rec, &root, &mut state, THUMBS_PER_PASS, THUMBS_PASS_TIME)?;
+        report.thumbnails += self
+            .make_thumbnails(&rec, &root, &mut state, THUMBS_PER_PASS, THUMBS_PASS_TIME)
+            .unwrap_or_else(|e| {
+                log::warn!("push {}: thumbnails not published: {e:#}", rec.name);
+                0
+            });
         if let Some(seq) = self.publish_manifest(&folder, epoch, &state)? {
             report.manifest_seq = Some(seq);
             state.published_seq = seq;
@@ -6539,6 +6607,21 @@ impl Engine {
     }
 
     fn sync_inner(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        // A new run: storages that rest after failures are left out from
+        // the start, the others are tried (`health`).
+        if self.cycle.is_none() {
+            self.health.begin_run();
+        }
+        // The upkeep steps below reuse the ledger pull of the folders'
+        // sync instead of listing every storage again.
+        let out = self.sync_round(|e| e.sync_round_inner(folder));
+        if out.is_err() {
+            self.finish_storages();
+        }
+        out
+    }
+
+    fn sync_round_inner(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         // A join made without reaching a storage is finished first.
         self.finish_pending_join()?;
         // Every folder's pull and push record into one ledger batch, and the
@@ -6546,6 +6629,11 @@ impl Engine {
         let (mut out, seq) = self.one_batch_seq(|e| e.sync_folders(folder))?;
         for (_, push) in out.iter_mut() {
             push.batch_seq = push.batch_seq.or(seq);
+        }
+        // Records and organization objects that reached only some storages
+        // go to the others now that they may answer (`health`).
+        if let Err(e) = self.heal_partial_writes() {
+            log::debug!("partial writes not healed yet: {e:#}");
         }
         // System, version and platform, signed (an organization's platform
         // policy is checked against them); republished only when changed.
@@ -6563,6 +6651,16 @@ impl Engine {
         let _ = self.ledger_lost_everywhere(false);
         // The other devices' trash records, when due (`trash`).
         let _ = self.trash_refresh(false);
+        // The storages this run could not reach, for every folder's report.
+        let down: Vec<String> = self
+            .storage_health()
+            .into_iter()
+            .filter(|h| h.down_now)
+            .map(|h| h.storage)
+            .collect();
+        for (pull, _) in out.iter_mut() {
+            pull.storages_down = down.clone();
+        }
         self.finish_storages();
         Ok(out)
     }
@@ -6578,8 +6676,15 @@ impl Engine {
         // A lost or damaged local ledger is restored before anything else.
         self.ensure_ledger_writable()?;
         // A folder another device converted into a Strongroom must be
-        // adopted before it is synced under its old key.
-        self.pull_registry()?;
+        // adopted before it is synced under its old key. With no storage
+        // reachable the folders still sync with peers, on the membership
+        // known here.
+        if let Err(e) = self.pull_registry() {
+            if !is_network_error(&e) {
+                return Err(e);
+            }
+            log::warn!("membership not read, no storage answered: {e:#}");
+        }
         self.finish_strongroom_conversions();
         // The restic device keeps every folder: new ones are attached in
         // its mirror as soon as their record is here.
@@ -6601,8 +6706,17 @@ impl Engine {
         if names.is_empty() {
             // Nothing attached yet (a device that just joined): still learn the
             // other devices and where the blocks are.
-            self.pull_ledger()?;
+            if let Err(e) = self.pull_ledger() {
+                if !is_network_error(&e) {
+                    return Err(e);
+                }
+                log::warn!("ledger not pulled, no storage answered: {e:#}");
+            }
         }
+        // A folder that fails is reported and the others go on; the sync
+        // fails only when every folder failed (`first_failure`).
+        let mut first_failure: Option<anyhow::Error> = None;
+        let mut synced = 0usize;
         for name in names {
             // A paused folder (`folder_safety`) is reported and skipped; the
             // other folders sync as usual.
@@ -6617,24 +6731,64 @@ impl Engine {
                     pull.paused = Some(p);
                     Ok((pull, push))
                 };
+            let failed = |e: anyhow::Error,
+                          mut pull: PullReport,
+                          first: &mut Option<anyhow::Error>|
+             -> (PullReport, PushReport) {
+                log::warn!(folder = name.as_str(); "folder not synced: {e:#}");
+                if pull.folder.is_empty() {
+                    pull.folder = name.clone();
+                }
+                pull.error = Some(format!("{e:#}"));
+                let push = PushReport {
+                    folder: pull.folder.clone(),
+                    ..Default::default()
+                };
+                first.get_or_insert(e);
+                (pull, push)
+            };
             let mut pull = match self.pull(&name) {
                 Ok(p) => p,
                 Err(e) => {
                     self.last_scan = None;
-                    out.push(paused(e, PullReport::default())?);
+                    if folder_safety::paused_error(&e).is_some() {
+                        out.push(paused(e, PullReport::default())?);
+                        synced += 1;
+                    } else {
+                        out.push(failed(e, PullReport::default(), &mut first_failure));
+                    }
                     continue;
                 }
             };
             // The pull scanned the folder; the push need not walk it again.
             let scan = self.last_scan.take();
             if self.keyring.find(&name).is_none() {
+                synced += 1;
                 continue; // converted while pulling
             }
             // Selective sync turned off: the placeholders become files.
-            pull.files_updated += self.fill_placeholders(&name, &mut pull.files_unavailable)?;
+            match self.fill_placeholders(&name, &mut pull.files_unavailable) {
+                Ok(n) => pull.files_updated += n,
+                Err(e) => {
+                    out.push(failed(e, pull, &mut first_failure));
+                    continue;
+                }
+            }
             match self.push_with_scan(&name, scan) {
-                Ok(push) => out.push((pull, push)),
-                Err(e) => out.push(paused(e, pull)?),
+                Ok(push) => {
+                    out.push((pull, push));
+                    synced += 1;
+                }
+                Err(e) if folder_safety::paused_error(&e).is_some() => {
+                    out.push(paused(e, pull)?);
+                    synced += 1;
+                }
+                Err(e) => out.push(failed(e, pull, &mut first_failure)),
+            }
+        }
+        if synced == 0 {
+            if let Some(e) = first_failure {
+                return Err(e);
             }
         }
         if self.block_cache_root().is_dir() {
@@ -6813,6 +6967,7 @@ impl Engine {
             });
         }
         Ok(StatusReport {
+            storages_down: self.storage_health(),
             vault_id: self.vault.vault_id.to_string(),
             device_id: self.vault.device_id.to_string(),
             device_name: self.vault.device_name.clone(),
