@@ -355,6 +355,9 @@ struct Job {
 #[derive(Clone)]
 enum BlockError {
     Pool(PoolError),
+    /// The storage could not be reached (storage health, spec 79.1): it is
+    /// left out like a pool without its disk; the others carry the import.
+    Down(String),
     Other(String),
 }
 
@@ -362,6 +365,7 @@ impl BlockError {
     fn of(e: &anyhow::Error) -> BlockError {
         match pool::pool_error(e) {
             Some(pe) => BlockError::Pool(pe.clone()),
+            None if crate::storage::is_network_error(e) => BlockError::Down(format!("{e:#}")),
             None => BlockError::Other(format!("{e:#}")),
         }
     }
@@ -369,7 +373,7 @@ impl BlockError {
     fn error(&self) -> anyhow::Error {
         match self {
             BlockError::Pool(pe) => anyhow::Error::new(pe.clone()),
-            BlockError::Other(m) => anyhow!("{m}"),
+            BlockError::Down(m) | BlockError::Other(m) => anyhow!("{m}"),
         }
     }
 }
@@ -749,7 +753,10 @@ fn settle_content(
                 ctx.stored.insert((chunks[index].object.clone(), name));
                 held.insert(index);
             }
-            Err(BlockError::Pool(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })) => {
+            Err(
+                BlockError::Pool(PoolError::NoDiskAttached { .. } | PoolError::NoRoom { .. })
+                | BlockError::Down(_),
+            ) => {
                 ctx.unavailable.insert(ctx.storages[t].0.name().to_string());
             }
             Err(e) => {

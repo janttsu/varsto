@@ -1263,14 +1263,30 @@ mod tests {
     /// Answers `statuses` in turn to the requests it gets, then 200 with
     /// `body`; the request lines seen are returned by the join handle.
     fn scripted(statuses: Vec<u16>, body: Vec<u8>) -> (u16, std::thread::JoinHandle<Vec<String>>) {
+        let n = statuses.len() + 1;
+        scripted_n(statuses, body, n)
+    }
+
+    /// `scripted`, answering `requests` requests in all (the statuses, then
+    /// `body`); the thread ends after them, or after 20 s without one.
+    fn scripted_n(
+        statuses: Vec<u16>,
+        body: Vec<u8>,
+        requests: usize,
+    ) -> (u16, std::thread::JoinHandle<Vec<String>>) {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
         let th = std::thread::spawn(move || {
             let mut seen = Vec::new();
-            let mut left = statuses.len() + 1;
+            let mut left = requests;
             let mut it = statuses.into_iter();
             while left > 0 {
-                let req = server.recv().unwrap();
+                let Some(req) = server
+                    .recv_timeout(std::time::Duration::from_secs(20))
+                    .unwrap()
+                else {
+                    break;
+                };
                 left -= 1;
                 seen.push(format!("{} {}", req.method().as_str(), req.url()));
                 let resp = match it.next() {
@@ -1313,7 +1329,8 @@ mod tests {
 
     #[test]
     fn a_refused_request_is_not_repeated() {
-        let (port, th) = scripted(vec![403], Vec::new());
+        // One request only: the server would wait for a repeat otherwise.
+        let (port, th) = scripted_n(vec![403], Vec::new(), 1);
         let e = storage_for(port).get("manifests/x").unwrap_err();
         assert!(!crate::storage::is_network_error(&e), "{e:#}");
         assert_eq!(th.join().unwrap().len(), 1);

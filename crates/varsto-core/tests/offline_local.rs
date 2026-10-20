@@ -41,11 +41,16 @@ impl Lab {
         a.add_storage(storage(&root.join("storage"))).unwrap();
         Lab { _tmp: tmp, root, a }
     }
-    fn down(&self) {
-        fs::rename(self.root.join("storage"), self.root.join("storage-away")).unwrap();
+    /// The storage stops answering, as an unreachable one does (storage
+    /// health, spec 79.1). Renaming a directory storage is no outage: it
+    /// is opened again as an empty directory.
+    fn down(&mut self) {
+        self.a.set_storage_down_for_tests("box", true);
     }
-    fn up(&self) {
-        fs::rename(self.root.join("storage-away"), self.root.join("storage")).unwrap();
+    /// It answers again, and the rest after its failures ends.
+    fn up(&mut self) {
+        self.a.set_storage_down_for_tests("box", false);
+        self.a.retry_storages_now();
     }
 }
 
@@ -80,9 +85,22 @@ fn writes_finish_locally_when_the_storage_is_down() {
     );
 }
 
+/// The import writes its blocks to the storages as it goes, so it needs
+/// one that answers: with one of two storages down (its pull fails, its
+/// uploads are left out) the import goes on with the other.
 #[test]
-fn a_local_import_goes_on_when_the_storage_is_down() {
+fn a_local_import_goes_on_when_a_storage_is_down() {
     let mut lab = Lab::new();
+    lab.a
+        .add_storage(StorageSpec::LocalDir {
+            name: "shelf".into(),
+            path: lab.root.join("shelf"),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+            min_free: None,
+        })
+        .unwrap();
     let src = lab.root.join("old-drive");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("one.txt"), b"one").unwrap();
@@ -93,7 +111,7 @@ fn a_local_import_goes_on_when_the_storage_is_down() {
     };
     let mut s = DirSource::open(&src).unwrap();
     lab.a.import_run(&mut s, &opts).unwrap();
-    lab.down();
+    lab.a.set_storage_down_for_tests("shelf", true);
 
     fs::write(src.join("two.txt"), b"two").unwrap();
     let mut s = DirSource::open(&src).unwrap();

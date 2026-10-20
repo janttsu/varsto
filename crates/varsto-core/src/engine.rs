@@ -1553,6 +1553,10 @@ impl Engine {
         let Ok(pending) = util::read_json::<PendingJoin>(&path) else {
             return Ok(());
         };
+        // Until joining is finished nothing else works here: every sync
+        // asks the storages again, also one resting after failures (storage
+        // health, spec 79.1).
+        self.retry_storages_now();
         let mut notes = Vec::new();
         let mut found: Option<(StorageSpec, VaultMeta)> = None;
         for name in &pending.storages {

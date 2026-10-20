@@ -355,7 +355,7 @@ def scenario(name):
 @scenario("reset")
 def s_reset():
     for vm in lab.DEVICES:
-        run(vm, "pkill -x varsto; sleep 0.5; rm -rf ~/.local/share/varsto ~/data ~/sel ~/sr ~/nc-home ~/nc-docs ~/*.log; mkdir -p ~/data", check_rc=False)
+        run(vm, "pkill -x varsto; sleep 0.5; rm -rf ~/.local/share/varsto ~/data ~/sel ~/sr ~/shelf ~/Varsto ~/nc-home ~/nc-docs ~/*.log; mkdir -p ~/data", check_rc=False)
         fix_clock(vm)
     s3 = lab.DIR / "s3"
     for d in s3.glob("*"):
