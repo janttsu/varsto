@@ -8,9 +8,69 @@
 //! that check LAN beacons.
 
 use super::*;
-use crate::p2p::v3::{self, peer, HeadRef, PeerBody, PeerDirectory, Pushed};
+use crate::p2p::v3::{self, peer, HeadRef, PeerBody, PeerDirectory, Pushed, SavedDirectory};
 use crate::record::{Acceptor, DeviceSigner, Id16, RecordStore, RecordWriter, RecordsRefused};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+/// The peer directory kept on this device (`alpha-0-format.md` section
+/// 77.8, "Offline"): the signed peer records as they were last read, checked again
+/// whenever they are loaded.
+pub const SAVED_PEERS: &str = "peer-records.json";
+
+/// How one read of the peer records over the storages went.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DirectoryRead {
+    /// Hot metadata storages asked.
+    pub storages: usize,
+    /// Of them, the ones whose records could be listed.
+    pub answered: usize,
+}
+
+impl DirectoryRead {
+    /// Nothing to ask, or at least one storage answered.
+    pub fn ok(&self) -> bool {
+        self.storages == 0 || self.answered > 0
+    }
+}
+
+/// A storage whose identity could not be read is not asked again for this long.
+const IDENTITY_RETRY: Duration = Duration::from_secs(300);
+
+type IdentityCache = Mutex<HashMap<String, (Option<String>, Instant)>>;
+
+/// Storage identities by location (`StorageSpec::location_key`): they never
+/// change, so building the peer record does not cost a GET per storage
+/// each time. A failed read is remembered too, so a dead storage costs one
+/// timeout per `IDENTITY_RETRY`.
+fn identity_cache() -> &'static IdentityCache {
+    static CACHE: OnceLock<IdentityCache> = OnceLock::new();
+    CACHE.get_or_init(Mutex::default)
+}
+
+/// The identity of `backend`, cached for every storage but a directory on
+/// this device (a removable disk may be another one next time, and reading
+/// it costs nothing).
+fn cached_storage_identity(spec: &StorageSpec, backend: &dyn Storage) -> Option<String> {
+    let key = match spec {
+        StorageSpec::LocalDir { .. } => None,
+        _ => spec.location_key(),
+    };
+    let Some(key) = key else {
+        return verify::storage_identity(backend).ok();
+    };
+    if let Some((id, at)) = identity_cache().lock().unwrap().get(&key) {
+        if id.is_some() || at.elapsed() < IDENTITY_RETRY {
+            return id.clone();
+        }
+    }
+    let id = verify::storage_identity(backend).ok();
+    identity_cache()
+        .lock()
+        .unwrap()
+        .insert(key, (id.clone(), Instant::now()));
+    id
+}
 
 /// The SHA-256 of a certificate as the records carry it.
 fn cert_bin(hex_sha: &str) -> [u8; 32] {
@@ -46,27 +106,96 @@ impl Engine {
             .collect()
     }
 
-    /// The accepted peer records of the other trusted full devices, newest
-    /// of each over every hot metadata storage. This device, a record
-    /// carrying this device's certificate and a certificate two devices
-    /// claim are left out (`PeerDirectory`).
-    pub fn peer_directory(&self) -> Result<PeerDirectory> {
+    /// The directory as this device saved it after its last good read
+    /// (`SAVED_PEERS`), every record checked again against the membership
+    /// held here: no storage is asked. A device removed or no longer
+    /// trusted since drops out; nothing else changes until a storage
+    /// answers. Opening the vault and starting peer-to-peer use this, so
+    /// LAN peers work with every storage unreachable.
+    pub fn local_peer_directory(&self) -> PeerDirectory {
+        self.local_peer_directory_saved().0
+    }
+
+    /// `local_peer_directory`, with the saved form it was loaded from.
+    fn local_peer_directory_saved(&self) -> (PeerDirectory, SavedDirectory) {
         let me = self.me3();
         let own = self.own_cert3();
-        let mut dir = PeerDirectory::new(me, own);
+        let empty = PeerDirectory::new(me, own);
         if self.vault.member {
-            return Ok(dir);
+            return (empty, SavedDirectory::default());
+        }
+        let saved: SavedDirectory = match util::read_json_or_default(&self.home.join(SAVED_PEERS)) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("saved peer records not read: {e:#}");
+                return (empty, SavedDirectory::default());
+            }
+        };
+        let devices = self.peer_devices();
+        if saved.records.is_empty() || devices.is_empty() {
+            return (empty, saved);
+        }
+        let Ok(vault) = members3::bin(&self.vault.vault_id) else {
+            return (empty, saved);
+        };
+        let vault_keys = self.vault_keys3();
+        let keys = self.keys3(&vault_keys);
+        let trust = self.f3.members.trust();
+        let acceptor = Acceptor {
+            vault,
+            keys: &keys,
+            trust: &trust,
+        };
+        let mut refused = RecordsRefused::default();
+        let dir = PeerDirectory::from_saved(&saved, &acceptor, &devices, me, own, &mut refused);
+        if refused.total() > 0 {
+            log::info!("saved peer records refused now: {:?}", refused.by_kind);
+        }
+        (dir, saved)
+    }
+
+    /// The accepted peer records of the other trusted full devices, newest
+    /// of each over the directory saved here and every hot metadata
+    /// storage. This device, a record carrying this device's certificate
+    /// and a certificate two devices claim are left out (`PeerDirectory`).
+    /// A storage that does not answer changes nothing: the saved entries
+    /// stay until a newer record replaces them.
+    pub fn peer_directory(&self) -> Result<PeerDirectory> {
+        Ok(self.peer_directory_read().0)
+    }
+
+    /// `peer_directory`, and how the listing went. The merged directory is
+    /// saved here when at least one storage answered.
+    pub fn peer_directory_read(&self) -> (PeerDirectory, DirectoryRead) {
+        let (mut dir, saved) = self.local_peer_directory_saved();
+        let mut read = DirectoryRead::default();
+        if self.vault.member {
+            return (dir, read);
         }
         let devices = self.peer_devices();
         if devices.is_empty() {
-            return Ok(dir);
+            return (dir, read);
         }
-        let vault = members3::bin(&self.vault.vault_id)?;
+        let me = self.me3();
+        let own = self.own_cert3();
+        let Ok(vault) = members3::bin(&self.vault.vault_id) else {
+            return (dir, read);
+        };
+        let storages = match self.record_storages() {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("peer records not read: {e:#}");
+                // Counted as one storage that did not answer.
+                read.storages = 1;
+                return (dir, read);
+            }
+        };
         let vault_keys = self.vault_keys3();
         let keys = self.keys3(&vault_keys);
         let trust = self.f3.members.trust();
         let mut refused = RecordsRefused::default();
-        for (_, backend) in self.record_storages()? {
+        for (_, backend) in storages {
+            read.storages += 1;
             let store = RecordStore {
                 storage: backend.as_ref(),
                 acceptor: Acceptor {
@@ -76,14 +205,25 @@ impl Engine {
                 },
             };
             match PeerDirectory::read(&store, devices.iter().copied(), me, own, &mut refused) {
-                Ok(d) => dir.merge(d),
+                Ok(d) => {
+                    read.answered += 1;
+                    dir.merge(d);
+                }
                 Err(e) => log::warn!(storage = backend.name(); "peer records not read: {e:#}"),
             }
         }
         if refused.total() > 0 {
             log::warn!("peer records refused: {:?}", refused.by_kind);
         }
-        Ok(dir)
+        if read.answered > 0 {
+            let now = dir.saved();
+            if now != saved {
+                if let Err(e) = util::write_json(&self.home.join(SAVED_PEERS), &now) {
+                    log::warn!("peer records not saved here: {e:#}");
+                }
+            }
+        }
+        (dir, read)
     }
 
     /// The newest batch this device holds of every full device (its own:
@@ -133,7 +273,7 @@ impl Engine {
             if seq == 0 {
                 continue;
             }
-            let Ok(id) = verify::storage_identity(backend.as_ref()) else {
+            let Some(id) = cached_storage_identity(&spec, backend.as_ref()) else {
                 continue;
             };
             let Some(storage) = crate::record::kinds::parse_id16(&id) else {
@@ -211,9 +351,25 @@ impl Engine {
             signer: &signer,
             keys: &keys,
         };
+        // Every storage is tried: one that fails does not keep the record
+        // from the others. The error (some storage missed it) makes the
+        // service try again later.
         let mut last = 0;
-        for (_, backend) in self.record_storages()? {
-            last = peer::publish(backend.as_ref(), &writer, body, epoch)?;
+        let mut failed = Vec::new();
+        let storages = self.record_storages()?;
+        let total = storages.len();
+        for (_, backend) in storages {
+            match peer::publish(backend.as_ref(), &writer, body, epoch) {
+                Ok(seq) => last = seq,
+                Err(e) => failed.push(format!("{}: {e:#}", backend.name())),
+            }
+        }
+        if !failed.is_empty() {
+            bail!(
+                "peer record not published on {} of {total} storages ({})",
+                failed.len(),
+                failed.join("; ")
+            );
         }
         Ok(last)
     }
@@ -285,13 +441,12 @@ impl Engine {
     }
 
     /// The answering side of both transports for `identity`, with the
-    /// current directory.
+    /// directory saved on this device. No storage is asked, so the listener
+    /// and the beacons start at once; the service merges the storages'
+    /// records in before its first sync.
     pub fn p2p_responder(&self, identity: &crate::p2p::quic::Identity) -> Arc<v3::Responder> {
         let r = v3::Responder::new(self.vault.device_id.clone(), &identity.sha256);
-        match self.peer_directory() {
-            Ok(d) => r.set_directory(d),
-            Err(e) => log::warn!("peer directory not read: {e:#}"),
-        }
+        r.set_directory(self.local_peer_directory());
         r
     }
 
@@ -304,19 +459,55 @@ impl Engine {
     /// runs; the service adds LAN beacons and the QUIC node). `None`
     /// before `p2p enable` or without peers.
     pub fn p2p_peers_tcp(&self) -> Option<crate::p2p::Peers> {
+        let dir = self.peer_directory().ok()?;
+        self.p2p_peers_tcp_from(&dir)
+    }
+
+    /// `p2p_peers_tcp` over a directory read already.
+    pub fn p2p_peers_tcp_from(&self, dir: &PeerDirectory) -> Option<crate::p2p::Peers> {
         let identity = crate::p2p::quic::Identity::load(&self.home)
             .ok()
             .flatten()?;
-        let dir = self.peer_directory().ok()?;
         if dir.infos().is_empty() {
             return None;
         }
         Some(crate::p2p::Peers::build_v3(
             self.p2p_client(identity),
-            &dir,
+            dir,
             &[],
             None,
         ))
+    }
+
+    /// The peer table a vault opens with: the directory saved on this
+    /// device, TLS over TCP, marked so that the first sync reads the
+    /// storages' records into it (`refresh_saved_peers`). Opening asks no
+    /// storage. `None` before `p2p enable`.
+    pub(super) fn p2p_peers_local(&self) -> Option<crate::p2p::Peers> {
+        let identity = crate::p2p::quic::Identity::load(&self.home)
+            .ok()
+            .flatten()?;
+        let dir = self.local_peer_directory();
+        Some(
+            crate::p2p::Peers::build_v3(self.p2p_client(identity), &dir, &[], None)
+                .from_saved_directory(),
+        )
+    }
+
+    /// A table built at open from the saved directory only: read the
+    /// storages' records into it now (a command-line sync), keeping the
+    /// saved entries when no storage answers. The service hands the engine
+    /// its own table before every sync, so this does nothing there.
+    pub(super) fn refresh_saved_peers(&mut self) {
+        if !self.peers.as_ref().is_some_and(|p| p.is_from_saved()) {
+            return;
+        }
+        let (dir, _) = self.peer_directory_read();
+        let fresh = self.p2p_peers_tcp_from(&dir).map(Arc::new);
+        if let (Some(new), Some(old)) = (&fresh, &self.peers) {
+            new.inherit(old);
+        }
+        self.peers = fresh;
     }
 
     /// Where this device's peer-to-peer snapshot finds batches for heads

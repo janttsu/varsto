@@ -951,9 +951,52 @@ pub struct Peers {
     /// connection-bound tokens, `v3`); the same client across rebuilds
     /// keeps the sessions.
     client: Arc<v3::Client>,
+    /// Built from the directory saved on this device only (a vault just
+    /// opened): the engine reads the storages' records before it syncs.
+    saved_only: bool,
+    /// Our own IPv4 subnets, when they are known for certain: a private
+    /// address of a peer outside all of them is not tried (it is the
+    /// peer's LAN, not ours). `None` tries every address.
+    subnets: Option<Vec<(Ipv4Addr, u8)>>,
 }
 
 crate::redacted_opaque!(Peers);
+
+/// The subnets of this host's interfaces, or `None` when an address
+/// outside them may still be reachable: no interface list, or a tunnel
+/// (VPN) that may route other private networks.
+fn own_subnets() -> Option<Vec<(Ipv4Addr, u8)>> {
+    let ifaces = crate::netif::interfaces();
+    let ranked = crate::netif::rank(&ifaces);
+    // `interfaces` falls back to one address with a guessed /24 mask.
+    if ranked.is_empty() || ifaces.iter().any(|f| f.name == "default") {
+        return None;
+    }
+    if ranked.iter().any(|c| c.kind == crate::netif::Kind::Overlay) {
+        return None;
+    }
+    Some(
+        ifaces
+            .iter()
+            .filter(|f| f.up && !f.loopback && f.prefix > 0)
+            .map(|f| (f.ip, f.prefix))
+            .collect(),
+    )
+}
+
+/// Whether `addr` can be tried from a host on `subnets`: anything but a
+/// private IPv4 address on none of them (loopback, link-local, public and
+/// IPv6 addresses always are).
+fn on_our_side(addr: &SocketAddr, subnets: Option<&[(Ipv4Addr, u8)]>) -> bool {
+    let (Some(nets), IpAddr::V4(ip)) = (subnets, addr.ip()) else {
+        return true;
+    };
+    if !ip.is_private() {
+        return true;
+    }
+    nets.iter()
+        .any(|(net, prefix)| crate::netif::same_subnet(ip, *net, *prefix))
+}
 
 /// How a peer answered object requests lately.
 #[derive(Clone, Debug, Default)]
@@ -980,6 +1023,48 @@ impl ObjectStats {
 }
 
 const ROUTE_TTL: Duration = Duration::from_secs(60);
+/// What routes are raced with (`Peers::race`): small, and answered by any
+/// device of the vault.
+const RACE_PATH: &str = "/p2p/info";
+/// Raced routes start this far apart, in their order (`order_routes`).
+const RACE_STAGGER: Duration = Duration::from_millis(300);
+
+/// One request over `route` to `p`, with no bookkeeping: what the raced
+/// routes run on their own threads (`Peers::race`). `relay_cert` is the
+/// relay's pinned certificate for a relayed route.
+fn attempt_route(
+    client: &v3::Client,
+    quic: Option<&quic::Node>,
+    route: &Route,
+    relay_cert: Option<&str>,
+    p: &PeerInfo,
+    path: &str,
+    timeout: Duration,
+) -> Result<(u16, Vec<u8>)> {
+    match route {
+        Route::Tcp(a) => client.tcp_get(*a, &p.cert_sha256, &p.device, path, timeout),
+        Route::Quic(a) => {
+            let node = quic.ok_or_else(|| anyhow!("no QUIC node"))?;
+            node.request_with(*a, &p.cert_sha256, path, true, &|e: &[u8; 32]| {
+                client.token(e, &p.device, path)
+            })
+        }
+        Route::Registered(_) => {
+            let node = quic.ok_or_else(|| anyhow!("no QUIC node"))?;
+            node.request_registrant_with(&p.device, path, &|e: &[u8; 32]| {
+                client.token(e, &p.device, path)
+            })
+        }
+        Route::Relay(relay, _, a) => {
+            let node = quic.ok_or_else(|| anyhow!("no QUIC node"))?;
+            let cert = relay_cert.ok_or_else(|| anyhow!("relay record unknown"))?;
+            let via = format!("/p2p/via/{}{}", p.device, path);
+            node.request_with(*a, cert, &via, true, &|e: &[u8; 32]| {
+                client.token(e, relay, &via)
+            })
+        }
+    }
+}
 /// A peer that refused our certificate (its directory did not name us
 /// yet: we published our record after its last read, and our knock makes
 /// it read the records again) rests this long only.
@@ -1053,7 +1138,20 @@ impl Peers {
             objects: Mutex::default(),
             selfs: Mutex::default(),
             client,
+            saved_only: false,
+            subnets: own_subnets(),
         }
+    }
+
+    /// Mark a table built from the directory saved on this device only.
+    pub fn from_saved_directory(mut self) -> Peers {
+        self.saved_only = true;
+        self
+    }
+
+    /// Built from the saved directory only (`from_saved_directory`).
+    pub fn is_from_saved(&self) -> bool {
+        self.saved_only
     }
 
     /// Count downloads in `traffic` (the service's counters).
@@ -1235,6 +1333,128 @@ impl Peers {
         }
     }
 
+    /// Why `route` is not to be tried now (`over` would refuse it at once),
+    /// or `None`.
+    fn not_ready(&self, route: &Route) -> Option<&'static str> {
+        match route {
+            Route::Tcp(a) => {
+                if let Some((false, when)) = self.state.lock().unwrap().get(a) {
+                    if when.elapsed() < ROUTE_TTL {
+                        return Some("resting after a failure");
+                    }
+                }
+                self.is_self_addr(*a)
+                    .then_some("that address is this device itself")
+            }
+            Route::Quic(a) => self
+                .is_self_addr(*a)
+                .then_some("that address is this device itself"),
+            Route::Registered(_) | Route::Relay(..) => None,
+        }
+    }
+
+    /// Ask `RACE_PATH` over every route in `routes` at once, the n-th
+    /// starting `RACE_STAGGER` × n late (so the first, usually the LAN,
+    /// wins without the others costing anything when it answers): the
+    /// first route that answers as a device of the vault, with its answer.
+    /// Failures go to `tried`; TCP outcomes are remembered as `try_tcp`
+    /// does. Routes still running when one answered finish in the
+    /// background and are ignored.
+    fn race(
+        &self,
+        p: &PeerInfo,
+        routes: &[Route],
+        tried: &mut Vec<String>,
+    ) -> Option<(Route, u16, Vec<u8>)> {
+        let (tx, rx) = std::sync::mpsc::channel::<(usize, Result<(u16, Vec<u8>)>)>();
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        for (i, route) in routes.iter().enumerate() {
+            let relay_cert = match route {
+                Route::Relay(relay, _, _) => self
+                    .peers
+                    .iter()
+                    .find(|r| &r.device == relay)
+                    .map(|r| r.cert_sha256.clone()),
+                _ => None,
+            };
+            let (client, quic, route, peer, tx, done, timeout) = (
+                self.client.clone(),
+                self.quic.clone(),
+                route.clone(),
+                p.clone(),
+                tx.clone(),
+                done.clone(),
+                self.timeout,
+            );
+            let spawned = std::thread::Builder::new()
+                .name("p2p-route".into())
+                .spawn(move || {
+                    let wait = RACE_STAGGER * i as u32;
+                    if !wait.is_zero() {
+                        std::thread::sleep(wait);
+                    }
+                    if done.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
+                    let got = attempt_route(
+                        &client,
+                        quic.as_deref(),
+                        &route,
+                        relay_cert.as_deref(),
+                        &peer,
+                        RACE_PATH,
+                        timeout,
+                    );
+                    let _ = tx.send((i, got));
+                });
+            if let Err(e) = spawned {
+                tried.push(format!("{}: no thread: {e}", routes[i].describe()));
+            }
+        }
+        drop(tx);
+        // Ends when every thread has sent or given up (each attempt is
+        // bounded by its own transport timeouts).
+        while let Ok((i, got)) = rx.recv() {
+            let r = &routes[i];
+            match got {
+                Ok((403, body)) if body == SELF_ANSWER && !matches!(r, Route::Relay(..)) => {
+                    log(&format!(
+                        "{} answered as this very device; not used again",
+                        r.addr()
+                    ));
+                    self.selfs.lock().unwrap().insert(r.addr());
+                    tried.push(format!(
+                        "{}: that address is this device itself",
+                        r.describe()
+                    ));
+                }
+                Ok((s, b)) => {
+                    done.store(true, std::sync::atomic::Ordering::Relaxed);
+                    if let Route::Tcp(a) = r {
+                        self.state
+                            .lock()
+                            .unwrap()
+                            .insert(*a, (true, Instant::now()));
+                    }
+                    return Some((r.clone(), s, b));
+                }
+                Err(e) => {
+                    let msg = format!("{e:#}");
+                    if let Route::Tcp(a) = r {
+                        let when = if refused_us(&msg) {
+                            failed_at(REFUSED_REST)
+                        } else {
+                            Instant::now()
+                        };
+                        self.state.lock().unwrap().insert(*a, (false, when));
+                    }
+                    tried.push(format!("{}: {msg}", r.describe()));
+                }
+            }
+        }
+        None
+    }
+
     /// Every route to `p`, in the order they are tried.
     fn candidate_routes(&self, p: &PeerInfo) -> Vec<Route> {
         let mut relays = Vec::new();
@@ -1253,16 +1473,20 @@ impl Peers {
             }
         }
         let selfs = self.selfs.lock().unwrap().clone();
+        // A private address on none of our subnets is the peer's own LAN
+        // seen from elsewhere: dialling it costs a timeout and reaches
+        // nothing (or a stranger with the same address).
+        let nets = self.subnets.as_deref();
         let tcp: Vec<SocketAddr> = p
             .tcp
             .iter()
-            .filter(|a| !selfs.contains(a))
+            .filter(|a| !selfs.contains(a) && on_our_side(a, nets))
             .copied()
             .collect();
         let udp: Vec<SocketAddr> = p
             .udp
             .iter()
-            .filter(|a| !selfs.contains(a))
+            .filter(|a| !selfs.contains(a) && on_our_side(a, nets))
             .copied()
             .collect();
         let mut routes = order_routes(&tcp, if quic { &udp } else { &[] }, relays);
@@ -1351,14 +1575,52 @@ impl Peers {
             }
         }
         let mut tried = Vec::new();
+        // Routes that cannot be used now are noted, not tried.
+        let mut ready = Vec::new();
         for r in self.candidate_routes(p) {
-            match self.over(&r, path, p) {
-                Ok((s, b)) => {
-                    log(&format!("{who}: {} answered {s}", r.describe()));
-                    self.remember(&p.device, Some(r.clone()), s);
-                    return Some((s, b, r));
+            match self.not_ready(&r) {
+                Some(why) => tried.push(format!("{}: {why}", r.describe())),
+                None => ready.push(r),
+            }
+        }
+        if ready.len() > 1 {
+            // Several routes: race them with a small request (staggered,
+            // the first one ahead), then ask the real thing on the winner.
+            // One at a time, every dead address would cost its timeout first.
+            if let Some((r, s, b)) = self.race(p, &ready, &mut tried) {
+                let got = if path == RACE_PATH {
+                    Ok((s, b))
+                } else {
+                    // The peer counted the probe's answer; so do we.
+                    self.traffic.record(
+                        &p.device,
+                        traffic::Direction::In,
+                        b.len() as u64,
+                        false,
+                        &r.label(),
+                        Some(r.addr()),
+                    );
+                    self.over(&r, path, p)
+                };
+                match got {
+                    Ok((s, b)) => {
+                        log(&format!("{who}: {} answered {s}", r.describe()));
+                        self.remember(&p.device, Some(r.clone()), s);
+                        return Some((s, b, r));
+                    }
+                    Err(e) => tried.push(format!("{}: {e:#}", r.describe())),
                 }
-                Err(e) => tried.push(format!("{}: {e:#}", r.describe())),
+            }
+        } else {
+            for r in ready {
+                match self.over(&r, path, p) {
+                    Ok((s, b)) => {
+                        log(&format!("{who}: {} answered {s}", r.describe()));
+                        self.remember(&p.device, Some(r.clone()), s);
+                        return Some((s, b, r));
+                    }
+                    Err(e) => tried.push(format!("{}: {e:#}", r.describe())),
+                }
             }
         }
         log(&format!(
@@ -1706,5 +1968,24 @@ mod tests {
             ]
         );
         assert_eq!(order_routes(&[lan], &[], vec![]), vec![Route::Tcp(lan)]);
+    }
+
+    #[test]
+    fn private_addresses_off_our_subnets_are_not_dialled() {
+        let nets = [(Ipv4Addr::new(192, 168, 1, 20), 24u8)];
+        let ours: SocketAddr = "192.168.1.5:17893".parse().unwrap();
+        let theirs: SocketAddr = "192.168.7.5:17893".parse().unwrap();
+        let corp: SocketAddr = "10.1.2.3:17893".parse().unwrap();
+        let public: SocketAddr = "203.0.113.5:17893".parse().unwrap();
+        let lo: SocketAddr = "127.0.0.1:17893".parse().unwrap();
+        let v6: SocketAddr = "[fd00::5]:17893".parse().unwrap();
+        assert!(on_our_side(&ours, Some(&nets)));
+        assert!(!on_our_side(&theirs, Some(&nets)));
+        assert!(!on_our_side(&corp, Some(&nets)));
+        assert!(on_our_side(&public, Some(&nets)));
+        assert!(on_our_side(&lo, Some(&nets)));
+        assert!(on_our_side(&v6, Some(&nets)));
+        // Subnets not known for certain (a VPN, no interface list): all are tried.
+        assert!(on_our_side(&theirs, None));
     }
 }

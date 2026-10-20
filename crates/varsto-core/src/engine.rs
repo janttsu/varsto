@@ -160,6 +160,7 @@ pub use org_ops::{
     LogView, OrgApproved, OrgBrief, OrgCreated, OrgDevice, OrgRemoveReport, OrgSummary, OrgUser,
     UnlistedDevice,
 };
+pub use p2p3::{DirectoryRead, SAVED_PEERS};
 pub use protection::{ClassCoverage, Protection};
 pub use quotas::QuotaStatus;
 pub use repair::{
@@ -2055,11 +2056,12 @@ impl Engine {
             // A real fork was found earlier: this identity signs nothing more.
             engine.forked_self = true;
         }
-        // Command-line runs use the peers of the directory (accepted peer
-        // records), over TLS on TCP only; the service adds LAN peers and
-        // the QUIC node.
+        // Command-line runs use the peers of the directory saved here
+        // (accepted peer records; no storage is asked while opening), over
+        // TLS on TCP only; a sync reads the storages' records first. The
+        // service adds LAN peers and the QUIC node.
         if engine.config.p2p.enabled {
-            if let Some(p) = engine.p2p_peers_tcp() {
+            if let Some(p) = engine.p2p_peers_local() {
                 engine.set_peers(Some(std::sync::Arc::new(p)));
             }
         }
@@ -6672,6 +6674,8 @@ impl Engine {
     fn sync_round_inner(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         // A join made without reaching a storage is finished first.
         self.finish_pending_join()?;
+        // Peers opened from the saved directory: read the records now.
+        self.refresh_saved_peers();
         // Every folder's pull and push record into one ledger batch, and the
         // ledger is pulled once.
         let (mut out, seq) = self.one_batch_seq(|e| e.sync_folders(folder))?;

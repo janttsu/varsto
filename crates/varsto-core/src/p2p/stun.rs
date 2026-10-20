@@ -9,8 +9,10 @@
 use anyhow::{anyhow, bail, Result};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// Servers asked when the user has not configured any. Public, free, and run
 /// by parties with no interest in this traffic; they only ever see an empty
@@ -162,13 +164,86 @@ fn parse_address(value: &[u8], xor: Option<&[u8; 12]>) -> Result<SocketAddr> {
     Ok(SocketAddr::new(ip, port))
 }
 
+/// A name lookup waits this long; a slow resolver (no internet, a captive
+/// portal) then costs this much instead of the system's own timeouts.
+pub const RESOLVE_TIMEOUT: Duration = Duration::from_secs(3);
+/// Resolved addresses are used for this long before they are looked up again.
+const RESOLVE_TTL: Duration = Duration::from_secs(600);
+
+type Resolved = Mutex<HashMap<String, (Vec<SocketAddr>, Instant)>>;
+
+/// Addresses found per server name, and the names being looked up now.
+fn resolved() -> &'static Resolved {
+    static CACHE: OnceLock<Resolved> = OnceLock::new();
+    CACHE.get_or_init(Mutex::default)
+}
+
+fn in_flight() -> &'static Mutex<HashSet<String>> {
+    static NAMES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    NAMES.get_or_init(Mutex::default)
+}
+
 /// Resolve a `host:port` server name to the addresses a socket of `family`
-/// can reach (an IPv4 socket cannot send to an IPv6 server).
+/// can reach (an IPv4 socket cannot send to an IPv6 server), waiting at
+/// most `RESOLVE_TIMEOUT` (`resolve_within`).
 pub fn resolve(server: &str, ipv6: bool) -> Vec<SocketAddr> {
-    server
-        .to_socket_addrs()
-        .map(|it| it.filter(|a| a.is_ipv6() == ipv6).collect())
-        .unwrap_or_default()
+    resolve_within(server, ipv6, RESOLVE_TIMEOUT)
+}
+
+/// `resolve`, with the lookup on a helper thread that is waited for at
+/// most `timeout`. Answers are kept for `RESOLVE_TTL`; when a lookup is
+/// slow or fails, the last answer is used, however old. Without a route
+/// to the internet nothing is looked up at all. A lookup that outlives
+/// its wait finishes in the background and fills the cache; meanwhile no
+/// second one for the same name starts.
+pub fn resolve_within(server: &str, ipv6: bool, timeout: Duration) -> Vec<SocketAddr> {
+    let family = |v: &[SocketAddr]| -> Vec<SocketAddr> {
+        v.iter().filter(|a| a.is_ipv6() == ipv6).copied().collect()
+    };
+    if let Ok(a) = server.parse::<SocketAddr>() {
+        return family(&[a]);
+    }
+    let cached = resolved().lock().unwrap().get(server).cloned();
+    if let Some((addrs, at)) = &cached {
+        if at.elapsed() < RESOLVE_TTL {
+            return family(addrs);
+        }
+    }
+    let stale = || cached.as_ref().map(|(a, _)| family(a)).unwrap_or_default();
+    // No route out (the OS has no interface address toward the internet):
+    // a lookup would only wait for the resolver to give up.
+    if !ipv6 && !server.starts_with("localhost:") && super::local_ipv4_addrs().is_empty() {
+        return stale();
+    }
+    if !in_flight().lock().unwrap().insert(server.to_string()) {
+        return stale();
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let name = server.to_string();
+    let spawned = std::thread::Builder::new()
+        .name("stun-dns".into())
+        .spawn(move || {
+            let found: Vec<SocketAddr> = name
+                .to_socket_addrs()
+                .map(|it| it.collect())
+                .unwrap_or_default();
+            if !found.is_empty() {
+                resolved()
+                    .lock()
+                    .unwrap()
+                    .insert(name.clone(), (found.clone(), Instant::now()));
+            }
+            in_flight().lock().unwrap().remove(&name);
+            let _ = tx.send(found);
+        });
+    if spawned.is_err() {
+        in_flight().lock().unwrap().remove(server);
+        return stale();
+    }
+    match rx.recv_timeout(timeout) {
+        Ok(found) if !found.is_empty() => family(&found),
+        _ => stale(),
+    }
 }
 
 /// One blocking query over a std socket, for the command line and tests.
@@ -388,6 +463,34 @@ mod tests {
             serde_json::to_string(&Nat::Symmetric).unwrap(),
             "\"symmetric\""
         );
+    }
+
+    #[test]
+    fn server_names_resolve_within_the_wait_and_literals_need_no_lookup() {
+        let v4: SocketAddr = "192.0.2.7:3478".parse().unwrap();
+        assert_eq!(
+            resolve_within("192.0.2.7:3478", false, Duration::ZERO),
+            vec![v4]
+        );
+        assert!(resolve_within("192.0.2.7:3478", true, Duration::ZERO).is_empty());
+        // A name that resolves to nothing costs at most the wait (plus
+        // thread start), never the resolver's own timeouts.
+        let t = Instant::now();
+        let got = resolve_within(
+            "varsto-test.invalid:3478",
+            false,
+            Duration::from_millis(300),
+        );
+        assert!(got.is_empty());
+        assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+        // A second ask while the first lookup may still run starts none.
+        let t = Instant::now();
+        let _ = resolve_within(
+            "varsto-test.invalid:3478",
+            false,
+            Duration::from_millis(300),
+        );
+        assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
     }
 
     #[test]
