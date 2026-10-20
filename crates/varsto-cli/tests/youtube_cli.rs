@@ -136,6 +136,35 @@ fn youtube_commands() {
     let videos = st[0]["videos"].as_array().unwrap();
     assert_eq!(videos.len(), 2);
     assert!(videos.iter().all(|v| v["status"] == "stored"), "{st:#}");
+    assert_eq!(st[0]["job_kind"], "youtube");
+    let full = job["id"].as_str().unwrap().to_string();
+    assert_eq!(st[0]["job"], format!("youtube:{full}"));
+    // The same list as torrent jobs: uniform rows with the kind.
+    let list = ok(&home, root, &["import", "jobs", "list"]);
+    let rows = list.as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{list:#}");
+    assert_eq!(rows[0]["id"], format!("youtube:{full}"));
+    assert_eq!(rows[0]["kind"], "youtube");
+    assert_eq!(rows[0]["unit"], "videos");
+    assert_eq!(rows[0]["done"], 2);
+    assert_eq!(rows[0]["total"], 2);
+    assert_eq!(rows[0]["already_stored"], 0);
+    assert_eq!(rows[0]["state"], "up_to_date");
+    assert_eq!(rows[0]["actions"], serde_json::json!(["pause", "remove"]));
+    // One job by its prefixed id, by its folder.
+    let one = ok(
+        &home,
+        root,
+        &[
+            "import",
+            "jobs",
+            "status",
+            &format!("youtube:{}", &full[..6]),
+        ],
+    );
+    assert_eq!(one["folder"], "workshop");
+    let one = ok(&home, root, &["import", "jobs", "status", "workshop"]);
+    assert_eq!(one["job"], format!("youtube:{full}"));
     let files = ok(&home, root, &["folder", "files", "workshop"]);
     let text = files.to_string();
     assert!(
@@ -156,10 +185,22 @@ fn youtube_commands() {
 
     let p = ok(&home, root, &["import", "jobs", "pause", &id]);
     assert_eq!(p["state"], "paused");
+    let list = ok(&home, root, &["import", "jobs", "list"]);
+    assert_eq!(list[0]["actions"], serde_json::json!(["resume", "remove"]));
+    let (success, _, err) = run(
+        &home,
+        root,
+        &["import", "jobs", "remove", &id, "--keep-in-transmission"],
+    );
+    assert!(!success && err.contains("torrent"), "{err}");
     let r = ok(&home, root, &["import", "jobs", "resume", &id]);
     assert_eq!(r["user_paused"], false);
     let removed = ok(&home, root, &["import", "jobs", "remove", &id]);
     assert_eq!(removed["folder"], "workshop");
     let st = ok(&home, root, &["import", "jobs", "status"]);
     assert!(st.as_array().unwrap().is_empty());
+    assert!(ok(&home, root, &["import", "jobs", "list"])
+        .as_array()
+        .unwrap()
+        .is_empty());
 }

@@ -2,8 +2,8 @@
 
 ```sh
 varsto import torrent show.torrent --folder show --storage cloud --free-min 15%
-varsto import torrent-jobs run show          # or let the background service do it
-varsto import torrent-jobs status show
+varsto import jobs run show                   # or let the background service do it
+varsto import jobs status show
 ```
 
 Varsto can download a torrent that is far larger than the computer's disk
@@ -15,8 +15,9 @@ encrypted, and each file is removed from the disk only once it is safely
 stored. Then the next batch starts, until the whole torrent is in the
 folder.
 
-Linux only, on the command line. On main and in the daily builds (storage
-format 3), not in a release yet. The details are in
+Linux only, on the command line or from the Import page of the interface
+(Torrent: a magnet link or a .torrent file). On main and in the daily builds
+(storage format 3), not in a release yet. The details are in
 [section 81 of the specification](spec/alpha-0-format.md).
 
 ## Installing transmission-daemon
@@ -155,7 +156,7 @@ downloaded too and compared after the download, by their content hash:
 - the same content: the folder keeps its version (nothing is stored again)
   and the download is removed once the folder's copy is safely stored;
 - other content: the folder is not changed. The download stays in the
-  job's directory as a conflict, and `import torrent-jobs status` names it. Move it
+  job's directory as a conflict, and `import jobs status` names it. Move it
   where you want it; it takes space on the download disk until then.
 
 A downloaded file whose path the folder holds with another size is handled
@@ -171,9 +172,9 @@ source, and `varsto import status` describes the last batch.
 
 ## Running
 
-`varsto import torrent-jobs run <job>` drives a job in the terminal until it is complete
+`varsto import jobs run <job>` drives a job in the terminal until it is complete
 (Ctrl-C stops it; running it again carries on), and the background service
-steps every job after each of its syncs. Each step:
+steps every job after each of its syncs and every 20 seconds in between. Each step:
 
 1. imports the files transmission has finished (every piece checked against
    the torrent's hashes) with the local-directory import
@@ -201,15 +202,26 @@ transmission did not finish and Varsto did not verify on a storage.
 ## Status and other commands
 
 ```sh
-varsto import torrent-jobs list                    # every job, one line each
-varsto import torrent-jobs status [job]            # files, batch, reserve, errors
-varsto import torrent-jobs pause <job>
-varsto import torrent-jobs resume <job>
-varsto import torrent-jobs remove <job> [--keep-in-transmission]
+varsto import jobs list                    # every import job, torrents and YouTube, one line each
+varsto import jobs status [job]            # files, batch, reserve, errors
+varsto import jobs pause <job>
+varsto import jobs resume <job>
+varsto import jobs remove <job> [--keep-in-transmission]
 ```
 
-A job is named by its info hash (the first 6 characters or more), its folder
-or the torrent's name. `varsto status` and `varsto import status` list the
+`varsto import jobs` is the same command for every kind of job (the YouTube
+jobs of [youtube.md](youtube.md) too); `list` names each job's kind. A torrent
+job is `torrent:<info hash>`, or just its info hash (the first 6 characters
+or more), its folder or the torrent's name; when such a name fits a YouTube
+job as well, the command asks for the `torrent:` form. With `--json`, `list`
+gives one uniform row per job (the rows of `GET /api/import/jobs`) and
+`status`, `run`, `pause`, `resume` and `remove` the job itself with `job`
+(its id in the list) and `job_kind`.
+
+The Import page of the interface shows every unfinished import at the top,
+torrent jobs among them, with their state (downloading, waiting for space,
+waiting for the policy, paused, an error with the time of the next try),
+files and bytes done, the batch in hand, and Pause, Resume and Remove. `varsto status` and `varsto import status` list the
 jobs that are not complete; a torrent folder is an import of a local
 directory (its job's download directory), so `varsto import status <folder>`
 and `varsto import verify <folder>` describe it like any other import.
@@ -237,10 +249,10 @@ disk pool, or anywhere else, use `varsto move` (spec section 23).
 
 ## Limits
 
-- Linux and the command line only. One transmission daemon per job, on the
+- Linux only (the command line, the service and the Import page). One transmission daemon per job, on the
   same computer (the download directory must be a local path both can use).
 - The reserve is checked between steps (every few seconds with
-  `import torrent-jobs run`, after each sync in the service): a disk filled very fast by
+  `import jobs run`, every 20 seconds and after each sync in the service): a disk filled very fast by
   something else can go below it before the torrent is stopped.
 - Pieces at the edges of a batch are written into the neighbouring files'
   places as well; the planner leaves room for them. When transmission

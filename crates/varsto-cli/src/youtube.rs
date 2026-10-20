@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! `varsto import youtube` and `varsto import jobs`: archive a YouTube
+//! `varsto import youtube`: archive a YouTube
 //! channel, playlist or video into a folder with the local yt-dlp, one
 //! video at a time and politely; see `docs/youtube.md`. Only for content
 //! you may keep a copy of.
 
 use crate::{fmt_bytes, passphrase, print, Cli};
 use anyhow::{bail, Result};
-use clap::{Args, Subcommand};
+use clap::Args;
 use std::path::{Path, PathBuf};
 use varsto_core::engine::{
     youtube_jobs_at, VideoStatus, YoutubeAddOptions, YoutubeEnv, YoutubeJob, YoutubeScanReport,
@@ -15,35 +15,6 @@ use varsto_core::engine::{
 use varsto_core::freespace::MinFree;
 use varsto_core::youtube::{self as yt, Throttle};
 use varsto_core::Engine;
-
-/// `varsto import jobs`: the YouTube import jobs.
-#[derive(Subcommand)]
-pub enum JobsCmd {
-    /// Work on the jobs now in this terminal (one, or all), until each waits
-    /// for something (space, the policy, a retry, the next listing).
-    Run {
-        job: Option<String>,
-        /// Try failed and given-up videos again now, and list again.
-        #[arg(long)]
-        retry_failed: bool,
-    },
-    /// The jobs: what each does or waits for, videos stored, already in the
-    /// vault, failed.
-    Status {
-        job: Option<String>,
-        /// List every video with its state.
-        #[arg(long)]
-        videos: bool,
-    },
-    /// Stop a job's downloads (a download in progress is stopped and
-    /// continued later).
-    Pause { job: String },
-    /// Carry on; videos that were given up are tried again.
-    Resume { job: String },
-    /// Forget a job. The folder keeps every video; files in the spool that
-    /// were not stored yet stay there.
-    Remove { job: String },
-}
 
 #[derive(Args)]
 pub struct AddArgs {
@@ -112,7 +83,7 @@ pub struct AddArgs {
 }
 
 /// The default spool parent.
-fn default_download_dir() -> Result<PathBuf> {
+pub(crate) fn default_download_dir() -> Result<PathBuf> {
     match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
         Some(h) => Ok(PathBuf::from(h).join("Downloads").join("varsto-youtube")),
         None => bail!("give --download-dir"),
@@ -152,7 +123,12 @@ impl YoutubeEnv for Terminal {
 }
 
 /// Step a job until it waits; its last state.
-fn run_job(engine: &mut Engine, home: &Path, id: &str, progress: bool) -> Result<YoutubeJob> {
+pub(crate) fn run_job(
+    engine: &mut Engine,
+    home: &Path,
+    id: &str,
+    progress: bool,
+) -> Result<YoutubeJob> {
     let mut env = Terminal {
         home: home.to_path_buf(),
     };
@@ -246,61 +222,6 @@ pub fn scan(cli: &Cli, home: &Path, target: &str) -> Result<()> {
     print(cli, &r, describe_scan)
 }
 
-/// `varsto import jobs ...`.
-pub fn jobs(cli: &Cli, home: &Path, cmd: &JobsCmd) -> Result<()> {
-    let mut engine = Engine::open(home, &passphrase()?)?;
-    let progress = !cli.json;
-    match cmd {
-        JobsCmd::Run { job, retry_failed } => {
-            let ids: Vec<String> = match job {
-                Some(k) => vec![varsto_core::engine::find_youtube_job(home, k)?.id],
-                None => engine.youtube_to_run().into_iter().map(|j| j.id).collect(),
-            };
-            let mut out = Vec::new();
-            for id in ids {
-                if *retry_failed {
-                    engine.youtube_retry_failed(&id)?;
-                }
-                out.push(run_job(&mut engine, home, &id, progress)?);
-            }
-            print(cli, &out, |l| describe_jobs(l, false))?;
-        }
-        JobsCmd::Status { job, videos } => {
-            let list = match job {
-                Some(k) => vec![varsto_core::engine::find_youtube_job(home, k)?],
-                None => youtube_jobs_at(home),
-            };
-            print(cli, &list, |l| describe_jobs(l, *videos))?;
-        }
-        JobsCmd::Pause { job } => {
-            let j = engine.youtube_set_paused(job, true)?;
-            print(cli, &j, |j| j.line())?;
-        }
-        JobsCmd::Resume { job } => {
-            let j = engine.youtube_set_paused(job, false)?;
-            print(cli, &j, |j| j.line())?;
-        }
-        JobsCmd::Remove { job } => {
-            let j = engine.youtube_remove(job)?;
-            print(cli, &j, |j| {
-                let mut s = format!(
-                    "YouTube job {} removed; folder {} keeps its videos.",
-                    j.short(),
-                    j.folder
-                );
-                if j.spool_dir.exists() {
-                    s += &format!(
-                        "\nFiles not stored yet stay in {} (remove them yourself when you no longer need them).",
-                        j.spool_dir.display()
-                    );
-                }
-                s
-            })?;
-        }
-    }
-    Ok(())
-}
-
 fn describe_scan(r: &YoutubeScanReport) -> String {
     format!(
         "{} {}: {} file(s) named with a video id, {} video(s), {} new to the index{}",
@@ -317,7 +238,7 @@ fn describe_scan(r: &YoutubeScanReport) -> String {
     )
 }
 
-fn describe_jobs(list: &[YoutubeJob], videos: bool) -> String {
+pub(crate) fn describe_jobs(list: &[YoutubeJob], videos: bool) -> String {
     if list.is_empty() {
         return "no YouTube jobs (varsto import youtube <channel address> --folder <name>)".into();
     }

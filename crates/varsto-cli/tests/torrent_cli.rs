@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! `varsto import torrent` and `import torrent-jobs` through the binary, against the in-process fake
-//! transmission: add, run to completion, list, status, remove.
+//! `varsto import torrent` and `import jobs` through the binary, against the in-process fake
+//! transmission: add, run to completion, list, status, remove; a YouTube job in the same list.
 #![cfg(target_os = "linux")]
 
 use std::fs;
@@ -121,7 +121,7 @@ fn a_torrent_job_through_the_cli() {
         &home,
         &[
             "import",
-            "torrent-jobs",
+            "jobs",
             "run",
             &hash[..10],
             "--interval",
@@ -133,6 +133,8 @@ fn a_torrent_job_through_the_cli() {
     stop.store(true, Ordering::Relaxed);
     stepper.join().unwrap();
     assert_eq!(done["state"], "complete", "{done:#}");
+    assert_eq!(done["job"], format!("torrent:{hash}"));
+    assert_eq!(done["job_kind"], "torrent");
     assert_eq!(done["bytes_stored"], (a.len() + b.len()) as u64);
     assert_eq!(fs::read_dir(&dl).unwrap().count(), 0);
     assert!(
@@ -141,26 +143,46 @@ fn a_torrent_job_through_the_cli() {
         "the folder is attached selectively under the folder root"
     );
 
-    let list = ok(&home, &["import", "torrent-jobs", "list"]);
-    assert_eq!(list.as_array().unwrap().len(), 1);
-    let (fine, out, _) = run(&home, &["import", "torrent-jobs", "status", "album"], false);
+    // One list for every kind of job: uniform rows with the kind.
+    let list = ok(&home, &["import", "jobs", "list"]);
+    let rows = list.as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{list:#}");
+    assert_eq!(rows[0]["id"], format!("torrent:{hash}"));
+    assert_eq!(rows[0]["kind"], "torrent");
+    assert_eq!(rows[0]["state"], "complete");
+    assert_eq!(rows[0]["done"], 2);
+    assert_eq!(rows[0]["total"], 2);
+    assert_eq!(rows[0]["finished"], true);
+    assert_eq!(rows[0]["actions"], serde_json::json!(["remove"]));
+    let (fine, out, _) = run(&home, &["import", "jobs", "list"], false);
+    assert!(fine && out.starts_with("torrent "), "{out}");
+    let (fine, out, _) = run(&home, &["import", "jobs", "status", "album"], false);
     assert!(fine && out.contains("complete"), "{out}");
+    let st = ok(
+        &home,
+        &[
+            "import",
+            "jobs",
+            "status",
+            &format!("torrent:{}", &hash[..8]),
+        ],
+    );
+    assert_eq!(st["hash"], hash.as_str());
+    // The old command is gone.
+    let (fine, _, _) = run(&home, &["import", "torrent-jobs", "list"], true);
+    assert!(!fine);
+    // A name no job has.
+    let (fine, _, err) = run(&home, &["import", "jobs", "status", "no-such-job"], true);
+    assert!(!fine && err.contains("import jobs list"), "{err}");
     let (_, out, _) = run(&home, &["status"], false);
     assert!(!out.contains("Album"), "complete jobs are not shown: {out}");
 
     ok(
         &home,
-        &[
-            "import",
-            "torrent-jobs",
-            "remove",
-            "album",
-            "--rpc-url",
-            &url,
-        ],
+        &["import", "jobs", "remove", "album", "--rpc-url", &url],
     );
     assert!(!fake.has(&hash));
-    assert!(ok(&home, &["import", "torrent-jobs", "list"])
+    assert!(ok(&home, &["import", "jobs", "list"])
         .as_array()
         .unwrap()
         .is_empty());

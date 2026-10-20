@@ -1633,7 +1633,10 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
         out.push(
             StepB::new(&format!("torrent:{}", t.job), "important", tx("Make room for torrent job {name}", &[("name", t.name.clone())]), tx("The next files need {need} more free space on the download disk than the reserve leaves; the download waits until there is room.", &[("need", human_bytes(t.need))]))
                 .how(t0("Free up space on the download disk, or lower the reserve with --free-min when you add a job. The job goes on by itself once there is room."))
-                .cmd(format!("varsto import torrent-jobs status {}", sh(&t.job)))
+                .cmd(format!(
+                    "varsto import jobs status {}",
+                    sh(&format!("torrent:{}", t.job))
+                ))
                 .0,
         );
     }
@@ -1647,7 +1650,10 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
                 tx("Every file of the torrent is in folder {folder} on your storages; the download directory is empty.", &[("folder", t.folder.clone())])
             })
                 .how(t0("Remove the job when you no longer want to see it. To move the folder's data to other storages later, use varsto move."))
-                .cmd(format!("varsto import torrent-jobs remove {}", sh(&t.job)))
+                .cmd(format!(
+                    "varsto import jobs remove {}",
+                    sh(&format!("torrent:{}", t.job))
+                ))
                 .0,
         );
     }

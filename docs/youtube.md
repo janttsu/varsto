@@ -10,8 +10,9 @@ Varsto lists the channel (or playlist, or a single video) with the
 downloads the videos one at a time into a spool directory, stores each
 finished video in a Varsto folder (encrypted on your storages, like any
 other file) and removes it from the spool once the folder's durability
-policy holds. The background service does this after every sync; `varsto
-import jobs run` does it in the terminal.
+policy holds. The background service does this after every sync and every
+20 seconds in between; `varsto import jobs run` does it in the terminal, and
+the Import page of the interface starts a job and shows it while it runs.
 
 **Only archive what you may keep a copy of.** YouTube's terms of service
 limit downloading, and videos are protected by copyright. Use this for your
@@ -141,6 +142,7 @@ is *given up*; `varsto import jobs resume <job>` or `varsto import jobs run <job
 
 ```sh
 varsto import youtube <address> [--folder NAME] [--storage S|cheapest]... [--free-min 15%] [--download-dir DIR] [options above]
+varsto import jobs list                         # every import job, YouTube and torrents, one line each with its kind
 varsto import jobs run [JOB] [--retry-failed]   # work in the terminal until each job waits
 varsto import jobs status [JOB] [--videos]      # what each job does or waits for; --videos lists every video
 varsto import jobs pause JOB | jobs resume JOB
@@ -148,8 +150,29 @@ varsto import jobs remove JOB                   # forget the job; the folder kee
 varsto import youtube-scan FOLDER-OR-DIRECTORY
 ```
 
-`JOB` is the job's id (its first characters), its folder or the channel
-address. `varsto status` shows a line per job that is not complete.
+`varsto import jobs` is one command for every kind of import job: the
+torrent jobs of [torrents.md](torrents.md) are in the same list. `JOB` is
+`youtube:<id>`, or just the job's id (its first characters), its folder or
+the channel address; when such a name fits a torrent job too, the command
+asks for the `youtube:` form. Without a `JOB`, `run` works on every YouTube
+job until it waits and steps every torrent job once. With `--json`, `list`
+gives one uniform row per job (the rows of `GET /api/import/jobs`) and the
+other commands the job itself with `job` (its id in the list) and `job_kind`.
+`varsto status` shows a line per job that is not complete.
+
+## From the interface
+
+The Import page has YouTube among its sources: paste a channel, playlist or
+video address; the page says which it is and lets you switch between "One
+video" and "Whole channel or playlist" (a watch address with a playlist in
+it can be either). Under Advanced are the polite defaults above (25-65 s
+between videos, 2 s between requests, 600K, one fragment at a time), the
+format, cookies from a browser, thumbnails, subtitles and how often to list
+again. The job then shows under *In progress* with its state (listing,
+downloading, waiting for space or for the policy, waiting to try failed
+videos again and when), the videos stored and already stored (found in the
+vault, not downloaded), the video in hand, and every failed video with
+yt-dlp's reason; Pause, Resume, Try failed videos again and Remove act on it.
 
 A single video address is one download (the job is complete once it is
 stored); a channel or playlist address is every video in it, one at a time.

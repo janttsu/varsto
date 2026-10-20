@@ -87,16 +87,8 @@ pub enum ImportCmd {
     },
     /// Download a torrent (a .torrent file or a magnet link) larger than
     /// this disk into a folder, batch by batch, through a local
-    /// transmission-daemon (Linux); `import torrent-jobs` drives and shows
-    /// the jobs.
+    /// transmission-daemon (Linux); `import jobs` drives and shows the jobs.
     Torrent(crate::torrent::TorrentAddArgs),
-    /// Torrent imports of this device: run, status, list, pause, resume,
-    /// remove.
-    #[command(name = "torrent-jobs")]
-    TorrentJobs {
-        #[command(subcommand)]
-        cmd: crate::torrent::TorrentJobCmd,
-    },
     /// Import a YouTube channel (https://www.youtube.com/@name), playlist or
     /// single video with the local yt-dlp. Listed flat, then downloaded one
     /// video at a time and politely (25-65 s between videos, 2 s between
@@ -106,10 +98,12 @@ pub enum ImportCmd {
     /// again. The background service carries on (`import jobs`). Only for
     /// content you may keep a copy of.
     Youtube(Box<crate::youtube::AddArgs>),
-    /// YouTube import jobs: status, run in the terminal, pause, resume, remove.
+    /// The import jobs of this device, torrents and YouTube alike: list,
+    /// status, run in the terminal, pause, resume, remove. A job is named
+    /// `torrent:<hash>` or `youtube:<id>` (or by its id, folder or name).
     Jobs {
         #[command(subcommand)]
-        cmd: crate::youtube::JobsCmd,
+        cmd: crate::import_jobs::JobsCmd,
     },
     /// Register YouTube videos you have already by the `[<id>]` in their file
     /// names (yt-dlp's default names): a folder of the vault (recorded for
@@ -231,13 +225,12 @@ impl Drop for ProgressLine {
 }
 
 pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
-    // Torrent jobs open the engine themselves (status and list without the
-    // passphrase).
+    // Torrent and YouTube jobs open the engine themselves (list and status
+    // without the passphrase).
     match cmd {
         ImportCmd::Torrent(a) => return crate::torrent::add(cli, home, a),
-        ImportCmd::TorrentJobs { cmd } => return crate::torrent::jobs(cli, home, cmd),
         ImportCmd::Youtube(a) => return crate::youtube::add(cli, home, a),
-        ImportCmd::Jobs { cmd } => return crate::youtube::jobs(cli, home, cmd),
+        ImportCmd::Jobs { cmd } => return crate::import_jobs::jobs(cli, home, cmd),
         ImportCmd::YoutubeScan { target } => return crate::youtube::scan(cli, home, target),
         _ => {}
     }
@@ -326,10 +319,10 @@ pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
                 std::process::exit(1);
             }
         }
-        ImportCmd::Torrent(_) | ImportCmd::TorrentJobs { .. } => unreachable!("handled above"),
-        ImportCmd::Youtube(_) | ImportCmd::Jobs { .. } | ImportCmd::YoutubeScan { .. } => {
-            unreachable!("handled above")
-        }
+        ImportCmd::Torrent(_)
+        | ImportCmd::Youtube(_)
+        | ImportCmd::Jobs { .. }
+        | ImportCmd::YoutubeScan { .. } => unreachable!("handled above"),
         ImportCmd::Cleanup {
             folder,
             yes,

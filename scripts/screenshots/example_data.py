@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
-"""Invented example data for two screenshots that a small demo vault cannot
-show well: peer-to-peer traffic between several devices, and where the data
-of a few folders is kept. Names and numbers are made up; the addresses are
+"""Invented example data for screenshots that a small demo vault cannot
+show well: peer-to-peer traffic between several devices, where the data
+of a few folders is kept, and imports of every kind in progress. Names and numbers are made up; the addresses are
 from the documentation ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24)
 and private LAN ranges. Served to the page by ui-shots.py in place of the
 service's answers."""
@@ -115,4 +115,51 @@ def locations():
         "folders": out_folders, "storages": out_storages, "devices": out_devices,
         "copies": {"average": copies_avg, "bytes": [0, 0, two, three_plus],
                    "none": 0, "one": 0, "two": int(two / block), "three_plus": int(three_plus / block)},
+    }
+
+
+def import_jobs():
+    """`GET /api/import/jobs` with an import of every kind in progress: a
+    disk being read, a torrent waiting for room, a channel with a failed
+    video and one the vault had, and a finished folder import."""
+    now = int(time.time())
+    row = {
+        "current": None, "speed": None, "last_error": None, "retry_utc": None, "already_stored": None,
+        "conflicts": None, "failed": [], "finished": False, "pending": None, "text": "", "source": "",
+    }
+
+    def r(**kw):
+        x = dict(row)
+        x.update(kw)
+        x.setdefault("updated_utc", now)
+        return x
+    jobs = [
+        r(id="run:3", kind="dir", folder="Old drive", title="/Volumes/Old drive/Photos", source="/Volumes/Old drive/Photos",
+          state="running", done=1840, total=5210, unit="files", bytes_done=31 * GB, bytes_total=88 * GB,
+          current="2019/Lapland/IMG_4410.CR2", speed=96 * MB, started_utc=now - 1500, actions=[]),
+        r(id="torrent:3f1a9c2e7b4d4e0a9c1d2b3a4f5e6d708b2c4d6e", kind="torrent", folder="open-data-2024",
+          title="Open data archive 2024", state="waiting_space", done=12, total=40, unit="files",
+          bytes_done=410 * GB, bytes_total=1400 * GB, current="Open data archive 2024/part-13.tar",
+          text="part-13.tar needs 38.2 GB more free space above the reserve", already_stored=3, conflicts=0,
+          started_utc=now - 86400 * 2, actions=["pause", "remove"]),
+        r(id="youtube:8b2c4d6e8f0a4b1c", kind="youtube", folder="example-workshop", title="@ExampleWorkshop",
+          source="https://www.youtube.com/@ExampleWorkshop/videos", state="downloading", done=57, total=212,
+          unit="videos", bytes_done=48 * GB, bytes_total=0, current="Building a workbench, part 3",
+          text="downloading Building a workbench, part 3", already_stored=9, retry_utc=now + 3 * 3600,
+          failed=[{"id": "exAAAAAAAA1", "title": "Members-only live stream", "reason": "Join this channel to get access to members-only content",
+                   "attempts": 2, "next_try_utc": now + 3 * 3600, "gave_up": False},
+                  {"id": "exBBBBBBBB2", "title": "Old trailer", "reason": "Video unavailable", "attempts": 6,
+                   "next_try_utc": None, "gave_up": True}],
+          started_utc=now - 86400 * 5, actions=["pause", "retry", "remove"]),
+        r(id="run:2", kind="dropbox", folder="Dropbox", title="mydropbox:", source="mydropbox:", state="done",
+          done=12034, total=12034, unit="files", bytes_done=64 * GB, bytes_total=0, finished=True,
+          text="12034 file(s) imported, 0 imported before, 0 could not be read", started_utc=now - 86400,
+          actions=["remove"]),
+    ]
+    return {
+        "jobs": jobs,
+        "platform": {"mobile": False, "torrents": True, "youtube": True},
+        "tools": {"yt_dlp": True, "transmission": True, "rclone": True, "git": True},
+        "defaults": {"free_min": "15%", "youtube_download_dir": "/home/me/Downloads/varsto-youtube", "sleep": "25-65",
+                     "sleep_requests": 2, "rate": "600K", "concurrent_fragments": 1, "refresh_hours": 24},
     }

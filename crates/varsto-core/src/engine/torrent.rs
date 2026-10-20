@@ -272,7 +272,7 @@ impl TorrentJob {
         self.bytes_deduped = sum(&[FileOutcome::Present, FileOutcome::Identical]);
     }
 
-    /// One line for `varsto import torrent-jobs list` and `varsto status`.
+    /// One line for `varsto import jobs list` and `varsto status`.
     pub fn line(&self) -> String {
         let deduped = self.count(FileOutcome::Present) + self.count(FileOutcome::Identical);
         let conflicts = self.count(FileOutcome::Conflict);
@@ -481,7 +481,7 @@ pub fn find_job(home: &Path, key: &str) -> Result<TorrentJob> {
         .collect();
     match hits.as_slice() {
         [one] => Ok((*one).clone()),
-        [] => bail!("no torrent job {key}: `varsto import torrent-jobs list` shows them"),
+        [] => bail!("no torrent job {key}: `varsto import jobs list` shows them"),
         _ => bail!("{key} names more than one torrent job: give its info hash"),
     }
 }
@@ -671,7 +671,7 @@ impl Engine {
         };
         if job_path(&self.home, &hash).exists() {
             bail!(
-                "there is a torrent job for this torrent already: varsto import torrent-jobs status {}",
+                "there is a torrent job for this torrent already: varsto import jobs status torrent:{}",
                 &hash[..8]
             );
         }
@@ -1510,7 +1510,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Pause or resume a job (`varsto import torrent-jobs pause|resume`).
+    /// Pause or resume a job (`varsto import jobs pause|resume`).
     pub fn torrent_set_paused(&mut self, key: &str, paused: bool, rpc: &Rpc) -> Result<TorrentJob> {
         let job = find_job(&self.home, key)?;
         let _lock = lock_job(&self.home, &job.hash, true)?;
@@ -1531,7 +1531,7 @@ impl Engine {
         Ok(job)
     }
 
-    /// Forget a job (`varsto import torrent-jobs remove`): transmission drops the
+    /// Forget a job (`varsto import jobs remove`): transmission drops the
     /// torrent too unless `keep_in_transmission`; nothing in the download
     /// directory is deleted (files there were not stored yet).
     pub fn torrent_remove(

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! `varsto import torrent` and `varsto import torrent-jobs`: download a
+//! `varsto import torrent`: download a
 //! torrent larger than the local disk straight into a Varsto folder through
 //! a local transmission-daemon, in batches that fit above a free-space
 //! reserve (`docs/torrents.md`). Linux only.
 
 use crate::{fmt_bytes, passphrase, print, Cli};
 use anyhow::{bail, Context, Result};
-use clap::{Args, Subcommand};
+use clap::Args;
 use std::path::{Path, PathBuf};
 use varsto_core::engine::{
-    find_job, torrent_jobs_at, FileOutcome, JobState, TorrentAddOptions, TorrentEnv, TorrentJob,
+    torrent_jobs_at, FileOutcome, JobState, TorrentAddOptions, TorrentEnv, TorrentJob,
 };
 use varsto_core::freespace::MinFree;
 use varsto_core::transmission::{self, AddSource, Rpc, RpcSettings};
@@ -33,7 +33,7 @@ pub struct RpcArgs {
 impl RpcArgs {
     /// Only what was given on the command line (a job's own settings and
     /// the environment fill the rest).
-    fn given(&self) -> RpcSettings {
+    pub(crate) fn given(&self) -> RpcSettings {
         RpcSettings {
             url: self.rpc_url.clone().unwrap_or_default(),
             user: self.rpc_user.clone(),
@@ -43,7 +43,7 @@ impl RpcArgs {
 }
 
 /// `varsto import torrent`: register a job. The torrent is added to
-/// transmission stopped with every file unwanted; `import torrent-jobs run`
+/// transmission stopped with every file unwanted; `import jobs run`
 /// (or the background service) downloads it batch by batch into the folder.
 #[derive(Args, Clone)]
 pub struct TorrentAddArgs {
@@ -82,59 +82,14 @@ pub struct TorrentAddArgs {
     #[arg(long)]
     verify_existing: bool,
     /// Start downloading in this terminal right away (as
-    /// `import torrent-jobs run`).
+    /// `import jobs run`).
     #[arg(long)]
     run: bool,
     #[command(flatten)]
     rpc: RpcArgs,
 }
 
-/// `varsto import torrent-jobs`: the torrent imports of this device.
-#[derive(Subcommand)]
-pub enum TorrentJobCmd {
-    /// Drive a job until it is complete: download a batch, import it, remove
-    /// it from the disk, then the next batch. Stop with Ctrl-C; running it
-    /// again carries on.
-    Run {
-        job: String,
-        /// Seconds between checks.
-        #[arg(long, default_value_t = 5)]
-        interval: u64,
-        /// One step only.
-        #[arg(long)]
-        once: bool,
-        #[command(flatten)]
-        rpc: RpcArgs,
-    },
-    /// A job's state, files and errors (every job without a name).
-    Status { job: Option<String> },
-    /// Every torrent job of this device, one line each.
-    List,
-    /// Stop downloading; the job stays.
-    Pause {
-        job: String,
-        #[command(flatten)]
-        rpc: RpcArgs,
-    },
-    /// Go on downloading.
-    Resume {
-        job: String,
-        #[command(flatten)]
-        rpc: RpcArgs,
-    },
-    /// Forget a job. The folder stays; files in the download directory that
-    /// were not stored yet stay there too.
-    Remove {
-        job: String,
-        /// Leave the torrent in transmission.
-        #[arg(long)]
-        keep_in_transmission: bool,
-        #[command(flatten)]
-        rpc: RpcArgs,
-    },
-}
-
-fn linux_only() -> Result<()> {
+pub(crate) fn linux_only() -> Result<()> {
     if !cfg!(target_os = "linux") {
         bail!("torrent imports run on Linux only (they drive a local transmission-daemon)");
     }
@@ -193,110 +148,20 @@ pub fn add(cli: &Cli, home: &Path, a: &TorrentAddArgs) -> Result<()> {
         )?
     };
     if a.run {
-        return drive(cli, home, &mut engine, &job.hash, &client, 5, false);
+        let j = drive(cli, home, &mut engine, &job.hash, &client, 5, false)?;
+        return print(cli, &j, describe);
     }
     print(cli, &job, |j| {
         format!(
-            "{}\nIt downloads while the background service runs, or now with: varsto import torrent-jobs run {}",
+            "{}\nIt downloads while the background service runs, or now with: varsto import jobs run torrent:{}",
             describe(j),
             j.short()
         )
     })
 }
 
-/// `varsto import torrent-jobs ...`.
-pub fn jobs(cli: &Cli, home: &Path, cmd: &TorrentJobCmd) -> Result<()> {
-    match cmd {
-        TorrentJobCmd::List => {
-            let jobs = torrent_jobs_at(home);
-            print(cli, &jobs, |j| {
-                if j.is_empty() {
-                    "no torrent jobs".to_string()
-                } else {
-                    j.iter()
-                        .map(TorrentJob::line)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                }
-            })
-        }
-        TorrentJobCmd::Status { job } => match job {
-            Some(k) => {
-                let j = find_job(home, k)?;
-                print(cli, &j, describe)
-            }
-            None => {
-                let jobs = torrent_jobs_at(home);
-                print(cli, &jobs, |j| {
-                    if j.is_empty() {
-                        "no torrent jobs".to_string()
-                    } else {
-                        j.iter().map(describe).collect::<Vec<_>>().join("\n\n")
-                    }
-                })
-            }
-        },
-        TorrentJobCmd::Run {
-            job,
-            interval,
-            once,
-            rpc,
-        } => {
-            linux_only()?;
-            let mut engine = Engine::open(home, &passphrase()?)?;
-            let j = find_job(home, job)?;
-            let client = Rpc::new(engine.torrent_rpc(&j, &rpc.given()));
-            drive(cli, home, &mut engine, &j.hash, &client, *interval, *once)
-        }
-        TorrentJobCmd::Pause { job, rpc } | TorrentJobCmd::Resume { job, rpc } => {
-            linux_only()?;
-            let paused = matches!(cmd, TorrentJobCmd::Pause { .. });
-            let mut engine = Engine::open(home, &passphrase()?)?;
-            let j = find_job(home, job)?;
-            let client = Rpc::new(engine.torrent_rpc(&j, &rpc.given()));
-            let j = engine.torrent_set_paused(&j.hash, paused, &client)?;
-            print(cli, &j, TorrentJob::line)
-        }
-        TorrentJobCmd::Remove {
-            job,
-            keep_in_transmission,
-            rpc,
-        } => {
-            linux_only()?;
-            let mut engine = Engine::open(home, &passphrase()?)?;
-            let j = find_job(home, job)?;
-            let client = Rpc::new(engine.torrent_rpc(&j, &rpc.given()));
-            let j = engine.torrent_remove(&j.hash, *keep_in_transmission, Some(&client))?;
-            print(cli, &j, |j| {
-                let left = std::fs::read_dir(&j.download_dir)
-                    .map(|d| d.count())
-                    .unwrap_or(0);
-                format!(
-                    "removed torrent job {} ({}); folder {} stays{}{}",
-                    j.short(),
-                    j.name,
-                    j.folder,
-                    if *keep_in_transmission {
-                        "; the torrent stays in transmission"
-                    } else {
-                        ""
-                    },
-                    if left > 0 {
-                        format!(
-                            "; {} holds files that were not stored yet",
-                            j.download_dir.display()
-                        )
-                    } else {
-                        String::new()
-                    }
-                )
-            })
-        }
-    }
-}
-
-/// Step a job until it is complete (or once).
-fn drive(
+/// Step a job until it is complete (or once); the job as it is then.
+pub(crate) fn drive(
     cli: &Cli,
     home: &Path,
     engine: &mut Engine,
@@ -304,7 +169,7 @@ fn drive(
     rpc: &Rpc,
     interval: u64,
     once: bool,
-) -> Result<()> {
+) -> Result<TorrentJob> {
     let mut env = CliEnv {
         home: home.to_path_buf(),
     };
@@ -318,14 +183,11 @@ fn drive(
                     last = line;
                 }
                 if once || j.state == JobState::Complete {
-                    if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&j)?);
-                    }
-                    return Ok(());
+                    return Ok(j);
                 }
                 if j.user_paused {
                     bail!(
-                        "the job is paused: varsto import torrent-jobs resume {}",
+                        "the job is paused: varsto import jobs resume torrent:{}",
                         j.short()
                     );
                 }
@@ -342,7 +204,7 @@ fn drive(
     }
 }
 
-fn describe(j: &TorrentJob) -> String {
+pub(crate) fn describe(j: &TorrentJob) -> String {
     let mut out = j.line();
     out += &format!(
         "\n  info hash {}\n  download directory {}\n  reserve {} ({}){}",

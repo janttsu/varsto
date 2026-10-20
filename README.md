@@ -115,7 +115,7 @@ varsto import dropbox mydropbox:                  # also onedrive, or rclone <re
 varsto import dir /media/old-drive --remove-source  # removes source files once stored and the policy is met; docs/import-local.md
 varsto import status && varsto import verify photos
 # torrents larger than the disk (Linux, daily builds): batch by batch through transmission-daemon into a storage
-varsto import torrent show.torrent --folder show --storage cheapest --free-min 15% && varsto import torrent-jobs run show   # docs/torrents.md
+varsto import torrent show.torrent --folder show --storage cheapest --free-min 15% && varsto import jobs run show   # docs/torrents.md
 
 # a pool of removable disks: fill, check, eject, retire; files on a disk that is away say "attach disk data-01 (shelf)"
 varsto storage add-pool shelf --place shelf

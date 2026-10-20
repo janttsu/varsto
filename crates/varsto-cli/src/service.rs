@@ -2062,6 +2062,9 @@ pub fn run(opts: Options) -> Result<()> {
     varsto_core::activity::global().spawn_poller(activity_stop.clone());
     // Tasks, transfers and peers as events while a page listens.
     crate::sse::spawn_sampler(state.lock().unwrap().traffic.clone(), activity_stop.clone());
+    // Torrent and YouTube jobs move on between syncs too, and pages hear
+    // of every change of the import list.
+    crate::import_jobs::spawn_driver(state.clone(), activity_stop.clone());
 
     // File watcher: sends a signal on any change under an attached folder.
     let (tx, rx) = mpsc::channel::<()>();

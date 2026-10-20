@@ -2922,22 +2922,22 @@ def seed_torrent(seed, name, torrent):
 
 
 def drive_torrent(lap, h, reserve, minutes=25):
-    """`varsto import torrent-jobs run` in the background until the job is complete, polling the
+    """`varsto import jobs run` in the background until the job is complete, polling the
     spool's free space; (state, lowest free bytes, seconds)."""
-    run(lap, f"{ENV} nohup varsto import torrent-jobs run {h} --interval 2 > ~/torrent-run.log 2>&1 &")
+    run(lap, f"{ENV} nohup varsto import jobs run {h} --interval 2 > ~/torrent-run.log 2>&1 &")
     size = int(run(lap, "df -B1 --output=size /mnt/spool | tail -1").stdout)
     lowest, state, t0 = size, None, time.time()
     try:
         while time.time() - t0 < minutes * 60:
             avail = int(run(lap, "df -B1 --output=avail /mnt/spool | tail -1").stdout)
             lowest = min(lowest, avail)
-            st = v(lap, f"import torrent-jobs status {h}", check_rc=False)
+            st = v(lap, f"import jobs status {h}", check_rc=False)
             state = st.get("state") if isinstance(st, dict) else None
             if state == "complete":
                 break
             time.sleep(2)
     finally:
-        run(lap, "pkill -f '[v]arsto import torrent-jobs run'; true", check_rc=False)
+        run(lap, "pkill -f '[v]arsto import jobs run'; true", check_rc=False)
     check(state == "complete", f"the job did not complete ({state}): " +
           run(lap, "tail -20 ~/torrent-run.log", check_rc=False).stdout[-1500:])
     check(lowest >= reserve, f"the spool fell to {lowest} bytes free, below the {reserve} byte reserve")
@@ -2991,7 +2991,12 @@ def s_torrent_spool():
     _, lowest, secs = drive_torrent(lap, h, reserve)
     CTX["torrent_secs"], CTX["torrent_lowest_free"], CTX["torrent_reserve"] = secs, lowest, reserve
     check(run(lap, "find /mnt/spool -mindepth 1 | head -5").stdout.strip() == "", "the spool is not empty")
-    st = v(lap, f"import torrent-jobs status {h}")
+    st = v(lap, f"import jobs status torrent:{h}")
+    check(st.get("job") == f"torrent:{h}" and st.get("job_kind") == "torrent", f"status names the job: {str(st)[:200]}")
+    # One list for every kind of job (`import jobs`, the Import page's rows).
+    rows = v(lap, "import jobs list")
+    check([r["id"] for r in rows] == [f"torrent:{h}"] and rows[0]["kind"] == "torrent" and rows[0]["finished"]
+          and rows[0]["done"] == rows[0]["total"] == 20, f"import jobs list: {str(rows)[:400]}")
     check(st["batches"] >= 4 and st["bytes_stored"] == 20 * (100 << 20), f"batches {st['batches']}, stored {st['bytes_stored']}")
     files = {f["path"]: f for f in v(lap, "folder files big")}
     check(set(files) == set(sums), f"folder files differ: {sorted(set(sums) ^ set(files))[:6]}")
@@ -3009,7 +3014,7 @@ def s_torrent_spool():
     check([s["folder"] for s in imports] == ["big"] and imports[0]["kind"] == "dir", f"import status: {str(imports)[:300]}")
     ver = v(lap, "import verify big")
     check(ver["blocks_without_storage_copy"] == 0, f"import verify: {str(ver)[:300]}")
-    v(lap, f"import torrent-jobs remove {h}", json_out=False)
+    v(lap, f"import jobs remove {h}", json_out=False)
 
     # A second torrent with the same top directory (its name is the first path
     # component): 10 files the folder holds, hard links to the seed's, and 3 new.
@@ -3032,7 +3037,7 @@ def s_torrent_spool():
     present = [f["path"] for f in job2["files"] if f["done"] and f["outcome"] == "present"]
     check(len(present) == 10 and job2["existing_folder"], f"present at add: {present}")
     drive_torrent(lap, h2, reserve)
-    st2 = v(lap, f"import torrent-jobs status {h2}")
+    st2 = v(lap, f"import jobs status {h2}")
     check(st2["bytes_stored"] == 3 * (100 << 20) and st2["bytes_deduped"] == 10 * (100 << 20),
           f"second torrent stored {st2['bytes_stored']}, deduped {st2['bytes_deduped']}")
     # The daemon never fetched the present files.
@@ -3045,7 +3050,7 @@ def s_torrent_spool():
     files = {f["path"] for f in v(lap, "folder files big")}
     check({f"Bigset/part-{i}.bin" for i in (21, 22, 23)} <= files, f"new files missing: {sorted(files)[-5:]}")
     check(run(lap, "find /mnt/spool -mindepth 1 | head -5").stdout.strip() == "", "the spool is not empty after the second job")
-    v(lap, f"import torrent-jobs remove {h2}", json_out=False)
+    v(lap, f"import jobs remove {h2}", json_out=False)
     for vm in (seed, lap):
         run(vm, "pkill -x transmission-da; pkill -f '[t]racker.py'; rm -rf ~/seed ~/tr-seed ~/tr-dl ~/shelf ~/big.torrent ~/more.torrent; true",
             check_rc=False)
@@ -3116,7 +3121,12 @@ def s_youtube_spool():
     # One more video: only it is downloaded.
     run(vm, "printf 'labVIDEO003\\thttps://www.youtube.com/watch?v=labVIDEO003\\tNew\\n' >> ~/yt-listing.txt")
     before = int(run(vm, "wc -l < ~/yt-calls.log").stdout.strip())
-    dl(f"import jobs run {job['id'][:8]} --retry-failed")
+    rows = dl("import jobs list")
+    row = next((r for r in rows if r["id"] == f"youtube:{job['id']}"), None)
+    check(row is not None and row["kind"] == "youtube" and row["already_stored"] == 1
+          and [f["id"] for f in row["failed"]] == ["labPRIVATE1"] and "Private video" in row["failed"][0]["reason"]
+          and "retry" in row["actions"], f"import jobs list: {str(rows)[:600]}")
+    dl(f"import jobs run youtube:{job['id'][:8]} --retry-failed")
     new = run(vm, f"tail -n +{before + 1} ~/yt-calls.log").stdout
     check("labVIDEO003" in new and "labVIDEO001" not in new and "labVIDEO002" not in new,
           f"calls of the second run: {new[-600:]}")

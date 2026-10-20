@@ -186,6 +186,7 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
         let st = state.lock().unwrap_or_else(|e| e.into_inner());
         Fixed {
             bound: st.bound.clone(),
+            home: st.home.clone(),
             token: st.token.clone(),
             traffic: st.traffic.clone(),
             state: state.clone(),
@@ -382,6 +383,8 @@ fn loggable_url(url: &str) -> String {
 /// What the dispatching thread needs, copied from the state at start.
 struct Fixed {
     bound: String,
+    /// The device directory (job files are read without the state).
+    home: PathBuf,
     token: String,
     traffic: Arc<varsto_core::p2p::Traffic>,
     state: Shared,
@@ -490,6 +493,22 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                 200,
                 &json!({"ticket": mint_ticket(route, folder, file)}),
             ))?;
+        }
+        return Ok(None);
+    }
+    if path == "/api/import/start"
+        || path == "/api/import/jobs"
+        || path.starts_with("/api/import/jobs/")
+    {
+        // Every import of this device, and starting or changing one: never
+        // waits for the state (an import or a sync may hold it for long).
+        if !header_token_ok(&request, &fixed.token) {
+            request.respond(json_response(
+                401,
+                &json!({"error": "missing or wrong token; reopen the start URL"}),
+            ))?;
+        } else {
+            crate::import_jobs::serve(&fixed.state, &fixed.home, request)?;
         }
         return Ok(None);
     }
@@ -677,7 +696,7 @@ fn api_plain(status: u16, msg: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         .with_header(header("Cache-Control", "no-store"))
 }
 
-fn json_response(status: u16, value: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn json_response(status: u16, value: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
     json_text(status, &value.to_string())
 }
 
@@ -1528,7 +1547,7 @@ fn storage_kind_allowed(kind: &str, on_phone: bool) -> Result<()> {
     Ok(())
 }
 
-fn mobile() -> bool {
+pub(crate) fn mobile() -> bool {
     std::env::var_os("VARSTO_MOBILE").is_some()
 }
 
@@ -1600,7 +1619,7 @@ fn default_folder_path(home: &std::path::Path, name: &str, plain: bool) -> Resul
 
 /// Decode `%XX` escapes and `+` in a query value. Works on bytes so that a
 /// multi-byte character after a `%` cannot split a character boundary.
-fn percent_decode(v: &str) -> String {
+pub(crate) fn percent_decode(v: &str) -> String {
     let bytes = v.as_bytes();
     let hex = |b: u8| (b as char).to_digit(16).map(|d| d as u8);
     let mut out = Vec::with_capacity(bytes.len());
@@ -4007,6 +4026,143 @@ mod tests {
     }
 
     #[test]
+    fn import_jobs_are_one_list_answered_without_the_state() {
+        let (port, token, tmp, state) = test_server_state();
+        let (hash, yid) = crate::import_jobs::tests::write_jobs(tmp.path());
+        let h = [("X-Varsto-Token", token.as_str())];
+        assert_eq!(raw(port, "GET", "/api/import/jobs", &[], "").0, 401);
+        assert_eq!(raw(port, "POST", "/api/import/start", &[], "{}").0, 401);
+        // A sync or an import holds the state: the list and the requests to
+        // change it are answered at once all the same.
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let holder = {
+            let state = state.clone();
+            std::thread::spawn(move || {
+                let _g = state.lock().unwrap();
+                held_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            })
+        };
+        held_rx.recv().unwrap();
+        let t = std::time::Instant::now();
+        let (st, _, body) = raw(port, "GET", "/api/import/jobs", &h, "");
+        assert!(t.elapsed() < std::time::Duration::from_millis(1000));
+        assert_eq!(st, 200, "{body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        let jobs = v["jobs"].as_array().unwrap();
+        // One uniform shape for every kind.
+        for j in jobs {
+            for k in [
+                "id",
+                "kind",
+                "folder",
+                "title",
+                "state",
+                "done",
+                "total",
+                "bytes_done",
+                "bytes_total",
+                "current",
+                "last_error",
+                "actions",
+                "finished",
+                "failed",
+            ] {
+                assert!(j.get(k).is_some(), "{k} missing in {j}");
+            }
+        }
+        let t = jobs.iter().find(|j| j["kind"] == "torrent").unwrap();
+        assert_eq!(t["id"], format!("torrent:{hash}"));
+        assert_eq!(t["state"], "downloading");
+        assert_eq!(
+            (t["done"].as_u64(), t["total"].as_u64()),
+            (Some(2), Some(3))
+        );
+        assert_eq!(t["bytes_total"], 1000);
+        assert_eq!(t["current"], "Example set/c.bin");
+        assert_eq!(t["actions"], json!(["pause", "remove"]));
+        let y = jobs.iter().find(|j| j["kind"] == "youtube").unwrap();
+        assert_eq!(y["id"], format!("youtube:{yid}"));
+        assert_eq!(y["unit"], "videos");
+        assert_eq!(y["already_stored"], 1);
+        assert_eq!(y["failed"].as_array().unwrap().len(), 2);
+        assert_eq!(y["failed"][0]["reason"], "Private video");
+        assert_eq!(y["actions"], json!(["pause", "retry", "remove"]));
+        assert!(v["platform"]["mobile"].is_boolean());
+        assert_eq!(v["defaults"]["rate"], "600K");
+        assert_eq!(v["defaults"]["sleep"], "25-65");
+        // An action is queued at once and shows on its row meanwhile.
+        let (st, _, body) = raw(
+            port,
+            "POST",
+            &format!("/api/import/jobs/youtube%3A{yid}/pause"),
+            &h,
+            "{}",
+        );
+        assert_eq!(st, 202, "{body}");
+        let v: Value =
+            serde_json::from_str(&raw(port, "GET", "/api/import/jobs", &h, "").2).unwrap();
+        let y = v["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|j| j["kind"] == "youtube")
+            .unwrap()
+            .clone();
+        assert_eq!(y["pending"], "pause", "{y}");
+        // Unknown jobs and actions, and what a torrent cannot do.
+        let post = |path: &str, body: &str| raw(port, "POST", path, &h, body).0;
+        assert_eq!(post("/api/import/jobs/torrent%3A00ff00ff/pause", "{}"), 404);
+        assert_eq!(
+            post(&format!("/api/import/jobs/torrent%3A{hash}/explode"), "{}"),
+            404
+        );
+        assert_eq!(
+            post(&format!("/api/import/jobs/torrent%3A{hash}/retry"), "{}"),
+            400
+        );
+        assert_eq!(post("/api/import/jobs/run%3A999999/remove", "{}"), 404);
+        // Starting checks what it can before anything is queued.
+        assert_eq!(post("/api/import/start", r#"{"kind":"nothing"}"#), 400);
+        assert_eq!(post("/api/import/start", r#"{"kind":"dir"}"#), 400);
+        assert_eq!(
+            post(
+                "/api/import/start",
+                r#"{"kind":"youtube","url":"https://example.com/x"}"#
+            ),
+            400
+        );
+        assert_eq!(
+            post(
+                "/api/import/start",
+                r#"{"kind":"cloud","source":"no colon"}"#
+            ),
+            400
+        );
+        holder.join().unwrap();
+        // Once the state is free the action runs; this vault is locked, so it
+        // fails and the list says why.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let v: Value =
+                serde_json::from_str(&raw(port, "GET", "/api/import/jobs", &h, "").2).unwrap();
+            let failed = v["jobs"].as_array().unwrap().iter().any(|j| {
+                j["id"].as_str().is_some_and(|i| i.starts_with("run:"))
+                    && j["state"] == "failed"
+                    && j["kind"] == "youtube"
+                    && j["last_error"]
+                        .as_str()
+                        .is_some_and(|e| e.contains("locked"))
+            });
+            if failed {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "{v:#}");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    #[test]
     fn a_change_through_the_api_drops_the_cached_reads() {
         let (port, token, _tmp, state) = test_server_state();
         let h = [("X-Varsto-Token", token.as_str())];
@@ -4886,6 +5042,10 @@ mod tests {
             "https://s3.eu-central-1.amazonaws.com",
             "/Users/me/Pictures",
             "/Volumes/Old drive/Photos",
+            "/Volumes/Archive disk/annex",
+            "mydropbox:",
+            "magnet:?xt=urn:btih:...",
+            "https://www.youtube.com/@channel",
             "/Users/me/Varsto/Photos",
             "stun.example.net:3478",
             "Documents: a verification is about to age out",
