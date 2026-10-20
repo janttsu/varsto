@@ -335,6 +335,10 @@ pub struct PushReport {
     /// Read-only folder: local changes moved to `kept-aside/` or undone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kept_aside: Vec<String>,
+    /// The change is saved here but its upload failed (a storage cannot be
+    /// reached): why. The next sync or push uploads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_pending: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -3971,6 +3975,32 @@ impl Engine {
         self.push_with_scan(folder, None)
     }
 
+    /// `push` after a change that is already saved on this device. When the
+    /// upload fails (a storage is down, no network), the change stays and the
+    /// report says "upload pending"; the next sync or push uploads it.
+    /// Errors that mean nothing could be published at all (removed device,
+    /// forked ledger, paused folder) are still returned.
+    fn push_after_local(&mut self, folder: &str) -> Result<PushReport> {
+        match self.push(folder) {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                if self.ensure_active().is_err()
+                    || self.ensure_ledger_writable().is_err()
+                    || self.forked_self
+                    || folder_safety::paused_error(&e).is_some()
+                {
+                    return Err(e);
+                }
+                log::warn!("{folder}: saved here, upload pending: {e:#}");
+                Ok(PushReport {
+                    folder: folder.to_string(),
+                    upload_pending: Some(format!("{e:#}")),
+                    ..Default::default()
+                })
+            }
+        }
+    }
+
     /// `push` with the scan a pull of the same folder just made, so a sync
     /// walks the folder once (`sync_folders`).
     fn push_with_scan(&mut self, folder: &str, scan: Option<ScanOutcome>) -> Result<PushReport> {
@@ -6471,7 +6501,7 @@ impl Engine {
             return Err(e.context(format!("write {}", disk.display())));
         }
         fs::rename(&tmp, &disk).with_context(|| format!("write {}", disk.display()))?;
-        self.push(folder)
+        self.push_after_local(folder)
     }
 
     /// Create a new file inside a folder, never replacing one: refused when
@@ -6606,7 +6636,7 @@ impl Engine {
                     fs::create_dir_all(parent)?;
                 }
                 fs::rename(&ph, placeholder_path(&dst))?;
-                return self.push(folder);
+                return self.push_after_local(folder);
             }
             bail!("unknown file {from}");
         }
@@ -6617,7 +6647,7 @@ impl Engine {
             fs::create_dir_all(parent)?;
         }
         fs::rename(&src, &dst).with_context(|| format!("move {from} to {to}"))?;
-        self.push(folder)
+        self.push_after_local(folder)
     }
 
     pub fn list_files(&self, folder: &str) -> Result<Vec<FileEntry>> {

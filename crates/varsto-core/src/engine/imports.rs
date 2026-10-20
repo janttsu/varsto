@@ -981,6 +981,14 @@ impl Engine {
 
     // ----- a run -------------------------------------------------------------------
 
+    /// Bring a folder up to date before an import, but go on with the local
+    /// import when a storage cannot be reached; the sync catches up later.
+    fn pull_best_effort(&mut self, name: &str) {
+        if let Err(e) = self.pull(name) {
+            log::warn!("{name}: not up to date before the import ({e:#}); importing locally");
+        }
+    }
+
     /// Import `source` into its folder (see the module documentation).
     pub fn import_run(
         &mut self,
@@ -1060,14 +1068,14 @@ impl Engine {
             });
             match (&existing, attached) {
                 (Some(_), Some(_)) => {
-                    self.pull(&name)?;
+                    self.pull_best_effort(&name);
                 }
                 (Some(rec), None) => {
                     let dest = dest_for(opts, &rec.name).ok_or_else(|| {
                         anyhow!("folder {} is not attached here: give --dest (and --selective for placeholders only)", rec.name)
                     })?;
                     self.attach_folder(&rec.name, &dest, opts.selective)?;
-                    self.pull(&name)?;
+                    self.pull_best_effort(&name);
                 }
                 (None, _) => {
                     let dest = dest_for(opts, &name).ok_or_else(|| {

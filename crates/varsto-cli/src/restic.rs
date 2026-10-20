@@ -263,16 +263,94 @@ fn restic_command(cfg: &ResticConfig, args: &[String]) -> Result<Command> {
     Ok(c)
 }
 
+/// Environment variable with the longest time, in seconds, that one restic
+/// run may take; unset or 0 means no limit (a backup can run for hours).
+const LIMIT_ENV: &str = "VARSTO_RESTIC_TIMEOUT_SECS";
+
+fn parse_limit(v: Option<&str>) -> Option<Duration> {
+    let n: u64 = v?.trim().parse().ok()?;
+    (n > 0).then(|| Duration::from_secs(n))
+}
+
+fn restic_limit() -> Option<Duration> {
+    parse_limit(std::env::var(LIMIT_ENV).ok().as_deref())
+}
+
+fn kill_pid(pid: u32) {
+    #[cfg(unix)]
+    let _ = Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    #[cfg(windows)]
+    let _ = Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Kills a child that outlives its wall-clock limit. Dropping it stands the
+/// watch down.
+struct Watchdog {
+    done: Arc<AtomicBool>,
+    fired: Arc<AtomicBool>,
+}
+
+impl Watchdog {
+    fn start(pid: u32, limit: Option<Duration>) -> Watchdog {
+        let done = Arc::new(AtomicBool::new(false));
+        let fired = Arc::new(AtomicBool::new(false));
+        if let Some(limit) = limit {
+            let (d, f) = (done.clone(), fired.clone());
+            std::thread::spawn(move || {
+                let start = Instant::now();
+                while !d.load(Ordering::SeqCst) {
+                    if start.elapsed() >= limit {
+                        f.store(true, Ordering::SeqCst);
+                        kill_pid(pid);
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            });
+        }
+        Watchdog { done, fired }
+    }
+
+    fn fired(&self) -> bool {
+        self.fired.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        self.done.store(true, Ordering::SeqCst);
+    }
+}
+
 /// Run restic to the end; (success, exit code, stdout, stderr).
 fn restic_output(
     cfg: &ResticConfig,
     args: &[String],
 ) -> Result<(bool, Option<i32>, String, String)> {
     let t = varsto_core::logging::Timer::start();
-    let out = restic_command(cfg, args)?
+    let child = restic_command(cfg, args)?
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .with_context(|| format!("run {} (is restic installed?)", cfg.binary))?;
+    let limit = restic_limit();
+    let dog = Watchdog::start(child.id(), limit);
+    let out = child.wait_with_output()?;
+    if dog.fired() {
+        bail!(
+            "restic did not finish within {} s and was stopped ({LIMIT_ENV})",
+            limit.map(|l| l.as_secs()).unwrap_or(0)
+        );
+    }
     log::debug!(
         code = out.status.code().unwrap_or(-1),
         ms = t.ms(),
@@ -333,6 +411,8 @@ fn backup(cfg: &ResticConfig, dry_run: bool, quiet: bool) -> Result<restic::Summ
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("run {} (is restic installed?)", cfg.binary))?;
+    let limit = restic_limit();
+    let dog = Watchdog::start(child.id(), limit);
     let stderr = child.stderr.take().expect("piped");
     let err_lines = std::thread::spawn(move || {
         let mut kept = Vec::new();
@@ -407,6 +487,12 @@ fn backup(cfg: &ResticConfig, dry_run: bool, quiet: bool) -> Result<restic::Summ
     }
     let status = child.wait()?;
     let err_text = err_lines.join().unwrap_or_default();
+    if dog.fired() {
+        bail!(
+            "restic did not finish within {} s and was stopped ({LIMIT_ENV})",
+            limit.map(|l| l.as_secs()).unwrap_or(0)
+        );
+    }
     // Exit code 3: a snapshot was taken but some files could not be read.
     // In a complete mirror that is a failure: the snapshot is not whole.
     if !status.success() {
@@ -1065,6 +1151,36 @@ pub fn kit_note(home: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_restic_limit_is_optional() {
+        assert_eq!(parse_limit(None), None);
+        assert_eq!(parse_limit(Some("")), None);
+        assert_eq!(parse_limit(Some("0")), None);
+        assert_eq!(parse_limit(Some("abc")), None);
+        assert_eq!(parse_limit(Some(" 90 ")), Some(Duration::from_secs(90)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_past_its_limit_is_killed() {
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let dog = Watchdog::start(child.id(), Some(Duration::from_millis(300)));
+        let t = Instant::now();
+        let status = child.wait().unwrap();
+        assert!(dog.fired());
+        assert!(!status.success());
+        assert!(t.elapsed() < Duration::from_secs(20));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_within_its_limit_is_left_alone() {
+        let mut child = Command::new("true").spawn().unwrap();
+        let dog = Watchdog::start(child.id(), Some(Duration::from_secs(60)));
+        assert!(child.wait().unwrap().success());
+        assert!(!dog.fired());
+    }
 
     fn config(repo: &str, password: PasswordSource) -> ResticConfig {
         serde_json::from_value(serde_json::json!({
