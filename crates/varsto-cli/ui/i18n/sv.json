@@ -1808,6 +1808,10 @@
  },
  "patterns": [
   [
+   "^Storage (.+) cannot be reached; it is tried again at (.+)\\.$",
+   "Lagringen $1 kan inte nås; den provas igen kl. $2."
+  ],
+  [
    "^This device's six words: (.+)\\. The other device shows the same words before it lets this one join\\.$",
    "Den här enhetens sex ord: $1. Den andra enheten visar samma ord innan den låter den här ansluta."
   ],

@@ -675,6 +675,22 @@ impl ServiceState {
     /// Take the scheduled backup snapshots that are due and, at most every
     /// six hours, expire old ones (called after a sync, like repair).
     pub fn backups_if_due(&mut self, engine: &mut Engine) {
+        self.backup_snapshots_if_due(engine);
+        let now = varsto_core::util::now_utc();
+        if self
+            .backup_upkeep_utc
+            .is_none_or(|t| now - t >= BACKUP_UPKEEP_EVERY)
+        {
+            self.backup_upkeep_utc = Some(now);
+            match engine.backup_upkeep() {
+                Ok(r) => self.record_backup_upkeep(&r),
+                Err(e) => log::warn!("backup expiry failed: {e:#}"),
+            }
+        }
+    }
+    /// Take the scheduled backup snapshots that are due (no expiry: also
+    /// after a sync that could not reach every storage, spec section 78).
+    pub fn backup_snapshots_if_due(&mut self, engine: &mut Engine) {
         let now = varsto_core::util::now_utc();
         for name in engine.backups_due(now) {
             match engine.take_snapshot(&name) {
@@ -704,16 +720,6 @@ impl ServiceState {
                     }
                     self.backup_errors.insert(name, why);
                 }
-            }
-        }
-        if self
-            .backup_upkeep_utc
-            .is_none_or(|t| now - t >= BACKUP_UPKEEP_EVERY)
-        {
-            self.backup_upkeep_utc = Some(now);
-            match engine.backup_upkeep() {
-                Ok(r) => self.record_backup_upkeep(&r),
-                Err(e) => log::warn!("backup expiry failed: {e:#}"),
             }
         }
     }
@@ -881,6 +887,7 @@ impl ServiceState {
         let mut left_out: std::collections::BTreeSet<String> = Default::default();
         // A read-only shared folder: local changes are not published.
         let mut kept_aside = 0;
+        let mut not_synced: Vec<String> = Vec::new();
         for (pl, ps) in reports {
             kept_aside += pl.kept_aside.len() + ps.kept_aside.len();
             for f in &ps.storages_full {
@@ -913,6 +920,12 @@ impl ServiceState {
                 );
             }
             left_out.extend(ps.storages_unavailable.iter().cloned());
+            // A folder that could not be synced (the round goes on with the
+            // others and returns Ok) and the storages it could not reach.
+            if let Some(err) = &pl.error {
+                not_synced.push(format!("{}: {err}", pl.folder));
+            }
+            left_out.extend(pl.storages_down.iter().cloned());
             self.p2p_chunks += pl.chunks_from_peers;
             self.p2p_bytes += pl.bytes_from_peers;
             updated += pl.files_updated;
@@ -952,7 +965,14 @@ impl ServiceState {
                 if kept_aside == 1 { "file" } else { "files" }
             ));
         }
-        self.last_error = None;
+        // Partly done: say which folders were left out and why.
+        self.last_error = if not_synced.is_empty() {
+            None
+        } else {
+            self.last_result
+                .push_str(&format!("; {} not synced", not_synced.len()));
+            Some(format!("not synced: {}", not_synced.join("; ")))
+        };
         for s in left_out.difference(&self.storage_problems) {
             varsto_core::events::publish(
                 "storage.problem",
@@ -1989,6 +2009,7 @@ pub fn run(opts: Options) -> Result<()> {
         },
         pair: None,
         link: None,
+        busy: None,
     }));
     // The token is not printed: stdout ends up in service.log under the
     // tray and launchd. `varsto desktop` reads it from the service file.
@@ -2064,7 +2085,9 @@ pub fn run(opts: Options) -> Result<()> {
         // Removable disks: notice what was attached or taken away.
         if Instant::now() >= next_disk_check {
             next_disk_check = Instant::now() + disk_check_every;
-            let mut st = state.lock().unwrap();
+            // With the engine out of the state (the mailbox and the moves
+            // may wait on disks and storages): the interface answers meanwhile.
+            let mut st = desktop::checkout(&state, "disk check");
             // Space back where downloads waited: sync now.
             st.service.check_space();
             if let Some(e) = st.engine.as_ref() {
@@ -2104,7 +2127,7 @@ pub fn run(opts: Options) -> Result<()> {
         if now_stamp != local_stamp {
             local_stamp = now_stamp;
             log::debug!("local configuration changed on disk; reloading");
-            let mut st = state.lock().unwrap();
+            let mut st = desktop::lock_idle(&state);
             let reloaded = st.engine.as_mut().map(|e| e.reload_local());
             if reloaded.as_ref().is_some_and(|r| r.is_ok()) {
                 varsto_core::events::publish("config.changed", json!({"source": "file"}));
@@ -2127,7 +2150,7 @@ pub fn run(opts: Options) -> Result<()> {
         }
         // Re-evaluate watched folders when the engine or its folders changed.
         {
-            let mut st = state.lock().unwrap();
+            let mut st = desktop::lock_idle(&state);
             if st.service.folders_changed {
                 let paths: Vec<PathBuf> = st
                     .engine
@@ -2152,7 +2175,7 @@ pub fn run(opts: Options) -> Result<()> {
         // Turned off while running: stop serving and fetching from peers.
         if p2p.is_some() {
             let (wanted, mapping) = {
-                let st = state.lock().unwrap();
+                let st = desktop::lock_idle(&state);
                 st.engine
                     .as_ref()
                     .map(|e| {
@@ -2163,13 +2186,13 @@ pub fn run(opts: Options) -> Result<()> {
             };
             if let Some(p) = &p2p {
                 p.set_port_mapping(mapping);
-                state.lock().unwrap().service.p2p_portmap = p.portmap_status();
+                desktop::lock_idle(&state).service.p2p_portmap = p.portmap_status();
             }
             if !wanted {
                 if let Some(p) = p2p.take() {
                     p.stop.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
-                let mut st = state.lock().unwrap();
+                let mut st = desktop::lock_idle(&state);
                 if let Some(e) = st.engine.as_mut() {
                     e.set_peers(None);
                     e.set_snapshot_sink(None);
@@ -2191,7 +2214,7 @@ pub fn run(opts: Options) -> Result<()> {
         }
         if p2p.is_none() && Instant::now() >= p2p_retry_at {
             let wanted = {
-                let st = state.lock().unwrap();
+                let st = desktop::lock_idle(&state);
                 st.engine
                     .as_ref()
                     .map(|e| e.p2p_config().enabled)
@@ -2207,17 +2230,23 @@ pub fn run(opts: Options) -> Result<()> {
             }
         }
         if let Some(p) = &p2p {
-            let mut st = state.lock().unwrap();
-            // A relay registration just succeeded: tell the other devices now.
-            if p.take_republish() {
-                p.publish_record(&mut st);
-            }
-            if st.service.syncs != snapshot_syncs {
-                snapshot_syncs = st.service.syncs;
-                p.refresh_after_sync(&mut st);
+            // A relay registration just succeeded: tell the other devices
+            // now. Publishing writes to the storages: with the engine out of
+            // the state, so the interface answers meanwhile.
+            let republish = p.take_republish();
+            let synced = desktop::lock_idle(&state).service.syncs != snapshot_syncs;
+            if republish || synced {
+                let mut st = desktop::checkout(&state, "peer record");
+                if republish {
+                    p.publish_record(&mut st);
+                }
+                if st.service.syncs != snapshot_syncs {
+                    snapshot_syncs = st.service.syncs;
+                    p.refresh_after_sync(&mut st);
+                }
             }
         }
-        if state.lock().unwrap().service.restart_requested {
+        if desktop::lock_idle(&state).service.restart_requested {
             log::info!("restarting after update");
             std::thread::sleep(Duration::from_millis(300));
             break;
@@ -2233,18 +2262,20 @@ pub fn run(opts: Options) -> Result<()> {
         // join, a device on the LAN beacons, a device that joined with the
         // vault key only shows in the storage's device records.
         {
-            let mut st = state.lock().unwrap();
-            let unlocked_now = st.engine.is_some();
+            let (unlocked_now, paired) = {
+                let st = desktop::lock_idle(&state);
+                let paired = st
+                    .pair
+                    .as_ref()
+                    .and_then(|o| o.status().paired_with)
+                    .filter(|w| paired_seen.as_ref() != Some(w));
+                (st.engine.is_some(), paired)
+            };
             if unlocked_now && !was_unlocked {
                 watch_every = WATCH_MIN;
                 next_watch = Instant::now() + WATCH_MIN;
             }
             was_unlocked = unlocked_now;
-            let paired = st
-                .pair
-                .as_ref()
-                .and_then(|o| o.status().paired_with)
-                .filter(|w| paired_seen.as_ref() != Some(w));
             if let Some(w) = paired {
                 // The new device is still joining: look soon and often.
                 paired_seen = Some(w);
@@ -2259,6 +2290,10 @@ pub fn run(opts: Options) -> Result<()> {
             if unlocked_now && (lan_new || knocked || Instant::now() >= next_watch) {
                 next_watch = Instant::now() + watch_every;
                 watch_every = (watch_every * 2).min(WATCH_MAX);
+                // The device records and the peer records are read from the
+                // storages: with the engine out of the state, so that the
+                // interface, pause and lock answer while a storage is slow.
+                let mut st = desktop::checkout(&state, "device check");
                 let found = st.engine.as_mut().map(|e| e.refresh_devices());
                 let mut grew = false;
                 match found {
@@ -2267,7 +2302,13 @@ pub fn run(opts: Options) -> Result<()> {
                         log::info!("a new device turned up in the vault; syncing now");
                     }
                     Some(Ok(false)) | None => {}
-                    Some(Err(e)) => log::debug!("device check failed: {e:#}"),
+                    Some(Err(e)) => {
+                        // Offline or a storage down: not again every few
+                        // seconds; a LAN device or a knock still looks at once.
+                        log::debug!("device check failed: {e:#}");
+                        watch_every = WATCH_MAX;
+                        next_watch = Instant::now() + WATCH_MAX;
+                    }
                 }
                 if let Some(p) = &p2p {
                     if grew || lan_new || knocked || p.records_changed(&st) {
@@ -2294,7 +2335,7 @@ pub fn run(opts: Options) -> Result<()> {
             .unwrap_or(false);
         let due_timer = Instant::now() >= next_sync;
         let (requested, paused, unlocked) = {
-            let st = state.lock().unwrap();
+            let st = desktop::lock_idle(&state);
             (
                 st.service.sync_requested,
                 st.service.paused,
@@ -2303,7 +2344,12 @@ pub fn run(opts: Options) -> Result<()> {
         };
         if unlocked && !paused && (due_change || due_timer || requested) {
             last_change = None;
-            let mut st = state.lock().unwrap();
+            // The whole round (peer records, ledger, the sync itself, the
+            // upkeep) runs with the engine and the service's state taken out
+            // of the shared state: the interface, the tray, the command line
+            // and MCP get the summary from before the round (marked busy) and
+            // the cached reads, and pause, lock and quit answer at once.
+            let mut st = desktop::checkout(&state, "sync");
             st.service.sync_requested = false;
             let interval = st.service.interval_secs;
             if let Some(p) = &p2p {
@@ -2367,17 +2413,10 @@ pub fn run(opts: Options) -> Result<()> {
                     }
                     snapshot_syncs = st.service.syncs; // the snapshot above is current
                     let upkeep = varsto_core::logging::Timer::start();
-                    // One step at a time, with the state let go in between:
-                    // the interface's requests waiting for it get their turn
-                    // (each step can take a while on a big vault).
-                    for step in UPKEEP_STEPS {
-                        st = relock(st, &state);
-                        let st = &mut *st;
-                        if let Some(e) = st.engine.as_mut() {
-                            step(&mut st.service, e);
-                        }
-                    }
-                    st = relock(st, &state);
+                    // One step at a time, with the engine handed back in
+                    // between: requests waiting for it get their turn (each
+                    // step can take a while on a big vault).
+                    st = run_upkeep(st, false);
                     log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, mailbox, drains, backups, trash, restic, disk suggestions, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
@@ -2394,10 +2433,16 @@ pub fn run(opts: Options) -> Result<()> {
                     );
                     log::warn!("sync failed: {e:#}");
                     // A wipe order was carried out: nothing of the vault is left.
-                    if e.downcast_ref::<varsto_core::engine::DeviceRemoved>()
-                        .is_some_and(|r| r.wiped)
-                    {
+                    let removed = e.downcast_ref::<varsto_core::engine::DeviceRemoved>();
+                    if removed.is_some_and(|r| r.wiped) {
                         st.engine = None;
+                    }
+                    // A storage out of reach (offline, a dead bucket) failed
+                    // the round: the upkeep that does not need it still runs
+                    // (the mailbox for docked disks, scheduled snapshots,
+                    // restic, moves to pool disks, disk suggestions).
+                    if removed.is_none() {
+                        st = run_upkeep(st, true);
                     }
                 }
                 None => {}
@@ -2458,12 +2503,56 @@ fn make_watcher(tx: mpsc::Sender<()>) -> Result<notify::RecommendedWatcher> {
     Ok(watcher)
 }
 
-/// Is the service recorded in `service.json` still alive?
+/// How long `status` waits for the summary; it is answered from the state
+/// without the engine, so only a stuck service takes longer.
+const STATUS_WAIT: Duration = Duration::from_secs(5);
+/// How long the liveness probe (`/api/alive`, answered before any state is
+/// looked at) may take.
+const ALIVE_WAIT: Duration = Duration::from_secs(3);
+
+/// Is the service recorded in `service.json` still alive? Answers within a
+/// few seconds. A service that is there but slow to answer (busy) counts as
+/// running, with `{"busy": true}` as its summary: the command line must not
+/// open the vault beside it, nor the tray start a second one.
 pub fn status(home: &Path) -> Option<(ServiceFile, Value)> {
     let f = read_service_file(home)?;
-    let url = format!("http://127.0.0.1:{}/api/service", f.port);
-    let body = http_get(&url, &f.token).ok()?;
-    Some((f, serde_json::from_str(&body).unwrap_or(json!({}))))
+    let base = format!("http://127.0.0.1:{}", f.port);
+    match http_call_within(
+        "GET",
+        &format!("{base}/api/service"),
+        &f.token,
+        None,
+        STATUS_WAIT,
+    ) {
+        Ok(body) => Some((f, serde_json::from_str(&body).unwrap_or(json!({})))),
+        Err(e) if refused(&e) => None,
+        Err(_) => {
+            // No summary in time (or an error answer): alive if the probe
+            // that never touches the state answers.
+            let alive = http_call_within(
+                "GET",
+                &format!("{base}/api/alive"),
+                &f.token,
+                None,
+                ALIVE_WAIT,
+            )
+            .ok()
+            .and_then(|b| serde_json::from_str::<Value>(&b).ok())
+            .filter(|v| v["pid"].as_u64() == Some(u64::from(f.pid)))?;
+            Some((
+                f,
+                json!({"running": true, "busy": alive["busy"].as_str().unwrap_or("busy")}),
+            ))
+        }
+    }
+}
+
+/// The connection was refused: nothing listens on the port (the service
+/// is not running, whatever `service.json` says).
+fn refused(e: &anyhow::Error) -> bool {
+    e.chain()
+        .filter_map(|c| c.downcast_ref::<std::io::Error>())
+        .any(|io| io.kind() == std::io::ErrorKind::ConnectionRefused)
 }
 
 /// The address that opens the interface in a browser: a one-time code
@@ -2481,42 +2570,112 @@ pub fn boot_url(f: &ServiceFile) -> Result<String> {
 
 /// The service's upkeep after a sync, in order (ledger, verify, scrub,
 /// repair, drains, backups, trash, restic, moves, disk suggestions, device
-/// details); each runs with the state taken anew.
+/// details); each runs with the engine taken anew.
 type UpkeepStep = fn(&mut ServiceState, &mut varsto_core::engine::Engine);
-const UPKEEP_STEPS: &[UpkeepStep] = &[
-    |s, e| s.ledger_after_sync(e),
-    |s, e| s.auto_verify_if_due(e),
-    |s, e| s.scrub_if_due(e),
-    |s, e| s.repair_if_due(e),
-    |s, e| s.forward_if_due(e),
-    |s, e| {
+
+/// One upkeep step: whether it runs after a full sync round, and whether
+/// also after one that failed (offline, or a storage out of reach). Those
+/// are the steps that work on this device's own disks or only add
+/// (snapshots); the steps that check, repair, rebuild or delete wait for a
+/// round that reached every storage: with one of them missing, its blocks
+/// would look lost.
+struct Upkeep {
+    name: &'static str,
+    run: UpkeepStep,
+    after_sync: bool,
+    after_failed_sync: bool,
+}
+
+const fn full(name: &'static str, run: UpkeepStep) -> Upkeep {
+    Upkeep {
+        name,
+        run,
+        after_sync: true,
+        after_failed_sync: false,
+    }
+}
+
+const fn always(name: &'static str, run: UpkeepStep) -> Upkeep {
+    Upkeep {
+        name,
+        run,
+        after_sync: true,
+        after_failed_sync: true,
+    }
+}
+
+const UPKEEP_STEPS: &[Upkeep] = &[
+    full("ledger", |s, e| s.ledger_after_sync(e)),
+    full("verify", |s, e| s.auto_verify_if_due(e)),
+    full("scrub", |s, e| s.scrub_if_due(e)),
+    full("repair", |s, e| s.repair_if_due(e)),
+    // In one sync round each (storage health layer, spec section 79): the
+    // steps that pull the ledger reuse one pull instead of listing every
+    // storage again.
+    full("forward", |s, e| {
+        let _ = e.sync_round(|e| {
+            s.forward_if_due(e);
+            Ok(())
+        });
+    }),
+    always("mailbox", |s, e| {
         s.mailbox_if_due(e, true);
+    }),
+    full("drains", |s, e| {
+        let _ = e.sync_round(|e| {
+            s.drains_if_due(e);
+            Ok(())
+        });
+    }),
+    full("backups", |s, e| s.backups_if_due(e)),
+    // After a failed round only the snapshots that are due (they only add);
+    // expiry, which deletes, waits for a full round.
+    Upkeep {
+        name: "backup snapshots",
+        run: |s, e| s.backup_snapshots_if_due(e),
+        after_sync: false,
+        after_failed_sync: true,
     },
-    |s, e| s.drains_if_due(e),
-    |s, e| s.backups_if_due(e),
-    |s, e| s.trash_if_due(e),
-    |s, e| s.restic_if_due(e),
-    |s, e| {
-        s.moves_if_due(e, true);
-    },
-    |s, e| s.suggest_disks(e),
-    |s, e| s.watch_folder_requests(e),
-    |s, e| {
+    full("trash", |s, e| s.trash_if_due(e)),
+    always("restic", |s, e| s.restic_if_due(e)),
+    always("moves", |s, e| {
+        let _ = e.sync_round(|e| {
+            s.moves_if_due(e, true);
+            Ok(())
+        });
+    }),
+    always("disk suggestions", |s, e| s.suggest_disks(e)),
+    full("folder requests", |s, e| s.watch_folder_requests(e)),
+    full("device details", |s, e| {
         if let Err(err) = e.publish_device_details(s.last_sync_utc) {
             log::info!("device details not published: {err:#}");
         }
-    },
+    }),
 ];
 
-/// Let go of the state for a moment and take it again: a thread waiting for
-/// it (a request of the interface) gets it first.
-fn relock<'a, T>(
-    guard: std::sync::MutexGuard<'a, T>,
-    m: &'a std::sync::Mutex<T>,
-) -> std::sync::MutexGuard<'a, T> {
-    drop(guard);
-    std::thread::sleep(Duration::from_millis(2));
-    m.lock().unwrap_or_else(|e| e.into_inner())
+/// The upkeep steps of a sync round (`failed`: one that failed, see
+/// [`Upkeep`]).
+fn upkeep_steps(failed: bool) -> impl Iterator<Item = &'static Upkeep> {
+    UPKEEP_STEPS.iter().filter(move |u| {
+        if failed {
+            u.after_failed_sync
+        } else {
+            u.after_sync
+        }
+    })
+}
+
+/// Run the upkeep steps on the engine out of the state; between them the
+/// engine goes back for a moment, so a request waiting for it gets it first.
+fn run_upkeep(mut st: desktop::Work<'_>, failed: bool) -> desktop::Work<'_> {
+    for step in upkeep_steps(failed) {
+        st = desktop::requeue(st, step.name);
+        let st = &mut *st;
+        if let Some(e) = st.engine.as_mut() {
+            (step.run)(&mut st.service, e);
+        }
+    }
+    desktop::requeue(st, "upkeep")
 }
 
 /// Minimal HTTP client for talking to the local service (no extra dependency).
@@ -3043,6 +3202,88 @@ mod tests {
         }
         // What it does call is the read-only listing.
         assert!(src.contains("f3_requests"));
+    }
+
+    /// Offline (spec section 78): after a sync that could not reach every
+    /// storage, the upkeep that works on this device's own disks or only
+    /// adds still runs; what checks, repairs, rebuilds or deletes waits for
+    /// a full round (a storage out of reach would make its blocks look lost).
+    #[test]
+    fn after_a_failed_sync_only_the_local_and_adding_upkeep_runs() {
+        let names = |failed: bool| upkeep_steps(failed).map(|u| u.name).collect::<Vec<_>>();
+        assert_eq!(
+            names(true),
+            [
+                "mailbox",
+                "backup snapshots",
+                "restic",
+                "moves",
+                "disk suggestions"
+            ]
+        );
+        let full = names(false);
+        for n in [
+            "ledger",
+            "verify",
+            "scrub",
+            "repair",
+            "forward",
+            "mailbox",
+            "drains",
+            "backups",
+            "trash",
+            "restic",
+            "moves",
+            "disk suggestions",
+            "folder requests",
+            "device details",
+        ] {
+            assert!(full.contains(&n), "{n} runs after a full round");
+        }
+        // Snapshots run once per full round (inside "backups").
+        assert!(!full.contains(&"backup snapshots"));
+        for n in [
+            "ledger", "verify", "scrub", "repair", "drains", "backups", "trash",
+        ] {
+            assert!(!names(true).contains(&n), "{n} waits for a full round");
+        }
+    }
+
+    /// The liveness probe tells "nothing listens" (not running) apart from
+    /// an answer that is slow or an error.
+    #[test]
+    fn a_refused_connection_means_not_running() {
+        // A port that was just free: nothing listens on it.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let e = http_call_within(
+            "GET",
+            &format!("http://127.0.0.1:{port}/api/alive"),
+            "t",
+            None,
+            Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert!(refused(&e), "{e:#}");
+        assert!(!refused(&anyhow!("service answered 503: busy")));
+        // Something listens but does not answer in time: not "refused".
+        let quiet = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = quiet.local_addr().unwrap().port();
+        let t = Instant::now();
+        let e = http_call_within(
+            "GET",
+            &format!("http://127.0.0.1:{port}/api/alive"),
+            "t",
+            None,
+            Duration::from_millis(300),
+        )
+        .unwrap_err();
+        assert!(!refused(&e), "{e:#}");
+        assert!(t.elapsed() < Duration::from_secs(5));
+        drop(quiet);
     }
 
     #[test]

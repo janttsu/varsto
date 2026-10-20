@@ -138,9 +138,19 @@ pub fn respond(
         .iter()
         .find(|h| h.field.equiv("Range"))
         .map(|h| h.value.as_str().to_string());
-    // Decrypt under the state lock, like /api/open; the bytes stay in memory.
+    // Decrypt with the engine taken out of the state (a missing block may
+    // come from a storage), like /api/open; the bytes stay in memory.
     let result = {
-        let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut st =
+            match crate::desktop::checkout_within(state, "view", crate::desktop::ENGINE_WAIT) {
+                Ok(w) => w,
+                Err(why) => {
+                    return Ok(request.respond(plain(
+                        503,
+                        &format!("Varsto is busy ({why}); try again in a moment"),
+                    ))?)
+                }
+            };
         match st.engine.as_mut() {
             None => Err(plain(400, "vault is locked")),
             Some(engine) => match engine.view_size(&folder, &path) {

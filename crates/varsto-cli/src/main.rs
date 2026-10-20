@@ -4410,6 +4410,9 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Sync { folder } => {
             let mut engine = open_engine(&home)?;
+            // Asked for by hand: a storage resting after failures is tried
+            // again now (storage health layer, spec section 79).
+            engine.retry_storages_now();
             let r = engine.sync(folder.as_deref())?;
             warn_ledger(&engine.ledger_health());
             print(cli, &r, |r| {

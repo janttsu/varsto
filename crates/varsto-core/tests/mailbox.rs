@@ -794,3 +794,37 @@ fn the_device_where_b_is_docked_takes_the_staged_blocks_over_peer_to_peer() {
         .iter()
         .all(|g| g.state != "held" || !g.here));
 }
+
+/// Offline (spec section 78): the hub cannot be reached, yet the docked disk
+/// is staged from at once, working from the ledger as last pulled; the run
+/// says why, and the same disks do not make it due again every 30 s.
+#[test]
+fn a_storage_out_of_reach_does_not_hold_up_the_local_disk_work() {
+    let (lab, mut e, _) = group_lab();
+    let home = lab.p("dock-1-home");
+    // The hub's directory becomes a plain file: every read of it fails.
+    let hub = lab.p("hub");
+    fs::rename(&hub, lab.p("hub-away")).unwrap();
+    fs::write(&hub, b"not a directory").unwrap();
+
+    let r = run(&mut e);
+    assert_eq!(r.staged, 3, "{r:?}");
+    assert!(
+        r.notes.iter().any(|n| n.contains("could not be reached")),
+        "{:?}",
+        r.notes
+    );
+    assert_eq!(outbox(&home).len(), 3);
+    assert!(!e.mailbox_due(false), "the same disks: not due again");
+
+    // Back online: the next run pulls again and has nothing new to stage.
+    fs::remove_file(&hub).unwrap();
+    fs::rename(lab.p("hub-away"), &hub).unwrap();
+    let r = run(&mut e);
+    assert_eq!((r.staged, r.delivered), (0, 0), "{r:?}");
+    assert!(
+        !r.notes.iter().any(|n| n.contains("could not be reached")),
+        "{:?}",
+        r.notes
+    );
+}

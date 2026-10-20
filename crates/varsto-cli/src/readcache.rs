@@ -5,11 +5,13 @@
 //! [`FRESH_WAIT`] gets the last answer of the same address instead of
 //! waiting, marked stale with its age. Any change made through the API
 //! (every request that is not a GET) empties the cache, so a page never sees
-//! an answer older than its own change.
+//! an answer older than its own change. With no answer kept, a read waits
+//! at most [`BUSY_WAIT`] and is then answered "busy" (503), never held up
+//! by a sync on a slow or dead link (spec section 78).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long a read waits for a busy state before the cached answer is used.
@@ -193,41 +195,76 @@ impl ReadCache {
     }
 }
 
-/// The state, or the cached answer while it stays busy.
-pub enum Got<'a, T> {
+/// With no answer kept, a read waits this long for a busy state (or engine)
+/// and is then answered "busy" (503): a page polls again anyway, and a
+/// sync on a slow or dead link can hold the engine for many minutes.
+pub const BUSY_WAIT: Duration = Duration::from_secs(2);
+
+/// The state (`G`: a lock guard, or the engine taken out of the state), or
+/// the cached answer while it stays busy.
+pub enum Got<G> {
     /// The state is ours: compute a fresh answer (and keep it).
-    Fresh(MutexGuard<'a, T>),
+    Fresh(G),
     /// The state stayed busy for `wait`: the last answer and its age.
     Cached(Duration, Arc<String>),
+    /// Busy for `busy_wait` too, and nothing kept for this address.
+    Busy,
 }
 
-/// Take `state` if it frees up within `wait`; otherwise answer from `cache`
-/// when it has `key`, and only without any answer wait for the state.
+/// Take what `take` gives if it gives it within `wait`; otherwise answer
+/// from `cache` when it has `key`; without any answer keep trying until
+/// `busy_wait` is up, then say busy.
+pub fn take_or_cached<G>(
+    mut take: impl FnMut() -> Option<G>,
+    cache: &Mutex<ReadCache>,
+    key: &str,
+    wait: Duration,
+    busy_wait: Duration,
+) -> Got<G> {
+    let start = Instant::now();
+    let mut looked = false;
+    loop {
+        if let Some(g) = take() {
+            return Got::Fresh(g);
+        }
+        let waited = start.elapsed();
+        if waited >= wait && !looked {
+            looked = true;
+            let hit = cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(key, Instant::now());
+            if let Some((age, body)) = hit {
+                return Got::Cached(age, body);
+            }
+        }
+        if waited >= busy_wait {
+            return Got::Busy;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// [`take_or_cached`] on a plain lock, saying busy after [`BUSY_WAIT`].
+#[cfg(test)]
 pub fn lock_or_cached<'a, T>(
     state: &'a Mutex<T>,
     cache: &Mutex<ReadCache>,
     key: &str,
     wait: Duration,
-) -> Got<'a, T> {
-    let until = Instant::now() + wait;
-    loop {
-        match state.try_lock() {
-            Ok(g) => return Got::Fresh(g),
-            Err(TryLockError::Poisoned(p)) => return Got::Fresh(p.into_inner()),
-            Err(TryLockError::WouldBlock) => {}
-        }
-        if Instant::now() >= until {
-            let hit = cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(key, Instant::now());
-            return match hit {
-                Some((age, body)) => Got::Cached(age, body),
-                None => Got::Fresh(state.lock().unwrap_or_else(|e| e.into_inner())),
-            };
-        }
-        std::thread::sleep(Duration::from_millis(2));
-    }
+) -> Got<std::sync::MutexGuard<'a, T>> {
+    use std::sync::TryLockError;
+    take_or_cached(
+        || match state.try_lock() {
+            Ok(g) => Some(g),
+            Err(TryLockError::Poisoned(p)) => Some(p.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        },
+        cache,
+        key,
+        wait,
+        BUSY_WAIT,
+    )
 }
 
 /// A cached JSON answer marked stale: objects get `"stale": true` and
@@ -338,7 +375,7 @@ mod tests {
         let t = Instant::now();
         match lock_or_cached(&state, &cache, "/api/status", FRESH_WAIT) {
             Got::Cached(_, body) => assert_eq!(body.as_str(), "{}"),
-            Got::Fresh(_) => panic!("the state is held"),
+            Got::Fresh(_) | Got::Busy => panic!("the state is held and an answer is kept"),
         }
         assert!(t.elapsed() < Duration::from_secs(1));
         // Nothing cached for this address: it waits for the state.
@@ -357,6 +394,54 @@ mod tests {
         let (fresh, waited) = waiter.join().unwrap();
         assert!(fresh);
         assert!(waited >= Duration::from_millis(250));
+    }
+
+    #[test]
+    fn a_miss_while_busy_says_busy_instead_of_waiting() {
+        // A sync on a dead link holds the engine for minutes: a read with
+        // nothing kept is answered "busy" once the short wait is up.
+        let cache = Mutex::new(ReadCache::default());
+        let t = Instant::now();
+        let got: Got<()> = take_or_cached(
+            || None,
+            &cache,
+            "/api/folders",
+            FRESH_WAIT,
+            Duration::from_millis(200),
+        );
+        assert!(matches!(got, Got::Busy));
+        let took = t.elapsed();
+        assert!(took >= Duration::from_millis(200), "{took:?}");
+        assert!(took < Duration::from_secs(2), "{took:?}");
+        // Something kept: that, after the short wait only.
+        let g = cache.lock().unwrap().generation();
+        cache
+            .lock()
+            .unwrap()
+            .store("/api/folders", g, Arc::new("[]".into()), Instant::now());
+        let t = Instant::now();
+        let got: Got<()> = take_or_cached(
+            || None,
+            &cache,
+            "/api/folders",
+            FRESH_WAIT,
+            Duration::from_secs(30),
+        );
+        assert!(matches!(got, Got::Cached(_, _)));
+        assert!(t.elapsed() < Duration::from_secs(1));
+        // Free in the meantime: fresh.
+        let mut tries = 0;
+        let got = take_or_cached(
+            || {
+                tries += 1;
+                (tries > 3).then_some(7u8)
+            },
+            &cache,
+            "/api/other",
+            FRESH_WAIT,
+            Duration::from_secs(30),
+        );
+        assert!(matches!(got, Got::Fresh(7)));
     }
 
     #[test]
