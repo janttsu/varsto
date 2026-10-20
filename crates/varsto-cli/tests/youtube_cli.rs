@@ -109,6 +109,10 @@ fn youtube_commands() {
             "box",
             "--download-dir",
             root.join("dl").to_str().unwrap(),
+            // A small reserve: the default (15% of the disk) depends on how
+            // full the machine running the test is.
+            "--free-min",
+            "1%",
             "--rate",
             "1M",
             "--sleep",
