@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! `varsto import`: bring a git-annex repository, a cloud drive (any rclone
-//! remote: Dropbox, OneDrive, ...) or a local directory into a Varsto
-//! folder, one folder per source; see `docs/import-git-annex.md`,
-//! `docs/import-cloud.md` and `docs/import-local.md`.
+//! remote: Dropbox, OneDrive, ...), a local directory or a torrent into a
+//! Varsto folder, one folder per source; see `docs/import-git-annex.md`,
+//! `docs/import-cloud.md`, `docs/import-local.md` and `docs/torrents.md`
+//! (torrents: `crate::torrent`).
 
 use crate::{confirm, fmt_bytes, passphrase, plural, print, show, Cli};
 use anyhow::Result;
@@ -84,7 +85,20 @@ pub enum ImportCmd {
         #[command(flatten)]
         target: Target,
     },
-    /// Imported folders: how much is in, what is missing and where it is.
+    /// Download a torrent (a .torrent file or a magnet link) larger than
+    /// this disk into a folder, batch by batch, through a local
+    /// transmission-daemon (Linux); `import torrent-jobs` drives and shows
+    /// the jobs.
+    Torrent(crate::torrent::TorrentAddArgs),
+    /// Torrent imports of this device: run, status, list, pause, resume,
+    /// remove.
+    #[command(name = "torrent-jobs")]
+    TorrentJobs {
+        #[command(subcommand)]
+        cmd: crate::torrent::TorrentJobCmd,
+    },
+    /// Imported folders: how much is in, what is missing and where it is
+    /// (with the torrent jobs that are not complete).
     Status {
         folder: Option<String>,
         /// List the files still awaiting import with the copies that should have them.
@@ -197,6 +211,13 @@ impl Drop for ProgressLine {
 }
 
 pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
+    // Torrent jobs open the engine themselves (status and list without the
+    // passphrase).
+    match cmd {
+        ImportCmd::Torrent(a) => return crate::torrent::add(cli, home, a),
+        ImportCmd::TorrentJobs { cmd } => return crate::torrent::jobs(cli, home, cmd),
+        _ => {}
+    }
     let mut engine = Engine::open(home, &passphrase()?)?;
     let progress_on = !cli.json && std::io::stderr().is_terminal();
     match cmd {
@@ -255,7 +276,24 @@ pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
                 print(cli, &list, |l| describe_missing(l))?;
             } else {
                 let list = engine.import_status(folder.as_deref())?;
-                print(cli, &list, describe_status)?;
+                let jobs: Vec<String> = varsto_core::engine::torrent_jobs_at(home)
+                    .iter()
+                    .filter(|j| j.state != varsto_core::engine::JobState::Complete)
+                    .filter(|j| {
+                        folder
+                            .as_deref()
+                            .is_none_or(|f| f.eq_ignore_ascii_case(&j.folder))
+                    })
+                    .map(varsto_core::engine::TorrentJob::line)
+                    .collect();
+                print(cli, &list, |l| {
+                    let mut out = describe_status(l);
+                    for line in &jobs {
+                        out.push('\n');
+                        out += line;
+                    }
+                    out
+                })?;
             }
         }
         ImportCmd::Verify { folder } => {
@@ -265,6 +303,7 @@ pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
                 std::process::exit(1);
             }
         }
+        ImportCmd::Torrent(_) | ImportCmd::TorrentJobs { .. } => unreachable!("handled above"),
         ImportCmd::Cleanup {
             folder,
             yes,

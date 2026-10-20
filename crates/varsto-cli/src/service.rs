@@ -117,6 +117,9 @@ pub struct ServiceState {
     pub drains: Vec<varsto_core::engine::DrainStatus>,
     /// Drains already announced as finished or waiting (not repeated).
     pub drain_notified: std::collections::BTreeSet<String>,
+    /// Torrent jobs already announced as waiting for space (not repeated
+    /// while they wait).
+    pub torrent_notified: std::collections::BTreeSet<String>,
     /// Storages at their quota during the last sync, one sentence each.
     pub quota_full: Vec<String>,
     /// Folders paused on this device (marker missing, deletions held), by
@@ -671,6 +674,51 @@ impl ServiceState {
             }
         }
         self.drains = engine.drain_statuses().unwrap_or_default();
+    }
+    /// Step the torrent jobs of this device (called after a sync); notify
+    /// once when one waits for disk space and when one is complete.
+    pub fn torrents_if_due(&mut self, engine: &mut Engine) {
+        // Linux only (a local transmission-daemon); not on phones.
+        if !cfg!(target_os = "linux") {
+            return;
+        }
+        let mut changed = Vec::new();
+        for j in engine.torrents_to_run() {
+            let rpc = varsto_core::transmission::Rpc::new(
+                engine.torrent_rpc(&j, &varsto_core::transmission::RpcSettings::default()),
+            );
+            match engine.torrent_tick(&j.hash, &rpc, &mut varsto_core::engine::SystemEnv, false) {
+                Ok(Some(now)) if now.state != j.state => changed.push(now),
+                Ok(_) => {}
+                Err(e) => log::warn!("torrent job {}: {e:#}", j.short()),
+            }
+        }
+        for j in changed {
+            match j.state {
+                varsto_core::engine::JobState::Complete => {
+                    log::info!("torrent job {} is complete", j.short());
+                    self.torrent_notified.remove(&j.hash);
+                    notify(
+                        "Varsto torrent",
+                        &format!(
+                            "{} is complete: every file is in folder {}.",
+                            j.name, j.folder
+                        ),
+                    );
+                }
+                varsto_core::engine::JobState::WaitingSpace => {
+                    if self.torrent_notified.insert(j.hash.clone()) {
+                        notify(
+                            "Varsto torrent",
+                            &format!("{} waits for disk space: {}", j.name, j.text),
+                        );
+                    }
+                }
+                _ => {
+                    self.torrent_notified.remove(&j.hash);
+                }
+            }
+        }
     }
     /// Take the scheduled backup snapshots that are due and, at most every
     /// six hours, expire old ones (called after a sync, like repair).
@@ -2323,7 +2371,7 @@ pub fn run(opts: Options) -> Result<()> {
                         }
                     }
                     st = relock(st, &state);
-                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, mailbox, drains, backups, trash, restic, disk suggestions, device details)");
+                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, mailbox, drains, backups, trash, restic, moves, torrents, disk suggestions, device details)");
                     let checked = st.engine.as_ref().map(|e| e.policy_check());
                     match checked {
                         Some(Ok(reps)) => st.service.record_policies(reps),
@@ -2425,8 +2473,8 @@ pub fn boot_url(f: &ServiceFile) -> Result<String> {
 }
 
 /// The service's upkeep after a sync, in order (ledger, verify, scrub,
-/// repair, drains, backups, trash, restic, moves, disk suggestions, device
-/// details); each runs with the state taken anew.
+/// repair, drains, backups, trash, restic, moves, torrents, disk
+/// suggestions, device details); each runs with the state taken anew.
 type UpkeepStep = fn(&mut ServiceState, &mut varsto_core::engine::Engine);
 const UPKEEP_STEPS: &[UpkeepStep] = &[
     |s, e| s.ledger_after_sync(e),
@@ -2444,6 +2492,7 @@ const UPKEEP_STEPS: &[UpkeepStep] = &[
     |s, e| {
         s.moves_if_due(e, true);
     },
+    |s, e| s.torrents_if_due(e),
     |s, e| s.suggest_disks(e),
     |s, e| s.watch_folder_requests(e),
     |s, e| {

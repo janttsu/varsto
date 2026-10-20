@@ -219,6 +219,27 @@ pub struct LowSpaceIn {
     pub free: u64,
 }
 
+/// A torrent job of this device (`engine::torrent`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TorrentIn {
+    /// The start of the info hash.
+    pub job: String,
+    pub name: String,
+    pub folder: String,
+    /// `JobState::as_str`: "downloading", "waiting_space", "complete", ...
+    pub state: String,
+    pub files: u64,
+    pub files_done: u64,
+    /// Free bytes on the download disk and what the next file needs more.
+    pub free: u64,
+    pub need: u64,
+    pub completed_utc: Option<i64>,
+    /// Downloaded files that differ from the folder's files at the same
+    /// paths and stay in the download directory.
+    #[serde(default)]
+    pub conflicts: u64,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct OrgIn {
     pub name: String,
@@ -301,6 +322,9 @@ pub struct Inputs {
     /// Places below their minimum free space, as the last checks found.
     #[serde(default)]
     pub low_space: Vec<LowSpaceIn>,
+    /// Torrent jobs of this device.
+    #[serde(default)]
+    pub torrents: Vec<TorrentIn>,
 }
 
 // ----- output ----------------------------------------------------------------
@@ -1143,6 +1167,30 @@ fn attention(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn]) {
         };
         att(h, &format!("space:{}", l.key), "warn", text);
     }
+    for t in &i.torrents {
+        let n = ("name", t.name.clone());
+        match t.state.as_str() {
+            "waiting_space" => att(
+                h,
+                &format!("torrent:{}", t.job),
+                "warn",
+                tx(
+                    "Torrent job {name} is waiting for disk space: {free} free on its download disk, {need} more is needed above the reserve.",
+                    &[n, ("free", human_bytes(t.free)), ("need", human_bytes(t.need))],
+                ),
+            ),
+            "complete" if t.completed_utc.is_some_and(|c| i.now_utc - c < 7 * 86_400) => att(
+                h,
+                &format!("torrent:{}", t.job),
+                "info",
+                tx(
+                    "Torrent job {name} is complete: all {count} files are in folder {folder}.",
+                    &[n, ("count", t.files.to_string()), ("folder", t.folder.clone())],
+                ),
+            ),
+            _ => {}
+        }
+    }
     for s in storages {
         match s.quota_state.as_str() {
             "full" => att(
@@ -1579,6 +1627,28 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
             .cmd(format!("varsto storage quota {}", sh(&full[0])))
             .guide("storages")
             .0,
+        );
+    }
+    for t in i.torrents.iter().filter(|t| t.state == "waiting_space") {
+        out.push(
+            StepB::new(&format!("torrent:{}", t.job), "important", tx("Make room for torrent job {name}", &[("name", t.name.clone())]), tx("The next files need {need} more free space on the download disk than the reserve leaves; the download waits until there is room.", &[("need", human_bytes(t.need))]))
+                .how(t0("Free up space on the download disk, or lower the reserve with --free-min when you add a job. The job goes on by itself once there is room."))
+                .cmd(format!("varsto import torrent-jobs status {}", sh(&t.job)))
+                .0,
+        );
+    }
+    for t in i.torrents.iter().filter(|t| {
+        t.state == "complete" && t.completed_utc.is_some_and(|c| i.now_utc - c < 7 * 86_400)
+    }) {
+        out.push(
+            StepB::new(&format!("torrent_done:{}", t.job), "tip", tx("Torrent job {name} is complete", &[("name", t.name.clone())]), if t.conflicts > 0 {
+                tx("Every file of the torrent is in folder {folder} on your storages; {count} downloaded files differ from the folder's files at the same paths and stay in the download directory.", &[("folder", t.folder.clone()), ("count", t.conflicts.to_string())])
+            } else {
+                tx("Every file of the torrent is in folder {folder} on your storages; the download directory is empty.", &[("folder", t.folder.clone())])
+            })
+                .how(t0("Remove the job when you no longer want to see it. To move the folder's data to other storages later, use varsto move."))
+                .cmd(format!("varsto import torrent-jobs remove {}", sh(&t.job)))
+                .0,
         );
     }
     if let Some(l) = i.low_space.first() {

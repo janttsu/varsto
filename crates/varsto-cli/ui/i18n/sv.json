@@ -1804,7 +1804,16 @@
   "the 24 words of your recovery kit: they make the folder's recovery copy now. Leave empty to write it later": "de 24 orden i ditt återställningspaket: med dem görs mappens återställningskopia nu. Lämna tomt för att skriva den senare",
   "Your vault key and recovery words": "Valvets nyckel och återställningsord",
   "Write both word sets down and keep them offline: they are the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. The recovery words also make each new folder's recovery copy. They are shown once.": "Skriv ner båda ordlistorna och förvara dem offline: de är det enda sättet att återställa data eller ansluta utan en annan enhet; enheter kan också läggas till med en parningskod. Återställningsorden skapar också varje ny mapps återställningskopia. De visas bara en gång.",
-  "I have written them down": "Jag har skrivit ner dem"
+  "I have written them down": "Jag har skrivit ner dem",
+  "Torrent job {name} is waiting for disk space: {free} free on its download disk, {need} more is needed above the reserve.": "Torrentjobbet {name} väntar på diskutrymme: {free} ledigt på nedladdningsdisken, {need} till behövs utöver reserven.",
+  "Torrent job {name} is complete: all {count} files are in folder {folder}.": "Torrentjobbet {name} är klart: alla {count} filer finns i mappen {folder}.",
+  "Make room for torrent job {name}": "Gör plats för torrentjobbet {name}",
+  "The next files need {need} more free space on the download disk than the reserve leaves; the download waits until there is room.": "Nästa filer behöver {need} mer ledigt utrymme på nedladdningsdisken än reserven lämnar; nedladdningen väntar tills det finns plats.",
+  "Free up space on the download disk, or lower the reserve with --free-min when you add a job. The job goes on by itself once there is room.": "Frigör utrymme på nedladdningsdisken, eller sänk reserven med --free-min när du lägger till ett jobb. Jobbet fortsätter av sig självt när det finns plats.",
+  "Torrent job {name} is complete": "Torrentjobbet {name} är klart",
+  "Every file of the torrent is in folder {folder} on your storages; the download directory is empty.": "Varje fil i torrenten finns i mappen {folder} på dina lagringsplatser; nedladdningsmappen är tom.",
+  "Remove the job when you no longer want to see it. To move the folder's data to other storages later, use varsto move.": "Ta bort jobbet när du inte längre vill se det. Mappens data kan senare flyttas till andra lagringsplatser med varsto move.",
+  "Every file of the torrent is in folder {folder} on your storages; {count} downloaded files differ from the folder's files at the same paths and stay in the download directory.": "Varje fil i torrenten finns i mappen {folder} på dina lagringsplatser; {count} nedladdade filer skiljer sig från mappens filer med samma sökvägar och ligger kvar i nedladdningskatalogen."
  },
  "patterns": [
   [

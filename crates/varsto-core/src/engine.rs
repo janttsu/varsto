@@ -98,6 +98,7 @@ mod storage_directory;
 mod storages3_ops;
 mod strongroom_ops;
 mod thumbs3;
+mod torrent;
 mod trash;
 mod trash3_io;
 mod verify;
@@ -170,6 +171,11 @@ pub use share_roles::{ShareRoleReport, KEPT_ASIDE_DIR};
 pub use staged_moves::{JobRunLimits, MoveJobRequest, MoveJobRun, SERVICE_RUN_GROUPS};
 pub use storage_directory::KnownStorage;
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
+pub use torrent::{
+    find_job, plan_batch, torrent_jobs_at, BatchPlan, Candidate, CompletedFiles, FileOutcome,
+    JobFile, JobState, SystemEnv, TorrentAddOptions, TorrentEnv, TorrentJob, CHEAPEST,
+    DEFAULT_FREE_MIN,
+};
 pub use trash::{
     restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
     TrashSettings, TrashStatus, TrashUpkeepReport, DEFAULT_TRASH_DAYS, MAX_TRASH_DAYS,

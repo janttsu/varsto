@@ -787,14 +787,14 @@ fn push_example(list: &mut Vec<Note>, count: &mut u64, note: Note) {
 impl Engine {
     // ----- the book --------------------------------------------------------------
 
-    fn book_path(&self, folder: &FolderId) -> PathBuf {
+    pub(super) fn book_path(&self, folder: &FolderId) -> PathBuf {
         self.home
             .join("state")
             .join("imports")
             .join(format!("{folder}.json"))
     }
 
-    fn load_book(&self, folder: &FolderId) -> Option<ImportBook> {
+    pub(super) fn load_book(&self, folder: &FolderId) -> Option<ImportBook> {
         util::read_json::<ImportBook>(&self.book_path(folder)).ok()
     }
 
@@ -2226,14 +2226,7 @@ impl Engine {
         );
         task.set_phase("cleanup");
         let state = self.load_state(&rec.folder_id)?;
-        let view = self.view3()?;
-        let table = self.folder_table(&rec)?;
-        let mut pctx = self.policy_ctx();
-
-        let policy = rec.effective_policy();
-        let storages = self.open_storages(false)?;
-        let mut read_back: HashSet<ObjectName> = HashSet::new();
-        let now = util::now_utc();
+        let mut check = self.stored_check(&rec)?;
         let wait = |report: &mut ImportCleanupReport, path: &str, size: u64, reason: String| {
             report.waiting_count += 1;
             if report.waiting.len() < 200 {
@@ -2300,65 +2293,7 @@ impl Engine {
             };
             // (3, 4) Every block on a storage (not a transferrer), read back
             // from one, and the policy met for these blocks now.
-            let mut problem: Option<String> = None;
-            let mut facts = Vec::new();
-            for c in &f.chunks {
-                let holders: Vec<String> = match (&table, crate::storages3::object_bin(&c.object)) {
-                    (Some(t), Ok(o)) => {
-                        let t = t.read().unwrap_or_else(|e| e.into_inner());
-                        crate::storages3::block_copies(&view, &*t, &o)
-                            .into_iter()
-                            .filter(|n| !pctx.carriers.contains(n))
-                            .collect()
-                    }
-                    _ => Vec::new(),
-                };
-                if holders.is_empty() {
-                    problem =
-                        Some("not on a storage yet (only on devices or a transferrer)".into());
-                    break;
-                }
-                if !read_back.contains(&c.object) {
-                    let key = chunk_storage_key(&c.object);
-                    let ok = storages
-                        .iter()
-                        .filter(|(s, _)| holders.iter().any(|h| h == s.name()))
-                        .any(|(_, b)| {
-                            b.get(&key).ok().flatten().is_some_and(|ct| {
-                                ObjectName::from_bytes(&crypto::hash(&ct)) == c.object
-                            })
-                        });
-                    if !ok {
-                        problem = Some("no storage copy could be read back intact".into());
-                        break;
-                    }
-                    read_back.insert(c.object.clone());
-                }
-                if let Some(t) = &table {
-                    let t = t.read().unwrap_or_else(|e| e.into_inner());
-                    facts.push(self.chunk_facts(&mut pctx, &view, &t, &c.object));
-                }
-            }
-            if problem.is_none() {
-                if let Some(p) = &policy {
-                    let r = crate::policy::evaluate(
-                        &rec.name,
-                        p,
-                        &facts,
-                        &pctx.unreadable_places,
-                        &pctx.unknown,
-                        now,
-                    );
-                    if !r.fully_met() {
-                        problem = Some(format!(
-                            "waiting for the policy ({}): {}",
-                            p.describe(),
-                            r.why_not_met()
-                        ));
-                    }
-                }
-            }
-            if let Some(p) = problem {
+            if let Some(p) = self.stored_problem(&rec, f, &mut check) {
                 wait(&mut report, &path, e.size, p);
                 continue;
             }
@@ -2427,6 +2362,131 @@ impl Engine {
         }
         Ok(report)
     }
+
+    /// Let the existing folder `rec` take imports from the local directory
+    /// `dir` as well (a torrent job into a folder that is there already):
+    /// its import book, made when it has none, names the directory as one of
+    /// its sources, so that `import_run` of the directory continues the
+    /// folder. A folder imported from git-annex or a cloud drive is refused.
+    pub(super) fn import_adopt_dir(&mut self, rec: &FolderRecord, dir: &Path) -> Result<()> {
+        if rec.is_backup() {
+            bail!("folder {} is a backup; it takes no imports", rec.name);
+        }
+        let src = import::dir::DirSource::open(dir)?;
+        self.check_source_path(src.root(), true)?;
+        let info = src.info().clone();
+        let _ = self.refresh_books();
+        let mut book = self.load_book(&rec.folder_id).unwrap_or_default();
+        if book.kind.is_empty() {
+            book.kind = import::KIND_DIR.to_string();
+            book.display = info.display.clone();
+        }
+        if book.kind != import::KIND_DIR {
+            bail!(
+                "folder {} was imported from a {} source; give a new folder name, or a folder that holds your own files or local imports",
+                rec.name,
+                book.kind
+            );
+        }
+        if info.identity.iter().all(|i| book.identity.contains(i)) {
+            return Ok(());
+        }
+        book.identity.extend(info.identity.iter().cloned());
+        self.save_book(&rec.folder_id, &book)?;
+        let rec = self.with_key(rec)?;
+        self.publish_book(&rec, &book)
+    }
+
+    /// What [`Engine::stored_problem`] reads once for many files of a folder.
+    pub(super) fn stored_check(&self, rec: &FolderRecord) -> Result<StoredCheck> {
+        Ok(StoredCheck {
+            view: self.view3()?,
+            table: self.folder_table(rec)?,
+            pctx: self.policy_ctx(),
+            policy: rec.effective_policy(),
+            storages: self.open_storages(false)?,
+            read_back: HashSet::new(),
+            now: util::now_utc(),
+        })
+    }
+
+    /// Why a local copy of `f` (a file of folder `rec`) may not be removed
+    /// yet, or `None` when it may: every block has a copy on a storage that
+    /// is not a transferrer, one copy of each block was read back intact,
+    /// and the folder's durability policy holds for its blocks now.
+    pub(super) fn stored_problem(
+        &self,
+        rec: &FolderRecord,
+        f: &FileState,
+        ck: &mut StoredCheck,
+    ) -> Option<String> {
+        let mut facts = Vec::new();
+        for c in &f.chunks {
+            let holders: Vec<String> = match (&ck.table, crate::storages3::object_bin(&c.object)) {
+                (Some(t), Ok(o)) => {
+                    let t = t.read().unwrap_or_else(|e| e.into_inner());
+                    crate::storages3::block_copies(&ck.view, &*t, &o)
+                        .into_iter()
+                        .filter(|n| !ck.pctx.carriers.contains(n))
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+            if holders.is_empty() {
+                return Some("not on a storage yet (only on devices or a transferrer)".into());
+            }
+            if !ck.read_back.contains(&c.object) {
+                let key = chunk_storage_key(&c.object);
+                let ok = ck
+                    .storages
+                    .iter()
+                    .filter(|(s, _)| holders.iter().any(|h| h == s.name()))
+                    .any(|(_, b)| {
+                        b.get(&key).ok().flatten().is_some_and(|ct| {
+                            ObjectName::from_bytes(&crypto::hash(&ct)) == c.object
+                        })
+                    });
+                if !ok {
+                    return Some("no storage copy could be read back intact".into());
+                }
+                ck.read_back.insert(c.object.clone());
+            }
+            if let Some(t) = &ck.table {
+                let t = t.read().unwrap_or_else(|e| e.into_inner());
+                facts.push(self.chunk_facts(&mut ck.pctx, &ck.view, &t, &c.object));
+            }
+        }
+        let p = ck.policy.as_ref()?;
+        let r = crate::policy::evaluate(
+            &rec.name,
+            p,
+            &facts,
+            &ck.pctx.unreadable_places,
+            &ck.pctx.unknown,
+            ck.now,
+        );
+        if r.fully_met() {
+            return None;
+        }
+        Some(format!(
+            "waiting for the policy ({}): {}",
+            p.describe(),
+            r.why_not_met()
+        ))
+    }
+}
+
+/// The ledger view, block map, storages and policy of one folder, read
+/// once for checking many of its files (`Engine::stored_problem`).
+pub(super) struct StoredCheck {
+    view: crate::ledger3::LedgerView,
+    table: Option<Arc<std::sync::RwLock<crate::blockmap::MapTable>>>,
+    pctx: PolicyCtx,
+    policy: Option<crate::policy::Policy>,
+    storages: OpenStorages,
+    /// Blocks read back intact during this check.
+    read_back: HashSet<ObjectName>,
+    now: i64,
 }
 
 fn dest_for(opts: &ImportOptions, name: &str) -> Option<PathBuf> {

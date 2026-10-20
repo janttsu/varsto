@@ -1804,7 +1804,16 @@
   "the 24 words of your recovery kit: they make the folder's recovery copy now. Leave empty to write it later": "palautuspaketin 24 sanaa: niillä tehdään kansion palautuskopio heti. Jätä tyhjäksi, jos haluat kirjoittaa sen myöhemmin",
   "Your vault key and recovery words": "Holvin avain ja palautussanat",
   "Write both word sets down and keep them offline: they are the only way to recover the data, or to join without another device; devices can also be added by pairing with a code. The recovery words also make each new folder's recovery copy. They are shown once.": "Kirjoita molemmat sanasarjat muistiin ja säilytä ne offline-tilassa: ne ovat ainoa tapa palauttaa tiedot tai liittyä ilman toista laitetta; laitteita voi lisätä myös parituskoodilla. Palautussanoista tehdään myös jokaisen uuden kansion palautuskopio. Ne näytetään vain kerran.",
-  "I have written them down": "Olen kirjoittanut ne muistiin"
+  "I have written them down": "Olen kirjoittanut ne muistiin",
+  "Torrent job {name} is waiting for disk space: {free} free on its download disk, {need} more is needed above the reserve.": "Torrent-työ {name} odottaa levytilaa: latauslevyllä on vapaana {free}, varauksen lisäksi tarvitaan vielä {need}.",
+  "Torrent job {name} is complete: all {count} files are in folder {folder}.": "Torrent-työ {name} on valmis: kaikki {count} tiedostoa ovat kansiossa {folder}.",
+  "Make room for torrent job {name}": "Tee tilaa torrent-työlle {name}",
+  "The next files need {need} more free space on the download disk than the reserve leaves; the download waits until there is room.": "Seuraavat tiedostot tarvitsevat latauslevyllä {need} enemmän vapaata tilaa kuin varaus jättää; lataus odottaa, kunnes tilaa on.",
+  "Free up space on the download disk, or lower the reserve with --free-min when you add a job. The job goes on by itself once there is room.": "Vapauta tilaa latauslevyltä tai pienennä varausta valitsimella --free-min, kun lisäät työn. Työ jatkuu itsestään, kun tilaa on.",
+  "Torrent job {name} is complete": "Torrent-työ {name} on valmis",
+  "Every file of the torrent is in folder {folder} on your storages; the download directory is empty.": "Torrentin jokainen tiedosto on kansiossa {folder} tallennuspaikoissasi; latauskansio on tyhjä.",
+  "Remove the job when you no longer want to see it. To move the folder's data to other storages later, use varsto move.": "Poista työ, kun et enää halua nähdä sitä. Kansion tiedot voi siirtää myöhemmin muihin tallennuspaikkoihin komennolla varsto move.",
+  "Every file of the torrent is in folder {folder} on your storages; {count} downloaded files differ from the folder's files at the same paths and stay in the download directory.": "Torrentin jokainen tiedosto on kansiossa {folder} tallennuspaikoissasi; {count} ladattua tiedostoa eroaa kansion samoissa poluissa olevista tiedostoista ja jää latauskansioon."
  },
  "patterns": [
   [

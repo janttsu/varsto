@@ -33,6 +33,7 @@ mod remember;
 mod restic;
 mod service;
 mod sse;
+mod torrent;
 mod trash;
 mod tray;
 mod update;
@@ -4490,6 +4491,9 @@ fn run(cli: &Cli) -> Result<()> {
                         api("/api/state")
                     )
                 );
+                for line in torrent::status_lines(&home) {
+                    println!("{line}");
+                }
             }
             if let Some(mut v) = from_service {
                 if cli.json {
