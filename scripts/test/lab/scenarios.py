@@ -3135,6 +3135,258 @@ def s_youtube_spool():
     check(scan.get("videos") == 1, f"scan: {scan}")
 
 
+# ----- working offline (spec section 79) -------------------------------------------------------
+
+S3B_PORT = 9901
+S3B_BUCKET = "vault2"
+
+
+def start_s3b():
+    """A second S3 server on the host (port 9901, the same directory as the first, bucket
+    vault2), so that one storage can go away while the other answers. Returns its Popen."""
+    (lab.DIR / "s3" / S3B_BUCKET).mkdir(parents=True, exist_ok=True)
+    p = subprocess.Popen(["rclone", "serve", "s3", "--addr", f"{lab.WAN_HOST}:{S3B_PORT}",
+                          "--auth-key", f"{lab.S3['key']},{lab.S3['secret']}", "--vfs-cache-mode", "off",
+                          "--dir-cache-time", "5s", str(lab.DIR / "s3")],
+                         stdout=open(lab.DIR / "run" / "s3b.log", "a"), stderr=subprocess.STDOUT, start_new_session=True)
+    time.sleep(1.5)
+    return p
+
+
+def stop_s3b(p):
+    if p is not None and p.poll() is None:
+        p.terminate()  # our own child, by its handle
+        try:
+            p.wait(10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+
+def block_wan(src=None, port=None):
+    """The home router drops (no answer, like a dead link) what goes from the home LAN to
+    the WAN: everything, or only from one device (`src`), or only to one port of the host."""
+    m = ""
+    if src:
+        m += f" ip saddr {src}"
+    if port:
+        m += f" ip daddr {lab.WAN_HOST} tcp dport {port}"
+    lab.ssh("vl-rhome", f"sudo nft insert rule ip filter forward iifname eth0 oifname eth1{m} drop")
+
+
+def unblock_wan():
+    lab.ssh("vl-rhome", "sudo nft -f /etc/nftables.conf")
+
+
+def storages_down(vm):
+    st = v(vm, "status")
+    return [d.get("storage") for d in st.get("storages_down") or []]
+
+
+@scenario("offline-storage-down-mid-sync")
+def s_offline_storage_down():
+    """Spec 79.1: two S3 storages with two copies of every block; the second one stops
+    answering (black-holed, connections time out). A change still syncs: the laptop's sync
+    succeeds within seconds, lists the storage as down, and the desktop (which also cannot
+    reach it) gets the change from the first storage. Once the storage answers again the
+    next sync writes what it missed there (packs and records) and fsck is clean on both."""
+    s_reset()
+    s3b = start_s3b()
+    try:
+        keys = init_vault("vl-laptop", "laptop")
+        v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                       f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
+        v("vl-laptop", f"storage add-s3 cloud2 --insecure-http --endpoint http://{lab.WAN_HOST}:{S3B_PORT} --region us-east-1 "
+                       f"--bucket {S3B_BUCKET} --access-key-id {lab.S3['key']} --place cloud2", json_out=False)
+        gen_data("vl-laptop", "/home/varsto/data/docs", seed=7, big_mb=2, small=30)
+        folder_add("vl-laptop", "docs", "/home/varsto/data/docs")
+        v("vl-laptop", "policy set docs --min-copies 2", json_out=False)
+        v("vl-laptop", "push docs")
+        check(bucket_packs() and bucket_packs(S3B_BUCKET), f"packs: {len(bucket_packs())} in {BUCKET}, {len(bucket_packs(S3B_BUCKET))} in {S3B_BUCKET}")
+        join_and_attach("vl-laptop", "vl-desktop", "desktop", {"docs": "/home/varsto/data/docs"}, keys["vault_words"])
+        before = len(bucket_packs(S3B_BUCKET))
+        block_wan(port=S3B_PORT)
+        try:
+            run("vl-laptop", "head -c 3000000 /dev/urandom > ~/data/docs/while-down.bin && echo one-down > ~/data/docs/one-down.txt")
+            t0 = time.time()
+            r = v("vl-laptop", "sync", check_rc=False)
+            secs = time.time() - t0
+            CTX["offline_one_down_sync_secs"] = round(secs, 1)
+            check(not (isinstance(r, dict) and r.get("_failed")), f"sync failed with one storage of two down: {str(r)[:400]}")
+            check(secs < 120, f"sync took {secs:.0f} s with one storage black-holed")
+            down = storages_down("vl-laptop")
+            check("cloud2" in down, f"status does not list cloud2 as down: {down}")
+            check("cloud" not in down, f"status lists cloud as down: {down}")
+            wait_file("vl-desktop", "~/data/docs/one-down.txt", "one-down", secs=90)
+            a = run("vl-laptop", "sha256sum ~/data/docs/while-down.bin").stdout.split()[0]
+            b = run("vl-desktop", "sha256sum ~/data/docs/while-down.bin", check_rc=False).stdout.split()
+            check(b and b[0] == a, "the file written while a storage was down differs on the desktop")
+        finally:
+            unblock_wan()
+        # Healing: `sync` by hand tries the resting storage at once.
+        v("vl-laptop", "sync")
+        v("vl-laptop", "sync")
+        check(not storages_down("vl-laptop"), f"cloud2 still listed as down after it answers: {storages_down('vl-laptop')}")
+        check(len(bucket_packs(S3B_BUCKET)) > before, f"cloud2 got no pack after it came back ({before} before)")
+        fsck_clean("vl-laptop", "after the storage came back")
+        v("vl-desktop", "sync")
+        fsck_clean("vl-desktop", "after the storage came back")
+    finally:
+        unblock_wan()
+        stop_s3b(s3b)
+
+
+@scenario("offline-lan-only")
+def s_offline_lan_only():
+    """Spec 77.8 "Offline" and 79.1: the home LAN loses the internet (every storage
+    black-holed). The desktop opens the vault at once (no storage is asked while opening),
+    reaches the laptop from the saved peer directory and fetches the content of a file of a
+    selective folder from it; a sync gives up within seconds and lists the storage as down
+    instead of hanging; after the link is back everything syncs and fsck is clean."""
+    fresh_pair()
+    stun = " ".join(f"--stun {x}" for x in lab.STUN)
+    for vm in ("vl-laptop", "vl-desktop"):
+        v(vm, f"p2p enable {stun}", json_out=False)
+    run("vl-laptop", "head -c 5000000 /dev/urandom > ~/data/docs/lan-only.bin")
+    v("vl-laptop", "push docs")
+    sha = run("vl-laptop", "sha256sum ~/data/docs/lan-only.bin").stdout.split()[0]
+    # The desktop holds the folder as placeholders (selective) and knows the file.
+    v("vl-desktop", "folder detach docs", json_out=False)
+    run("vl-desktop", "rm -rf ~/sel")
+    v("vl-desktop", "folder attach docs /home/varsto/sel --selective", json_out=False)
+    v("vl-desktop", "sync")
+    check(run("vl-desktop", "test -e ~/sel/lan-only.bin.varsto-placeholder", check_rc=False).returncode == 0,
+          "the desktop has no placeholder for the new file")
+    for vm in ("vl-laptop", "vl-desktop"):
+        start_service(vm)
+    try:
+        # Peer records travel through the bucket and are saved on each device.
+        saved = False
+        for _ in range(30):
+            if run("vl-desktop", "test -s ~/.local/share/varsto/peer-records.json", check_rc=False).returncode == 0:
+                saved = True
+                break
+            time.sleep(3)
+        check(saved, "the desktop saved no peer directory")
+        time.sleep(10)
+        kill_services("vl-desktop")
+        block_wan()
+        try:
+            t0 = time.time()
+            st = v("vl-desktop", "status")
+            secs = time.time() - t0
+            CTX["offline_lan_status_secs"] = round(secs, 1)
+            check(secs < 20, f"status took {secs:.0f} s with no storage reachable")
+            check(st.get("folders"), f"status without storages: {str(st)[:300]}")
+            t0 = time.time()
+            r = v("vl-desktop", "folder fetch docs lan-only.bin", json_out=False, check_rc=False)
+            CTX["offline_lan_fetch_secs"] = round(time.time() - t0, 1)
+            got = run("vl-desktop", "sha256sum ~/sel/lan-only.bin 2>/dev/null || true").stdout.split()
+            check(got and got[0] == sha, f"the file did not come from the laptop over the LAN: {str(r)[-400:]}")
+            t0 = time.time()
+            v("vl-desktop", "sync", check_rc=False)
+            secs = time.time() - t0
+            CTX["offline_lan_sync_secs"] = round(secs, 1)
+            check(secs < 120, f"sync took {secs:.0f} s with no storage reachable")
+            check("cloud" in storages_down("vl-desktop"), f"status does not list cloud as down: {storages_down('vl-desktop')}")
+        finally:
+            unblock_wan()
+        run("vl-desktop", "echo back > ~/sel/back.txt")
+        v("vl-desktop", "sync")
+        wait_file("vl-laptop", "~/data/docs/back.txt", "back", secs=90)
+        check(not storages_down("vl-desktop"), f"cloud still listed as down: {storages_down('vl-desktop')}")
+        fsck_clean("vl-desktop", "after the link came back")
+    finally:
+        unblock_wan()
+        kill_services("vl-laptop", "vl-desktop")
+
+
+@scenario("offline-pair-join-without-storage")
+def s_offline_pair_join():
+    """Spec 68: the new device cannot reach the storage while it pairs (its own uplink is
+    black-holed; the LAN works). It joins at once with the keys from the pairing,
+    `state/pending-join.json` holds the rest, and a sync says joining is not finished. Once
+    the storage answers, the next sync finishes joining: the device is listed on the laptop and
+    the folder the offer named arrives."""
+    s_reset()
+    init_vault("vl-laptop", "laptop")
+    v("vl-laptop", f"storage add-s3 cloud --insecure-http --endpoint {lab.S3['endpoint']} --region us-east-1 --bucket {BUCKET} "
+                   f"--access-key-id {lab.S3['key']} --place cloud", json_out=False)
+    gen_data("vl-laptop", "/home/varsto/data/docs", seed=9, big_mb=1, small=15)
+    folder_add("vl-laptop", "docs", "/home/varsto/data/docs")
+    v("vl-laptop", "push docs")
+    want = tree_hashes("vl-laptop", "/home/varsto/data/docs")
+    block_wan(src="10.78.1.11")
+    try:
+        run("vl-laptop", f"{ENV} nohup varsto pair offer --yes --folders docs > ~/pair.log 2>&1 &")
+        code = None
+        for _ in range(30):
+            m = re.search(r"Pairing code: (\d{3}-\d{3}-\d{3})", run("vl-laptop", "cat ~/pair.log").stdout)
+            if m:
+                code = m.group(1)
+                break
+            time.sleep(0.5)
+        check(code, "no pairing code: " + run("vl-laptop", "cat ~/pair.log").stdout[-300:])
+        t0 = time.time()
+        out = run("vl-desktop", f"{ENV} varsto pair join --name desktop --code {code} 2>&1", check_rc=False).stdout
+        CTX["offline_pair_join_secs"] = round(time.time() - t0, 1)
+        check("joined vault" in out, out[-500:])
+        check("joined without reaching a storage" in out, "the join did not say it was deferred: " + out[-500:])
+        check(run("vl-desktop", "test -s ~/.local/share/varsto/state/pending-join.json", check_rc=False).returncode == 0,
+              "no state/pending-join.json")
+        r = v("vl-desktop", "sync", check_rc=False)
+        check(isinstance(r, dict) and r.get("_failed") and "joining is not finished" in (r.get("_err", "") + str(r.get("_out"))),
+              f"sync without a storage: {str(r)[:400]}")
+    finally:
+        unblock_wan()
+        run("vl-laptop", "pkill -f 'varsto pair offer'", check_rc=False)
+    v("vl-desktop", "sync")
+    check(run("vl-desktop", "test -e ~/.local/share/varsto/state/pending-join.json", check_rc=False).returncode != 0,
+          "pending-join.json is still there after a sync that reached the storage")
+    v("vl-laptop", "sync")
+    names = [d.get("name") for d in v("vl-laptop", "status").get("devices", [])]
+    check("desktop" in names, f"the laptop does not list the desktop: {names}")
+    v("vl-desktop", "folder attach docs /home/varsto/data/docs", json_out=False)
+    v("vl-desktop", "sync")
+    same_tree(want, tree_hashes("vl-desktop", "/home/varsto/data/docs"), "after the deferred join")
+
+
+@scenario("offline-approve-then-flush")
+def s_offline_approve():
+    """Spec 77.6 "Offline": the owner approves a folder request while its uplink is
+    black-holed. The approval is kept on the owner's device (records mirror and outbox) and
+    the command succeeds; the requester gets nothing yet. Once the owner's sync reaches the
+    storage the outbox is flushed and the requester reads its grant and gets the files."""
+    fresh_pair()
+    join_s3("vl-work", "work", CTX["vault_words"])
+    req = v("vl-work", "folder request docs")
+    pending = []
+    for _ in range(12):
+        v("vl-laptop", "sync", check_rc=False)
+        pending = [p for p in v("vl-laptop", "folder requests docs") if p["device"] == "work"]
+        if pending:
+            break
+        time.sleep(3)
+    check(pending and pending[0]["fingerprint"] == req["fingerprint"], f"the laptop does not list work's request: {pending}")
+    block_wan(src="10.78.1.10")
+    try:
+        t0 = time.time()
+        r = v("vl-laptop", "folder approve docs work --yes", json_out=False, check_rc=False)
+        CTX["offline_approve_secs"] = round(time.time() - t0, 1)
+        check(not (isinstance(r, dict) and r.get("_failed")), f"approve failed offline: {str(r)[:400]}")
+        v("vl-work", "sync", check_rc=False)
+        m = v("vl-work", "folder members docs", check_rc=False)
+        role = m.get("your_role") if isinstance(m, dict) and not m.get("_failed") else None
+        check(not role, f"work got a role before the approval left the laptop: {role}")
+    finally:
+        unblock_wan()
+    v("vl-laptop", "sync")
+    wait_role("vl-work", "docs")
+    v("vl-work", "folder attach docs /home/varsto/data/docs", json_out=False)
+    v("vl-work", "sync")
+    same_tree(tree_hashes("vl-laptop", "/home/varsto/data/docs"), tree_hashes("vl-work", "/home/varsto/data/docs"),
+              "after the approval was flushed")
+
+
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_approval_flow, s_recovery_escrow, s_member_removal,
@@ -3142,7 +3394,8 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale, s_format3_scale,
              s_backup, s_gc_settling, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_mailbox_offline_disk,
              s_scrub, s_restic, s_ledger_loss, s_ledger_withhold, s_ledger_rollback, s_rollback_warning,
-             s_upgrade, s_forward, s_pair_fallback, s_torrent_spool, s_youtube_spool]
+             s_upgrade, s_forward, s_pair_fallback, s_torrent_spool, s_youtube_spool,
+             s_offline_storage_down, s_offline_lan_only, s_offline_pair_join, s_offline_approve]
 
 # What a run must contain (the format 3 switch): the old scenarios, updated, and the new ones.
 REQUIRED = {"reset", "init-and-s3-through-nat", "pair-over-lan", "sync-to-second-device", "join-with-recovery-words",
@@ -3158,7 +3411,10 @@ REQUIRED = {"reset", "init-and-s3-through-nat", "pair-over-lan", "sync-to-second
             "format3-scale", "approval-flow", "recovery-escrow", "rollback-warning", "member-removal", "gc-settling",
             "mailbox-offline-disk",
             # torrents through a local transmission-daemon (spec 81), YouTube through yt-dlp (spec 82)
-            "torrent-spool", "youtube-spool"}
+            "torrent-spool", "youtube-spool",
+            # working offline (spec 79, 77.8 "Offline", 77.6 "Offline", 68)
+            "offline-storage-down-mid-sync", "offline-lan-only", "offline-pair-join-without-storage",
+            "offline-approve-then-flush"}
 
 
 def self_check():
@@ -3182,7 +3438,8 @@ def self_check():
         problems.append("the first scenario must be reset (it empties the bucket)")
     for n in ("format3-scale", "approval-flow", "recovery-escrow", "rollback-warning", "member-removal", "gc-settling",
               "mailbox-offline-disk", "upgrade-from-alpha-15", "ledger-rollback", "forwarding-and-viz", "torrent-spool",
-              "youtube-spool"):
+              "youtube-spool", "offline-storage-down-mid-sync", "offline-lan-only",
+              "offline-pair-join-without-storage", "offline-approve-then-flush"):
         f = next((f for f in SCENARIOS if f.scenario == n), None)
         if f is not None and not (f.__doc__ or "").strip():
             problems.append(f"scenario {n} has no docstring saying what it asserts")
