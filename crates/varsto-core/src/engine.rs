@@ -1377,6 +1377,228 @@ impl Engine {
         Ok(engine)
     }
 
+    /// Join without reaching any storage: the vault keys come from the
+    /// pairing (`Bundle::vault_epochs`), the storages are only written to
+    /// the settings, and `state/pending-join.json` makes the next sync
+    /// finish what needs a storage (`finish_pending_join`): check the vault
+    /// and the keys, enrol this device and read the vault's records.
+    #[allow(clippy::too_many_arguments)]
+    fn join_deferred(
+        home: &Path,
+        device_name: &str,
+        passphrase: &str,
+        bundle: &crate::pair::Bundle,
+        epochs: &[crate::pair::BundleEpoch],
+        storages: &[&crate::pair::BundleStorage],
+        signer: Option<crypto::SigningKey>,
+        kem: Option<crate::kem::DecapsKey>,
+        mut notes: Vec<String>,
+    ) -> Result<(Engine, Vec<String>)> {
+        crypto::check_passphrase(passphrase)?;
+        ensure_no_vault(home)?;
+        let mut by_epoch = BTreeMap::new();
+        for e in epochs {
+            by_epoch.insert(e.epoch, SecretKey::from_hex(&e.key)?);
+        }
+        let master = by_epoch
+            .get(&0)
+            .cloned()
+            .ok_or_else(|| anyhow!("the pairing did not carry the vault key of epoch 0"))?;
+        let vault_id = VaultId::from_hex(&bundle.vault_id)?;
+        let mut vault_epochs = membership::VaultEpochs::genesis(&master);
+        vault_epochs.keys = by_epoch;
+        vault_epochs.kem = Some(kem.unwrap_or_else(crate::kem::DecapsKey::generate));
+        util::private_home(home)?;
+        let keys = Keys {
+            master,
+            signer: signer.unwrap_or_else(crypto::SigningKey::generate),
+        };
+        let vault = LocalVault {
+            format_version: crate::FORMAT_VERSION,
+            vault_id,
+            device_id: ledger::device_id_for(&keys.signer.public()),
+            device_name: device_name.to_string(),
+            // The vault's own date is read from its storage later.
+            created_utc: util::now_utc(),
+            member: false,
+        };
+        let mut engine = Self::write_new(home, vault, keys, passphrase, vault_epochs)?;
+        for s in storages {
+            engine.add_storage_deferred(s.spec.clone(), s.secret.clone())?;
+        }
+        std::fs::create_dir_all(engine.home.join("state"))?;
+        util::write_json(
+            &engine.pending_join_path(),
+            &PendingJoin {
+                storages: storages.iter().map(|s| s.spec.name().to_string()).collect(),
+                since_utc: util::now_utc(),
+            },
+        )?;
+        notes.push(
+            "joined without reaching a storage: this device is set up with the vault's keys; the next sync (the background service does it) finishes joining as soon as a storage can be reached".into(),
+        );
+        Ok((engine, notes))
+    }
+
+    /// Keep a storage's settings and secret without contacting it (a join
+    /// that is finished later).
+    fn add_storage_deferred(&mut self, spec: StorageSpec, secret: Option<String>) -> Result<()> {
+        if self.config.storages.iter().any(|s| s.name() == spec.name()) {
+            bail!("a storage named {} already exists", spec.name());
+        }
+        if let Some(secret) = secret {
+            let reference = match &spec {
+                StorageSpec::S3 { secret_ref, .. } if !secret_ref.is_empty() => secret_ref.clone(),
+                _ => spec.name().to_string(),
+            };
+            let mut store = self.secret_store()?;
+            store.secrets.insert(reference, secret);
+            self.forget_storages();
+            store.save(
+                &self.home,
+                &self.keys,
+                &self.vault.vault_id,
+                &self.vault.device_id,
+            )?;
+        }
+        self.config.storages.push(spec);
+        self.config.save(&self.home)
+    }
+
+    fn pending_join_path(&self) -> PathBuf {
+        self.home.join("state").join("pending-join.json")
+    }
+
+    /// The storages a join without storage access is still waiting for
+    /// (`None`: joining is complete).
+    pub fn join_pending(&self) -> Option<Vec<String>> {
+        util::read_json::<PendingJoin>(&self.pending_join_path())
+            .ok()
+            .map(|p| p.storages)
+    }
+
+    /// Finish a join that was made without reaching a storage: the first
+    /// storage that answers must hold this vault (same id and format) and
+    /// open with this device's vault key (not one from before a removal);
+    /// then the storages are added as usual, the registry and ledger are
+    /// read and this device's enrolment is published. Without a pending
+    /// join it does nothing; while no storage answers it fails and the
+    /// next sync tries again.
+    fn finish_pending_join(&mut self) -> Result<()> {
+        let path = self.pending_join_path();
+        let Ok(pending) = util::read_json::<PendingJoin>(&path) else {
+            return Ok(());
+        };
+        let mut notes = Vec::new();
+        let mut found: Option<(StorageSpec, VaultMeta)> = None;
+        for name in &pending.storages {
+            let Some(spec) = self
+                .config
+                .storages
+                .iter()
+                .find(|s| s.name() == name)
+                .cloned()
+            else {
+                continue;
+            };
+            let got = self
+                .open_spec(&spec)
+                .and_then(|b| b.get(VaultMeta::STORAGE_KEY))
+                .and_then(|m| match m {
+                    Some(bytes) => Ok(serde_json::from_slice::<VaultMeta>(&bytes)?),
+                    None => Err(anyhow!("holds no vault")),
+                });
+            match got {
+                Ok(meta) => {
+                    found = Some((spec, meta));
+                    break;
+                }
+                Err(e) => notes.push(format!("{name}: {e:#}")),
+            }
+        }
+        let Some((first, meta)) = found else {
+            bail!(
+                "joining is not finished: no storage of the vault can be reached yet ({}); it finishes by itself when one can",
+                notes.join("; ")
+            );
+        };
+        if meta.format_version != crate::FORMAT_VERSION {
+            bail!("{}", crate::format_mismatch(meta.format_version));
+        }
+        if meta.vault_id != self.vault.vault_id {
+            bail!(
+                "storage {} holds another vault than the one paired with: run `varsto reset --yes` and pair again",
+                first.name()
+            );
+        }
+        {
+            let backend = self.open_spec(&first)?;
+            let refs: Vec<&dyn Storage> = vec![backend.as_ref()];
+            let kem = self
+                .epochs
+                .kem
+                .as_ref()
+                .ok_or_else(|| anyhow!("this device has no K8"))?;
+            let newest = self
+                .epochs
+                .keys
+                .values()
+                .next_back()
+                .cloned()
+                .ok_or_else(|| anyhow!("this device holds no vault key"))?;
+            let m = crate::membership3::Membership::join(
+                members3::bin(&meta.vault_id)?,
+                &refs,
+                &self.keys.signer,
+                kem,
+                newest,
+            )?;
+            if m.devices.devices.is_empty() {
+                bail!(
+                    "this vault key does not open the records on storage {}: run `varsto reset --yes` and pair again",
+                    first.name()
+                );
+            }
+        }
+        self.vault.created_utc = meta.created_utc;
+        util::write_json(&self.home.join("vault.json"), &self.vault)?;
+        let order = std::iter::once(first.name().to_string()).chain(
+            pending
+                .storages
+                .iter()
+                .filter(|n| n.as_str() != first.name())
+                .cloned(),
+        );
+        for name in order {
+            let Some(spec) = self
+                .config
+                .storages
+                .iter()
+                .find(|s| s.name() == name)
+                .cloned()
+            else {
+                continue;
+            };
+            self.config.storages.retain(|s| s.name() != name);
+            if let Err(e) = self.add_storage_internal(spec.clone(), None) {
+                // Kept as it was: the other storages are added when they answer.
+                self.config.storages.retain(|s| s.name() != name);
+                self.config.storages.push(spec);
+                self.config.save(&self.home)?;
+                if name == first.name() {
+                    return Err(e);
+                }
+                log::warn!("storage {name} is not reachable yet: {e:#}");
+            }
+        }
+        self.pull_registry()?;
+        self.pull_ledger()?;
+        self.push_own_batches()?;
+        let _ = std::fs::remove_file(&path);
+        log::info!("joining finished through storage {}", first.name());
+        Ok(())
+    }
+
     /// Join with what a paired device sent (`pair::Bundle`, with the vault
     /// key the pairing opened in `vault_key`) and the keys of this device's
     /// hello (`keys`: the folder grants the other device wrote are sealed
@@ -1423,6 +1645,31 @@ impl Engine {
             }
         }
         let Some(first) = first else {
+            // No storage answers, but the sender gave every vault key and
+            // the settings of a network storage: set this device up now and
+            // finish joining when one can be reached.
+            if let Some(epochs) = &bundle.vault_epochs {
+                let network: Vec<&crate::pair::BundleStorage> = bundle
+                    .storages
+                    .iter()
+                    .filter(|s| {
+                        matches!(s.spec, StorageSpec::S3 { .. } | StorageSpec::Rclone { .. })
+                    })
+                    .collect();
+                if !network.is_empty() {
+                    return Self::join_deferred(
+                        home,
+                        device_name,
+                        passphrase,
+                        bundle,
+                        epochs,
+                        &network,
+                        signer,
+                        kem,
+                        notes,
+                    );
+                }
+            }
             bail!(
                 "none of the vault's storages can be reached from this device: {}. Add a storage both devices can reach (an S3 bucket or an rclone remote) on {} and pair again",
                 if notes.is_empty() { "it has none".to_string() } else { notes.join("; ") },
@@ -1527,6 +1774,16 @@ impl Engine {
             vault_key: self.export_vault_key()?,
             from: self.vault.device_name.clone(),
             storages,
+            vault_epochs: Some(
+                self.epochs
+                    .keys
+                    .iter()
+                    .map(|(e, k)| crate::pair::BundleEpoch {
+                        epoch: *e,
+                        key: k.to_hex(),
+                    })
+                    .collect(),
+            ),
         })
     }
 
@@ -6282,6 +6539,8 @@ impl Engine {
     }
 
     fn sync_inner(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
+        // A join made without reaching a storage is finished first.
+        self.finish_pending_join()?;
         // Every folder's pull and push record into one ledger batch, and the
         // ledger is pulled once.
         let (mut out, seq) = self.one_batch_seq(|e| e.sync_folders(folder))?;
@@ -7001,6 +7260,15 @@ impl Engine {
 /// devices keep working.
 /// Refuse to set up a vault where one already is, saying which one and
 /// how to start over.
+/// `state/pending-join.json`: a join made without reaching a storage,
+/// finished by the next sync that can (`Engine::finish_pending_join`).
+#[derive(Serialize, Deserialize)]
+struct PendingJoin {
+    /// The names of the storages taken over from the pairing.
+    storages: Vec<String>,
+    since_utc: i64,
+}
+
 pub fn ensure_no_vault(home: &Path) -> Result<()> {
     let p = home.join("vault.json");
     if !p.exists() {

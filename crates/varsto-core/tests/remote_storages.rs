@@ -50,6 +50,14 @@ impl S3Server {
             .local_addr()
             .unwrap()
             .port();
+        Self::start_on(root, port)
+    }
+
+    fn port(&self) -> u16 {
+        self.endpoint.rsplit(':').next().unwrap().parse().unwrap()
+    }
+
+    fn start_on(root: &Path, port: u16) -> S3Server {
         let child = Command::new("rclone")
             .args([
                 "serve",
@@ -201,4 +209,58 @@ fn rclone_backend_against_local_remote() {
     let st = spec.open().unwrap();
     storage_contract(st.as_ref());
     two_devices_through(spec.clone(), None, spec);
+}
+
+/// Pairing with no storage reachable from the joining device: the device is
+/// set up with the keys the pairing carried, and the next sync that reaches
+/// the bucket finishes joining.
+#[test]
+fn a_join_without_reaching_the_bucket_is_finished_by_the_next_sync() {
+    if !have_rclone_s3_server() {
+        eprintln!("rclone 1.65+ with `serve s3` not installed; skipping");
+        return;
+    }
+    let data = tempfile::tempdir().unwrap();
+    fs::create_dir_all(data.path().join("bucket1")).unwrap();
+    let server = S3Server::start(data.path());
+    let port = server.port();
+    let spec = StorageSpec::S3 {
+        name: "s3test".into(),
+        endpoint: server.endpoint.clone(),
+        region: "us-east-1".into(),
+        bucket: "bucket1".into(),
+        prefix: "varsto".into(),
+        access_key_id: "testkey".into(),
+        secret_ref: String::new(),
+        path_style: true,
+        storage_class: None,
+        cold: false,
+        place: String::new(),
+        allow_insecure_http: false,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let (a_home, b_home) = (root.path().join("a"), root.path().join("b"));
+    let (mut a, _key) = Engine::init(&a_home, "laptop", PASS).unwrap();
+    a.add_storage_with_secret(spec, Some("testsecret".into()))
+        .unwrap();
+    let bundle = a.pairing_bundle().unwrap();
+    assert!(bundle.vault_epochs.as_ref().is_some_and(|e| !e.is_empty()));
+
+    // The bucket goes away before the new device can reach it.
+    drop(server);
+    let keys = varsto_core::pair::v3::PairingKeys::generate();
+    let (mut b, notes) = Engine::join_paired(&b_home, "desk", PASS, &bundle, keys).unwrap();
+    assert!(notes
+        .iter()
+        .any(|n| n.contains("without reaching a storage")));
+    assert_eq!(b.join_pending(), Some(vec!["s3test".to_string()]));
+    let err = b.sync(None).unwrap_err().to_string();
+    assert!(err.contains("joining is not finished"), "{err}");
+    assert!(b.join_pending().is_some());
+
+    // The bucket is back: the next sync finishes joining.
+    let _server = S3Server::start_on(data.path(), port);
+    b.sync(None).unwrap();
+    assert_eq!(b.join_pending(), None);
+    assert_eq!(b.storages().len(), 1);
 }

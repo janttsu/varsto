@@ -57,14 +57,38 @@ pub struct Bundle {
     /// Name of the device that sent it.
     pub from: String,
     pub storages: Vec<BundleStorage>,
+    /// Every vault key epoch the sending device holds, so that a joining
+    /// device can be set up without reaching a storage (the rest of
+    /// joining is finished when one can be reached). Like `vault_key` it is
+    /// empty on the wire (`v3` seals each key to the joiner's K8 and the
+    /// joining side puts the opened keys back in). `None`: the sender does
+    /// not offer an offline join (an organization's approval).
+    #[serde(default)]
+    pub vault_epochs: Option<Vec<BundleEpoch>>,
 }
 
-crate::redacted_debug!(Bundle { vault_id, from, storages ; vault_key });
+crate::redacted_debug!(Bundle { vault_id, from, storages ; vault_key, vault_epochs });
 
 impl Drop for Bundle {
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.vault_key.zeroize();
+    }
+}
+
+/// The vault key K3 of one epoch, hex.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct BundleEpoch {
+    pub epoch: u32,
+    pub key: String,
+}
+
+crate::redacted_debug!(BundleEpoch { epoch ; key });
+
+impl Drop for BundleEpoch {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
     }
 }
 
@@ -643,6 +667,7 @@ mod tests {
             vault_id: "v".into(),
             vault_key: "k".repeat(64),
             from: "laptop".into(),
+            vault_epochs: None,
             storages: vec![BundleStorage {
                 spec: StorageSpec::LocalDir {
                     name: "primary".into(),

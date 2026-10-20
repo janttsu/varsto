@@ -116,6 +116,11 @@ struct Payload {
     bundle: Bundle,
     /// `seal_vault_key` to the joiner's K8, hex.
     vault_key: String,
+    /// The same for every vault key epoch (the bundle's `vault_epochs`,
+    /// which is not sent): `(epoch, sealed hex)`; absent when the sender
+    /// offers no offline join.
+    #[serde(default)]
+    vault_epochs: Option<Vec<(u32, String)>>,
 }
 
 impl Offer {
@@ -191,7 +196,21 @@ fn offer_exchange(
     }
     let mut sent = bundle.clone();
     sent.vault_key = String::new();
+    sent.vault_epochs = None;
+    let vault_epochs = match &bundle.vault_epochs {
+        None => None,
+        Some(list) => {
+            let mut sealed = Vec::new();
+            for e in list {
+                let k = SecretKey::from_hex(&e.key).map_err(|_| Attempt::Broken)?;
+                let c = seal_vault_key(&bundle.vault_id, &kem, &k).map_err(|_| Attempt::Broken)?;
+                sealed.push((e.epoch, hex::encode(c)));
+            }
+            Some(sealed)
+        }
+    };
     let payload = Payload {
+        vault_epochs,
         vault_key: hex::encode(
             seal_vault_key(&bundle.vault_id, &kem, vault_key).map_err(|_| Attempt::Broken)?,
         ),
@@ -329,8 +348,20 @@ pub fn fetch(code: &str, keys: &JoinKeys<'_>, addr: SocketAddr) -> Result<(Bundl
         keys.kem,
         &hex::decode(&payload.vault_key)?,
     )?;
+    let mut bundle = payload.bundle;
+    if let Some(list) = &payload.vault_epochs {
+        let mut opened = Vec::new();
+        for (epoch, sealed) in list {
+            let k = open_vault_key(&bundle.vault_id, keys.kem, &hex::decode(sealed)?)?;
+            opened.push(super::BundleEpoch {
+                epoch: *epoch,
+                key: k.to_hex(),
+            });
+        }
+        bundle.vault_epochs = Some(opened);
+    }
     write_line(&mut w, &serde_json::json!({"ok": true}))?;
-    Ok((payload.bundle, vault_key))
+    Ok((bundle, vault_key))
 }
 
 /// Find an open format-3 offer on the LAN for this code.
@@ -383,6 +414,7 @@ mod tests {
             "the bundle carries no plain vault key"
         );
         assert_eq!(b.storages[0].secret.as_deref(), Some("s3cret"));
+        assert!(b.vault_epochs.is_none(), "no epochs were offered");
         let j = seen.lock().unwrap()[0].clone();
         assert_eq!(j.name, "phone");
         assert_eq!(j.signing_pub, k6.public().to_bytes());
@@ -402,6 +434,43 @@ mod tests {
         );
         assert!(open_vault_key("v", &DecapsKey::generate(), &sealed).is_err());
         assert!(open_vault_key("other vault", &k8, &sealed).is_err());
+    }
+
+    #[test]
+    fn every_vault_key_epoch_travels_sealed_and_comes_out_in_the_bundle() {
+        let _port = super::super::tests::port_lock();
+        let k6 = SigningKey::generate();
+        let k8 = DecapsKey::generate();
+        let (k0, k1) = (SecretKey::random(), SecretKey::random());
+        let mut b = bundle();
+        b.vault_epochs = Some(vec![
+            super::super::BundleEpoch {
+                epoch: 0,
+                key: k0.to_hex(),
+            },
+            super::super::BundleEpoch {
+                epoch: 1,
+                key: k1.to_hex(),
+            },
+        ]);
+        let o = Offer::start_v3(b, k1.clone(), Arc::new(|_: &Joiner| true)).unwrap();
+        let code = o.status().code;
+        let keys = JoinKeys {
+            name: "phone",
+            signing_pub: k6.public().to_bytes(),
+            kem: &k8,
+        };
+        let (got, _) = fetch(&code, &keys, addr(&o)).unwrap();
+        let epochs = got.vault_epochs.clone().expect("epochs came along");
+        assert_eq!(epochs.len(), 2);
+        assert_eq!(
+            (epochs[0].epoch, epochs[0].key.as_str()),
+            (0, k0.to_hex().as_str())
+        );
+        assert_eq!(
+            (epochs[1].epoch, epochs[1].key.as_str()),
+            (1, k1.to_hex().as_str())
+        );
     }
 
     #[test]
