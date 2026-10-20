@@ -99,12 +99,14 @@ mod storage_directory;
 mod storages3_ops;
 mod strongroom_ops;
 mod thumbs3;
+mod torrent;
 mod trash;
 mod trash3_io;
 mod verify;
 mod view;
 mod viz;
 mod where_data;
+mod youtube;
 pub use access_sync::AccessExchangeReport;
 pub use backups::{
     BackupOptions, BackupSummary, ExpireReport, RestoreReport, SnapshotInfo, SnapshotPick,
@@ -173,12 +175,23 @@ pub use share_roles::{ShareRoleReport, KEPT_ASIDE_DIR};
 pub use staged_moves::{JobRunLimits, MoveJobRequest, MoveJobRun, SERVICE_RUN_GROUPS};
 pub use storage_directory::KnownStorage;
 pub use strongroom_ops::{CleanupReport, ConvertReport, StrongroomKeySummary};
+pub use torrent::{
+    find_job, plan_batch, torrent_jobs_at, BatchPlan, Candidate, CompletedFiles, FileOutcome,
+    JobFile, JobState, SystemEnv, TorrentAddOptions, TorrentEnv, TorrentJob, CHEAPEST,
+    DEFAULT_FREE_MIN,
+};
 pub use trash::{
     restored_name, RestoredFile, TrashItem, TrashPurgeReport, TrashRestorePlan, TrashRestoreReport,
     TrashSettings, TrashStatus, TrashUpkeepReport, DEFAULT_TRASH_DAYS, MAX_TRASH_DAYS,
     TRASH_UPKEEP_EVERY_SECS,
 };
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
+pub use youtube::{
+    find_youtube_job, task_args as youtube_task_args, youtube_jobs_at, BlockingYoutubeEnv,
+    ServiceYoutubeEnv, TaskKind as YoutubeTaskKind, Video as YoutubeVideo, VideoCounts,
+    VideoStatus, YoutubeAddOptions, YoutubeEnv, YoutubeJob, YoutubeScanReport, YtState,
+    DEFAULT_REFRESH_HOURS, DEFAULT_YT_FREE_MIN,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct LocalIndexEntry {

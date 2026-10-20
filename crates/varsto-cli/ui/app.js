@@ -446,7 +446,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (page === "backups") { loadBackups(); }
     if (page === "recovery") { loadGuide(); }
     if (page === "help") { setTimeout(loadHelp, 0); }
-    if (page === "import") { loadImports(); }
+    if (page === "import") { openImportPage(); } else if (importJobsTimer) { clearTimeout(importJobsTimer); importJobsTimer = null; }
     if (page === "trash") { loadTrash(); loadHistorySettings(); }
     if (page === "overview" && lastWhere) { renderWhere(lastWhere); }
     trafficWatch();
@@ -2003,22 +2003,315 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadBackups(); });
   };
 
-  // Import page: a folder of this device here; git-annex and cloud imports
-  // are shown with their command (they run on the command line).
-  var importCli = {
-    annex: ["varsto import git-annex /path/to/repository", "Run it once for every disk that holds a clone of the repository: each run continues the same folder with what that disk has, and says which disk to insert next. Nothing is changed on the disks."],
-    dropbox: ["rclone config create mydropbox dropbox\nvarsto import dropbox mydropbox:", "The first line signs in to Dropbox in your browser (once). Run the import again to bring changes over."],
-    onedrive: ["rclone config create myonedrive onedrive\nvarsto import onedrive myonedrive:", "The first line signs in to OneDrive in your browser (once). Run the import again to bring changes over."],
-    rclone: ["varsto import rclone remote:path", "Any remote set up in rclone (rclone config) works, Google Drive included."]
-  };
-  function importKind() {
-    var k = $("import-kind").value; var cli = importCli[k];
-    $("import-cli").classList.toggle("hidden", !cli);
-    $("import-dir-fields").classList.toggle("hidden", !!cli);
-    if (cli) { $("import-cli-cmd").textContent = cli[0]; $("import-cli-note").textContent = cli[1]; }
+  // Import page. Step 1: the source as cards; step 2: only that source's
+  // fields. Every source starts here (POST /api/import/start): the service
+  // runs it in the background with the same engine functions as the command
+  // line. At the top, every unfinished import of this device
+  // (GET /api/import/jobs: directory, annex and cloud runs, torrent and
+  // YouTube jobs), kept current by the event import.jobs, import activity
+  // and a poll while the page is open; finished ones below.
+  var importInfo = { platform: {}, tools: {}, defaults: {}, jobs: [] };
+  var importKindNow = "dir", importTorrentB64 = "", importYtTouched = false;
+  var importJobsTimer = null, importJobsSoon = null, importJobsLast = null, importDoneKey = null;
+  var importKinds = ["dir", "git-annex", "cloud", "torrent", "youtube"];
+  var cloudCmds = { dropbox: "rclone config create mydropbox dropbox", onedrive: "rclone config create myonedrive onedrive", rclone: "rclone config" };
+  var cloudPlaceholders = { dropbox: "mydropbox:", onedrive: "myonedrive:", rclone: "gdrive:Photos" };
+  function importUnavailable(kind) {
+    var p = importInfo.platform || {};
+    if (p.mobile && kind !== "dir") { return "This device imports its own folders only. Import other sources on a computer of the vault: the folder then reaches this device like any other."; }
+    if (kind === "torrent" && p.torrents === false) { return "Torrents are imported on Linux only: Varsto drives a transmission-daemon on the same computer."; }
+    if (kind === "youtube" && p.youtube === false) { return "YouTube imports run on computers only (Linux, macOS, Windows), with yt-dlp."; }
+    return "";
   }
-  $("import-kind").onchange = importKind;
+  function importToolNote(kind) {
+    var t = importInfo.tools || {};
+    if (kind === "youtube" && t.yt_dlp === false) { return "yt-dlp was not found on this computer. Install it (pacman -S yt-dlp, apt install yt-dlp or brew install yt-dlp), keep it up to date, then start the import."; }
+    if (kind === "torrent" && t.transmission === false) { return "transmission-daemon was not found on this computer. Install it (apt install transmission-daemon or pacman -S transmission-cli) and start it, then start the import."; }
+    if (kind === "cloud" && t.rclone === false) { return "rclone was not found on this computer. Install it from rclone.org or your package manager and set up a remote, then start the import."; }
+    if (kind === "git-annex" && t.git === false) { return "git was not found on this computer; the import reads the repository with it."; }
+    return "";
+  }
+  function importSelect(kind) {
+    if (importKinds.indexOf(kind) < 0) { kind = "dir"; }
+    importKindNow = kind; $("import-kind").value = kind;
+    document.querySelectorAll("#import-sources .ij-source").forEach(function (b) {
+      b.setAttribute("aria-checked", b.dataset.kind === kind ? "true" : "false");
+      b.tabIndex = b.dataset.kind === kind ? 0 : -1;
+    });
+    importAvailability();
+    document.querySelectorAll("#import-fields [data-kinds]").forEach(function (d) { d.classList.toggle("hidden", d.dataset.kinds.split(" ").indexOf(kind) < 0); });
+    $("import-download-dir").placeholder = kind === "youtube" ? ((importInfo.defaults || {}).youtube_download_dir || "Downloads/varsto-youtube in your home directory") : "transmission's own download directory";
+    importCloudKind();
+    if (kind === "youtube") { importYtDetect(); }
+    try { sessionStorage.setItem("varsto-import-kind", kind); } catch (e) {}
+  }
+  // What this device cannot import says why, instead of the fields; a
+  // missing program is named above the fields.
+  function importAvailability() {
+    var why = importUnavailable(importKindNow), note = why || importToolNote(importKindNow);
+    $("import-unavailable").textContent = note;
+    $("import-unavailable").classList.toggle("hidden", !note);
+    $("import-fields").classList.toggle("hidden", !!why);
+    document.querySelectorAll("#import-sources .ij-source").forEach(function (b) { b.classList.toggle("unavailable", !!importUnavailable(b.dataset.kind)); });
+  }
+  document.querySelectorAll("#import-sources .ij-source").forEach(function (b) { b.onclick = function () { importSelect(b.dataset.kind); }; });
+  // The cards are a radio group: the arrow keys move the choice.
+  $("import-sources").addEventListener("keydown", function (ev) {
+    var list = Array.prototype.slice.call(document.querySelectorAll("#import-sources .ij-source"));
+    var i = list.indexOf(document.activeElement);
+    var d = ev.key === "ArrowRight" || ev.key === "ArrowDown" ? 1 : ev.key === "ArrowLeft" || ev.key === "ArrowUp" ? -1 : 0;
+    if (i < 0 || !d) { return; }
+    ev.preventDefault();
+    var n = list[(i + d + list.length) % list.length]; importSelect(n.dataset.kind); n.focus();
+  });
+  function importCloudKind() {
+    var k = $("import-cloud-kind").value;
+    $("import-cloud-cmd").textContent = cloudCmds[k] || cloudCmds.rclone;
+    $("import-remote").placeholder = cloudPlaceholders[k] || cloudPlaceholders.rclone;
+  }
+  $("import-cloud-kind").onchange = importCloudKind;
   $("import-where").onchange = function () { $("import-dest-label").classList.toggle("hidden", $("import-where").value !== "full"); };
+  function fillImportStorages() {
+    var sel = $("import-storage"), prev = sel.value;
+    sel.innerHTML = "";
+    function opt(v, text, raw) { var o = el("option", null, text); o.value = v; if (raw) { o.setAttribute("data-no-i18n", ""); } sel.appendChild(o); }
+    opt("", "The folder's usual placement");
+    opt("cheapest", "The cheapest storage (by price per GB-month)");
+    ((lastStatus && lastStatus.storages) || []).filter(function (st) { return !st.carrier; }).forEach(function (st) { opt(st.name, st.name, true); });
+    sel.value = prev;
+    if (sel.value !== prev) { sel.value = ""; }
+  }
+  // What a YouTube address names: a video, a playlist, a channel, or a video
+  // in a playlist ("both": either may be meant); null when it is none.
+  function ytKind(u) {
+    var s = (u || "").trim();
+    if (!s) { return null; }
+    if (/^[A-Za-z0-9_-]{11}$/.test(s)) { return { kind: "video" }; }
+    var m;
+    try { m = new URL(/^https?:\/\//i.test(s) ? s : "https://" + s); } catch (e) { return null; }
+    var host = m.hostname.toLowerCase().replace(/^(www|m|music)\./, ""), list = m.searchParams.get("list"), p = m.pathname;
+    if (host === "youtu.be") { return p.length > 1 ? { kind: list ? "both" : "video", list: list } : null; }
+    if (host !== "youtube.com") { return null; }
+    if (p === "/watch") { return m.searchParams.get("v") ? { kind: list ? "both" : "video", list: list } : null; }
+    if (/^\/(shorts|live|embed|v)\/[^\/]+/.test(p)) { return { kind: "video" }; }
+    if (p === "/playlist") { return list ? { kind: "playlist", list: list } : null; }
+    if (/^\/(@[^\/]+|channel\/[^\/]+|c\/[^\/]+|user\/[^\/]+)/.test(p)) { return { kind: "channel" }; }
+    return null;
+  }
+  function importYtDetect() {
+    var u = $("import-yt-url").value, k = ytKind(u), note = $("import-yt-detected");
+    var radios = document.querySelectorAll("#importform input[name=yt_scope]");
+    function set(v) { radios.forEach(function (r) { r.checked = r.value === v; }); }
+    var both = !!k && k.kind === "both";
+    // Only the choices the address allows: a channel is not one video, and a
+    // video alone names no channel.
+    radios.forEach(function (r) { r.disabled = !!k && !both && ((k.kind === "video") !== (r.value === "video")); });
+    if (!k) { note.textContent = u.trim() ? "This is not a YouTube address Varsto knows." : "Paste the address of a video, a playlist or a channel."; return; }
+    if (k.kind === "video") { set("video"); note.textContent = "A single video."; }
+    else if (k.kind === "playlist") { set("list"); note.textContent = "A playlist: every video in it, one at a time."; }
+    else if (k.kind === "channel") { set("list"); note.textContent = "A channel: every video in it, one at a time; new videos are listed again later."; }
+    else { if (!importYtTouched) { set("video"); } note.textContent = "A video in a playlist: choose the video alone or the whole playlist."; }
+  }
+  $("import-yt-url").addEventListener("input", function () { importYtTouched = false; importYtDetect(); });
+  document.querySelectorAll("#importform input[name=yt_scope]").forEach(function (r) { r.addEventListener("change", function () { importYtTouched = true; }); });
+  // The address to send: a video in a playlist becomes the playlist or the
+  // video alone, as chosen.
+  function ytAddress() {
+    var u = $("import-yt-url").value.trim(), k = ytKind(u);
+    var scope = (document.querySelector("#importform input[name=yt_scope]:checked") || {}).value;
+    if (!k || k.kind !== "both") { return u; }
+    if (scope === "list") { return "https://www.youtube.com/playlist?list=" + encodeURIComponent(k.list); }
+    try { var m = new URL(/^https?:\/\//i.test(u) ? u : "https://" + u); m.searchParams.delete("list"); m.searchParams.delete("index"); return m.toString(); } catch (e) { return u; }
+  }
+  $("import-torrent-file").onchange = function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    importTorrentB64 = "";
+    if (!f) { return; }
+    if (f.size > 5 * 1024 * 1024) { alertBox("This .torrent file is larger than the page can send (5 MB). Add it on the command line: varsto import torrent <file>."); ev.target.value = ""; return; }
+    var r = new FileReader();
+    r.onload = function () { var s = String(r.result || ""); importTorrentB64 = s.slice(s.indexOf(",") + 1); };
+    r.onerror = function () { alertBox("The .torrent file could not be read."); };
+    r.readAsDataURL(f);
+  };
+  function importShared(body, d) { body.storage = d.storage; body.free_min = d.free_min; body.download_dir = d.download_dir; body.min_copies = d.min_copies; }
+  $("importform").onsubmit = function (ev) {
+    ev.preventDefault();
+    var d = formData(ev.target), kind = importKindNow;
+    var why = importUnavailable(kind);
+    if (why) { alertBox(why); return; }
+    var body = { kind: kind, folder: d.folder };
+    if (kind === "dir" || kind === "git-annex" || kind === "cloud") {
+      if (d.where === "full" && !d.dest) { alertBox("Choose the directory for the copy."); return; }
+      body.dest = d.where === "full" ? d.dest : ""; body.selective = d.where !== "full";
+    }
+    if (kind === "dir") {
+      if (!d.source_dir) { alertBox("Choose the folder to import."); return; }
+      body.source = d.source_dir; body.remove_source = !!d.remove_source;
+    } else if (kind === "git-annex") {
+      if (!d.source_annex) { alertBox("Choose the git-annex repository."); return; }
+      body.source = d.source_annex; body.git_ref = d.git_ref; body.no_verify = !!d.no_verify;
+    } else if (kind === "cloud") {
+      if ((d.source_cloud || "").indexOf(":") < 0) { alertBox("Give an rclone remote, such as mydropbox: or gdrive:Photos."); return; }
+      body.kind = d.cloud_kind; body.source = d.source_cloud; body.transfers = d.transfers;
+    } else if (kind === "torrent") {
+      var magnet = /^magnet:/i.test((d.magnet || "").trim());
+      if (!magnet && !importTorrentB64) { alertBox("Give a magnet link or choose a .torrent file."); return; }
+      body.magnet = magnet ? d.magnet.trim() : ""; body.torrent_base64 = magnet ? "" : importTorrentB64;
+      importShared(body, d); body.verify_existing = !!d.verify_existing;
+    } else if (kind === "youtube") {
+      if (!ytKind(d.url)) { alertBox("Give the address of a YouTube video, playlist or channel."); return; }
+      body.url = ytAddress(); importShared(body, d);
+      ["sleep", "sleep_requests", "rate", "concurrent_fragments", "format", "cookies_from_browser", "subs", "refresh_hours"].forEach(function (k) { body[k] = d[k]; });
+      body.thumbnails = !!d.thumbnails;
+    }
+    busy(true);
+    api("POST", "/api/import/start", body).then(function () {
+      log("Import started: " + (d.folder || body.source || body.url || "torrent"));
+      importJobsLast = null;
+      return loadImportJobs().then(function () { $("importjobs-card").scrollIntoView({ block: "start", behavior: "smooth" }); });
+    }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); });
+  };
+
+  var ijKinds = { dir: "Local folder", "git-annex": "git-annex", rclone: "Cloud drive", dropbox: "Dropbox", onedrive: "OneDrive", torrent: "Torrent", youtube: "YouTube", "import": "Command line" };
+  var ijIcons = { dir: "folders", "git-annex": "annex", rclone: "cloud", dropbox: "cloud", onedrive: "cloud", torrent: "torrent", youtube: "video", "import": "download" };
+  var ijStates = {
+    waiting: ["Waiting for the service", "grey"], running: ["Importing", "accent"], failed: ["Failed", "bad"], done: ["Finished", "ok"],
+    adding: ["Adding", "accent"], metadata: ["Fetching the file list", "accent"], downloading: ["Downloading", "accent"], checking: ["Checking", "accent"],
+    waiting_space: ["Waiting for space", "risk"], waiting_policy: ["Waiting for the policy", "risk"], waiting_retry: ["Waiting to try again", "risk"],
+    paused: ["Paused", "grey"], complete: ["Complete", "ok"], listing: ["Listing the videos", "accent"], probing: ["Checking a video's size", "accent"], up_to_date: ["Up to date", "ok"]
+  };
+  var ijActions = { pause: "Pause", resume: "Resume", retry: "Try failed videos again", remove: "Remove" };
+  var ijPending = { pause: "Pausing…", resume: "Resuming…", remove: "Removing…", retry: "Trying again…" };
+  var ijMoving = /^(running|adding|metadata|downloading|checking|listing|probing)$/;
+  function ijRow(j, open) {
+    var li = el("li", "ij-row"); li.dataset.id = j.id;
+    var ic = el("span", "li-icon"); ic.appendChild(icon(ijIcons[j.kind] || "download")); li.appendChild(ic);
+    var body = el("div", "li-body");
+    var title = el("div", "li-title");
+    title.appendChild(rawSpan(j.title || j.folder || j.source || j.id));
+    title.appendChild(pill("grey", ijKinds[j.kind] || j.kind));
+    var st = ijStates[j.state] || [j.state.replace(/_/g, " "), "grey"];
+    title.appendChild(pill(st[1], st[0]));
+    if (j.pending) { title.appendChild(el("span", "muted small", ijPending[j.pending] || "")); }
+    body.appendChild(title);
+    if (j.folder && j.folder !== j.title) { body.appendChild(el("div", "li-sub", "Into folder " + j.folder)); }
+    if (j.source && j.source !== j.title) { body.appendChild(rawSpan(j.source, "li-sub ij-source-line")); }
+    if (!j.finished) {
+      var bar = el("div", "act-bar ij-progress"), fill = el("i"); bar.appendChild(fill);
+      var share = j.total > 0 ? j.done / j.total : j.bytes_total > 0 ? j.bytes_done / j.bytes_total : -1;
+      if (share >= 0) { fill.style.width = Math.min(100, Math.round(100 * share)) + "%"; }
+      else if (ijMoving.test(j.state)) { bar.classList.add("indeterminate"); }
+      body.appendChild(bar);
+    }
+    var c = [];
+    if (j.total > 0) { c.push(j.done + " of " + j.total + (j.unit === "videos" ? " videos" : " files")); }
+    if (j.bytes_total > 0) { c.push(fmtBytes(j.bytes_done) + " of " + fmtBytes(j.bytes_total)); } else if (j.bytes_done > 0) { c.push(fmtBytes(j.bytes_done) + " stored"); }
+    if (j.speed) { c.push(fmtBytes(j.speed) + "/s"); }
+    if (j.already_stored) { c.push(j.already_stored + (j.unit === "videos" ? " already in the vault" : " already in the folder")); }
+    if (j.conflicts) { c.push(j.conflicts + " in conflict"); }
+    if (c.length) { body.appendChild(el("div", "ij-counts", c.join(" · "))); }
+    if (j.current && !j.finished) {
+      var cur = el("div", "li-sub"); cur.appendChild(el("span", null, "Now:")); cur.appendChild(document.createTextNode(" ")); cur.appendChild(rawSpan(j.current)); body.appendChild(cur);
+    }
+    if (j.text) { body.appendChild(el("div", "li-sub", j.text)); }
+    if (j.last_error) {
+      var er = el("div", "ij-error"); er.appendChild(el("span", null, "Error:")); er.appendChild(document.createTextNode(" ")); er.appendChild(rawSpan(j.last_error)); body.appendChild(er);
+    }
+    if (j.retry_utc && !j.finished) { body.appendChild(el("div", "li-sub", "Tries again at " + fmtWhen(j.retry_utc))); }
+    if (j.failed && j.failed.length) {
+      var det = el("details", "ij-failed");
+      if (open[j.id]) { det.open = true; }
+      det.appendChild(el("summary", null, j.failed.length === 1 ? "1 video failed" : j.failed.length + " videos failed"));
+      var ul = el("ul");
+      j.failed.forEach(function (f) {
+        var x = el("li");
+        x.appendChild(rawSpan((f.title || f.id) + " [" + f.id + "]"));
+        x.appendChild(document.createTextNode(": "));
+        x.appendChild(f.reason ? rawSpan(f.reason) : el("span", null, "no reason given"));
+        x.appendChild(el("div", "muted small", f.gave_up ? "Given up after " + f.attempts + " tries" : "Try " + f.attempts + ", next at " + fmtWhen(f.next_try_utc)));
+        ul.appendChild(x);
+      });
+      det.appendChild(ul); body.appendChild(det);
+    }
+    li.appendChild(body);
+    var act = el("div", "li-actions");
+    var run = j.id.indexOf("run:") === 0;
+    (j.actions || []).forEach(function (a) {
+      var b = el("button", a === "remove" && !run ? "secondary danger" : "secondary", run && a === "remove" ? "Dismiss" : (ijActions[a] || a));
+      b.type = "button";
+      if (j.pending) { b.disabled = true; b.dataset.keepDisabled = "1"; }
+      b.onclick = function () { ijAction(j, a); };
+      act.appendChild(b);
+    });
+    if (run && j.kind === "dir" && j.state === "done" && j.folder) {
+      var cl = el("button", "secondary", "Remove safe files…"); cl.type = "button";
+      cl.onclick = function () { cleanupImport(j.folder); };
+      act.appendChild(cl);
+    }
+    if (act.childNodes.length) { li.appendChild(act); }
+    return li;
+  }
+  function ijAction(j, a) {
+    function go() {
+      return api("POST", "/api/import/jobs/" + encodeURIComponent(j.id) + "/" + a, {}).then(function () { importJobsLast = null; return loadImportJobs(); }).catch(function (e) { alertBox(e.message); });
+    }
+    if (a !== "remove" || j.id.indexOf("run:") === 0) { go(); return; }
+    var msg = j.kind === "torrent"
+      ? "Remove the torrent job " + j.title + "? Folder " + j.folder + " stays, and so do the files in the download directory that were not stored yet; transmission drops the torrent."
+      : "Remove the YouTube job " + j.title + "? Folder " + j.folder + " keeps every video; files in the spool that were not stored yet stay there.";
+    confirmBox(msg, { title: "Remove the job?", ok: "Remove", danger: true }).then(function (yes) { if (yes) { go(); } });
+  }
+  function loadImportJobs() {
+    return api("GET", "/api/import/jobs").then(function (r) {
+      importInfo = r || importInfo;
+      importInfo.platform = importInfo.platform || {}; importInfo.tools = importInfo.tools || {}; importInfo.defaults = importInfo.defaults || {};
+      renderImportJobs(importInfo.jobs || []);
+      importAvailability();
+      ijSchedule();
+    }).catch(function (e) { log("imports: " + e.message); ijSchedule(); });
+  }
+  function renderImportJobs(list) {
+    var raw = JSON.stringify(list);
+    if (raw === importJobsLast) { return; }
+    importJobsLast = raw;
+    var open = {};
+    document.querySelectorAll("#importjobs details[open], #importdone details[open]").forEach(function (d) { var li = d.closest("li.ij-row"); if (li) { open[li.dataset.id] = true; } });
+    // A failed import the page started needs attention: it stays on top.
+    var now = list.filter(function (j) { return !j.finished || (j.state === "failed" && j.id.indexOf("run:") === 0); });
+    var done = list.filter(function (j) { return now.indexOf(j) < 0; });
+    var ul = $("importjobs"); ul.innerHTML = "";
+    now.forEach(function (j) { ul.appendChild(ijRow(j, open)); });
+    $("importjobs-empty").classList.toggle("hidden", now.length > 0);
+    var ud = $("importdone"); ud.innerHTML = "";
+    done.forEach(function (j) { ud.appendChild(ijRow(j, open)); });
+    $("importdone-card").classList.toggle("hidden", done.length === 0);
+    // Something finished: the imported folders follow.
+    var key = done.map(function (j) { return j.id; }).join(" ");
+    if (importDoneKey !== null && key !== importDoneKey) { loadImports(); }
+    importDoneKey = key;
+  }
+  // The list follows by itself: soon after an event, and by polling while
+  // the page is open (often while something runs).
+  function ijSchedule() {
+    if (importJobsTimer) { clearTimeout(importJobsTimer); importJobsTimer = null; }
+    if (currentPage !== "import" || document.visibilityState === "hidden") { return; }
+    var moving = (importInfo.jobs || []).some(function (j) { return !j.finished; });
+    importJobsTimer = setTimeout(function () { importJobsTimer = null; if (currentPage === "import") { loadImportJobs(); } }, moving ? 5000 : 30000);
+  }
+  function ijSoon() {
+    if (importJobsSoon || currentPage !== "import") { return; }
+    importJobsSoon = setTimeout(function () { importJobsSoon = null; if (currentPage === "import") { loadImportJobs(); } }, 1200);
+  }
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState !== "hidden" && currentPage === "import") { ijSoon(); } });
+  // The source chosen last in this tab.
+  function importStoredKind() { try { return sessionStorage.getItem("varsto-import-kind") || importKindNow; } catch (e) { return importKindNow; } }
+  function openImportPage() {
+    fillImportStorages();
+    importSelect(importStoredKind());
+    loadImports();
+    loadImportJobs();
+  }
+  importSelect(importStoredKind());
   function loadImports() {
     return api("GET", "/api/import/status").then(renderImports).catch(function (e) { log("imports: " + e.message); });
   }
@@ -2075,26 +2368,6 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       showCleanupPlan(folder, c);
     }).catch(function (e) { alertBox(e.message); });
   }
-  $("importform").onsubmit = function (ev) {
-    ev.preventDefault();
-    var d = formData(ev.target);
-    if (!d.source) { alertBox("Choose the folder to import."); return; }
-    if (d.where === "full" && !d.dest) { alertBox("Choose the directory for the copy."); return; }
-    busy(true);
-    api("POST", "/api/import/dir", { source: d.source, folder: d.folder, dest: d.where === "full" ? d.dest : "", selective: d.where !== "full", remove_source: !!d.remove_source }).then(function (r) {
-      $("import-result").classList.remove("hidden");
-      var ul = $("import-summary"); ul.innerHTML = "";
-      ul.appendChild(el("li", null, "Imported " + r.imported_files + " file(s) (" + fmtBytes(r.imported_bytes) + ") into folder " + r.folder));
-      if (r.already_ids) { ul.appendChild(el("li", null, r.already_ids + " file(s) were imported before")); }
-      if (r.failed_count) { ul.appendChild(el("li", null, r.failed_count + " file(s) could not be read: " + r.failed.map(function (n) { return n.path; }).join(", "))); }
-      if (r.skipped_count) { ul.appendChild(el("li", null, r.skipped_count + " item(s) not imported (links, special files, names Varsto cannot use): " + r.skipped.map(function (n) { return n.path; }).join(", "))); }
-      if (r.kept_in_varsto_count) { ul.appendChild(el("li", null, r.kept_in_varsto_count + " file(s) were changed in Varsto and kept as they are")); }
-      if (r.gone_at_source) { ul.appendChild(el("li", null, r.gone_at_source + " file(s) are gone from the source and kept in Varsto")); }
-      showCleanupPlan(r.folder, r.cleanup);
-      log("Imported into " + r.folder);
-    }).catch(function (e) { alertBox(e.message); }).then(function () { busy(false); loadImports(); });
-  };
-
   // Trash (its own page): files deleted on any device, kept for the trash
   // days and restorable on every device; the settings below the list.
   var trashItems = [], trashSelected = {}, trashStorageNow = "", trashStorages = [];
@@ -4190,9 +4463,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (first) { serviceSoon(); }
     });
     on("reset", function () { statusSoon(); serviceSoon(); });
-    on("activity.started", function (t) { evsTasks[t.id] = t; tasksChanged(); });
-    on("activity.progress", function (t) { evsTasks[t.id] = t; tasksChanged(); });
-    on("activity.finished", function (t) { delete evsTasks[t.id]; tasksChanged(); });
+    on("activity.started", function (t) { evsTasks[t.id] = t; tasksChanged(); if (t.kind === "import") { ijSoon(); } });
+    on("activity.progress", function (t) { evsTasks[t.id] = t; tasksChanged(); if (t.kind === "import") { ijSoon(); } });
+    on("activity.finished", function (t) { delete evsTasks[t.id]; tasksChanged(); if (t.kind === "import") { ijSoon(); } });
+    // Every import of this device: the Import page's list follows.
+    on("import.jobs", function () { ijSoon(); });
     on("activity.peers", function (d) { evsPeers = d.peers || []; tasksChanged(); });
     on("traffic", function (d) { if (trafficWanted()) { renderTraffic(d); } });
     on("transfers", function (d) { transferFollowers.forEach(function (f) { f(d); }); });

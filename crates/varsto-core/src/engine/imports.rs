@@ -787,18 +787,18 @@ fn push_example(list: &mut Vec<Note>, count: &mut u64, note: Note) {
 impl Engine {
     // ----- the book --------------------------------------------------------------
 
-    fn book_path(&self, folder: &FolderId) -> PathBuf {
+    pub(super) fn book_path(&self, folder: &FolderId) -> PathBuf {
         self.home
             .join("state")
             .join("imports")
             .join(format!("{folder}.json"))
     }
 
-    fn load_book(&self, folder: &FolderId) -> Option<ImportBook> {
+    pub(super) fn load_book(&self, folder: &FolderId) -> Option<ImportBook> {
         util::read_json::<ImportBook>(&self.book_path(folder)).ok()
     }
 
-    fn save_book(&self, folder: &FolderId, book: &ImportBook) -> Result<()> {
+    pub(super) fn save_book(&self, folder: &FolderId, book: &ImportBook) -> Result<()> {
         let p = self.book_path(folder);
         if let Some(d) = p.parent() {
             fs::create_dir_all(d)?;
@@ -807,7 +807,7 @@ impl Engine {
     }
 
     /// Publish this device's book of a folder, replacing its older record.
-    fn publish_book(&self, rec: &FolderRecord, book: &ImportBook) -> Result<()> {
+    pub(super) fn publish_book(&self, rec: &FolderRecord, book: &ImportBook) -> Result<()> {
         let storages = self.metadata_storages(false)?;
         if storages.is_empty() {
             return Ok(());
@@ -848,7 +848,7 @@ impl Engine {
 
     /// Read the other devices' books of every folder and merge them into
     /// this device's.
-    fn refresh_books(&mut self) -> Result<()> {
+    pub(super) fn refresh_books(&mut self) -> Result<()> {
         let storages = self.metadata_storages(false)?;
         // (folder, device) -> (written, storage index, key)
         let mut newest: BTreeMap<(String, DeviceId), (i64, usize, String)> = BTreeMap::new();
@@ -1020,9 +1020,30 @@ impl Engine {
                 }
             }
         }
-        if opts.remove_source && info.kind != import::KIND_DIR {
+        if opts.remove_source && info.kind != import::KIND_DIR && info.kind != import::KIND_YOUTUBE
+        {
             bail!("only local directories can be removed after an import");
         }
+        // A YouTube job may continue a folder whose videos `import youtube-scan`
+        // listed (its book holds only that list).
+        let existing = existing.or_else(|| {
+            let want = opts.folder.as_ref()?.trim().to_lowercase();
+            (info.kind == import::KIND_YOUTUBE)
+                .then(|| {
+                    self.keyring
+                        .folders
+                        .values()
+                        .find(|r| {
+                            !r.is_removed() && !r.is_backup() && r.name.to_lowercase() == want
+                        })
+                        .filter(|r| {
+                            self.load_book(&r.folder_id)
+                                .is_some_and(|b| b.is_index_only())
+                        })
+                        .cloned()
+                })
+                .flatten()
+        });
         let name = match (&existing, &opts.folder) {
             (Some(rec), Some(want)) if rec.name.to_lowercase() != want.trim().to_lowercase() => bail!(
                 "this source was imported into folder {} before; leave out --folder to continue there",
@@ -1292,7 +1313,18 @@ impl Engine {
         }
         let (rec, root) = rec_root.expect("attached above");
         let root_path = root.clone();
-        book.tree = new_tree;
+        if info.kind == import::KIND_YOUTUBE {
+            // A YouTube job lists only what is in its spool now: the book
+            // keeps every video file it ever imported, nothing is gone.
+            let mut all = std::mem::take(&mut book.tree);
+            all.extend(new_tree);
+            book.tree = all;
+            gone.clear();
+            report.gone_at_source = 0;
+            report.gone_examples.clear();
+        } else {
+            book.tree = new_tree;
+        }
         book.tree_ref = listing.tree_ref;
         book.tree_utc = util::now_utc();
         book.gone_at_source = std::mem::take(&mut gone);
@@ -1715,6 +1747,12 @@ impl Engine {
                 },
             );
             book.missing_holders.remove(&g.id);
+            if let Some(v) = crate::youtube::video_of_content_id(&g.id) {
+                let paths = book.youtube.entry(v.to_string()).or_default();
+                for &i in &g.paths {
+                    paths.insert(items[i].path.clone());
+                }
+            }
             report.imported_ids += 1;
             report.imported_files += g.paths.len() as u64;
             report.imported_bytes += done.size;
@@ -1931,7 +1969,10 @@ impl Engine {
                     continue;
                 }
             }
-            if let Some(b) = self.load_book(&rec.folder_id) {
+            if let Some(b) = self
+                .load_book(&rec.folder_id)
+                .filter(|b| !b.is_index_only())
+            {
                 out.push((rec.clone(), b));
             }
         }
@@ -2192,6 +2233,18 @@ impl Engine {
     /// Remove the files of a local source that are safely in the vault
     /// (`apply`), or say which would be removed and which wait and why.
     pub fn import_cleanup(&mut self, folder: &str, apply: bool) -> Result<ImportCleanupReport> {
+        self.import_cleanup_at(folder, None, apply)
+    }
+
+    /// [`Self::import_cleanup`]; `spool`: a YouTube job's directory and the
+    /// files of it to consider (as listed there now), instead of the
+    /// book's source directory and file list.
+    pub(super) fn import_cleanup_at(
+        &mut self,
+        folder: &str,
+        spool: Option<(&Path, Vec<(String, TreeEntry)>)>,
+        apply: bool,
+    ) -> Result<ImportCleanupReport> {
         self.ensure_active()?;
         let _ = self.refresh_books();
         let (rec, mut b) = self
@@ -2199,26 +2252,40 @@ impl Engine {
             .into_iter()
             .next()
             .expect("one folder");
-        if b.kind != import::KIND_DIR {
-            bail!("only imports of local directories can remove their source files");
-        }
-        let src = PathBuf::from(
-            b.source_path
-                .clone()
-                .ok_or_else(|| anyhow!("the import of {} names no source directory", rec.name))?,
-        );
-        let src = src
-            .canonicalize()
-            .with_context(|| format!("the source {} is not here", src.display()))?;
-        if b.identity
-            .iter()
-            .all(|i| i != &format!("dir:{}", src.display()))
-        {
-            bail!(
-                "{} is not the directory this folder was imported from",
-                src.display()
-            );
-        }
+        let (src, tree) = match spool {
+            Some((dir, entries)) => {
+                if b.kind != import::KIND_YOUTUBE {
+                    bail!("folder {} is not filled by a YouTube job", rec.name);
+                }
+                let src = dir.canonicalize().with_context(|| {
+                    format!("the download directory {} is not here", dir.display())
+                })?;
+                (src, entries)
+            }
+            None => {
+                if b.kind != import::KIND_DIR {
+                    bail!("only imports of local directories can remove their source files");
+                }
+                let src = PathBuf::from(b.source_path.clone().ok_or_else(|| {
+                    anyhow!("the import of {} names no source directory", rec.name)
+                })?);
+                let src = src
+                    .canonicalize()
+                    .with_context(|| format!("the source {} is not here", src.display()))?;
+                if b.identity
+                    .iter()
+                    .all(|i| i != &format!("dir:{}", src.display()))
+                {
+                    bail!(
+                        "{} is not the directory this folder was imported from",
+                        src.display()
+                    );
+                }
+                let tree: Vec<(String, TreeEntry)> =
+                    b.tree.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                (src, tree)
+            }
+        };
         self.check_source_path(&src, true)?;
         let mut report = ImportCleanupReport {
             folder: rec.name.clone(),
@@ -2229,19 +2296,12 @@ impl Engine {
         let task = activity::start(
             activity::IMPORT,
             &rec.name,
-            b.tree.len() as u64,
+            tree.len() as u64,
             activity::Unit::Items,
         );
         task.set_phase("cleanup");
         let state = self.load_state(&rec.folder_id)?;
-        let view = self.view3()?;
-        let table = self.folder_table(&rec)?;
-        let mut pctx = self.policy_ctx();
-
-        let policy = rec.effective_policy();
-        let storages = self.open_storages(false)?;
-        let mut read_back: HashSet<ObjectName> = HashSet::new();
-        let now = util::now_utc();
+        let mut check = self.stored_check(&rec)?;
         let wait = |report: &mut ImportCleanupReport, path: &str, size: u64, reason: String| {
             report.waiting_count += 1;
             if report.waiting.len() < 200 {
@@ -2252,8 +2312,6 @@ impl Engine {
                 });
             }
         };
-        let tree: Vec<(String, TreeEntry)> =
-            b.tree.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         for (path, e) in tree {
             task.advance(1);
             let Some(x) = b.imported.get(&e.id).cloned() else {
@@ -2308,65 +2366,7 @@ impl Engine {
             };
             // (3, 4) Every block on a storage (not a transferrer), read back
             // from one, and the policy met for these blocks now.
-            let mut problem: Option<String> = None;
-            let mut facts = Vec::new();
-            for c in &f.chunks {
-                let holders: Vec<String> = match (&table, crate::storages3::object_bin(&c.object)) {
-                    (Some(t), Ok(o)) => {
-                        let t = t.read().unwrap_or_else(|e| e.into_inner());
-                        crate::storages3::block_copies(&view, &*t, &o)
-                            .into_iter()
-                            .filter(|n| !pctx.carriers.contains(n))
-                            .collect()
-                    }
-                    _ => Vec::new(),
-                };
-                if holders.is_empty() {
-                    problem =
-                        Some("not on a storage yet (only on devices or a transferrer)".into());
-                    break;
-                }
-                if !read_back.contains(&c.object) {
-                    let key = chunk_storage_key(&c.object);
-                    let ok = storages
-                        .iter()
-                        .filter(|(s, _)| holders.iter().any(|h| h == s.name()))
-                        .any(|(_, b)| {
-                            b.get(&key).ok().flatten().is_some_and(|ct| {
-                                ObjectName::from_bytes(&crypto::hash(&ct)) == c.object
-                            })
-                        });
-                    if !ok {
-                        problem = Some("no storage copy could be read back intact".into());
-                        break;
-                    }
-                    read_back.insert(c.object.clone());
-                }
-                if let Some(t) = &table {
-                    let t = t.read().unwrap_or_else(|e| e.into_inner());
-                    facts.push(self.chunk_facts(&mut pctx, &view, &t, &c.object));
-                }
-            }
-            if problem.is_none() {
-                if let Some(p) = &policy {
-                    let r = crate::policy::evaluate(
-                        &rec.name,
-                        p,
-                        &facts,
-                        &pctx.unreadable_places,
-                        &pctx.unknown,
-                        now,
-                    );
-                    if !r.fully_met() {
-                        problem = Some(format!(
-                            "waiting for the policy ({}): {}",
-                            p.describe(),
-                            r.why_not_met()
-                        ));
-                    }
-                }
-            }
-            if let Some(p) = problem {
+            if let Some(p) = self.stored_problem(&rec, f, &mut check) {
                 wait(&mut report, &path, e.size, p);
                 continue;
             }
@@ -2435,6 +2435,131 @@ impl Engine {
         }
         Ok(report)
     }
+
+    /// Let the existing folder `rec` take imports from the local directory
+    /// `dir` as well (a torrent job into a folder that is there already):
+    /// its import book, made when it has none, names the directory as one of
+    /// its sources, so that `import_run` of the directory continues the
+    /// folder. A folder imported from git-annex or a cloud drive is refused.
+    pub(super) fn import_adopt_dir(&mut self, rec: &FolderRecord, dir: &Path) -> Result<()> {
+        if rec.is_backup() {
+            bail!("folder {} is a backup; it takes no imports", rec.name);
+        }
+        let src = import::dir::DirSource::open(dir)?;
+        self.check_source_path(src.root(), true)?;
+        let info = src.info().clone();
+        let _ = self.refresh_books();
+        let mut book = self.load_book(&rec.folder_id).unwrap_or_default();
+        if book.kind.is_empty() {
+            book.kind = import::KIND_DIR.to_string();
+            book.display = info.display.clone();
+        }
+        if book.kind != import::KIND_DIR {
+            bail!(
+                "folder {} was imported from a {} source; give a new folder name, or a folder that holds your own files or local imports",
+                rec.name,
+                book.kind
+            );
+        }
+        if info.identity.iter().all(|i| book.identity.contains(i)) {
+            return Ok(());
+        }
+        book.identity.extend(info.identity.iter().cloned());
+        self.save_book(&rec.folder_id, &book)?;
+        let rec = self.with_key(rec)?;
+        self.publish_book(&rec, &book)
+    }
+
+    /// What [`Engine::stored_problem`] reads once for many files of a folder.
+    pub(super) fn stored_check(&self, rec: &FolderRecord) -> Result<StoredCheck> {
+        Ok(StoredCheck {
+            view: self.view3()?,
+            table: self.folder_table(rec)?,
+            pctx: self.policy_ctx(),
+            policy: rec.effective_policy(),
+            storages: self.open_storages(false)?,
+            read_back: HashSet::new(),
+            now: util::now_utc(),
+        })
+    }
+
+    /// Why a local copy of `f` (a file of folder `rec`) may not be removed
+    /// yet, or `None` when it may: every block has a copy on a storage that
+    /// is not a transferrer, one copy of each block was read back intact,
+    /// and the folder's durability policy holds for its blocks now.
+    pub(super) fn stored_problem(
+        &self,
+        rec: &FolderRecord,
+        f: &FileState,
+        ck: &mut StoredCheck,
+    ) -> Option<String> {
+        let mut facts = Vec::new();
+        for c in &f.chunks {
+            let holders: Vec<String> = match (&ck.table, crate::storages3::object_bin(&c.object)) {
+                (Some(t), Ok(o)) => {
+                    let t = t.read().unwrap_or_else(|e| e.into_inner());
+                    crate::storages3::block_copies(&ck.view, &*t, &o)
+                        .into_iter()
+                        .filter(|n| !ck.pctx.carriers.contains(n))
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+            if holders.is_empty() {
+                return Some("not on a storage yet (only on devices or a transferrer)".into());
+            }
+            if !ck.read_back.contains(&c.object) {
+                let key = chunk_storage_key(&c.object);
+                let ok = ck
+                    .storages
+                    .iter()
+                    .filter(|(s, _)| holders.iter().any(|h| h == s.name()))
+                    .any(|(_, b)| {
+                        b.get(&key).ok().flatten().is_some_and(|ct| {
+                            ObjectName::from_bytes(&crypto::hash(&ct)) == c.object
+                        })
+                    });
+                if !ok {
+                    return Some("no storage copy could be read back intact".into());
+                }
+                ck.read_back.insert(c.object.clone());
+            }
+            if let Some(t) = &ck.table {
+                let t = t.read().unwrap_or_else(|e| e.into_inner());
+                facts.push(self.chunk_facts(&mut ck.pctx, &ck.view, &t, &c.object));
+            }
+        }
+        let p = ck.policy.as_ref()?;
+        let r = crate::policy::evaluate(
+            &rec.name,
+            p,
+            &facts,
+            &ck.pctx.unreadable_places,
+            &ck.pctx.unknown,
+            ck.now,
+        );
+        if r.fully_met() {
+            return None;
+        }
+        Some(format!(
+            "waiting for the policy ({}): {}",
+            p.describe(),
+            r.why_not_met()
+        ))
+    }
+}
+
+/// The ledger view, block map, storages and policy of one folder, read
+/// once for checking many of its files (`Engine::stored_problem`).
+pub(super) struct StoredCheck {
+    view: crate::ledger3::LedgerView,
+    table: Option<Arc<std::sync::RwLock<crate::blockmap::MapTable>>>,
+    pctx: PolicyCtx,
+    policy: Option<crate::policy::Policy>,
+    storages: OpenStorages,
+    /// Blocks read back intact during this check.
+    read_back: HashSet<ObjectName>,
+    now: i64,
 }
 
 fn dest_for(opts: &ImportOptions, name: &str) -> Option<PathBuf> {
