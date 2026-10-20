@@ -1284,7 +1284,11 @@ def s_outage():
         r = v("vl-laptop", "sync", check_rc=False)
         secs = time.time() - t0
         CTX["outage_fail_secs"] = round(secs, 1)
-        check(isinstance(r, dict) and r.get("_failed"), "sync claimed success with the storage down")
+        # Working offline (spec 79.1): the sync either fails at once or finishes the local
+        # part and names the storage it could not reach; it never claims the storage got it.
+        failed = isinstance(r, dict) and r.get("_failed")
+        check(failed or "cloud" in storages_down("vl-laptop"),
+              f"sync claimed success with the storage down and did not name it: {str(r)[:300]}")
         check(secs < 60, f"sync took {secs:.0f} s to give up on a storage that refuses connections")
     finally:
         lab.cmd_services(None)
@@ -1308,7 +1312,9 @@ def s_blackhole():
         r = v("vl-laptop", "sync", check_rc=False)
         secs = time.time() - t0
         CTX["blackhole_fail_secs"] = round(secs, 1)
-        check(isinstance(r, dict) and r.get("_failed"), "sync claimed success with no network")
+        failed = isinstance(r, dict) and r.get("_failed")
+        check(failed or "cloud" in storages_down("vl-laptop"),
+              f"sync claimed success with no network and did not name the storage: {str(r)[:300]}")
         check(secs < 150, f"sync took {secs:.0f} s to give up on an unreachable storage")
     finally:
         lab.ssh("vl-rhome", "sudo nft -f /etc/nftables.conf")
@@ -3044,7 +3050,7 @@ def s_torrent_spool():
     info = run(lap, f"transmission-remote 127.0.0.1:9091 -t {h2} -f", check_rc=False).stdout
     for p in present:
         line = next((x for x in info.splitlines() if x.rstrip().endswith(p)), "")
-        m = re.search(r":\s+(\d+)%", line)
+        m = re.search(r":\s+(\d+)(?:\.\d+)?%", line)  # "0%" or "0.00%"
         # Only pieces shared with a neighbouring file (1 MiB of 100) may be there.
         check(m and int(m.group(1)) <= 2, f"{p} was downloaded: {line!r}")
     files = {f["path"] for f in v(lap, "folder files big")}
@@ -3343,7 +3349,8 @@ def s_offline_pair_join():
     check(run("vl-desktop", "test -e ~/.local/share/varsto/state/pending-join.json", check_rc=False).returncode != 0,
           "pending-join.json is still there after a sync that reached the storage")
     v("vl-laptop", "sync")
-    names = [d.get("name") for d in v("vl-laptop", "status").get("devices", [])]
+    devs = v("vl-laptop", "status").get("devices") or {}
+    names = list(devs.values()) if isinstance(devs, dict) else [d.get("name") for d in devs]
     check("desktop" in names, f"the laptop does not list the desktop: {names}")
     v("vl-desktop", "folder attach docs /home/varsto/data/docs", json_out=False)
     v("vl-desktop", "sync")

@@ -203,10 +203,15 @@ pub(crate) fn accept_numbered<T: RecordBody>(
 /// record it read or wrote and is read together with the storages; `outbox`
 /// holds the records a storage still lacks, until [`flush_outbox`] has put
 /// them on every storage.
+///
+/// `partial`: some storages of the vault are not among the ones written to
+/// (down or resting in this run): a record written now stays in the
+/// outbox for them even when every storage given took it.
 #[derive(Clone, Copy)]
 pub struct Local<'a> {
     pub mirror: &'a dyn Storage,
     pub outbox: &'a dyn Storage,
+    pub partial: bool,
 }
 
 /// A record name that the storage which decides already holds: another
@@ -371,7 +376,9 @@ impl Writer<'_> {
             }
         }
         let mut answered = false;
-        let mut missing = false;
+        // No storage to write to (offline), or one of the vault's storages
+        // left out of the list: the record waits for them in the outbox.
+        let mut missing = self.storages.is_empty() || self.local.is_some_and(|l| l.partial);
         let mut last_err = None;
         for s in self.storages {
             match put_parts(*s, parts) {
@@ -504,6 +511,17 @@ fn send(s: &dyn Storage, parts: &[(String, Vec<u8>)]) -> Result<bool> {
 /// left out for the rest of this flush (its records wait for the next one).
 /// Nothing here fails because a storage is down; an error is a local one.
 pub fn flush_outbox(outbox: &dyn Storage, storages: &[&dyn Storage]) -> Result<Flushed> {
+    flush_outbox_to(outbox, storages, false)
+}
+
+/// [`flush_outbox`]; with `partial` (some storages of the vault are not in
+/// `storages`: down or resting) the records are put where they can be and
+/// all stay in the outbox for the others.
+pub fn flush_outbox_to(
+    outbox: &dyn Storage,
+    storages: &[&dyn Storage],
+    partial: bool,
+) -> Result<Flushed> {
     let records = outbox_records(outbox)?;
     let mut out = Flushed::default();
     if storages.is_empty() {
@@ -518,7 +536,7 @@ pub fn flush_outbox(outbox: &dyn Storage, storages: &[&dyn Storage]) -> Result<F
                 parts.push((n.clone(), b));
             }
         }
-        let mut all = true;
+        let mut all = !partial;
         let mut conflict = false;
         for (i, s) in storages.iter().enumerate() {
             if down[i] {

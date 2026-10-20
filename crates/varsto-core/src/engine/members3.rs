@@ -358,6 +358,20 @@ impl Engine {
 
     /// The hot metadata storages membership records are read from and
     /// written to.
+    /// Whether some storages that carry the membership records are not
+    /// among the `opened` ones (down or resting in this run, `health`):
+    /// what is written now must still reach them later (the outbox).
+    fn member_storages_left_out(&self, opened: usize) -> bool {
+        let drained = self.drained_storages();
+        let all = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| !s.is_cold() && !s.is_data_only() && !drained.contains(s.name()))
+            .count();
+        opened < all
+    }
+
     fn member_storages(&self) -> Result<OpenStorages> {
         // Transferrers carry the records too (F-048).
         self.metadata_storages(false)
@@ -408,7 +422,11 @@ impl Engine {
         f: impl FnOnce(&mut Membership<'_>) -> Result<R>,
     ) -> Result<Option<R>> {
         let open = self.member_storages()?;
-        if open.is_empty() {
+        // Storages down or resting in this run are not opened; with every
+        // one of them away the membership is still read (from this
+        // device's copy, as `reach` allows). `None` only without a storage.
+        let left_out = self.member_storages_left_out(open.len());
+        if open.is_empty() && !left_out {
             return Ok(None);
         }
         let vault = bin(&self.vault.vault_id)?;
@@ -439,6 +457,7 @@ impl Engine {
         let local = crate::membership3::Local {
             mirror: &mirror,
             outbox: &outbox,
+            partial: left_out,
         };
         let lamport = self.clock.lamport;
         let kept = self.vault_kept3();
@@ -485,7 +504,10 @@ impl Engine {
                     // A storage that does not answer reads as empty (the
                     // tee); when none answered, nothing came from the
                     // storages.
-                    Ok(m) => match all_down(&teed) {
+                    Ok(m) => match all_down(&teed).or_else(|| {
+                        teed.is_empty()
+                            .then(|| anyhow!("every storage is down or resting in this run"))
+                    }) {
                         None => m,
                         Some(e) if reach == Reach::StoragesOrLocal => {
                             log::warn!(
@@ -595,7 +617,8 @@ impl Engine {
         let outbox = self.records_outbox()?;
         let open = self.member_storages()?;
         let refs: Vec<&dyn Storage> = open.iter().map(|(_, b)| &**b).collect();
-        let done = crate::membership3::flush_outbox(&outbox, &refs)?;
+        let partial = self.member_storages_left_out(open.len());
+        let done = crate::membership3::flush_outbox_to(&outbox, &refs, partial)?;
         if done.sent > 0 {
             log::info!("{} membership changes uploaded", done.sent);
         }

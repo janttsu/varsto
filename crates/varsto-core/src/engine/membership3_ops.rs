@@ -568,8 +568,11 @@ impl Engine {
     ///
     /// The pairing does not wait on a storage: the folder records and
     /// grants are made from this device's copy of the records and kept
-    /// here, and reach the storages with the next flush (the caller runs
-    /// `flush_records3` once the vault key went out, and every sync does).
+    /// here. They are uploaded at once, before the joining device gets its
+    /// answer, so that it holds the folders as soon as it has joined; a
+    /// storage that cannot be reached gets them with the next flush (the
+    /// caller runs `flush_records3` again once the vault key went out, and
+    /// every sync does).
     pub fn f3_pair_grants(
         &mut self,
         name: &str,
@@ -586,6 +589,14 @@ impl Engine {
                 .collect::<Result<Vec<_>>>()?;
             let dev = m.grant_to_joiner(name, k6_public, k8_public, &ids, role)?;
             Ok(hex::encode(dev))
+        })
+        .inspect(|_| match self.flush_records3() {
+            Ok(f) if f.waiting > 0 => log::info!(
+                "{} membership changes of the pairing wait for a storage",
+                f.waiting
+            ),
+            Ok(_) => {}
+            Err(e) => log::warn!("the pairing's folder grants wait to upload: {e:#}"),
         })
     }
 }

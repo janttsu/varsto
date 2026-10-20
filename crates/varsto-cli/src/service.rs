@@ -3302,7 +3302,10 @@ mod tests {
                 "mailbox",
                 "backup snapshots",
                 "restic",
+                // Imports only add, on this device.
+                "youtube",
                 "moves",
+                "torrents",
                 "disk suggestions"
             ]
         );
@@ -3318,7 +3321,9 @@ mod tests {
             "backups",
             "trash",
             "restic",
+            "youtube",
             "moves",
+            "torrents",
             "disk suggestions",
             "folder requests",
             "device details",

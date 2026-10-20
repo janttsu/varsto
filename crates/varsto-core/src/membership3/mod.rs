@@ -80,7 +80,7 @@ pub use member_view::MemberView;
 pub use members::{MemberDevice, MemberRegistry};
 pub use requests::{fingerprint, PendingRequest, RequestRecord};
 pub use session::{EpochStart, Membership, PendingKey};
-pub use store::{flush_outbox, outbox_waiting, Flushed, Local, Taken};
+pub use store::{flush_outbox, flush_outbox_to, outbox_waiting, Flushed, Local, Taken};
 pub use trust::Trust;
 
 use crate::crypto::SecretKey;

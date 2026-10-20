@@ -1234,6 +1234,7 @@ fn records_are_kept_here_first_and_wait_for_a_storage_that_is_down() {
         Local {
             mirror: &mirror,
             outbox: &outbox,
+            partial: false,
         },
     );
     ma.enrol("laptop").unwrap();
@@ -1298,6 +1299,7 @@ fn without_any_storage_records_wait_and_a_flush_sends_them_once() {
         Local {
             mirror: &mirror,
             outbox: &outbox,
+            partial: false,
         },
     );
     // A request made offline: kept here, nothing fails.
