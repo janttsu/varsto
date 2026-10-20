@@ -63,6 +63,8 @@ fn engine_parts(state: &Shared) -> (Option<Arc<Heavy>>, Option<Arc<Light>>, bool
     let mut stale = false;
     if need_heavy || need_light {
         match state.try_lock() {
+            // A job (a sync) has the engine out: as busy as a held lock.
+            Ok(st) if st.busy.is_some() => stale = c.heavy.is_some(),
             Ok(st) => match st.engine.as_ref() {
                 Some(engine) => {
                     c.unlocked = true;
@@ -187,6 +189,7 @@ mod tests {
             service: ServiceState::default(),
             pair: None,
             link: None,
+            busy: None,
         }));
         let server = Arc::new(server);
         std::thread::spawn(move || crate::desktop::serve_arc(server, state));

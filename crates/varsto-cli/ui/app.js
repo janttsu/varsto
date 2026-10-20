@@ -157,7 +157,8 @@
         var stale = r.headers.get("X-Varsto-Stale") === "1";
         return r.text().then(function (t) {
           var j = null; try { j = t ? JSON.parse(t) : {}; } catch (x) { j = null; }
-          connState(stale ? "busy" : "ok");
+          // 503 with "busy": a sync has the engine and nothing was kept for this address.
+          connState(stale || (r.status === 503 && j && j.busy) ? "busy" : "ok");
           if (!r.ok) { var err = new Error((j && j.error) || ("The Varsto service answered " + r.status + " to " + what)); err.body = j; throw err; }
           if (j === null) { throw new Error("The Varsto service sent an unreadable answer to " + what); }
           // The answer as sent: a list or summary that did not change is
@@ -1435,6 +1436,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       setTimeout(function () { helpAfterStatus(s); }, 0);
       setTimeout(function () { if (window.varstoFolders) { window.varstoFolders.update(s); } }, 0);
       renderLedger(s.ledger_health);
+      renderStoragesDown(s.storages_down || []);
       renderFolderSafety(s);
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + (s.ledger_batches === 1 ? " ledger batch" : " ledger batches");
       var tb = $("folders").querySelector("tbody"); tb.innerHTML = "";
@@ -2819,6 +2821,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     b.classList.toggle("hidden", b.childNodes.length === 0);
   }
   // Places short of disk space: one line each (each translated on its own).
+  // Storages that could not be reached (offline, a dead bucket): skipped
+  // until the time shown; a sync asked for by hand tries them again at once.
+  function renderStoragesDown(list) {
+    var b = $("storagebanner"); if (!b) { return; }
+    b.innerHTML = "";
+    list.forEach(function (d) { b.appendChild(el("div", null, "Storage " + d.storage + " cannot be reached; it is tried again at " + fmtTime(d.next_try_utc) + ".")); });
+    b.classList.toggle("hidden", list.length === 0);
+  }
   function renderSpace(list) {
     var b = $("spacebanner"); if (!b) { return; }
     b.innerHTML = "";
@@ -2873,7 +2883,21 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     confirmBox("Install Varsto " + c.latest + " now? Varsto restarts afterwards.", { title: "Update Varsto", ok: "Install" }).then(function (yes) {
       if (!yes) { return; }
       busy(true); log("installing " + c.latest);
-      return api("POST", "/api/update", {}).then(function (r) { log(r.message); if (r.updated) { log("the service is restarting; this page reconnects in a few seconds"); $("update").classList.add("hidden"); } busy(false); });
+      // The service installs it in the background; the page asks how it goes.
+      return api("POST", "/api/update", {}).then(function (r) {
+        log(r.message);
+        return new Promise(function (done) {
+          function poll() {
+            api("GET", "/api/update/status").then(function (j) {
+              if (j.running) { setTimeout(poll, 2000); return; }
+              if (j.message) { log(j.message); }
+              if (j.updated) { log("the service is restarting; this page reconnects in a few seconds"); $("update").classList.add("hidden"); }
+              done();
+            }).catch(function () { done(); });
+          }
+          setTimeout(poll, 1000);
+        });
+      }).then(function () { busy(false); });
     }).catch(function (e) { log("update failed: " + e.message); busy(false); });
   };
   // Daily check and automatic installation (off: only the button above, when a version is out).
@@ -2890,7 +2914,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function runSync(folder) {
     busy(true); log("sync " + (folder || "all") + " started");
     return api("POST", "/api/sync", folder ? { folder: folder } : {}).then(function (r) {
-      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.pull.renamed_locally || []).length ? "; kept under another name here because the disk ignores case: " + x.pull.renamed_locally.join(", ") : "") + ((x.push.read_only || (x.pull.kept_aside || []).length) ? "; read-only: your changes were not published" + (((x.pull.kept_aside || []).length + (x.push.kept_aside || []).length) ? " (kept aside: " + (x.pull.kept_aside || []).concat(x.push.kept_aside || []).join(", ") + ")" : "") : "") + ((x.pull.writes_refused || []).length ? "; not taken from read-only members: " + x.pull.writes_refused.join(", ") : "")); });
+      r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.pull.renamed_locally || []).length ? "; kept under another name here because the disk ignores case: " + x.pull.renamed_locally.join(", ") : "") + ((x.push.read_only || (x.pull.kept_aside || []).length) ? "; read-only: your changes were not published" + (((x.pull.kept_aside || []).length + (x.push.kept_aside || []).length) ? " (kept aside: " + (x.pull.kept_aside || []).concat(x.push.kept_aside || []).join(", ") + ")" : "") : "") + ((x.pull.writes_refused || []).length ? "; not taken from read-only members: " + x.pull.writes_refused.join(", ") : "") + (x.pull.error ? "; not synced: " + x.pull.error : "") + ((x.pull.storages_down || []).length ? "; unreachable: " + x.pull.storages_down.join(", ") : "")); });
     }).catch(function (e) { log("sync failed: " + e.message); }).then(function () { busy(false); return refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }); });
   }
 

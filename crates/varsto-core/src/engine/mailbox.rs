@@ -626,7 +626,12 @@ impl Engine {
                 st.last = Some(r.clone());
                 st.last_error = None;
             }
-            Err(e) => st.last_error = Some(format!("{e:#}")),
+            Err(e) => {
+                st.last_error = Some(format!("{e:#}"));
+                // Not tried again every 30 s for the same disks: the next
+                // sync or a disk that comes or goes runs it again.
+                st.disks_sig = self.mailbox_disks_sig();
+            }
         }
         st.save(&self.home)?;
         out
@@ -654,7 +659,16 @@ impl Engine {
             report.finished_utc = util::now_utc();
             return Ok(report);
         };
-        self.pull_ledger_once()?;
+        // Best effort: what the docked disks hold and what waits for them is
+        // known locally, and a storage out of reach must not hold up the
+        // local disk work (spec section 78). The run works from the ledger
+        // as last pulled.
+        if let Err(e) = self.pull_ledger_once() {
+            log::info!("mailbox: ledger not pulled, working from the local copy: {e:#}");
+            report.notes.push(format!(
+                "the storages could not be reached ({e:#}); worked from the ledger as last pulled"
+            ));
+        }
         let mut st = MailboxState::load(&self.home);
         st.disks_sig = self.mailbox_disks_sig();
         let ob = Outbox::new(&self.home);

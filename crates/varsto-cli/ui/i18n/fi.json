@@ -1808,6 +1808,10 @@
  },
  "patterns": [
   [
+   "^Storage (.+) cannot be reached; it is tried again at (.+)\\.$",
+   "Tallennustilaan $1 ei saada yhteyttä; sitä yritetään uudelleen klo $2."
+  ],
+  [
    "^This device's six words: (.+)\\. The other device shows the same words before it lets this one join\\.$",
    "Tämän laitteen kuusi sanaa: $1. Toinen laite näyttää samat sanat ennen kuin se päästää tämän liittymään."
   ],

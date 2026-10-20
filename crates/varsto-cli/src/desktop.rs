@@ -158,9 +158,299 @@ pub struct State {
     /// A `varsto://` link the system handed to Varsto (`varsto open-link`),
     /// waiting for the interface to pick it up.
     pub link: Option<String>,
+    /// Set while a job has the engine and the service's state out of this
+    /// lock ([`checkout`]): a sync round, the watch tick, a request that
+    /// works on the engine. Meanwhile `engine` is `None` (even though the
+    /// vault may be unlocked) and `service` is a stand-in.
+    pub busy: Option<Busy>,
 }
 
 pub type Shared = Arc<Mutex<State>>;
+
+/// What the shared state shows while a job has the engine out ([`State::busy`]).
+pub struct Busy {
+    /// What the job does ("sync", "device check", a request's path).
+    pub why: String,
+    pub since: std::time::Instant,
+    /// The vault was unlocked when the job took the engine.
+    pub unlocked: bool,
+    /// The service's summary when the job started: `/api/service` and
+    /// `/api/state` answer with it meanwhile, marked busy.
+    pub summary: Value,
+    /// `/api/lock` came meanwhile: the keys go when the job hands them back.
+    pub lock: bool,
+    /// `/api/service/pause` came meanwhile: applied when the job is done.
+    pub paused: Option<bool>,
+}
+
+/// A request that needs the engine waits at most this long for a job that
+/// has it out (a sync of a big vault on a slow link), then is answered
+/// "busy, try again".
+pub const ENGINE_WAIT: std::time::Duration = std::time::Duration::from_secs(300);
+/// A route that needs no engine waits at most this long for the state lock
+/// itself (held only briefly now: nothing waits on the network under it).
+const FREE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Threads waiting for the engine now; a job that hands it back between
+/// two steps lets them have it first ([`requeue`]).
+static WAITERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The engine and the service's state, taken out of the shared state for
+/// work that may wait on the network. The shared lock is free meanwhile:
+/// pause, lock, quit, the service summary and the cached reads answer at
+/// once. Handed back when dropped (also on an early return or a panic).
+pub struct Work<'a> {
+    state: &'a Shared,
+    held: Option<State>,
+}
+
+impl std::ops::Deref for Work<'_> {
+    type Target = State;
+    fn deref(&self) -> &State {
+        self.held
+            .as_ref()
+            .expect("work state present until dropped")
+    }
+}
+
+impl std::ops::DerefMut for Work<'_> {
+    fn deref_mut(&mut self) -> &mut State {
+        self.held
+            .as_mut()
+            .expect("work state present until dropped")
+    }
+}
+
+impl Drop for Work<'_> {
+    fn drop(&mut self) {
+        if let Some(w) = self.held.take() {
+            checkin(self.state, w);
+        }
+    }
+}
+
+/// Take the engine and the service's state out of `st` (which must not be
+/// busy) into a work state of their own.
+fn take_out(st: &mut State, why: &str) -> State {
+    let summary = st.service.summary();
+    let work = State {
+        home: st.home.clone(),
+        engine: st.engine.take(),
+        token: st.token.clone(),
+        bound: st.bound.clone(),
+        traffic: st.traffic.clone(),
+        service: std::mem::take(&mut st.service),
+        pair: None,
+        link: None,
+        busy: None,
+    };
+    st.busy = Some(Busy {
+        why: why.to_string(),
+        since: std::time::Instant::now(),
+        unlocked: work.engine.is_some(),
+        summary,
+        lock: false,
+        paused: None,
+    });
+    work
+}
+
+/// Put a work state back: the engine as the job left it (gone after a
+/// wipe, or when `/api/lock` came meanwhile), the service's state with what
+/// was asked for meanwhile merged in.
+fn checkin(state: &Shared, mut work: State) {
+    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+    let busy = st.busy.take();
+    let stand_in = std::mem::replace(&mut st.service, std::mem::take(&mut work.service));
+    // Set meanwhile by threads that write the service's state without the
+    // engine (the automatic update, a peer that published something).
+    st.service.restart_requested |= stand_in.restart_requested;
+    st.service.sync_requested |= stand_in.sync_requested;
+    st.service.folders_changed |= stand_in.folders_changed;
+    // Peer-to-peer started, or a probe of the peers ended, meanwhile.
+    if stand_in.p2p_listen.is_some() {
+        st.service.p2p_listen = stand_in.p2p_listen;
+        st.service.p2p_cert_sha256 = stand_in.p2p_cert_sha256;
+    }
+    if !stand_in.p2p_paths.is_empty() {
+        st.service.p2p_paths = stand_in.p2p_paths;
+    }
+    let mut engine = work.engine.take();
+    if let Some(b) = busy {
+        if let Some(p) = b.paused {
+            st.service.paused = p;
+        }
+        if b.lock {
+            engine = None;
+            st.pair = None;
+            log::info!("vault locked (asked for while {} ran)", b.why);
+        }
+    }
+    if st.engine.is_none() {
+        st.engine = engine;
+    } else {
+        // Nothing sets one while a job has the engine out (those routes wait
+        // for it); should it happen, the newer one stays.
+        log::warn!("an engine was opened while a job had one out; keeping the newer one");
+    }
+    if work.pair.is_some() {
+        st.pair = work.pair.take();
+    }
+    if work.link.is_some() {
+        st.link = work.link.take();
+    }
+}
+
+/// The engine, unless a job has it out: never waits for the lock either.
+fn try_checkout<'a>(state: &'a Shared, why: &str) -> Option<Work<'a>> {
+    let mut st = match state.try_lock() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return None,
+    };
+    if st.busy.is_some() {
+        return None;
+    }
+    let held = take_out(&mut st, why);
+    drop(st);
+    Some(Work {
+        state,
+        held: Some(held),
+    })
+}
+
+/// What has the engine out now, if anything.
+pub fn busy_with(state: &Shared) -> Option<String> {
+    state
+        .try_lock()
+        .ok()
+        .and_then(|st| st.busy.as_ref().map(|b| b.why.clone()))
+}
+
+/// Poll `take` until it gives something or `wait` (forever: `None`) is up.
+fn wait_for<T>(
+    wait: Option<std::time::Duration>,
+    mut take: impl FnMut() -> Option<T>,
+) -> Option<T> {
+    use std::sync::atomic::Ordering;
+    if let Some(t) = take() {
+        return Some(t);
+    }
+    let until = wait.and_then(|w| std::time::Instant::now().checked_add(w));
+    WAITERS.fetch_add(1, Ordering::SeqCst);
+    let got = loop {
+        if let Some(t) = take() {
+            break Some(t);
+        }
+        if until.is_some_and(|u| std::time::Instant::now() >= u) {
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    WAITERS.fetch_sub(1, Ordering::SeqCst);
+    got
+}
+
+/// The engine for a job, waiting while another job has it out, at most
+/// `wait`; the error names what has it.
+pub fn checkout_within<'a>(
+    state: &'a Shared,
+    why: &str,
+    wait: std::time::Duration,
+) -> std::result::Result<Work<'a>, String> {
+    wait_for(Some(wait), || try_checkout(state, why))
+        .ok_or_else(|| busy_with(state).unwrap_or_else(|| "another task".into()))
+}
+
+/// The engine for a job of the service itself: waits as long as it takes.
+pub fn checkout<'a>(state: &'a Shared, why: &str) -> Work<'a> {
+    wait_for(None, || try_checkout(state, why)).expect("waits until it has the engine")
+}
+
+/// Hand the engine back for a moment and take it again: a request waiting
+/// for it gets it first. Between the steps of a long job.
+pub fn requeue<'a>(work: Work<'a>, why: &str) -> Work<'a> {
+    let state = work.state;
+    drop(work);
+    let pause = if WAITERS.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+        20
+    } else {
+        2
+    };
+    std::thread::sleep(std::time::Duration::from_millis(pause));
+    checkout(state, why)
+}
+
+/// The shared state with the engine in it (no job has it out), waiting at
+/// most `wait`. For short work on the engine that must see it in place.
+pub fn lock_idle_within(
+    state: &Shared,
+    wait: std::time::Duration,
+) -> std::result::Result<std::sync::MutexGuard<'_, State>, String> {
+    wait_for(Some(wait), || {
+        let st = state.lock().unwrap_or_else(|e| e.into_inner());
+        st.busy.is_none().then_some(st)
+    })
+    .ok_or_else(|| busy_with(state).unwrap_or_else(|| "another task".into()))
+}
+
+/// [`lock_idle_within`] without a limit (the service's own loop).
+pub fn lock_idle(state: &Shared) -> std::sync::MutexGuard<'_, State> {
+    wait_for(None, || {
+        let st = state.lock().unwrap_or_else(|e| e.into_inner());
+        st.busy.is_none().then_some(st)
+    })
+    .expect("waits until the engine is back")
+}
+
+/// The shared state for a route that needs no engine: waits at most
+/// [`FREE_WAIT`] for the lock itself, never for a job.
+fn lock_within(
+    state: &Shared,
+    wait: std::time::Duration,
+) -> Option<std::sync::MutexGuard<'_, State>> {
+    wait_for(Some(wait), || match state.try_lock() {
+        Ok(g) => Some(g),
+        Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    })
+}
+
+/// The service's summary: the live one, or while a job has the service's
+/// state out, the one from when it started, marked busy.
+pub fn service_summary(st: &State) -> Value {
+    match &st.busy {
+        None => st.service.summary(),
+        Some(b) => {
+            let mut v = b.summary.clone();
+            v["busy"] = json!(b.why);
+            v["busy_secs"] = json!(b.since.elapsed().as_secs());
+            if let Some(p) = b.paused {
+                v["paused"] = json!(p);
+            }
+            v
+        }
+    }
+}
+
+/// The vault is open: the engine is here, or a job has it out (and no lock
+/// came meanwhile).
+fn unlocked_now(st: &State) -> bool {
+    st.engine.is_some() || st.busy.as_ref().is_some_and(|b| b.unlocked && !b.lock)
+}
+
+/// What has the engine out now, read under the lock.
+fn busy_now(st: &State) -> Option<String> {
+    st.busy.as_ref().map(|b| b.why.clone())
+}
+
+/// "Busy, try again" for a request that needed the engine.
+fn busy_answer(why: &str) -> Value {
+    json!({
+        "error": format!("Varsto is busy ({why}); try again in a moment"),
+        "busy": why,
+    })
+}
 
 /// Bind the server. Returns the server and the bound `host:port`.
 pub fn bind(port: u16) -> Result<(Server, String)> {
@@ -175,51 +465,34 @@ pub fn bind(port: u16) -> Result<(Server, String)> {
 
 /// Serve requests until the server is unblocked. Blocks.
 ///
-/// This thread answers what needs no state itself: the page and its assets
-/// and the traffic counters. Everything else goes, in arrival order, to one
-/// worker thread, as before. A sync or a fetch holds the state for minutes,
-/// and every request behind it waits; the traffic view, most interesting
-/// exactly then, must not wait with them. The host name, token and counters
-/// it needs never change after start, so they are copied here once.
+/// This thread answers what needs no state itself: the page and its assets,
+/// the traffic counters and the liveness probe. Reads go to threads of their
+/// own (`read_elsewhere`), and so do the routes that need no engine (pause,
+/// lock, quit, settings, the update check: `engine_free`). Everything else
+/// goes, in arrival order, to one worker thread, which works on the engine
+/// taken out of the state ([`checkout`]). No network I/O runs under the
+/// state lock: a sync on a slow or dead link holds the engine, not the lock
+/// (spec section 78). The host name, token and counters it needs never
+/// change after start, so they are copied here once.
 pub fn serve_arc(server: Arc<Server>, state: Shared) {
     let fixed = {
         let st = state.lock().unwrap_or_else(|e| e.into_inner());
         Fixed {
             bound: st.bound.clone(),
             token: st.token.clone(),
+            home: st.home.clone(),
             traffic: st.traffic.clone(),
             state: state.clone(),
             reads: Arc::default(),
         }
     };
-    let reads = fixed.reads.clone();
     let (tx, rx) = std::sync::mpsc::channel::<Request>();
+    let worker_fixed = fixed.clone();
     let worker = std::thread::Builder::new()
         .name("http-api".into())
         .spawn(move || {
             for request in rx {
-                let (method, url) = (request.method().to_string(), loggable_url(request.url()));
-                let t = varsto_core::logging::Timer::start();
-                STATUS.with(|s| s.set(0));
-                // A panic in a handler answers 500 (the dropped request does)
-                // and leaves the worker alive for the next request.
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    handle(&state, request)
-                }))
-                .unwrap_or_else(|_| {
-                    log::error!(method = method, path = url; "api handler panicked");
-                    Err(anyhow::anyhow!("handler panicked"))
-                });
-                let path = url.split('?').next().unwrap_or("");
-                if method != "GET" && crate::readcache::drops_answers(path) {
-                    // Reads computed while it ran may predate the change.
-                    reads.lock().unwrap_or_else(|e| e.into_inner()).invalidate();
-                }
-                let status = STATUS.with(|s| s.get());
-                match result {
-                    Ok(()) => log::debug!(method = method, path = url, status = status, ms = t.ms(); "api request"),
-                    Err(e) => log::warn!(method = method, path = url, ms = t.ms(); "api request failed: {e:#}"),
-                }
+                handle_logged(&worker_fixed, request);
             }
         });
     if worker.is_err() {
@@ -247,6 +520,12 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
                         .unwrap_or_else(|e| e.into_inner())
                         .invalidate();
                 }
+                // Pause, lock, quit and the other routes that need no
+                // engine: a thread of their own, so that they neither wait
+                // behind a request the worker is busy with nor for a job.
+                let Some(request) = elsewhere_if_engine_free(&fixed, request) else {
+                    continue;
+                };
                 if tx.send(request).is_err() {
                     break;
                 }
@@ -254,6 +533,107 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
             Err(e) => log::warn!("request failed: {e:#}"),
         }
     }
+}
+
+/// Answer one request with [`handle`] and log it; a panic answers 500 (the
+/// dropped request does) and leaves the thread alive.
+fn handle_logged(fixed: &Fixed, request: Request) {
+    let (method, url) = (request.method().to_string(), loggable_url(request.url()));
+    let t = varsto_core::logging::Timer::start();
+    STATUS.with(|s| s.set(0));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle(fixed, request)))
+        .unwrap_or_else(|_| {
+            log::error!(method = method, path = url; "api handler panicked");
+            Err(anyhow::anyhow!("handler panicked"))
+        });
+    let path = url.split('?').next().unwrap_or("");
+    if method != "GET" && crate::readcache::drops_answers(path) {
+        // Reads computed while it ran may predate the change.
+        fixed
+            .reads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .invalidate();
+    }
+    let status = STATUS.with(|s| s.get());
+    match result {
+        Ok(()) => {
+            log::debug!(method = method, path = url, status = status, ms = t.ms(); "api request")
+        }
+        Err(e) => log::warn!(method = method, path = url, ms = t.ms(); "api request failed: {e:#}"),
+    }
+}
+
+/// The routes that need no engine (and no long hold of the state): each
+/// answered on a thread of its own, at once, also while a sync runs.
+pub(crate) fn engine_free(method: &Method, path: &str) -> bool {
+    match method {
+        Method::Get => matches!(
+            path,
+            "/api/ui-language"
+                | "/api/update/check"
+                | "/api/update/status"
+                | "/api/pair/join-status"
+                | "/api/providers"
+                | "/api/logs"
+        ),
+        Method::Post => matches!(
+            path,
+            "/api/quit"
+                | "/api/service/pause"
+                | "/api/service/restart"
+                | "/api/lock"
+                | "/api/ui-language"
+                | "/api/update"
+                | "/api/update/settings"
+                | "/api/pair/join"
+                | "/api/logs/level"
+        ),
+        _ => false,
+    }
+}
+
+/// Threads answering the routes of [`engine_free`] now, at most this many.
+const MAX_FREE: usize = 16;
+static FREE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A request of an engine-free route goes to a thread of its own; anything
+/// else is handed back for the worker.
+fn elsewhere_if_engine_free(fixed: &Fixed, request: Request) -> Option<Request> {
+    use std::sync::atomic::Ordering;
+    let path = request.url().split('?').next().unwrap_or("").to_string();
+    if !engine_free(request.method(), &path) {
+        return Some(request);
+    }
+    if FREE.fetch_add(1, Ordering::SeqCst) >= MAX_FREE {
+        FREE.fetch_sub(1, Ordering::SeqCst);
+        return Some(request);
+    }
+    let fixed2 = fixed.clone();
+    let slot = std::sync::Arc::new(Mutex::new(Some(request)));
+    let slot2 = slot.clone();
+    let spawned = std::thread::Builder::new()
+        .name("http-free".into())
+        .spawn(move || {
+            struct Done;
+            impl Drop for Done {
+                fn drop(&mut self) {
+                    FREE.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _done = Done;
+            let taken = slot2.lock().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some(request) = taken {
+                handle_logged(&fixed2, request);
+            }
+        });
+    if spawned.is_err() {
+        FREE.fetch_sub(1, Ordering::SeqCst);
+        log::warn!("cannot start a thread for {path}");
+        // The request was not taken: the worker answers it.
+        return slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+    }
+    None
 }
 
 /// Reads answered on threads of their own, at most this many at a time.
@@ -307,8 +687,16 @@ fn read_elsewhere(fixed: &Fixed, request: Request) -> Option<Request> {
     None
 }
 
-/// Answer a read: fresh when the state is free within
-/// `readcache::FRESH_WAIT`, else the last answer of the same address.
+/// Reads answered from the state itself, without the engine: also while a
+/// job has the engine out (with the summary from when it started).
+fn read_without_engine(path: &str) -> bool {
+    matches!(path, "/api/state" | "/api/service" | "/api/update/settings")
+}
+
+/// Answer a read: fresh when the state (or for most reads, the engine) is
+/// free within `readcache::FRESH_WAIT`, else the last answer of the same
+/// address; with no answer kept, "busy" once `readcache::BUSY_WAIT` is up
+/// instead of waiting for a sync to finish.
 fn serve_read(
     state: &Shared,
     reads: &Mutex<crate::readcache::ReadCache>,
@@ -319,11 +707,36 @@ fn serve_read(
     let (path, query) = url.split_once('?').unwrap_or((url.as_str(), ""));
     // The address without the token parameters (none are accepted anyway).
     let key = loggable_url(&url);
-    match readcache::lock_or_cached(state, reads, &key, readcache::FRESH_WAIT) {
-        Got::Fresh(mut st) => {
+    // Either the state lock (a read of the state itself) or the engine,
+    // taken out of the state so that the lock stays free meanwhile.
+    enum Hold<'a> {
+        Lock(std::sync::MutexGuard<'a, State>),
+        Work(Work<'a>),
+    }
+    let take = || {
+        if read_without_engine(path) {
+            match state.try_lock() {
+                Ok(g) => Some(Hold::Lock(g)),
+                Err(std::sync::TryLockError::Poisoned(p)) => Some(Hold::Lock(p.into_inner())),
+                Err(std::sync::TryLockError::WouldBlock) => None,
+            }
+        } else {
+            try_checkout(state, path).map(Hold::Work)
+        }
+    };
+    match readcache::take_or_cached(
+        take,
+        reads,
+        &key,
+        readcache::FRESH_WAIT,
+        readcache::BUSY_WAIT,
+    ) {
+        Got::Fresh(hold) => {
             let generation = reads.lock().unwrap_or_else(|e| e.into_inner()).generation();
-            let result = api(&mut st, Method::Get, path, query, &json!({}));
-            drop(st);
+            let result = match hold {
+                Hold::Lock(mut st) => api(&mut st, Method::Get, path, query, &json!({})),
+                Hold::Work(mut work) => api(&mut work, Method::Get, path, query, &json!({})),
+            };
             match result {
                 Ok(v) => {
                     let body = Arc::new(v.to_string());
@@ -348,6 +761,13 @@ fn serve_read(
                     .with_header(header("X-Varsto-Age-Ms", &age.as_millis().to_string())),
             )?;
             Ok("cached")
+        }
+        Got::Busy => {
+            // Nothing kept for this address and a job has the engine: the
+            // page tries again on its next poll instead of hanging.
+            let why = busy_with(state).unwrap_or_else(|| "another task".into());
+            request.respond(json_response(503, &busy_answer(&why)))?;
+            Ok("busy")
         }
     }
 }
@@ -379,10 +799,14 @@ fn loggable_url(url: &str) -> String {
     }
 }
 
-/// What the dispatching thread needs, copied from the state at start.
+/// What the dispatching thread needs, copied from the state at start (the
+/// address, the token and the device directory never change while the
+/// service runs, so checking a request never takes the state lock).
+#[derive(Clone)]
 struct Fixed {
     bound: String,
     token: String,
+    home: PathBuf,
     traffic: Arc<varsto_core::p2p::Traffic>,
     state: Shared,
     /// The last answers of the reads (`readcache`), emptied by every change.
@@ -557,6 +981,27 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
                 }
             }
         }
+        "/api/alive" => {
+            // The liveness probe of the command line, the tray and the MCP
+            // server (`service::status`): answered here, never behind the
+            // state, so "busy" is not mistaken for "not running".
+            if !header_token_ok(&request, &fixed.token) {
+                request.respond(json_response(
+                    401,
+                    &json!({"error": "missing or wrong token; reopen the start URL"}),
+                ))?;
+            } else {
+                request.respond(json_response(
+                    200,
+                    &json!({
+                        "ok": true,
+                        "pid": std::process::id(),
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "busy": busy_with(&fixed.state),
+                    }),
+                ))?;
+            }
+        }
         "/api/p2p/traffic" | "/api/progress" | "/api/activity" => {
             let token_ok = header_token_ok(&request, &fixed.token);
             if !token_ok {
@@ -690,16 +1135,18 @@ fn json_text(status: u16, body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         .with_header(header("Cache-Control", "no-store"))
 }
 
-fn handle(state: &Shared, mut request: Request) -> Result<()> {
+fn handle(fixed: &Fixed, mut request: Request) -> Result<()> {
+    let state = &fixed.state;
+    // The address and the token never change: checked without the state
+    // lock, so that a route that needs no engine never waits for it.
     let host_ok = {
-        let st = state.lock().unwrap_or_else(|e| e.into_inner());
-        let port = st.bound.rsplit(':').next().unwrap_or("").to_string();
+        let port = fixed.bound.rsplit(':').next().unwrap_or("").to_string();
         request
             .headers()
             .iter()
             .find(|h| h.field.equiv("Host"))
             .map(|h| {
-                h.value.as_str() == st.bound || h.value.as_str() == format!("localhost:{port}")
+                h.value.as_str() == fixed.bound || h.value.as_str() == format!("localhost:{port}")
             })
             .unwrap_or(false)
     };
@@ -728,8 +1175,7 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         return Ok(request.respond(Response::from_string("not found").with_status_code(404))?);
     }
     let token_ok = {
-        let st = state.lock().unwrap_or_else(|e| e.into_inner());
-        let in_header = header_token_ok(&request, &st.token);
+        let in_header = header_token_ok(&request, &fixed.token);
         // Downloads and the viewer are plain links (<a>, <video>) that cannot
         // send a header: they carry a ticket for exactly that file, never the
         // session token.
@@ -758,8 +1204,7 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
                 &json!({"error": "missing or wrong token; reopen the start URL"}),
             ))?);
         };
-        let home = state.lock().unwrap_or_else(|e| e.into_inner()).home.clone();
-        let key = match crate::mcp_keys::check(&home, &key) {
+        let key = match crate::mcp_keys::check(&fixed.home, &key) {
             Ok(k) => k,
             Err(r) => {
                 return Ok(request.respond(json_response(
@@ -778,21 +1223,85 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
                 .take(4 << 20)
                 .read_to_string(&mut body)?;
         }
-        let input: Value = serde_json::from_str(&body).unwrap_or(json!({}));
+        let mut input: Value = serde_json::from_str(&body).unwrap_or(json!({}));
         let method = request.method().clone();
-        let (status, v) = mcp_api(state, &key, method, &path, &query, &input);
+        if method == Method::Post && path == "/api/sync" && input.is_object() {
+            // An assistant's sync is queued for the service's own round:
+            // a sync on a slow link outlasts any tool call.
+            input["background"] = json!(true);
+        }
+        if method == Method::Get && path == "/api/mcp/scope" {
+            // The key's own scope (the MCP server asks it at start): no
+            // engine needed, so no wait behind a sync.
+            return Ok(request.respond(json_response(
+                200,
+                &json!({"id": key.id, "name": key.name, "scope": key.scope}),
+            ))?);
+        }
+        if method == Method::Get && crate::readcache::cacheable(&path) {
+            // A read of an assistant: like the page's, the last answer (for
+            // this key) while a job has the engine, "busy" after a while.
+            use crate::readcache::{self, Got};
+            let cache_key = format!("mcp/{}{}", key.id, loggable_url(&url));
+            let got = readcache::take_or_cached(
+                || try_checkout(state, "mcp"),
+                &fixed.reads,
+                &cache_key,
+                readcache::FRESH_WAIT,
+                MCP_WAIT,
+            );
+            return match got {
+                Got::Fresh(mut work) => {
+                    let generation = fixed
+                        .reads
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .generation();
+                    let (status, v) = mcp_api(&mut work, &key, method, &path, &query, &input);
+                    drop(work);
+                    let body = Arc::new(v.to_string());
+                    if status == 200 {
+                        fixed.reads.lock().unwrap_or_else(|e| e.into_inner()).store(
+                            &cache_key,
+                            generation,
+                            body.clone(),
+                            std::time::Instant::now(),
+                        );
+                    }
+                    Ok(request.respond(json_text(status, body.as_str()))?)
+                }
+                Got::Cached(age, body) => Ok(request.respond(
+                    json_text(200, &readcache::mark_stale(&body, age))
+                        .with_header(header("X-Varsto-Stale", "1")),
+                )?),
+                Got::Busy => {
+                    let why = busy_with(state).unwrap_or_else(|| "another task".into());
+                    Ok(request.respond(json_response(503, &busy_answer(&why)))?)
+                }
+            };
+        }
+        let (status, v) = match checkout_within(state, "mcp", MCP_WAIT) {
+            Ok(mut work) => mcp_api(&mut work, &key, method, &path, &query, &input),
+            Err(why) => (503, busy_answer(&why)),
+        };
         return Ok(request.respond(json_response(status, &v))?);
     }
     if path == "/api/open" {
         // Download a file through the browser; a plain link, so it carries a
-        // ticket instead of the token. Counts as an access.
+        // ticket instead of the token. Counts as an access. The engine is
+        // taken out of the state meanwhile (it may fetch from a storage).
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
-        let result = {
-            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-            match (&mut st.engine, folder, file) {
+        let result = match checkout_within(state, "download", ENGINE_WAIT) {
+            Err(why) => {
+                return Ok(request.respond(api_plain(
+                    503,
+                    &format!("Varsto is busy ({why}); try again in a moment"),
+                ))?)
+            }
+            Ok(mut work) => match (&mut work.engine, folder, file) {
                 (Some(e), Some(f), Some(p)) => Some(e.read_file(&f, &p).map(|b| (b, p))),
                 _ => None,
-            }
+            },
         };
         return match result {
             Some(Ok((bytes, p))) => {
@@ -821,12 +1330,14 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
     }
     if path == "/api/thumb" {
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
-        let bytes = {
-            let st = state.lock().unwrap_or_else(|e| e.into_inner());
-            match (&st.engine, folder, file) {
+        // A missing thumbnail may be fetched from a storage: off the lock.
+        // A page full of pictures does not wait for a sync: no picture yet.
+        let bytes = match checkout_within(state, "thumbnail", std::time::Duration::from_secs(2)) {
+            Ok(work) => match (&work.engine, folder, file) {
                 (Some(e), Some(f), Some(p)) => e.thumbnail(&f, &p).unwrap_or(None),
                 _ => None,
-            }
+            },
+            Err(_) => None,
         };
         match bytes {
             Some(b) => request.respond(
@@ -874,11 +1385,12 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
             .ok()
             .and_then(|v| v.get("save").and_then(Value::as_bool))
             .unwrap_or(false);
-        let (home, state_json) = {
-            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-            let v = api(&mut st, Method::Get, "/api/state", "", &json!({})).ok();
-            (st.home.clone(), v.map(|v| v.to_string()))
-        };
+        let home = fixed.home.clone();
+        let state_json = lock_within(state, FREE_WAIT).and_then(|mut st| {
+            api(&mut st, Method::Get, "/api/state", "", &json!({}))
+                .ok()
+                .map(|v| v.to_string())
+        });
         let extras = bundle_extras(&home, state_json);
         let name = format!("varsto-logs-{}.tar.zst", log_stamp());
         if save {
@@ -966,9 +1478,9 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
         return Ok(());
     }
     let post = method == Method::Post;
-    let result = {
-        let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-        api(&mut st, method, &path, &query, &input)
+    let result = match run_api(fixed, method, &path, &query, &input) {
+        Ok(r) => r,
+        Err(why) => return Ok(request.respond(json_response(503, &busy_answer(&why)))?),
     };
     // Something was changed through the API: open pages load it again.
     if post && result.is_ok() && path != "/api/sync" {
@@ -980,10 +1492,113 @@ fn handle(state: &Shared, mut request: Request) -> Result<()> {
     }
 }
 
+/// The routes [`api`] answers itself, with the shared state: they set up or
+/// drop the engine, the pairing offer or a link, or need none. Every other
+/// route works on the engine (`api_unlocked`) and runs with the engine taken
+/// out of the state ([`checkout`]), so the lock stays free meanwhile. Keep
+/// this list in step with the arms of `api` before its last one.
+const STATE_ROUTES: &[&str] = &[
+    "/api/state",
+    "/api/reset",
+    "/api/service",
+    "/api/help",
+    "/api/logs",
+    "/api/logs/level",
+    "/api/logs/open",
+    "/api/update/check",
+    "/api/update/status",
+    "/api/update",
+    "/api/update/settings",
+    "/api/thumbnails/wanted",
+    "/api/thumbnail",
+    "/api/ui-language",
+    "/api/providers",
+    "/api/service/restart",
+    "/api/service/pause",
+    "/api/unlock",
+    "/api/lock",
+    "/api/pair/start",
+    "/api/pair/status",
+    "/api/qr",
+    "/api/link/parse",
+    "/api/link",
+    "/api/pair/stop",
+    "/api/init",
+    "/api/share/request",
+    "/api/org/request",
+    "/api/org/join",
+    "/api/share/accept",
+    "/api/join",
+];
+
+/// Answer a route of [`api`]: an engine-free one at once, one of
+/// [`STATE_ROUTES`] under the lock once no job has the engine out, any other
+/// on the engine taken out of the state. `Err` names the job that kept the
+/// engine for longer than [`ENGINE_WAIT`] (or the lock for [`FREE_WAIT`]).
+fn run_api(
+    fixed: &Fixed,
+    method: Method,
+    path: &str,
+    query: &str,
+    input: &Value,
+) -> std::result::Result<Result<Value>, String> {
+    let state = &fixed.state;
+    if engine_free(&method, path) {
+        match (&method, path) {
+            (Method::Get, "/api/update/check") => {
+                // Its own thread, without the state: offline it takes the
+                // connect timeout, and the answer is kept a while.
+                return Ok(crate::update::check_cached().and_then(|c| Ok(serde_json::to_value(c)?)));
+            }
+            (Method::Get, "/api/update/status") => {
+                return Ok(Ok(
+                    serde_json::to_value(crate::update::job_status()).unwrap_or(Value::Null)
+                ));
+            }
+            (Method::Post, "/api/update") => {
+                let restart_state = state.clone();
+                return Ok(crate::update::start_job(fixed.home.clone(), move || {
+                    // A job may have the service's state out: the flag is
+                    // merged when it hands it back.
+                    restart_state
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .service
+                        .restart_requested = true;
+                })
+                .map(|job| {
+                    json!({
+                        "ok": true,
+                        "started": true,
+                        "updated": false,
+                        "message": "installing the update in the background; Varsto restarts when it is done",
+                        "job": job,
+                    })
+                }));
+            }
+            _ => {}
+        }
+        let mut st = lock_within(state, FREE_WAIT).ok_or_else(|| "the service".to_string())?;
+        return Ok(api(&mut st, method, path, query, input));
+    }
+    if STATE_ROUTES.contains(&path) {
+        let mut st = lock_idle_within(state, ENGINE_WAIT)?;
+        return Ok(api(&mut st, method, path, query, input));
+    }
+    let why = path.trim_start_matches("/api/");
+    let mut work = checkout_within(state, why, ENGINE_WAIT)?;
+    Ok(api(&mut work, method, path, query, input))
+}
+
+/// The longest an assistant's request waits for the engine: below the MCP
+/// server's 30 s read timeout, so that it hears "busy" instead.
+const MCP_WAIT: std::time::Duration = std::time::Duration::from_secs(25);
+
 /// A request made with an MCP key: checked against the key's scope, then
 /// answered like any other, with folder lists cut to the key's folders.
+/// `st` is a work state with the engine (taken out of the shared state).
 fn mcp_api(
-    state: &Shared,
+    st: &mut State,
     key: &crate::mcp_keys::McpKey,
     method: Method,
     path: &str,
@@ -1006,7 +1621,6 @@ fn mcp_api(
             json!({"error": format!("an MCP key may not use {m} {path}")}),
         );
     };
-    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     // Folder names and Strongroom flags, by name and by id.
     let known: Vec<(String, String, bool)> = match st.engine.as_ref() {
         Some(e) => e
@@ -1044,7 +1658,7 @@ fn mcp_api(
             .find(|(n, _, _)| n == name)
             .is_some_and(|(n, _, s)| allows(&key.scope, n, *s, Need::Read))
     };
-    match api(&mut st, method, path, query, input) {
+    match api(st, method, path, query, input) {
         Ok(v) if path == "/api/status" => {
             // Only the folders the key may read: no devices, no storages, no
             // paths, no vault identity.
@@ -1094,13 +1708,25 @@ impl<R: Read> Read for Capped<R> {
     }
 }
 
+/// Where `/api/upload` keeps the body of a file for a plain folder while it
+/// arrives (under the device directory; removed once the file is in place).
+const UPLOAD_SPOOL: &str = "upload-spool";
+
 /// `/api/upload`: stream the request body into `folder/path` and push.
+///
+/// The body arrives with neither the state lock nor the engine held (a
+/// phone on a slow link takes minutes): into the block cache for a folder
+/// kept encrypted here, into a spool file under the device directory for a
+/// plain one. Only then is the engine taken, off the state lock, to put the
+/// file in place, and a sync is asked for, which carries it to the other
+/// devices if the push could not.
 fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -> Result<Value> {
-    let writer = {
-        let st = state.lock().unwrap_or_else(|e| e.into_inner());
+    let busy = |why: String| anyhow!("Varsto is busy ({why}); try again in a moment");
+    let (writer, home) = {
+        let st = lock_idle_within(state, ENGINE_WAIT).map_err(busy)?;
         match &st.engine {
             None => bail!("vault is locked"),
-            Some(e) => e.block_writer(&folder)?,
+            Some(e) => (e.block_writer(&folder)?, st.home.clone()),
         }
     };
     // Known for a file picked in the page or sent by the phone app: the
@@ -1114,20 +1740,36 @@ fn upload(state: &Shared, request: &mut Request, folder: String, path: String) -
     let push = match writer {
         Some(w) => {
             let staged = w.write_sized(&mut body, length)?;
-            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+            let mut work = checkout_within(state, "upload", ENGINE_WAIT).map_err(busy)?;
+            let st = &mut *work;
             let e = st
                 .engine
                 .as_mut()
                 .ok_or_else(|| anyhow!("vault is locked"))?;
-            e.commit_staged(&folder, &path, staged)?
+            let push = e.commit_staged(&folder, &path, staged)?;
+            st.service.request_sync();
+            push
         }
         None => {
-            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = home.join(UPLOAD_SPOOL);
+            std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+            let mut spool = tempfile::Builder::new()
+                .prefix(".upload-")
+                .tempfile_in(&dir)
+                .context("create the upload spool file")?;
+            std::io::copy(&mut body, spool.as_file_mut())?;
+            spool.as_file().sync_all()?;
+            let size = body.read;
+            let from = std::fs::File::open(spool.path())?;
+            let mut work = checkout_within(state, "upload", ENGINE_WAIT).map_err(busy)?;
+            let st = &mut *work;
             let e = st
                 .engine
                 .as_mut()
                 .ok_or_else(|| anyhow!("vault is locked"))?;
-            e.write_from_reader(&folder, &path, &mut body)?
+            let push = e.write_from_reader_sized(&folder, &path, from, Some(size))?;
+            st.service.request_sync();
+            push
         }
     };
     Ok(json!({"ok": true, "folder": folder, "path": path, "bytes": body.read, "push": push}))
@@ -1228,7 +1870,10 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
             return Err(e);
         }
     };
-    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+    // With no job holding the engine: a job handing it back would put its
+    // own (none) over the new one.
+    let mut st = lock_idle_within(state, ENGINE_WAIT)
+        .map_err(|why| anyhow!("Varsto is busy ({why}); try again in a moment"))?;
     let (e, notes) = Engine::join_paired(&st.home, &name, &passphrase, &bundle, keys)?;
     st.engine = Some(e);
     st.service.request_sync();
@@ -1635,7 +2280,9 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         (Method::Get, "/api/state") => Ok(json!({
             "home": st.home.display().to_string(),
             "has_vault": has_vault,
-            "unlocked": st.engine.is_some(),
+            // A job (a sync) may have the engine out of the state meanwhile.
+            "unlocked": unlocked_now(st),
+            "busy": busy_now(st),
             "version": env!("CARGO_PKG_VERSION"),
             "platform": std::env::consts::OS,
             // Mobile shells set these so the interface can pick folder locations itself.
@@ -1644,7 +2291,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             // Phones: where "plain files on this phone" folders go, and whether that is possible now.
             "plain_root": plain_root(&st.home).display().to_string(),
             "plain_root_writable": !mobile() || plain_root_writable(&plain_root(&st.home)),
-            "service": st.service.summary(),
+            "service": service_summary(st),
             // Set when another device removed (and maybe wiped) this one.
             "removal": varsto_core::engine::removal_notice(&st.home),
         })),
@@ -1660,7 +2307,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             st.service.policy_worst = None;
             Ok(json!({"ok": true, "removed": removed}))
         }
-        (Method::Get, "/api/service") => Ok(st.service.summary()),
+        (Method::Get, "/api/service") => Ok(service_summary(st)),
         // The Help page: where this device stands, where the data is and what
         // to do next. Works without a vault and while it is locked too.
         // Sentences come as {t, p} like the recovery guide's; `?format=text`
@@ -1705,16 +2352,16 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             crate::filemanager::open_with_desktop(&dir)?;
             Ok(json!({"ok": true}))
         }
-        (Method::Get, "/api/update/check") => Ok(serde_json::to_value(crate::update::check()?)?),
+        // Answered by `run_api` without the state; here for the callers of
+        // `api` itself (kept answer, never a new download under the lock).
+        (Method::Get, "/api/update/check") => {
+            Ok(serde_json::to_value(crate::update::check_cached()?)?)
+        }
+        (Method::Get, "/api/update/status") => {
+            Ok(serde_json::to_value(crate::update::job_status())?)
+        }
         (Method::Post, "/api/update") => {
-            let c = crate::update::check()?;
-            let policy = crate::update::Policy::new(&st.home, false);
-            let message = crate::update::apply(&c, &policy)?;
-            // The Windows setup program restarts Varsto itself.
-            if c.available && !c.installer() {
-                st.service.restart_requested = true;
-            }
-            Ok(json!({"ok": true, "updated": c.available, "message": message}))
+            bail!("an update is installed in the background: POST /api/update to the service")
         }
         (Method::Get, "/api/update/settings") => Ok(json!({
             "auto": crate::update::auto_update_enabled(&st.home),
@@ -1767,11 +2414,18 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(json!({"ok": true}))
         }
         (Method::Post, "/api/service/pause") => {
-            st.service.paused = input
+            let paused = input
                 .get("paused")
                 .and_then(|b| b.as_bool())
                 .unwrap_or(true);
-            Ok(st.service.summary())
+            // A job (a sync) has the service's state out: applied when it
+            // hands it back; the summary says so at once.
+            if let Some(b) = st.busy.as_mut() {
+                b.paused = Some(paused);
+            } else {
+                st.service.paused = paused;
+            }
+            Ok(service_summary(st))
         }
         (Method::Post, "/api/unlock") => {
             let mut e = Engine::open(&st.home, &s(input, "passphrase")?)?;
@@ -1790,10 +2444,20 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         (Method::Post, "/api/lock") => {
             // The keys go. Folders kept "encrypted on this device" hold only
             // encrypted blocks; the decrypted copies handed to other apps go.
+            // While a job (a sync) has the engine out, the keys go the
+            // moment it hands it back; the answer does not wait for that.
+            let pending = match st.busy.as_mut() {
+                Some(b) => {
+                    b.lock = true;
+                    b.unlocked = false;
+                    true
+                }
+                None => false,
+            };
             st.engine = None;
             st.pair = None;
             let exports = Engine::clear_exports(&st.home);
-            Ok(json!({"ok": true, "exports_removed": exports}))
+            Ok(json!({"ok": true, "exports_removed": exports, "pending": pending}))
         }
         (Method::Post, "/api/pair/start") => {
             let e = st
@@ -2720,7 +3384,19 @@ fn api_unlocked(
             service.record_trash_upkeep(&r);
             Ok(serde_json::to_value(r)?)
         }
+        (Method::Post, "/api/sync") if background(input) => {
+            // Queued for the service's own sync round, which runs with the
+            // engine out of the state: the answer comes at once. Asked for
+            // by hand: storages resting after failures are tried again.
+            engine.retry_storages_now();
+            service.request_sync();
+            Ok(json!({"ok": true, "queued": true}))
+        }
         (Method::Post, "/api/sync") => {
+            // Runs with the engine taken out of the state (`run_api`):
+            // status, pause, lock and quit answer meanwhile. "Sync now": a
+            // storage resting after failures is tried again at once.
+            engine.retry_storages_now();
             let folder = opt(input, "folder");
             varsto_core::events::publish("sync.started", json!({"reason": "requested", "folder": folder}));
             let reports = engine.sync(folder.as_deref())?;
@@ -3928,6 +4604,7 @@ mod tests {
             service: ServiceState::default(),
             pair: None,
             link: None,
+            busy: None,
         }));
         let server = Arc::new(server);
         let kept = state.clone();
@@ -4032,6 +4709,123 @@ mod tests {
         assert!(!head.contains("x-varsto-stale"));
         assert!(t.elapsed() >= std::time::Duration::from_millis(500));
         holder.join().unwrap();
+    }
+
+    /// Offline (spec section 78): a sync on a dead link has the engine out
+    /// of the state for minutes. The summary, pause, lock, the settings and
+    /// the liveness probe answer at once meanwhile; a read with nothing kept
+    /// is answered "busy" instead of hanging; pause and lock take effect
+    /// when the job hands the engine back.
+    #[test]
+    fn a_job_with_the_engine_out_leaves_the_interface_answering() {
+        let (port, token, _tmp, state) = test_server_state();
+        let h = [("X-Varsto-Token", token.as_str())];
+        let (out_tx, out_rx) = std::sync::mpsc::channel();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let job = {
+            let state = state.clone();
+            std::thread::spawn(move || {
+                let w = checkout(&state, "sync");
+                out_tx.send(()).unwrap();
+                go_rx.recv().unwrap();
+                drop(w);
+            })
+        };
+        out_rx.recv().unwrap();
+        let quick = std::time::Duration::from_millis(1500);
+        let timed = |method: &str, target: &str, body: &str| {
+            let t = std::time::Instant::now();
+            let (st, _, b) = raw(port, method, target, &h, body);
+            let took = t.elapsed();
+            assert!(took < quick, "{method} {target} took {took:?}");
+            (st, serde_json::from_str::<Value>(&b).unwrap_or(Value::Null))
+        };
+        let (st, v) = timed("GET", "/api/service", "");
+        assert_eq!(st, 200);
+        assert_eq!(v["busy"], "sync");
+        let (st, v) = timed("GET", "/api/state", "");
+        assert_eq!(st, 200);
+        assert_eq!(v["busy"], "sync");
+        let (st, v) = timed("GET", "/api/alive", "");
+        assert_eq!(st, 200);
+        assert_eq!(v["busy"], "sync");
+        assert_eq!(v["pid"], std::process::id());
+        let (st, v) = timed("POST", "/api/service/pause", "{\"paused\": true}");
+        assert_eq!(st, 200);
+        assert_eq!(v["paused"], true);
+        let (st, _) = timed("POST", "/api/ui-language", "{\"language\": \"fi\"}");
+        assert_eq!(st, 200);
+        let (st, _) = timed("GET", "/api/update/settings", "");
+        assert_eq!(st, 200);
+        let (st, v) = timed("POST", "/api/lock", "{}");
+        assert_eq!(st, 200);
+        assert_eq!(v["pending"], true);
+        // A read that needs the engine, with nothing kept: busy, not a hang.
+        let t = std::time::Instant::now();
+        let (st, _, body) = raw(port, "GET", "/api/folders", &h, "");
+        assert_eq!(st, 503, "{body}");
+        assert!(t.elapsed() < std::time::Duration::from_secs(10));
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["busy"], "sync");
+        go_tx.send(()).unwrap();
+        job.join().unwrap();
+        let st = state.lock().unwrap();
+        assert!(st.busy.is_none());
+        assert!(
+            st.service.paused,
+            "the pause asked for meanwhile is applied"
+        );
+        assert!(st.engine.is_none());
+    }
+
+    /// The engine taken out and handed back: what was asked for meanwhile
+    /// (a lock, a restart by the automatic update) is applied then, and the
+    /// work's own changes to the service's state are kept.
+    #[test]
+    fn a_lock_asked_for_while_a_job_has_the_engine_takes_effect_when_it_is_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("v");
+        let (e, _) = Engine::init(&home, "dev", "correct horse battery staple").unwrap();
+        let state: Shared = Arc::new(Mutex::new(State {
+            home: home.clone(),
+            engine: Some(e),
+            token: "t".into(),
+            bound: "127.0.0.1:1".into(),
+            traffic: Arc::default(),
+            service: ServiceState::default(),
+            pair: None,
+            link: None,
+            busy: None,
+        }));
+        let mut w = checkout(&state, "sync");
+        assert!(w.engine.is_some());
+        {
+            let mut st = state.lock().unwrap();
+            assert!(st.engine.is_none());
+            let v = api(&mut st, Method::Get, "/api/state", "", &json!({})).unwrap();
+            assert_eq!(v["unlocked"], true, "the vault is open, only busy");
+            assert_eq!(v["busy"], "sync");
+            let v = api(&mut st, Method::Post, "/api/lock", "", &json!({})).unwrap();
+            assert_eq!(v["pending"], true);
+            let v = api(&mut st, Method::Get, "/api/state", "", &json!({})).unwrap();
+            assert_eq!(v["unlocked"], false);
+            // The automatic update asks for a restart meanwhile.
+            st.service.restart_requested = true;
+        }
+        // Another job does not get the engine meanwhile.
+        assert!(try_checkout(&state, "other").is_none());
+        assert!(checkout_within(&state, "other", std::time::Duration::from_millis(50)).is_err());
+        assert!(lock_idle_within(&state, std::time::Duration::from_millis(50)).is_err());
+        w.service.syncs = 7;
+        drop(w);
+        let st = state.lock().unwrap();
+        assert!(st.busy.is_none());
+        assert!(st.engine.is_none(), "locked once handed back");
+        assert_eq!(st.service.syncs, 7);
+        assert!(st.service.restart_requested);
+        drop(st);
+        // Free again: the next job gets it at once.
+        assert!(try_checkout(&state, "next").is_some());
     }
 
     /// One raw request; returns (status, lowercase head, body).
@@ -4533,6 +5327,7 @@ mod tests {
             },
             pair: None,
             link: None,
+            busy: None,
         };
         let get = |st: &mut State, query: &str| {
             api(st, Method::Get, "/api/help", query, &json!({})).unwrap()
@@ -4624,6 +5419,7 @@ mod tests {
             service: ServiceState::default(),
             pair: None,
             link: None,
+            busy: None,
         };
         let v = api(&mut st, Method::Get, "/api/status", "", &json!({})).unwrap();
         let f = &v["folders"][0];
@@ -4666,6 +5462,7 @@ mod tests {
             service: ServiceState::default(),
             pair: None,
             link: None,
+            busy: None,
         };
         let v = api(&mut st, Method::Get, "/api/mailbox", "", &json!({})).unwrap();
         assert_eq!(v["enabled"], true);
@@ -5469,6 +6266,7 @@ mod tests {
             service: ServiceState::default(),
             pair: None,
             link: None,
+            busy: None,
         };
         let wait_ask = |st: &mut State| -> Value {
             for _ in 0..200 {
