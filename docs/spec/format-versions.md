@@ -51,7 +51,7 @@ Alpha-0-format.md sections 76 and 77.20. Commands, local API routes, event-strea
 
 ## YouTube jobs (alpha-0-format.md section 80; storage format unchanged)
 
-The import book (section 42, sealed in `vault/imports/<folder>/<device>/<utc>.enc`) gets the optional field `youtube` (video id to the paths in the folder, left out when empty; books merge it by union), a new `kind` `youtube` with content ids `youtube:<video id>:<suffix>` and identity `youtube:<canonical address>`, and books with an empty `kind` that hold only that index (`varsto youtube scan` of a folder). Device-local only: `state/youtube/<job id>.json`, `<job id>.lock` and `known.json`. No ledger event or storage object changes. Earlier builds ignore the field; they list a `youtube` book in `varsto import status` like any other and an index-only book with an empty kind.
+The import book (section 42, sealed in `vault/imports/<folder>/<device>/<utc>.enc`) gets the optional field `youtube` (video id to the paths in the folder, left out when empty; books merge it by union), a new `kind` `youtube` with content ids `youtube:<video id>:<suffix>` and identity `youtube:<canonical address>`, and books with an empty `kind` that hold only that index (`varsto import youtube-scan` of a folder). Device-local only: `state/youtube/<job id>.json`, `<job id>.lock` and `known.json`. No ledger event or storage object changes. Earlier builds ignore the field; they list a `youtube` book in `varsto import status` like any other and an index-only book with an empty kind.
 
 ## The mailbox for offline pool disks (alpha-0-format.md section 78; storage format unchanged)
 

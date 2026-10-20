@@ -84,6 +84,26 @@ pub enum ImportCmd {
         #[command(flatten)]
         target: Target,
     },
+    /// Import a YouTube channel (https://www.youtube.com/@name), playlist or
+    /// single video with the local yt-dlp. Listed flat, then downloaded one
+    /// video at a time and politely (25-65 s between videos, 2 s between
+    /// requests, 600 kB/s) into a spool that keeps the disk above a reserve;
+    /// each video is stored encrypted in the folder and leaves the spool once
+    /// the folder's policy holds. A video any folder has is never downloaded
+    /// again. The background service carries on (`import jobs`). Only for
+    /// content you may keep a copy of.
+    Youtube(Box<crate::youtube::AddArgs>),
+    /// YouTube import jobs: status, run in the terminal, pause, resume, remove.
+    Jobs {
+        #[command(subcommand)]
+        cmd: crate::youtube::JobsCmd,
+    },
+    /// Register YouTube videos you have already by the `[<id>]` in their file
+    /// names (yt-dlp's default names): a folder of the vault (recorded for
+    /// every device) or a directory outside Varsto (this device only). No
+    /// YouTube import downloads them again.
+    #[command(name = "youtube-scan")]
+    YoutubeScan { target: String },
     /// Imported folders: how much is in, what is missing and where it is.
     Status {
         folder: Option<String>,
@@ -197,6 +217,12 @@ impl Drop for ProgressLine {
 }
 
 pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
+    match cmd {
+        ImportCmd::Youtube(a) => return crate::youtube::add(cli, home, a),
+        ImportCmd::Jobs { cmd } => return crate::youtube::jobs(cli, home, cmd),
+        ImportCmd::YoutubeScan { target } => return crate::youtube::scan(cli, home, target),
+        _ => {}
+    }
     let mut engine = Engine::open(home, &passphrase()?)?;
     let progress_on = !cli.json && std::io::stderr().is_terminal();
     match cmd {
@@ -264,6 +290,9 @@ pub fn run(cli: &Cli, home: &Path, cmd: &ImportCmd) -> Result<()> {
             if !v.complete {
                 std::process::exit(1);
             }
+        }
+        ImportCmd::Youtube(_) | ImportCmd::Jobs { .. } | ImportCmd::YoutubeScan { .. } => {
+            unreachable!("handled above")
         }
         ImportCmd::Cleanup {
             folder,

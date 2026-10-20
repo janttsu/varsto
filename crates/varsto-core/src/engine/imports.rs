@@ -1016,7 +1016,7 @@ impl Engine {
         {
             bail!("only local directories can be removed after an import");
         }
-        // A YouTube job may continue a folder whose videos `youtube scan`
+        // A YouTube job may continue a folder whose videos `import youtube-scan`
         // listed (its book holds only that list).
         let existing = existing.or_else(|| {
             let want = opts.folder.as_ref()?.trim().to_lowercase();
@@ -1305,7 +1305,18 @@ impl Engine {
         }
         let (rec, root) = rec_root.expect("attached above");
         let root_path = root.clone();
-        book.tree = new_tree;
+        if info.kind == import::KIND_YOUTUBE {
+            // A YouTube job lists only what is in its spool now: the book
+            // keeps every video file it ever imported, nothing is gone.
+            let mut all = std::mem::take(&mut book.tree);
+            all.extend(new_tree);
+            book.tree = all;
+            gone.clear();
+            report.gone_at_source = 0;
+            report.gone_examples.clear();
+        } else {
+            book.tree = new_tree;
+        }
         book.tree_ref = listing.tree_ref;
         book.tree_utc = util::now_utc();
         book.gone_at_source = std::mem::take(&mut gone);

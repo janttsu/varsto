@@ -234,18 +234,11 @@ enum Cmd {
         cmd: backup::BackupCmd,
     },
     /// Import a git-annex repository, a cloud drive (Dropbox, OneDrive, any
-    /// rclone remote) or a local directory into a folder; status, verify, cleanup.
+    /// rclone remote), a local directory or a YouTube channel, playlist or
+    /// video into a folder; status, verify, cleanup, jobs.
     Import {
         #[command(subcommand)]
         cmd: import::ImportCmd,
-    },
-    /// Archive a YouTube channel, playlist or video into a folder with the
-    /// local yt-dlp: listed, downloaded one video at a time and politely
-    /// (25-65 s between videos, 600 kB/s), stored encrypted, never
-    /// downloaded twice. Only for content you may keep a copy of.
-    Youtube {
-        #[command(subcommand)]
-        cmd: youtube::YoutubeCmd,
     },
     /// The trash: files deleted on any device, kept for a number of days
     /// (30 by default) and restorable on every device.
@@ -4601,7 +4594,6 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::Verify { cmd } => upkeep::verify(cli, &home, cmd)?,
         Cmd::Scrub { cmd, run } => upkeep::scrub(cli, &home, cmd, run)?,
         Cmd::Import { cmd } => import::run(cli, &home, cmd)?,
-        Cmd::Youtube { cmd } => youtube::run(cli, &home, cmd)?,
         Cmd::Advice { idle_days, cmd } => upkeep::advice(cli, &home, *idle_days, cmd)?,
         Cmd::Restic { cmd } => restic::run(cli, &home, cmd)?,
         Cmd::Repair {

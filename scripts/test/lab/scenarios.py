@@ -2872,11 +2872,11 @@ printf '{"id":"%s","title":"Lab episode %s","channel":"Lab Channel","upload_date
 @scenario("youtube-spool")
 def s_youtube_spool():
     """Spec 80 with a fake yt-dlp on the VM (nothing goes to the network): a channel of
-    four videos, one private and one the vault has in another folder. `youtube add` lists,
+    four videos, one private and one the vault has in another folder. `import youtube` lists,
     downloads one at a time into the spool, stores each in the folder and empties the spool;
     the private video is recorded as failed and the job goes on; the one in the other folder
     is never downloaded. A later listing with one more video downloads only that one, and
-    `youtube scan` of a directory registers a video by its file name."""
+    `import youtube-scan` of a directory registers a video by its file name."""
     dl_clean()
     vm = DL_VM
     run(vm, "rm -rf ~/yt-dl ~/yt-old ~/yt-mine ~/yt-calls.log ~/yt-listing.txt ~/fake-yt-dlp ~/Varsto/lab-channel; true",
@@ -2890,9 +2890,9 @@ def s_youtube_spool():
     ids = ["labVIDEO001", "labPRIVATE1", "labOLDVID04", "labVIDEO002"]
     listing = "".join(f"{i}\\thttps://www.youtube.com/watch?v={i}\\tLab episode {i}\\n" for i in ids)
     run(vm, f"printf '{listing}' > ~/yt-listing.txt")
-    job = dl("youtube add https://www.youtube.com/@LabChannel --folder lab-channel --storage box "
+    job = dl("import youtube https://www.youtube.com/@LabChannel --folder lab-channel --storage box "
              "--download-dir /home/varsto/yt-dl --ytdlp-path /home/varsto/fake-yt-dlp")
-    check(isinstance(job, dict) and job.get("state") == "waiting_retry", f"youtube add: {str(job)[:400]}")
+    check(isinstance(job, dict) and job.get("state") == "waiting_retry", f"import youtube: {str(job)[:400]}")
     by_id = {x["id"]: x for x in job["videos"]}
     check(by_id["labVIDEO001"]["status"] == "stored" and by_id["labVIDEO002"]["status"] == "stored",
           f"stored: {by_id}")
@@ -2912,12 +2912,12 @@ def s_youtube_spool():
     # One more video: only it is downloaded.
     run(vm, "printf 'labVIDEO003\\thttps://www.youtube.com/watch?v=labVIDEO003\\tNew\\n' >> ~/yt-listing.txt")
     before = int(run(vm, "wc -l < ~/yt-calls.log").stdout.strip())
-    dl(f"youtube run {job['id'][:8]} --retry-failed")
+    dl(f"import jobs run {job['id'][:8]} --retry-failed")
     new = run(vm, f"tail -n +{before + 1} ~/yt-calls.log").stdout
     check("labVIDEO003" in new and "labVIDEO001" not in new and "labVIDEO002" not in new,
           f"calls of the second run: {new[-600:]}")
     run(vm, "mkdir -p ~/yt-mine && touch ~/yt-mine/'Mine [labMINE0005].webm'")
-    scan = dl("youtube scan /home/varsto/yt-mine")
+    scan = dl("import youtube-scan /home/varsto/yt-mine")
     check(scan.get("videos") == 1, f"scan: {scan}")
 
 

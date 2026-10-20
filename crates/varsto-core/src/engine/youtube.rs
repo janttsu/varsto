@@ -27,7 +27,7 @@
 //! that is anywhere already is never downloaded again. A video that fails
 //! (private, removed, blocked in this country) is recorded with yt-dlp's
 //! reason and tried again later, an hour, then four times longer each time
-//! up to a week; after six failures it is given up until `youtube resume`.
+//! up to a week; after six failures it is given up until `import jobs resume`.
 //!
 //! The background service leaves yt-dlp running between steps (it checks
 //! on it after each sync); the command line waits for it
@@ -105,7 +105,7 @@ pub enum VideoStatus {
     AlreadyStored,
     /// Failed; tried again at `next_try_utc`.
     Failed,
-    /// Failed too often; `youtube resume` tries it again.
+    /// Failed too often; `import jobs resume` tries it again.
     GaveUp,
 }
 
@@ -302,7 +302,7 @@ impl YoutubeJob {
         self.videos.iter_mut().find(|v| v.id == id)
     }
 
-    /// One line for `varsto youtube status` and `varsto status`.
+    /// One line for `varsto import jobs status` and `varsto status`.
     pub fn line(&self) -> String {
         let c = self.counts();
         format!(
@@ -388,7 +388,7 @@ pub struct YoutubeAddOptions {
     pub ytdlp: Option<PathBuf>,
 }
 
-/// What `youtube scan` found.
+/// What `import youtube-scan` found.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct YoutubeScanReport {
     /// The folder or directory scanned.
@@ -402,7 +402,7 @@ pub struct YoutubeScanReport {
     pub new_videos: u64,
 }
 
-/// Videos this device knows of outside Varsto (`youtube scan <dir>`).
+/// Videos this device knows of outside Varsto (`import youtube-scan <dir>`).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct KnownLocal {
     videos: BTreeMap<String, String>,
@@ -460,7 +460,7 @@ pub fn find_youtube_job(home: &Path, key: &str) -> Result<YoutubeJob> {
         .collect();
     match hits.as_slice() {
         [one] => Ok((*one).clone()),
-        [] => bail!("no YouTube job {key}: `varsto youtube status` lists them"),
+        [] => bail!("no YouTube job {key}: `varsto import jobs status` lists them"),
         _ => bail!("{key} names more than one YouTube job: give its id"),
     }
 }
@@ -1085,7 +1085,7 @@ impl Engine {
             .find(|j| j.url == src.canonical)
         {
             bail!(
-                "there is a YouTube job for {} already: varsto youtube status {}",
+                "there is a YouTube job for {} already: varsto import jobs status {}",
                 src.canonical,
                 j.short()
             );
@@ -1596,7 +1596,7 @@ impl Engine {
     }
 
     /// Try failed and given-up videos again now, and list again
-    /// (`youtube run --retry-failed`).
+    /// (`import jobs run --retry-failed`).
     pub fn youtube_retry_failed(&mut self, key: &str) -> Result<YoutubeJob> {
         let job = find_youtube_job(&self.home, key)?;
         let _lock = lock_job(&self.home, &job.id, true)?;

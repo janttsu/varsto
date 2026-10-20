@@ -326,6 +326,10 @@ fn channel_is_archived_politely_once() {
         assert!(String::from_utf8_lossy(&info).contains(v));
         assert!(!spool.join(path_of(v, "mp4")).exists());
     }
+    // `import verify` covers every video file the job imported.
+    let verify = lab.a.import_verify("makers").unwrap();
+    assert_eq!(verify.files_total, 6, "{verify:#?}");
+    assert!(verify.complete, "{verify:#?}");
     let counts = j.counts();
     assert_eq!(
         (counts.stored, counts.already_stored, counts.failed),

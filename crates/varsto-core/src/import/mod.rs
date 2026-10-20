@@ -282,7 +282,7 @@ pub struct ImportBook {
     pub source_path: Option<String>,
     /// YouTube videos in this folder: video id -> paths (`youtube:<id>`
     /// content of a YouTube job, or files named `... [<id>].<ext>` that
-    /// `varsto youtube scan` found). Every folder's list together is the
+    /// `varsto import youtube-scan` found). Every folder's list together is the
     /// vault's index of videos, so that no job downloads one again. A book
     /// with an empty `kind` holds only this list.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -319,7 +319,13 @@ impl ImportBook {
                 }
             }
         }
-        if other.tree_utc > self.tree_utc {
+        if self.kind == KIND_YOUTUBE {
+            // Every device's videos: the lists add up.
+            for (p, e) in &other.tree {
+                self.tree.entry(p.clone()).or_insert_with(|| e.clone());
+            }
+            self.tree_utc = self.tree_utc.max(other.tree_utc);
+        } else if other.tree_utc > self.tree_utc {
             self.tree = other.tree.clone();
             self.tree_ref = other.tree_ref.clone();
             self.tree_utc = other.tree_utc;
@@ -349,7 +355,7 @@ impl ImportBook {
         }
     }
 
-    /// Only the YouTube index (`varsto youtube scan` of a folder that was
+    /// Only the YouTube index (`varsto import youtube-scan` of a folder that was
     /// not imported).
     pub fn is_index_only(&self) -> bool {
         self.kind.is_empty()

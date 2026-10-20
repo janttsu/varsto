@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! `varsto youtube`: archive a YouTube channel, playlist or video into a
-//! folder with the local yt-dlp, one video at a time and politely; see
-//! `docs/youtube.md`. Only for content you may keep a copy of.
+//! `varsto import youtube` and `varsto import jobs`: archive a YouTube
+//! channel, playlist or video into a folder with the local yt-dlp, one
+//! video at a time and politely; see `docs/youtube.md`. Only for content
+//! you may keep a copy of.
 
 use crate::{fmt_bytes, passphrase, print, Cli};
 use anyhow::{bail, Result};
@@ -15,14 +16,9 @@ use varsto_core::freespace::MinFree;
 use varsto_core::youtube::{self as yt, Throttle};
 use varsto_core::Engine;
 
+/// `varsto import jobs`: the YouTube import jobs.
 #[derive(Subcommand)]
-pub enum YoutubeCmd {
-    /// Start archiving a channel (https://www.youtube.com/@name), playlist or
-    /// video into a folder. The background service lists it and downloads
-    /// one video at a time into a spool directory, stores each in the folder
-    /// (encrypted on the storages) and removes it from the spool once the
-    /// folder's policy holds. Videos already in any folder are skipped.
-    Add(Box<AddArgs>),
+pub enum JobsCmd {
     /// Work on the jobs now in this terminal (one, or all), until each waits
     /// for something (space, the policy, a retry, the next listing).
     Run {
@@ -47,11 +43,6 @@ pub enum YoutubeCmd {
     /// Forget a job. The folder keeps every video; files in the spool that
     /// were not stored yet stay there.
     Remove { job: String },
-    /// Register videos you have already by the `[<id>]` in their file names
-    /// (yt-dlp's default names): a folder of the vault (recorded for every
-    /// device) or a directory outside Varsto (this device only). No job
-    /// downloads them again.
-    Scan { target: String },
 }
 
 #[derive(Args)]
@@ -59,7 +50,7 @@ pub struct AddArgs {
     /// A channel, playlist or video address.
     url: String,
     /// The folder (default: named after the channel). An existing folder
-    /// can be used when `youtube scan` registered it.
+    /// can be used when `import youtube-scan` registered it.
     #[arg(long)]
     folder: Option<String>,
     /// Store the videos on this storage (repeat for more); `cheapest`: the
@@ -191,11 +182,12 @@ fn run_job(engine: &mut Engine, home: &Path, id: &str, progress: bool) -> Result
     }
 }
 
-pub fn run(cli: &Cli, home: &Path, cmd: &YoutubeCmd) -> Result<()> {
+/// `varsto import youtube`: register the job, then work on it until it waits.
+pub fn add(cli: &Cli, home: &Path, a: &AddArgs) -> Result<()> {
     let mut engine = Engine::open(home, &passphrase()?)?;
     let progress = !cli.json;
-    match cmd {
-        YoutubeCmd::Add(a) => {
+    {
+        {
             let opts = YoutubeAddOptions {
                 url: a.url.clone(),
                 folder: a.folder.clone(),
@@ -237,13 +229,29 @@ pub fn run(cli: &Cli, home: &Path, cmd: &YoutubeCmd) -> Result<()> {
             };
             print(cli, &job, |j| {
                 format!(
-                    "{}\nThe background service carries on (varsto youtube status {}).",
+                    "{}\nThe background service carries on (varsto import jobs status {}).",
                     j.line(),
                     j.short()
                 )
             })?;
         }
-        YoutubeCmd::Run { job, retry_failed } => {
+    }
+    Ok(())
+}
+
+/// `varsto import youtube-scan`: register videos by the ids in file names.
+pub fn scan(cli: &Cli, home: &Path, target: &str) -> Result<()> {
+    let mut engine = Engine::open(home, &passphrase()?)?;
+    let r = engine.youtube_scan(target)?;
+    print(cli, &r, describe_scan)
+}
+
+/// `varsto import jobs ...`.
+pub fn jobs(cli: &Cli, home: &Path, cmd: &JobsCmd) -> Result<()> {
+    let mut engine = Engine::open(home, &passphrase()?)?;
+    let progress = !cli.json;
+    match cmd {
+        JobsCmd::Run { job, retry_failed } => {
             let ids: Vec<String> = match job {
                 Some(k) => vec![varsto_core::engine::find_youtube_job(home, k)?.id],
                 None => engine.youtube_to_run().into_iter().map(|j| j.id).collect(),
@@ -257,22 +265,22 @@ pub fn run(cli: &Cli, home: &Path, cmd: &YoutubeCmd) -> Result<()> {
             }
             print(cli, &out, |l| describe_jobs(l, false))?;
         }
-        YoutubeCmd::Status { job, videos } => {
+        JobsCmd::Status { job, videos } => {
             let list = match job {
                 Some(k) => vec![varsto_core::engine::find_youtube_job(home, k)?],
                 None => youtube_jobs_at(home),
             };
             print(cli, &list, |l| describe_jobs(l, *videos))?;
         }
-        YoutubeCmd::Pause { job } => {
+        JobsCmd::Pause { job } => {
             let j = engine.youtube_set_paused(job, true)?;
             print(cli, &j, |j| j.line())?;
         }
-        YoutubeCmd::Resume { job } => {
+        JobsCmd::Resume { job } => {
             let j = engine.youtube_set_paused(job, false)?;
             print(cli, &j, |j| j.line())?;
         }
-        YoutubeCmd::Remove { job } => {
+        JobsCmd::Remove { job } => {
             let j = engine.youtube_remove(job)?;
             print(cli, &j, |j| {
                 let mut s = format!(
@@ -288,10 +296,6 @@ pub fn run(cli: &Cli, home: &Path, cmd: &YoutubeCmd) -> Result<()> {
                 }
                 s
             })?;
-        }
-        YoutubeCmd::Scan { target } => {
-            let r = engine.youtube_scan(target)?;
-            print(cli, &r, describe_scan)?;
         }
     }
     Ok(())
@@ -315,7 +319,7 @@ fn describe_scan(r: &YoutubeScanReport) -> String {
 
 fn describe_jobs(list: &[YoutubeJob], videos: bool) -> String {
     if list.is_empty() {
-        return "no YouTube jobs (varsto youtube add <channel address> --folder <name>)".into();
+        return "no YouTube jobs (varsto import youtube <channel address> --folder <name>)".into();
     }
     let mut out = Vec::new();
     for j in list {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! `varsto youtube` through the binary, with a fake yt-dlp (a shell script;
+//! `varsto import youtube`, `import jobs` and `import youtube-scan` through the binary, with a fake yt-dlp (a shell script;
 //! nothing goes to the network): add runs the job until it waits, status,
 //! scan, pause, resume and remove.
 
@@ -86,22 +86,22 @@ fn youtube_commands() {
         &home,
         root,
         &[
+            "import",
             "youtube",
-            "add",
             "https://www.youtube.com/@ExampleWorkshop",
             "--extra-arg=-o",
         ],
     );
     assert!(!success && err.contains("-o cannot be passed"), "{err}");
-    let (success, _, _) = run(&home, root, &["youtube", "add", "https://example.com/x"]);
+    let (success, _, _) = run(&home, root, &["import", "youtube", "https://example.com/x"]);
     assert!(!success);
 
     let job = ok(
         &home,
         root,
         &[
+            "import",
             "youtube",
-            "add",
             "https://www.youtube.com/@ExampleWorkshop",
             "--folder",
             "workshop",
@@ -119,15 +119,20 @@ fn youtube_commands() {
     );
     assert_eq!(job["state"], "up_to_date", "{job:#}");
     assert_eq!(job["folder"], "workshop");
-    assert_eq!(job["url"], "https://www.youtube.com/@ExampleWorkshop/videos");
+    assert_eq!(
+        job["url"],
+        "https://www.youtube.com/@ExampleWorkshop/videos"
+    );
     let calls = fs::read_to_string(root.join("calls.log")).unwrap();
     assert!(
-        calls.contains("--sleep-interval 30 --max-sleep-interval 90 --sleep-requests 2 --limit-rate 1M"),
+        calls.contains(
+            "--sleep-interval 30 --max-sleep-interval 90 --sleep-requests 2 --limit-rate 1M"
+        ),
         "{calls}"
     );
     let id = job["id"].as_str().unwrap()[..8].to_string();
 
-    let st = ok(&home, root, &["youtube", "status"]);
+    let st = ok(&home, root, &["import", "jobs", "status"]);
     let videos = st[0]["videos"].as_array().unwrap();
     assert_eq!(videos.len(), 2);
     assert!(videos.iter().all(|v| v["status"] == "stored"), "{st:#}");
@@ -142,15 +147,19 @@ fn youtube_commands() {
     let mine = root.join("mine");
     fs::create_dir_all(&mine).unwrap();
     fs::write(mine.join("Old [cliCCCCCCC3].mkv"), b"x").unwrap();
-    let scan = ok(&home, root, &["youtube", "scan", mine.to_str().unwrap()]);
+    let scan = ok(
+        &home,
+        root,
+        &["import", "youtube-scan", mine.to_str().unwrap()],
+    );
     assert_eq!(scan["videos"], 1);
 
-    let p = ok(&home, root, &["youtube", "pause", &id]);
+    let p = ok(&home, root, &["import", "jobs", "pause", &id]);
     assert_eq!(p["state"], "paused");
-    let r = ok(&home, root, &["youtube", "resume", &id]);
+    let r = ok(&home, root, &["import", "jobs", "resume", &id]);
     assert_eq!(r["user_paused"], false);
-    let removed = ok(&home, root, &["youtube", "remove", &id]);
+    let removed = ok(&home, root, &["import", "jobs", "remove", &id]);
     assert_eq!(removed["folder"], "workshop");
-    let st = ok(&home, root, &["youtube", "status"]);
+    let st = ok(&home, root, &["import", "jobs", "status"]);
     assert!(st.as_array().unwrap().is_empty());
 }

@@ -1,8 +1,8 @@
-# Archiving YouTube channels
+# Importing YouTube channels, playlists and videos
 
 ```sh
-varsto youtube add https://www.youtube.com/@ExampleWorkshop --folder workshop
-varsto youtube status
+varsto import youtube https://www.youtube.com/@ExampleWorkshop --folder workshop
+varsto import jobs status
 ```
 
 Varsto lists the channel (or playlist, or a single video) with the
@@ -11,7 +11,7 @@ downloads the videos one at a time into a spool directory, stores each
 finished video in a Varsto folder (encrypted on your storages, like any
 other file) and removes it from the spool once the folder's durability
 policy holds. The background service does this after every sync; `varsto
-youtube run` does it in the terminal.
+import jobs run` does it in the terminal.
 
 **Only archive what you may keep a copy of.** YouTube's terms of service
 limit downloading, and videos are protected by copyright. Use this for your
@@ -91,9 +91,9 @@ downloaded, Varsto looks the id up in the vault's index:
   folder's import book lists them, and the books are synced);
 - every file named `... [<id>].<ext>` in the folders attached on this
   computer;
-- what `varsto youtube scan` registered.
+- what `varsto import youtube-scan` registered.
 
-A video found there is marked *already stored* (`youtube status` says
+A video found there is marked *already stored* (`import jobs status` says
 where) and is not downloaded. Listing the channel again later adds only
 new videos. A video you delete from the folder is not downloaded again
 either.
@@ -101,8 +101,8 @@ either.
 If you have downloaded videos before, register them:
 
 ```sh
-varsto youtube scan "Old videos"          # a Varsto folder: recorded with the folder, for every device
-varsto youtube scan /media/disk/youtube   # a directory outside Varsto: recorded on this computer only
+varsto import youtube-scan "Old videos"          # a Varsto folder: recorded with the folder, for every device
+varsto import youtube-scan /media/disk/youtube   # a directory outside Varsto: recorded on this computer only
 ```
 
 Both read only the names (yt-dlp's default `%(title)s [%(id)s].%(ext)s`);
@@ -117,7 +117,7 @@ names another place (never inside a Varsto folder). It never takes the
 download disk below a reserve: 15 % by default, `--free-min 20GB` or
 `--free-min 10%` to change it (never less than Varsto's own minimum free
 space on that disk). A video starts only when its expected size fits above
-the reserve; otherwise the job *waits for space* (`youtube status` says how
+the reserve; otherwise the job *waits for space* (`import jobs status` says how
 much is missing, and the service notifies once). When the disk fills during
 a download, the download is stopped and continued later from where it was.
 
@@ -134,22 +134,31 @@ A video that cannot be downloaded (private, removed, members only, not
 available in your country, a network error) never stops the job: the
 reason yt-dlp gave is recorded and the video is tried again an hour later,
 then 4, 16 and 64 hours later, at most a week apart. After six failures it
-is *given up*; `varsto youtube resume <job>` or `varsto youtube run <job>
+is *given up*; `varsto import jobs resume <job>` or `varsto import jobs run <job>
 --retry-failed` tries it again.
 
 ## Commands
 
 ```sh
-varsto youtube add <address> [--folder NAME] [--storage S|cheapest]... [--free-min 15%] [--download-dir DIR] [options above]
-varsto youtube run [JOB] [--retry-failed]   # work in the terminal until each job waits
-varsto youtube status [JOB] [--videos]      # what each job does or waits for; --videos lists every video
-varsto youtube pause JOB | resume JOB
-varsto youtube remove JOB                   # forget the job; the folder keeps its videos
-varsto youtube scan FOLDER-OR-DIRECTORY
+varsto import youtube <address> [--folder NAME] [--storage S|cheapest]... [--free-min 15%] [--download-dir DIR] [options above]
+varsto import jobs run [JOB] [--retry-failed]   # work in the terminal until each job waits
+varsto import jobs status [JOB] [--videos]      # what each job does or waits for; --videos lists every video
+varsto import jobs pause JOB | jobs resume JOB
+varsto import jobs remove JOB                   # forget the job; the folder keeps its videos
+varsto import youtube-scan FOLDER-OR-DIRECTORY
 ```
 
 `JOB` is the job's id (its first characters), its folder or the channel
 address. `varsto status` shows a line per job that is not complete.
+
+A single video address is one download (the job is complete once it is
+stored); a channel or playlist address is every video in it, one at a time.
+
+YouTube imports are imports like the others: `varsto import status
+[FOLDER]` shows the folder's files and what is in, and `varsto import
+verify FOLDER` says whether every video file the job imported is in the
+folder with every block on a storage and the policy met. The folder's
+import book is what keeps a video from being downloaded twice.
 
 ## Limits
 

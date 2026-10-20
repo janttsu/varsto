@@ -623,7 +623,7 @@ pub fn backoff_secs(attempts: u32) -> i64 {
 }
 
 /// After this many failed attempts a video is given up (until `youtube
-/// resume` or `youtube run --retry-failed`).
+/// resume` or `import jobs run --retry-failed`).
 pub const MAX_ATTEMPTS: u32 = 6;
 
 /// The reason yt-dlp gave, from its error output: the last `ERROR:` line
