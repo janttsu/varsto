@@ -170,6 +170,12 @@ fn is_timeout(e: &std::io::Error) -> bool {
     )
 }
 
+/// An error that is (or was caused by) a socket timeout.
+fn timed_out(e: &anyhow::Error) -> bool {
+    e.chain()
+        .any(|c| c.downcast_ref::<std::io::Error>().is_some_and(is_timeout))
+}
+
 impl crate::p2p::CloseWrite for ServerStream {
     fn close_write(&mut self) {
         self.conn.send_close_notify();
@@ -216,7 +222,9 @@ pub fn connect(
     let cfg = client_config(identity, expected)?;
     let mut sock = TcpStream::connect_timeout(&addr, timeout)?;
     sock.set_nodelay(true)?;
-    sock.set_read_timeout(Some(Duration::from_secs(30)))?;
+    // The handshake is a few round trips: a listener that accepted and
+    // then says nothing does not hold us for the response timeout.
+    sock.set_read_timeout(Some((timeout * 2).max(Duration::from_secs(3))))?;
     sock.set_write_timeout(Some(timeout))?;
     let name = ServerName::try_from("varsto").map_err(|e| anyhow!("server name: {e}"))?;
     let mut conn = rustls::ClientConnection::new(cfg, name)?;
@@ -224,16 +232,37 @@ pub fn connect(
         conn.complete_io(&mut sock)
             .with_context(|| format!("TLS handshake with {addr}"))?;
     }
+    // Then each read of the answer may wait this long (an idle timeout per
+    // chunk, not a deadline for the whole answer).
+    sock.set_read_timeout(Some(RESPONSE_IDLE))?;
     let exp = conn
         .export_keying_material([0u8; 32], EXPORTER_LABEL, Some(b""))
         .map_err(|e| anyhow!("TLS exporter: {e}"))?;
     Ok((rustls::StreamOwned::new(conn, sock), exp))
 }
 
+/// Each read of an answer over TLS may wait this long.
+const RESPONSE_IDLE: Duration = Duration::from_secs(30);
+/// The longest a connection attempt waits, however slow the link was.
+pub const HANDSHAKE_MAX: Duration = Duration::from_secs(6);
+
+/// How long to wait for a connection to a peer: `base` (the LAN figure),
+/// or three times the time the last handshake with that host took, up to
+/// `HANDSHAKE_MAX`. On a link with a long round trip one lost packet then
+/// costs a retransmission instead of a failed attempt and a resting peer.
+pub fn handshake_timeout(base: Duration, last: Option<Duration>) -> Duration {
+    match last {
+        Some(t) => (t * 3).clamp(base, HANDSHAKE_MAX.max(base)),
+        None => base,
+    }
+}
+
 /// Kept-alive TLS sessions to peers, per (address, pinned certificate).
 #[derive(Default)]
 pub struct TlsPool {
     idle: Mutex<BTreeMap<(SocketAddr, String), Vec<Kept>>>,
+    /// How long the last handshake with each host took.
+    handshakes: Mutex<BTreeMap<std::net::IpAddr, Duration>>,
 }
 
 /// An idle session: the stream, its exporter value, since when idle.
@@ -292,7 +321,22 @@ impl TlsPool {
             }
             return Ok((status, body));
         }
-        let (s, e) = connect(identity, addr, expected, timeout)?;
+        let last = self.handshakes.lock().unwrap().get(&addr.ip()).copied();
+        let wait = handshake_timeout(timeout, last);
+        let started = Instant::now();
+        let (s, e) = match connect(identity, addr, expected, wait) {
+            Ok(x) => x,
+            // Beyond the LAN a timeout may be one lost packet: once more,
+            // with twice the wait.
+            Err(err) if timed_out(&err) && !crate::p2p::is_lan(addr.ip()) => {
+                connect(identity, addr, expected, (wait * 2).min(HANDSHAKE_MAX))?
+            }
+            Err(err) => return Err(err),
+        };
+        self.handshakes
+            .lock()
+            .unwrap()
+            .insert(addr.ip(), started.elapsed());
         let ((status, body, keep), e) = ask(s, e)?;
         if let Some(s) = keep {
             self.give_back(key, s, e);

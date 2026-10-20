@@ -7806,24 +7806,31 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
 
     // The accepted peer records of the other devices, probed over TLS on
     // TCP with their pinned certificates.
-    let records: Vec<varsto_core::p2p::PeerInfo> = engine
-        .peer_directory()?
-        .bodies()
-        .map(|b| b.info())
-        .collect();
+    // One read of the records (the saved directory and every storage)
+    // serves both the list and the probe.
+    let dir = engine.peer_directory()?;
+    let records: Vec<varsto_core::p2p::PeerInfo> = dir.bodies().map(|b| b.info()).collect();
+    // A temporary socket: the mapping differs from the service's, but the
+    // public IP and the NAT guess are the same. Asked at the same time as
+    // the peers, at most two servers with a short wait each (offline this
+    // costs about two seconds, not a lookup and a wait per server).
+    let stun_servers: Vec<String> = c.stun.iter().take(2).cloned().collect();
+    let stun_thread = (!stun_servers.is_empty()).then(|| {
+        std::thread::spawn(move || {
+            std::net::UdpSocket::bind("0.0.0.0:0").ok().map(|s| {
+                varsto_core::p2p::stun::probe(
+                    &s,
+                    &stun_servers,
+                    std::time::Duration::from_millis(800),
+                )
+            })
+        })
+    });
     let probe = engine
-        .p2p_peers_tcp()
+        .p2p_peers_tcp_from(&dir)
         .map(|p| p.probe())
         .unwrap_or_default();
-    // A temporary socket: the mapping differs from the service's, but the
-    // public IP and the NAT guess are the same.
-    let stun = if c.stun.is_empty() {
-        None
-    } else {
-        std::net::UdpSocket::bind("0.0.0.0:0").ok().map(|s| {
-            varsto_core::p2p::stun::probe(&s, &c.stun, std::time::Duration::from_millis(1500))
-        })
-    };
+    let stun = stun_thread.and_then(|t| t.join().ok().flatten());
     if json {
         println!(
             "{}",

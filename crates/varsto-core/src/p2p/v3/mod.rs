@@ -29,7 +29,7 @@ pub mod token;
 mod tests;
 
 pub use heads::{BatchSource, HeadRef, HeadsAnswer, Pushed, Watch};
-pub use peer::{PeerBody, PeerDirectory};
+pub use peer::{PeerBody, PeerDirectory, SavedDirectory};
 
 use super::{serve_as, Snapshot, SELF_ANSWER};
 use crate::ids::DeviceId;

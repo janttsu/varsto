@@ -1031,10 +1031,22 @@ struct P2p {
     announced: AtomicBool,
     /// When an unknown certificate last made us read the records again.
     knock_read: Mutex<Option<Instant>>,
+    /// How long a knock waits after that read: `KNOCK_REREAD` while the
+    /// storages answer, doubling up to `KNOCK_REREAD_MAX` while none does.
+    knock_wait: Mutex<Duration>,
+    /// When our record may be published again after a failed attempt, and
+    /// the wait after the next failure.
+    publish_retry: Mutex<(Option<Instant>, Duration)>,
 }
 
 /// An unknown certificate makes the records be read again at most this often.
 const KNOCK_REREAD: Duration = Duration::from_secs(5);
+/// ... and while no storage answers, at most this often.
+const KNOCK_REREAD_MAX: Duration = Duration::from_secs(300);
+/// A failed publish of our record is tried again after this long, doubling
+/// up to `PUBLISH_RETRY_MAX`.
+const PUBLISH_RETRY_MIN: Duration = Duration::from_secs(30);
+const PUBLISH_RETRY_MAX: Duration = Duration::from_secs(600);
 
 type BeaconKeys = std::collections::BTreeMap<[u8; 16], varsto_core::crypto::VerifyingKey>;
 
@@ -1200,8 +1212,11 @@ impl P2p {
         }
 
         let nat: Arc<Mutex<NatInfo>> = Arc::new(Mutex::new(NatInfo::default()));
-        let records: Arc<Mutex<Vec<varsto_core::p2p::v3::PeerBody>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        // The saved directory's records, so relays are known before any
+        // storage answers.
+        let records: Arc<Mutex<Vec<varsto_core::p2p::v3::PeerBody>>> = Arc::new(Mutex::new(
+            responder.directory().bodies().cloned().collect(),
+        ));
         let republish = Arc::new(std::sync::atomic::AtomicBool::new(false));
         if let Some(node) = &quic {
             Self::spawn_nat_thread(node.clone(), cfg.clone(), nat.clone(), stop.clone());
@@ -1258,6 +1273,8 @@ impl P2p {
             lan_new,
             announced: AtomicBool::new(false),
             knock_read: Mutex::new(None),
+            knock_wait: Mutex::new(KNOCK_REREAD),
+            publish_retry: Mutex::new((None, PUBLISH_RETRY_MIN)),
         })
     }
 
@@ -1286,8 +1303,9 @@ impl P2p {
     /// `KNOCK_REREAD`)? A stranger knocking costs a listing of the peer
     /// records now and then, nothing more.
     fn take_unknown_knock(&self) -> bool {
+        let wait = *self.knock_wait.lock().unwrap();
         let mut last = self.knock_read.lock().unwrap();
-        if last.is_some_and(|t| t.elapsed() < KNOCK_REREAD) {
+        if last.is_some_and(|t| t.elapsed() < wait) {
             return false;
         }
         if !self.responder.take_unknown() {
@@ -1558,14 +1576,22 @@ impl P2p {
         // A storage hiccup must not empty the directory: that would stop
         // the keeper's punches (so NAT mappings lapse and peers' punches
         // steal our port) and make both servers refuse every peer's
-        // certificate. Keep the last good one until the next listing.
-        let dir = match e.peer_directory() {
-            Ok(d) => d,
-            Err(err) => {
-                log::warn!("peer record listing failed, keeping the known ones: {err:#}");
-                self.responder.directory().as_ref().clone()
-            }
-        };
+        // certificate. The read starts from the directory saved here; when
+        // no storage answered, the entries in use are kept as well.
+        let (mut dir, read) = e.peer_directory_read();
+        let mut wait = self.knock_wait.lock().unwrap();
+        if read.ok() {
+            *wait = KNOCK_REREAD;
+        } else {
+            log::warn!(
+                "peer records: none of {} storages answered; keeping the known ones",
+                read.storages
+            );
+            dir.merge(self.responder.directory().as_ref().clone());
+            // Knocks do not make us list a dead storage every few seconds.
+            *wait = (*wait * 2).min(KNOCK_REREAD_MAX);
+        }
+        drop(wait);
         self.responder.set_directory(dir.clone());
         let mut flat = lan.clone();
         for i in dir.infos() {
@@ -1668,12 +1694,30 @@ impl P2p {
         let mut last = self.last_publish.lock().unwrap();
         let mut last_rec = self.last_record.lock().unwrap();
         let changed = last_rec.as_ref().is_none_or(|r| !r.same_as(&rec));
-        if changed || last.is_none_or(|t| t.elapsed() > RECORD_MAX_AGE) {
-            if let Err(err) = e.publish_peer_body(&mut rec) {
-                log::warn!("p2p record publish failed: {err:#}");
+        let mut retry = self.publish_retry.lock().unwrap();
+        let resting = retry.0.is_some_and(|t| Instant::now() < t);
+        if (changed || last.is_none_or(|t| t.elapsed() > RECORD_MAX_AGE)) && !resting {
+            // Only a publish that every storage took counts as done: a
+            // failed one is tried again (with a growing wait), not an hour
+            // later.
+            match e.publish_peer_body(&mut rec) {
+                Ok(_) => {
+                    *last = Some(Instant::now());
+                    *last_rec = Some(rec);
+                    *retry = (None, PUBLISH_RETRY_MIN);
+                }
+                Err(err) => {
+                    let wait = retry.1;
+                    log::warn!(
+                        "p2p record publish failed: {err:#}; trying again in {} s",
+                        wait.as_secs()
+                    );
+                    *retry = (
+                        Some(Instant::now() + wait),
+                        (wait * 2).min(PUBLISH_RETRY_MAX),
+                    );
+                }
             }
-            *last = Some(Instant::now());
-            *last_rec = Some(rec);
         }
     }
 }
@@ -1978,6 +2022,8 @@ pub fn run(opts: Options) -> Result<()> {
     // the user unlocks; a failed start is retried every 30 seconds.
     let mut p2p = P2p::start(&state);
     let mut p2p_retry_at = Instant::now();
+    // Whether the vault was open at the last look, while p2p is not running.
+    let mut p2p_unlocked = state.lock().unwrap().engine.is_some();
     // Asks the peers what they are doing, only while someone watches.
     let activity_stop = Arc::new(AtomicBool::new(false));
     varsto_core::activity::global().spawn_poller(activity_stop.clone());
@@ -2133,6 +2179,15 @@ pub fn run(opts: Options) -> Result<()> {
                 varsto_core::activity::global().set_peers(None, None);
                 log::info!("p2p stopped (turned off)");
             }
+        }
+        if p2p.is_none() {
+            let unlocked = state.lock().unwrap().engine.is_some();
+            // Unlocked just now (a phone that started locked): start at
+            // once rather than after the retry wait of the locked attempt.
+            if unlocked && !p2p_unlocked {
+                p2p_retry_at = Instant::now();
+            }
+            p2p_unlocked = unlocked;
         }
         if p2p.is_none() && Instant::now() >= p2p_retry_at {
             let wanted = {

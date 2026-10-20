@@ -276,6 +276,155 @@ fn a_certificate_two_devices_claim_admits_neither() {
     assert!(dir.infos().is_empty());
 }
 
+// ----- the directory kept on the device -------------------------------------------
+
+fn load(
+    saved: &SavedDirectory,
+    keys: &Keys,
+    trust: &Trust,
+    me: &Dev,
+    devices: &[Id16],
+) -> (PeerDirectory, RecordsRefused) {
+    let acceptor = Acceptor {
+        vault: VAULT,
+        keys,
+        trust,
+    };
+    let mut counter = RecordsRefused::default();
+    let dir = PeerDirectory::from_saved(saved, &acceptor, devices, me.id, me.cert(), &mut counter);
+    (dir, counter)
+}
+
+#[test]
+fn a_saved_directory_is_checked_again_on_load() {
+    let (a, b, c) = (Dev::new(1), Dev::new(2), Dev::new(3));
+    let st = Mem::default();
+    let k = keys();
+    let mut bb = b.body(4000);
+    publish(&st, &k, &b, &mut bb);
+    let trust = trust_of(&[&a, &b]);
+    let dir = read_dir(&st, &k, &trust, &a, &[b.id], &mut RecordsRefused::default());
+    let saved = dir.saved();
+    assert_eq!(saved.records.len(), 1);
+    // Through the file format and back: the same entry, nothing asked of
+    // any storage.
+    let json = serde_json::to_vec(&saved).unwrap();
+    let saved: SavedDirectory = serde_json::from_slice(&json).unwrap();
+    let (back, counter) = load(&saved, &k, &trust, &a, &[b.id]);
+    assert_eq!(back.get(&b.id), dir.get(&b.id));
+    assert_eq!(back.device_for_cert(&b.cert()), Some(b.id));
+    assert_eq!(counter.total(), 0);
+    // Saved again unchanged: what was read is what is kept.
+    assert_eq!(back.saved(), saved);
+
+    // A device no longer among the trusted full devices drops out.
+    let (gone, _) = load(&saved, &k, &trust, &a, &[]);
+    assert!(gone.get(&b.id).is_none());
+    // A signer the membership no longer trusts is refused.
+    let (refused, counter) = load(&saved, &k, &trust_of(&[&a, &c]), &a, &[b.id]);
+    assert!(refused.get(&b.id).is_none());
+    assert!(counter.total() >= 1, "{counter:?}");
+    // Without the registry key (another vault's) the record does not open.
+    let (closed, _) = load(&saved, &keys(), &trust, &a, &[b.id]);
+    assert!(closed.get(&b.id).is_none());
+    // A changed byte in the file is refused, never trusted.
+    let mut tampered = saved.clone();
+    let hexed = &mut tampered.records[0].parts[0].1;
+    let mid = hexed.len() / 2;
+    let flip = if &hexed[mid..mid + 1] == "0" {
+        "1"
+    } else {
+        "0"
+    };
+    hexed.replace_range(mid..mid + 1, flip);
+    let (bad, _) = load(&tampered, &k, &trust, &a, &[b.id]);
+    assert!(bad.get(&b.id).is_none());
+    // Junk that is not hex is skipped.
+    let mut junk = saved.clone();
+    junk.records[0].parts[0].1 = "not hex".into();
+    assert!(load(&junk, &k, &trust, &a, &[b.id]).0.get(&b.id).is_none());
+}
+
+#[test]
+fn an_empty_or_failed_listing_keeps_the_saved_entries_and_a_newer_record_replaces_them() {
+    let (a, b) = (Dev::new(1), Dev::new(2));
+    let st = Mem::default();
+    let k = keys();
+    let trust = trust_of(&[&a, &b]);
+    let mut bb = b.body(4000);
+    publish(&st, &k, &b, &mut bb);
+    let saved = read_dir(&st, &k, &trust, &a, &[b.id], &mut RecordsRefused::default()).saved();
+    let (mut dir, _) = load(&saved, &k, &trust, &a, &[b.id]);
+    // A storage that answered with nothing (an outage that lists empty).
+    let empty = read_dir(
+        &Mem::default(),
+        &k,
+        &trust,
+        &a,
+        &[b.id],
+        &mut RecordsRefused::default(),
+    );
+    dir.merge(empty);
+    assert_eq!(dir.get(&b.id).map(|r| r.port), Some(4000));
+    assert_eq!(dir.saved(), saved, "nothing to save anew");
+    // B moves: its newer record wins, and is what is saved from now on.
+    bb.port = 4001;
+    publish(&st, &k, &b, &mut bb);
+    dir.merge(read_dir(
+        &st,
+        &k,
+        &trust,
+        &a,
+        &[b.id],
+        &mut RecordsRefused::default(),
+    ));
+    assert_eq!(dir.get(&b.id).map(|r| r.port), Some(4001));
+    let (again, _) = load(&dir.saved(), &k, &trust, &a, &[b.id]);
+    assert_eq!(again.get(&b.id).map(|r| r.port), Some(4001));
+    // An older record read later (a lagging storage) changes nothing.
+    let old = Mem::default();
+    let mut stale = b.body(3999);
+    publish(&old, &k, &b, &mut stale);
+    dir.merge(read_dir(
+        &old,
+        &k,
+        &trust,
+        &a,
+        &[b.id],
+        &mut RecordsRefused::default(),
+    ));
+    assert_eq!(dir.get(&b.id).map(|r| r.port), Some(4001));
+}
+
+#[test]
+fn routes_are_raced_so_a_dead_first_address_costs_no_timeout() {
+    let (a, b) = (Dev::new(1), Dev::new(2));
+    let srv = tls_server(&a, responder_for(&a, &[&b]));
+    let mut body = a.body(srv.addr.port());
+    body.seq = 1;
+    // First a TEST-NET address that never answers (a peer's address on
+    // another network), then the live one.
+    body.lan_addrs = vec!["192.0.2.1".parse().unwrap(), "127.0.0.1".parse().unwrap()];
+    let peers = Peers::build_v3(
+        Client::new(b.device(), b.tls.clone()),
+        &dir_with(&b, vec![body]),
+        &[],
+        None,
+    );
+    let t = std::time::Instant::now();
+    let (s, _) = peers.ask(&a.device(), "/p2p/info").unwrap();
+    assert_eq!(s, 200);
+    // One at a time the dead address would cost its 1.5 s timeout first.
+    assert!(
+        t.elapsed() < Duration::from_millis(1400),
+        "{:?}",
+        t.elapsed()
+    );
+    // The route that answered is kept: the next request goes straight to it.
+    let status = peers.status();
+    assert_eq!(status[0].addr, Some(srv.addr), "{status:?}");
+}
+
 // ----- tokens -------------------------------------------------------------------
 
 fn responder_for(me: &Dev, others: &[&Dev]) -> Arc<Responder> {
