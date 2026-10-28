@@ -1920,7 +1920,23 @@
   "Error:": "Fel:",
   "no reason given": "inget skäl angivet",
   "1 video failed": "1 video misslyckades",
-  "Remove the job?": "Ta bort jobbet?"
+  "Remove the job?": "Ta bort jobbet?",
+  "Rendezvous service": "Mötestjänst",
+  "A small meeting point that helps your devices find each other across networks, get through routers together and, as a last resort, relay their connection, which stays end-to-end encrypted. It sees random-looking tags and network addresses, never your files, names or keys. Without it everything still works on the local network and through your storages.": "En liten mötesplats som hjälper dina enheter att hitta varandra mellan nätverk, ta sig genom routrar tillsammans och som sista utväg förmedla sin anslutning, som förblir krypterad från ände till ände. Den ser slumpmässigt utseende etiketter och nätverksadresser, aldrig dina filer, namn eller nycklar. Utan den fungerar allt fortfarande i det lokala nätverket och via dina lagringsplatser.",
+  "Use the rendezvous service": "Använd mötestjänsten",
+  "Service address": "Tjänstens adress",
+  "Use the default": "Använd standard",
+  "Works on the same network and across the internet (rendezvous).": "Fungerar i samma nätverk och över internet (mötestjänst).",
+  "If this address does not work, Varsto tries the other addresses of the QR code, looks for the device on the network and then asks the rendezvous service, which also finds a device on another network.": "Om den här adressen inte fungerar provar Varsto QR-kodens andra adresser, letar efter enheten i nätverket och frågar sedan mötestjänsten, som också hittar en enhet i ett annat nätverk.",
+  "Your devices send blocks to each other directly when they can, on the same network or over the internet, and fall back to the storages when they cannot. The Peers page shows how each device is reached and how fast data moves. The rendezvous service helps devices on different networks find each other, pair with a code and, when nothing direct works, relay their encrypted connection; it can be turned off or replaced by your own on the Peers page.": "Dina enheter skickar block direkt till varandra när det går, i samma nätverk eller över internet, och faller tillbaka på lagringsplatserna när det inte går. Sidan Enheter visar hur varje enhet nås och hur snabbt data rör sig. Mötestjänsten hjälper enheter i olika nätverk att hitta varandra, para ihop sig med en kod och, när inget direkt fungerar, förmedla sin krypterade anslutning; den kan stängas av eller ersättas med din egen på sidan Enheter.",
+  "Looking for the device through the rendezvous service …": "Letar efter enheten via mötestjänsten …",
+  "Could not reach the device showing the code. Check that the code is still showing and has not expired, that both devices have an internet connection or share a Wi-Fi network, that the router does not isolate wireless clients (guest network, client isolation) and that no VPN or firewall is in the way. Across networks both devices also need to reach the rendezvous service (Peers page).": "Det gick inte att nå enheten som visar koden. Kontrollera att koden fortfarande visas och inte har gått ut, att båda enheterna har internetanslutning eller delar ett Wi-Fi-nätverk, att routern inte isolerar trådlösa klienter (gästnätverk, klientisolering) och att inget VPN eller brandvägg är i vägen. Mellan nätverk måste båda enheterna också nå mötestjänsten (sidan Enheter).",
+  "It works on the same network and across the internet (rendezvous).": "Den fungerar i samma nätverk och över internet (mötestjänst).",
+  "Off: devices find each other without the rendezvous service.": "Av: enheterna hittar varandra utan mötestjänsten.",
+  "Not reachable now; everything else keeps working.": "Kan inte nås just nu; allt annat fungerar fortfarande.",
+  "Not connected yet.": "Ännu inte ansluten.",
+  "Connected.": "Ansluten.",
+  "via rendezvous": "via mötestjänsten"
  },
  "patterns": [
   [
@@ -2714,6 +2730,26 @@
   [
    "^Remove the YouTube job (.+)\\? Folder (.+) keeps every video; files in the spool that were not stored yet stay there\\.$",
    "Ta bort YouTube-jobbet $1? Mappen $2 behåller alla videor; filer i mellanlagret som inte har lagrats ännu blir kvar där."
+  ],
+  [
+   "^Service: (.+)$",
+   "Tjänst: $1"
+  ],
+  [
+   "^Seen from the internet as (.+)$",
+   "Syns på internet som $1"
+  ],
+  [
+   "^Relaying (\\d+) connection\\(s\\)$",
+   "Förmedlar $1 anslutning(ar)"
+  ],
+  [
+   "^This device's clock differs from the service's by (\\d+) s: set the clock right$",
+   "Den här enhetens klocka avviker $1 s från tjänstens: ställ klockan rätt"
+  ],
+  [
+   "^Last problem: (.+)$",
+   "Senaste problem: $1"
   ]
  ],
  "parts": [

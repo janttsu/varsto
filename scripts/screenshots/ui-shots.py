@@ -86,6 +86,13 @@ with sync_playwright() as p:
                                                             body=json.dumps(example_data.locations())))
         pg.route("**/api/p2p/traffic*", lambda r: r.fulfill(status=200, content_type="application/json",
                                                          body=json.dumps(example_data.traffic())))
+        # The demo vault runs no rendezvous thread: the real answer with the
+        # example rendezvous state and a relayed peer put in.
+        def p2p_with_rendezvous(r):
+            body = r.fetch().json()
+            body.update(example_data.p2p_extra())
+            r.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+        pg.route("**/api/p2p", p2p_with_rendezvous)
         # No event stream here: its live traffic events would replace the example.
         pg.route("**/api/events*", lambda r: r.abort())
         pg.goto(url("laptop"))
@@ -102,6 +109,9 @@ with sync_playwright() as p:
         time.sleep(0.3)
         card = pg.query_selector("#tr-table").evaluate_handle("t => t.closest('.card')")
         card.as_element().screenshot(path=f"{out}/desktop-traffic-{scheme}.png")
+        # The Network card: the rendezvous service and how it is doing.
+        pg.wait_for_selector("#rvstatus:not(:empty)", timeout=60000)
+        pg.query_selector("#rvcard").screenshot(path=f"{out}/desktop-rendezvous-{scheme}.png")
         c.close()
         c = ctx(scheme, scale=1)
         pg = c.new_page()

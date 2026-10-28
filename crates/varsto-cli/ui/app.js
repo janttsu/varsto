@@ -3909,7 +3909,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       // The other device shows this device's six words to its person before it lets this one join.
       var words = v.active && v.fingerprint ? "This device's six words: " + v.fingerprint + ". The other device shows the same words before it lets this one join." : "";
       if ($("pairwords").textContent !== words) { $("pairwords").textContent = words; }
-      var msg = !v.active ? "" : v.step === "trying" ? "Trying " + v.address + " …" : v.step === "looking" ? "Looking for the device on the network …" : "";
+      var msg = !v.active ? "" : v.step === "trying" ? "Trying " + v.address + " …" : v.step === "looking" ? "Looking for the device on the network …" : v.step === "rendezvous" ? "Looking for the device through the rendezvous service …" : "";
       if (msg !== shown) { shown = msg; prog.textContent = msg; if (msg) { log(msg.charAt(0).toLowerCase() + msg.slice(1)); } }
     }
     var poll = setInterval(function () { api("GET", "/api/pair/join-status").then(showStep).catch(function () {}); }, 500);
@@ -3923,7 +3923,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var facts = [];
     if (tried.length) { facts.push(["Tried", tried.join("; ")]); }
     facts.push(["Network search", actTr(b.found ? "found the device but could not connect to it" : "nothing answered")]);
-    return dialog({ title: "Could not pair", text: "Could not reach the device showing the code. Check that both devices are on the same Wi-Fi network, that the router does not isolate wireless clients (guest network, client isolation) and that no VPN or firewall is in the way.", facts: facts, cancel: false });
+    return dialog({ title: "Could not pair", text: "Could not reach the device showing the code. Check that the code is still showing and has not expired, that both devices have an internet connection or share a Wi-Fi network, that the router does not isolate wireless clients (guest network, client isolation) and that no VPN or firewall is in the way. Across networks both devices also need to reach the rendezvous service (Peers page).", facts: facts, cancel: false });
   }
   // Adding a device: show the code until the new device has fetched the vault.
   var pairTimer = null;
@@ -3932,7 +3932,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     $("pairbox").classList.remove("hidden"); pairButtons(s.open); $("paircode").textContent = s.open ? s.code : "";
     renderQr($("pairqr"), s.open ? s.uri : "").catch(function () {});
     if (s.open) {
-      $("pairinfo").textContent = "On the new device choose Pair with your other device and type this code. It works once, for " + Math.max(1, Math.ceil(s.expires_in_secs / 60)) + " more minute(s)." + (s.addresses.length ? " If the new device does not find this one, give it the address " + s.addresses.slice(0, 3).join(" or ") + "." : "") + (s.failed_attempts ? " Wrong codes so far: " + s.failed_attempts + " of 3." : "");
+      $("pairinfo").textContent = "On the new device choose Pair with your other device and type this code. It works once, for " + Math.max(1, Math.ceil(s.expires_in_secs / 60)) + " more minute(s)." + (s.rendezvous ? " It works on the same network and across the internet (rendezvous)." : "") + (s.addresses.length ? " If the new device does not find this one, give it the address " + s.addresses.slice(0, 3).join(" or ") + "." : "") + (s.failed_attempts ? " Wrong codes so far: " + s.failed_attempts + " of 3." : "");
       return;
     }
     if (pairTimer) { clearInterval(pairTimer); pairTimer = null; }
@@ -4136,6 +4136,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       var nat = p.listen ? ("NAT: " + (p.nat || "unknown") + ". " + ((p.public || []).length ? "Public address " + p.public.join(", ") + ". " : "No public address observed. ") + (p.reachable ? "Reachable from the internet; this device relays for the others." : "Not reachable directly" + ((p.relays || []).length ? "; registered with relay " + p.relays.join(", ") + "." : "; no relay yet.")) + (p.cert_sha256 ? " Certificate " + p.cert_sha256.slice(0, 16) + "." : "")) : "";
       $("p2pnat").textContent = nat;
       $("p2pmap").textContent = p.listen ? portmapText(p.portmap) : "";
+      renderRendezvous(p.rendezvous, p.config && p.config.rendezvous);
       var paths = p.paths || [];
       var tb = $("p2ppaths").querySelector("tbody"); tb.innerHTML = "";
       $("p2ppaths").classList.toggle("hidden", !paths.length);
@@ -4146,6 +4147,37 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       });
     }).catch(function () {});
   }
+  // The rendezvous card: the state line and the form (not overwritten while it is being edited).
+  function renderRendezvous(r, url) {
+    if (!r) { return; }
+    var on = !!r.enabled, line;
+    if (!on) { line = "Off: devices find each other without the rendezvous service."; }
+    else if (r.state === "unreachable") { line = "Not reachable now; everything else keeps working."; }
+    else if (r.state === "connecting") { line = "Not connected yet."; }
+    else { line = "Connected."; }
+    $("rvstatus").textContent = line;
+    var more = [];
+    if (on && (r.relayed_peers || 0) > 0) { more.push("Relaying " + r.relayed_peers + " connection(s)"); }
+    if (on && r.url) { more.push("Service: " + r.url); }
+    if (on && r.observed) { more.push("Seen from the internet as " + r.observed); }
+    if (on && r.clock_skew && Math.abs(r.clock_skew) > 30) { more.push("This device's clock differs from the service's by " + Math.abs(r.clock_skew) + " s: set the clock right"); }
+    if (on && r.last_error && r.state === "unreachable") { more.push("Last problem: " + r.last_error); }
+    $("rvobs").textContent = more.join(" · ");
+    var f = $("rvform");
+    if (!f.contains(document.activeElement)) {
+      f.rendezvous_on.checked = on;
+      f.rendezvous_url.value = r.url || r.default_url || "";
+      f.rendezvous_url.disabled = !on;
+    }
+  }
+  $("rvform").rendezvous_on.onchange = function () { $("rvform").rendezvous_url.disabled = !this.checked; };
+  $("rvform").onsubmit = function (ev) {
+    ev.preventDefault(); var d = formData(ev.target);
+    api("POST", "/api/p2p", { rendezvous_on: !!d.rendezvous_on, rendezvous_url: d.rendezvous_url || "" }).then(function () { log("rendezvous service saved"); document.activeElement.blur(); loadP2p(); }).catch(function (e) { alertBox(e.message); });
+  };
+  $("rvdefault").onclick = function () {
+    api("POST", "/api/p2p", { rendezvous_on: true, rendezvous_url: "default" }).then(function () { log("rendezvous service: the default"); document.activeElement.blur(); loadP2p(); }).catch(function (e) { alertBox(e.message); });
+  };
   // "Router port opened via UPnP: 203.0.113.5:17893" or "not available".
   function portmapText(m) {
     if (!m || !m.state) { return ""; }

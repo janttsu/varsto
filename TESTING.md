@@ -27,6 +27,8 @@ Varsto is tested in layers. The goal is that cheaper AI systems and scripts can 
 
 The matrix is defined in [tests/matrix.yaml](tests/matrix.yaml).
 
+The rendezvous service ([docs/rendezvous.md](docs/rendezvous.md)) is tested in three places. `crates/varsto-rendezvous/tests` runs the server in process (`Server::spawn_for_tests`) against the core client. The core's integration tests (next to `tests/nat.rs`) run two engines in one process against that server: record publish, fetch and merge, observed address, punch coordination, relayed fetch, relayed pairing, and "service unreachable: LAN and storages still work". The interface side is covered by the translation test (`interface_translations_cover_the_page`, every new string in fi and sv), the API shape test for `/api/p2p` (`rendezvous` and the `rendezvous_on` / `rendezvous_url` settings) and `node --check crates/varsto-cli/ui/app.js`. The screenshot fixtures (`scripts/screenshots/example_data.py`) show the rendezvous card and a peer `relayed via rendezvous` with the invented address `https://rv.example.org`. Lab scenarios run the service on the lab host with the two devices behind two NAT networks; any scenario that must work without it runs with the service off.
+
 ## Running tests (Linux)
 
 ### Rust (levels 1 and 2, no VM needed)

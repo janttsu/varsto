@@ -1920,7 +1920,23 @@
   "Error:": "Virhe:",
   "no reason given": "syytä ei kerrottu",
   "1 video failed": "1 video epäonnistui",
-  "Remove the job?": "Poistetaanko työ?"
+  "Remove the job?": "Poistetaanko työ?",
+  "Rendezvous service": "Kohtaamispalvelu",
+  "A small meeting point that helps your devices find each other across networks, get through routers together and, as a last resort, relay their connection, which stays end-to-end encrypted. It sees random-looking tags and network addresses, never your files, names or keys. Without it everything still works on the local network and through your storages.": "Pieni kohtaamispaikka, joka auttaa laitteitasi löytämään toisensa eri verkkojen välillä, pääsemään reitittimien läpi yhdessä ja viimeisenä keinona välittämään yhteytensä, joka pysyy päästä päähän salattuna. Se näkee satunnaiselta näyttäviä tunnisteita ja verkko-osoitteita, ei koskaan tiedostojasi, nimiäsi tai avaimiasi. Ilman sitä kaikki toimii edelleen paikallisessa verkossa ja tallennuspaikkojesi kautta.",
+  "Use the rendezvous service": "Käytä kohtaamispalvelua",
+  "Service address": "Palvelun osoite",
+  "Use the default": "Käytä oletusta",
+  "Works on the same network and across the internet (rendezvous).": "Toimii samassa verkossa ja internetin yli (kohtaamispalvelu).",
+  "If this address does not work, Varsto tries the other addresses of the QR code, looks for the device on the network and then asks the rendezvous service, which also finds a device on another network.": "Jos tämä osoite ei toimi, Varsto kokeilee QR-koodin muita osoitteita, etsii laitetta verkosta ja kysyy sitten kohtaamispalvelulta, joka löytää laitteen myös toisesta verkosta.",
+  "Your devices send blocks to each other directly when they can, on the same network or over the internet, and fall back to the storages when they cannot. The Peers page shows how each device is reached and how fast data moves. The rendezvous service helps devices on different networks find each other, pair with a code and, when nothing direct works, relay their encrypted connection; it can be turned off or replaced by your own on the Peers page.": "Laitteesi lähettävät lohkoja suoraan toisilleen, kun se onnistuu, samassa verkossa tai internetin yli, ja turvautuvat tallennuspaikkoihin, kun ei onnistu. Laitteet-sivu näyttää, miten kukin laite tavoitetaan ja kuinka nopeasti tieto liikkuu. Kohtaamispalvelu auttaa eri verkoissa olevia laitteita löytämään toisensa, yhdistämään koodilla ja, kun mikään suora yhteys ei toimi, välittämään salatun yhteytensä; sen voi kytkeä pois tai korvata omalla Laitteet-sivulla.",
+  "Looking for the device through the rendezvous service …": "Etsitään laitetta kohtaamispalvelun kautta …",
+  "Could not reach the device showing the code. Check that the code is still showing and has not expired, that both devices have an internet connection or share a Wi-Fi network, that the router does not isolate wireless clients (guest network, client isolation) and that no VPN or firewall is in the way. Across networks both devices also need to reach the rendezvous service (Peers page).": "Koodin näyttävään laitteeseen ei saatu yhteyttä. Tarkista, että koodi on yhä näkyvissä eikä ole vanhentunut, että molemmilla laitteilla on internetyhteys tai ne ovat samassa Wi-Fi-verkossa, ettei reititin eristä langattomia laitteita toisistaan (vierasverkko, asiakaseristys) ja ettei VPN tai palomuuri ole tiellä. Verkkojen välillä molempien laitteiden on myös tavoitettava kohtaamispalvelu (Laitteet-sivu).",
+  "It works on the same network and across the internet (rendezvous).": "Se toimii samassa verkossa ja internetin yli (kohtaamispalvelu).",
+  "Off: devices find each other without the rendezvous service.": "Pois: laitteet löytävät toisensa ilman kohtaamispalvelua.",
+  "Not reachable now; everything else keeps working.": "Ei tavoitettavissa nyt; kaikki muu toimii edelleen.",
+  "Not connected yet.": "Ei yhteyttä vielä.",
+  "Connected.": "Yhdistetty.",
+  "via rendezvous": "kohtaamispalvelun kautta"
  },
  "patterns": [
   [
@@ -2714,6 +2730,26 @@
   [
    "^Remove the YouTube job (.+)\\? Folder (.+) keeps every video; files in the spool that were not stored yet stay there\\.$",
    "Poistetaanko YouTube-työ $1? Kansio $2 säilyttää kaikki videot; välihakemiston tiedostot, joita ei ole vielä tallennettu, jäävät sinne."
+  ],
+  [
+   "^Service: (.+)$",
+   "Palvelu: $1"
+  ],
+  [
+   "^Seen from the internet as (.+)$",
+   "Näkyy internetiin osoitteella $1"
+  ],
+  [
+   "^Relaying (\\d+) connection\\(s\\)$",
+   "Välittää $1 yhteyttä"
+  ],
+  [
+   "^This device's clock differs from the service's by (\\d+) s: set the clock right$",
+   "Tämän laitteen kello poikkeaa palvelun kellosta $1 s: aseta kello oikein"
+  ],
+  [
+   "^Last problem: (.+)$",
+   "Viimeisin ongelma: $1"
   ]
  ],
  "parts": [
