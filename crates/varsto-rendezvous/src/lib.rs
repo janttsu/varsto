@@ -23,6 +23,7 @@ pub mod http;
 pub mod limits;
 pub mod registry;
 pub mod relay;
+pub mod selftest;
 pub mod udp;
 
 use anyhow::{Context, Result};
@@ -58,6 +59,23 @@ pub struct Config {
     pub max_controls_per_ip: usize,
     /// Most relay sessions at once.
     pub max_relays: usize,
+    /// Bytes per second all relay sessions together may move (0: no cap).
+    pub relay_total_rate: u64,
+    /// Relay bytes one tag may move per `relay_tag_window` (0: no cap).
+    pub relay_tag_bytes: u64,
+    pub relay_tag_window: std::time::Duration,
+    /// A control connection that lets this many messages drop because it
+    /// does not read them is closed.
+    pub control_drop_max: u32,
+    /// How often the server pings a control connection (proxies close
+    /// connections that stay silent).
+    pub control_ping: std::time::Duration,
+    /// How long open connections get to finish on shutdown.
+    pub grace: std::time::Duration,
+    /// How often the totals are logged at info level (zero: never).
+    pub stats_every: std::time::Duration,
+    /// How often expired slots, relay tokens and rate buckets are swept.
+    pub sweep_every: std::time::Duration,
 }
 
 impl Default for Config {
@@ -75,6 +93,14 @@ impl Default for Config {
             max_controls: 50_000,
             max_controls_per_ip: 32,
             max_relays: 1_000,
+            relay_total_rate: 32 << 20,
+            relay_tag_bytes: 4 << 30,
+            relay_tag_window: std::time::Duration::from_secs(3600),
+            control_drop_max: 16,
+            control_ping: std::time::Duration::from_secs(30),
+            grace: std::time::Duration::from_secs(5),
+            stats_every: std::time::Duration::from_secs(600),
+            sweep_every: std::time::Duration::from_secs(30),
         }
     }
 }

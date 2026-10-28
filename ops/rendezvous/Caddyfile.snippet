@@ -1,0 +1,21 @@
+# Caddy in front of varsto-rendezvous (docs/rendezvous.md). WebSockets
+# (the control channel and the relay) pass through reverse_proxy as they are.
+#
+# Under a path of an existing site; clients use https://example.org/rv
+example.org {
+	handle_path /rv/* {
+		reverse_proxy 127.0.0.1:8790 {
+			# Idle WebSockets are kept alive by the server's pings; give Caddy
+			# time to close the old connections on a reload.
+			stream_close_delay 10s
+		}
+	}
+	# ... the rest of the site
+}
+
+# Or on a host name of its own; clients use https://rv.example.org
+#rv.example.org {
+#	reverse_proxy 127.0.0.1:8790 {
+#		stream_close_delay 10s
+#	}
+#}

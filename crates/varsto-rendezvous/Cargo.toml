@@ -29,6 +29,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "net", "sync", "time"
 base64 = "0.22"
 log = { version = "0.4", features = ["std"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [dev-dependencies]
 ureq = "3"
