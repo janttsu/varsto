@@ -154,6 +154,7 @@ jobs:
           cp target/x86_64-unknown-linux-musl/release/varsto-rendezvous dist/rendezvous/varsto-rendezvous-linux-x86_64
           file dist/rendezvous/varsto-rendezvous-linux-x86_64
           dist/rendezvous/varsto-rendezvous-linux-x86_64 --version
+          dist/rendezvous/varsto-rendezvous-linux-x86_64 --self-test
       - uses: actions/upload-artifact@v4
         with:
           name: rendezvous-linux

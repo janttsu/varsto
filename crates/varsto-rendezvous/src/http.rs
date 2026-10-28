@@ -9,7 +9,7 @@ use crate::proto::{
     self, DeleteSlot, ErrorAnswer, ErrorCode, Health, Info, Lookup, PutSlot, ToClient, Token,
 };
 use crate::registry::Registry;
-use crate::relay::{RelayTable, Side, SpliceLimits};
+use crate::relay::{Caps, RelayTable, Side, SpliceLimits, TagBytes, Throttle};
 use crate::udp::Observed;
 use crate::Config;
 use anyhow::{Context, Result};
@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 /// Counters for `/health`.
 #[derive(Debug, Default)]
@@ -35,6 +35,12 @@ pub struct Counters {
     pub udp_answered: AtomicU64,
     pub refused: AtomicU64,
     pub rate_limited: AtomicU64,
+    /// Control messages dropped because the connection did not read.
+    pub control_dropped: AtomicU64,
+    /// Control connections closed for not reading.
+    pub control_slow: AtomicU64,
+    /// Relay sessions ended by a spent tag quota.
+    pub quota_stopped: AtomicU64,
 }
 
 /// The state every route shares. Locks are std mutexes held for a few
@@ -47,7 +53,15 @@ pub struct Shared {
     pub observed: Mutex<Observed>,
     pub limiter: Arc<dyn RateLimit>,
     pub counters: Counters,
-    senders: Mutex<HashMap<SessionId, mpsc::Sender<ToClient>>>,
+    /// The global relay rate, when capped.
+    pub throttle: Option<Throttle>,
+    /// Relay bytes per tag and window.
+    pub tag_bytes: TagBytes,
+    shutdown: watch::Sender<bool>,
+    /// Per-process salt for the hashed addresses of debug logs.
+    salt: [u8; 16],
+    /// Control connections' queues, and how many messages each lost.
+    senders: Mutex<HashMap<SessionId, (mpsc::Sender<ToClient>, u32)>>,
     waiting: Mutex<HashMap<u64, (Side, oneshot::Sender<DuplexStream>)>>,
     next_session: AtomicU64,
     started: Instant,
@@ -97,13 +111,55 @@ impl Shared {
     }
 
     fn deliver(&self, out: Vec<(SessionId, ToClient)>) {
-        let senders = self.senders.lock().unwrap();
+        let mut senders = self.senders.lock().unwrap();
+        let mut slow = Vec::new();
         for (id, m) in out {
-            if let Some(tx) = senders.get(&id) {
-                // A connection that does not read its messages loses them.
-                let _ = tx.try_send(m);
+            if let Some((tx, lost)) = senders.get_mut(&id) {
+                // A connection that does not read its messages loses them,
+                // and is closed once it has lost too many.
+                if tx.try_send(m).is_err() {
+                    *lost += 1;
+                    self.counters
+                        .control_dropped
+                        .fetch_add(1, Ordering::Relaxed);
+                    if *lost > self.cfg.control_drop_max {
+                        slow.push(id);
+                    }
+                }
             }
         }
+        for id in slow {
+            // Dropping the sender ends the connection's loop.
+            if senders.remove(&id).is_some() {
+                self.counters.control_slow.fetch_add(1, Ordering::Relaxed);
+                log::debug!("control {id} closed: not reading");
+            }
+        }
+    }
+
+    /// A short, salted hash for debug logs (never the address itself).
+    fn hash_ip(&self, ip: IpAddr) -> String {
+        let mut k = [0u8; 32];
+        k[..16].copy_from_slice(&self.salt);
+        let mut h = blake3::Hasher::new_keyed(&k);
+        h.update(&crate::limits::ip_key(ip));
+        hex::encode(&h.finalize().as_bytes()[..4])
+    }
+
+    /// Ask every open connection to finish.
+    pub fn begin_shutdown(&self) {
+        let _ = self.shutdown.send(true);
+    }
+
+    /// The totals as one log line (no tags, no addresses).
+    pub fn stats_line(&self) -> String {
+        format!(
+            "stats {} dropped={} slow_closed={} quota_stopped={}",
+            self.health().line(),
+            self.counters.control_dropped.load(Ordering::Relaxed),
+            self.counters.control_slow.load(Ordering::Relaxed),
+            self.counters.quota_stopped.load(Ordering::Relaxed),
+        )
     }
 }
 
@@ -146,6 +202,10 @@ pub async fn bind(cfg: Config) -> Result<Bound> {
         observed: Mutex::new(Observed::default()),
         limiter: Arc::new(Buckets::new(cfg.rates.clone())),
         counters: Counters::default(),
+        throttle: (cfg.relay_total_rate > 0).then(|| Throttle::new(cfg.relay_total_rate)),
+        tag_bytes: TagBytes::new(cfg.relay_tag_bytes, cfg.relay_tag_window),
+        shutdown: watch::channel(false).0,
+        salt: proto::random_token(),
         senders: Mutex::new(HashMap::new()),
         waiting: Mutex::new(HashMap::new()),
         next_session: AtomicU64::new(1),
@@ -170,15 +230,33 @@ impl Bound {
             tokio::spawn(udp_loop(udp, shared.clone()));
         }
         tokio::spawn(sweeper(shared.clone()));
-        let app = router(shared);
-        let served = axum::serve(
+        let app = router(shared.clone());
+        let mut down = shared.shutdown.subscribe();
+        let serve = axum::serve(
             self.listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .with_graceful_shutdown(stop)
-        .await;
-        if let Err(e) = served {
-            log::error!("http server: {e}");
+        .with_graceful_shutdown(async move {
+            let _ = down.wait_for(|v| *v).await;
+        });
+        // After the stop signal open connections are asked to finish and get
+        // `grace` to do so; then the server stops anyway.
+        let stopper = {
+            let shared = shared.clone();
+            async move {
+                stop.await;
+                log::info!("shutting down");
+                shared.begin_shutdown();
+                tokio::time::sleep(shared.cfg.grace).await;
+            }
+        };
+        tokio::select! {
+            r = serve => {
+                if let Err(e) = r {
+                    log::error!("http server: {e}");
+                }
+            }
+            () = stopper => log::info!("grace period over, closing"),
         }
     }
 }
@@ -404,11 +482,23 @@ async fn control_session(shared: Arc<Shared>, ip: IpAddr, mut socket: WebSocket)
         .open(id, ip, challenge, udp_token, unix_now());
     shared.observed.lock().unwrap().register(udp_token);
     let (tx, mut rx) = mpsc::channel::<ToClient>(64);
-    shared.senders.lock().unwrap().insert(id, tx);
+    shared.senders.lock().unwrap().insert(id, (tx, 0));
+    log::debug!("control {} opened from {}", id, shared.hash_ip(ip));
     let idle = Duration::from_secs(proto::CONTROL_IDLE_SECS);
+    let mut down = shared.shutdown.subscribe();
+    let mut ping = tokio::time::interval(shared.cfg.control_ping.max(Duration::from_millis(50)));
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ping.tick().await;
     if send_json(&mut socket, &first).await {
         loop {
             tokio::select! {
+                _ = down.changed() => {
+                    let _ = socket.send(Message::Close(None)).await;
+                    break;
+                }
+                _ = ping.tick() => {
+                    if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break; }
+                }
                 m = tokio::time::timeout(idle, socket.recv()) => {
                     let text = match m {
                         Ok(Some(Ok(Message::Text(t)))) => t,
@@ -444,6 +534,7 @@ async fn control_session(shared: Arc<Shared>, ip: IpAddr, mut socket: WebSocket)
     if let Some(s) = closed {
         shared.observed.lock().unwrap().unregister(&s.udp_token);
     }
+    log::debug!("control {id} closed");
 }
 
 fn handle_control(
@@ -465,6 +556,19 @@ fn handle_control(
                     id: Some(*n),
                     error: ErrorCode::RateLimited,
                     message: String::new(),
+                },
+            )];
+        }
+    }
+    if let ToServer::Relay { id: n, tag, .. } = &msg {
+        if shared.tag_bytes.exhausted(&tag.0, now) {
+            shared.counters.rate_limited.fetch_add(1, Ordering::Relaxed);
+            return vec![(
+                id,
+                ToClient::Error {
+                    id: Some(*n),
+                    error: ErrorCode::RateLimited,
+                    message: "relay quota of this vault is used up for now".into(),
                 },
             )];
         }
@@ -528,12 +632,13 @@ async fn relay(
 
 /// Pump a WebSocket's binary frames to and from a byte stream; returns the
 /// other end of that stream.
-fn ws_stream(mut socket: WebSocket) -> DuplexStream {
+fn ws_stream(mut socket: WebSocket, mut down: watch::Receiver<bool>) -> DuplexStream {
     let (mut ours, theirs) = tokio::io::duplex(proto::MAX_RELAY_FRAME * 2);
     tokio::spawn(async move {
         let mut buf = vec![0u8; proto::MAX_RELAY_FRAME];
         loop {
             tokio::select! {
+                _ = down.changed() => break,
                 m = socket.recv() => match m {
                     Some(Ok(Message::Binary(b))) => {
                         if ours.write_all(&b).await.is_err() { break; }
@@ -556,7 +661,7 @@ fn ws_stream(mut socket: WebSocket) -> DuplexStream {
 }
 
 async fn relay_side(shared: Arc<Shared>, session: u64, side: Side, socket: WebSocket) {
-    let stream = ws_stream(socket);
+    let stream = ws_stream(socket, shared.shutdown.subscribe());
     // The first side to arrive waits for the other; the second splices.
     let waiter = {
         let mut w = shared.waiting.lock().unwrap();
@@ -587,7 +692,24 @@ async fn relay_side(shared: Arc<Shared>, session: u64, side: Side, socket: WebSo
         } else {
             (other, stream)
         };
-        crate::relay::splice(a, b, lim, &shared.counters.relay_bytes).await;
+        let (tag, now) = (
+            shared.relays.lock().unwrap().tag_of(session),
+            Instant::now(),
+        );
+        let quota = tag.map(|t| shared.tag_bytes.cell(&t, now));
+        let caps = Caps {
+            total: shared.throttle.as_ref(),
+            quota: quota.as_deref(),
+        };
+        let (ab, ba) =
+            crate::relay::splice_with(a, b, lim, &shared.counters.relay_bytes, caps).await;
+        if quota.as_deref().is_some_and(|q| q.exhausted()) {
+            shared
+                .counters
+                .quota_stopped
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        log::debug!("relay session ended: {} bytes", ab + ba);
     }
     shared.relays.lock().unwrap().finish(session);
 }
@@ -621,9 +743,16 @@ async fn udp_loop(sock: Arc<tokio::net::UdpSocket>, shared: Arc<Shared>) {
 }
 
 async fn sweeper(shared: Arc<Shared>) {
-    let mut tick = tokio::time::interval(Duration::from_secs(30));
+    let mut tick = tokio::time::interval(shared.cfg.sweep_every.max(Duration::from_millis(50)));
+    let mut last_stats = Instant::now();
     loop {
         tick.tick().await;
+        shared.tag_bytes.prune(Instant::now());
+        let every = shared.cfg.stats_every;
+        if !every.is_zero() && last_stats.elapsed() >= every {
+            last_stats = Instant::now();
+            log::info!("{}", shared.stats_line());
+        }
         let gone = shared.registry.lock().unwrap().expire(unix_now());
         shared.relays.lock().unwrap().expire(Instant::now());
         shared.limiter.prune(Instant::now());

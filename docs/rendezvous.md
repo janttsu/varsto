@@ -64,7 +64,7 @@ keeps nothing on disk, logs no tags or addresses, and has no accounts.
 
 The server is one static binary, `varsto-rendezvous` (Linux x86_64, in the
 daily build as `varsto-daily-rendezvous-linux-x86_64`). It keeps everything
-in memory. It needs:
+in memory and writes nothing to disk. It needs:
 
 - one TCP port on loopback for HTTP and WebSocket, behind a TLS proxy;
 - one public UDP port for observe requests (default 17893; any free port).
@@ -73,20 +73,105 @@ Clients read the UDP endpoint from `/info`, so it can be any port, but it
 must be the one the internet reaches: when a firewall or NAT maps another
 port, pass it with `--public-udp-addr host:port`.
 
+### Quick install
+
+Download `varsto-daily-rendezvous-linux-x86_64` from the daily page, then on
+the server (any Linux with systemd; the binary has no dependencies):
+
+```
+mkdir -p ~/bin ~/.config/systemd/user
+install -m 755 varsto-daily-rendezvous-linux-x86_64 ~/bin/varsto-rendezvous
+~/bin/varsto-rendezvous --self-test        # must end with "self-test passed"
+```
+
+Then the unit (below), a reverse proxy and the firewall. Only the proxy and
+firewall commands differ by distribution:
+
+**Debian / Ubuntu**
+
+```
+sudo apt install caddy ufw
+sudo ufw allow 17893/udp
+sudo ufw allow 80,443/tcp
+# put the Caddy snippet in /etc/caddy/Caddyfile, then
+sudo systemctl reload caddy
+```
+
+**Fedora**
+
+```
+sudo dnf install caddy firewalld
+sudo firewall-cmd --permanent --add-port=17893/udp
+sudo firewall-cmd --permanent --add-service=http --add-service=https
+sudo firewall-cmd --reload
+# put the Caddy snippet in /etc/caddy/Caddyfile, then
+sudo systemctl enable --now caddy
+```
+
+**Arch**
+
+```
+sudo pacman -S caddy nftables
+# nftables: accept udp dport 17893 in the input chain, for example
+#   sudo nft add rule inet filter input udp dport 17893 accept
+# put the Caddy snippet in /etc/caddy/Caddyfile, then
+sudo systemctl enable --now caddy
+```
+
+The UDP port is not optional for punching and the address check: without it
+devices still pair and sync through the WebSocket relay, but every
+connection goes through your server. Check it from another machine with
+`nc -u -z -w2 rv.example.org 17893` (no error is not proof; the real check
+is a device's `varsto p2p rendezvous status` showing an observed address).
+
 ### Options
+
+Every option can also be set in the environment as `VARSTO_RV_<NAME>` (for
+example `VARSTO_RV_LISTEN`); `ops/rendezvous/varsto-rendezvous.env.example`
+lists them.
 
 ```
 varsto-rendezvous --listen 127.0.0.1:8790 --udp 0.0.0.0:17893 \
     --public-udp-addr rv.example.org:17893 \
-    [--relay-rate 4194304] [--relay-per-tag 4] [--max-relays 1000] [--no-relay] \
+    [--relay-rate 4194304] [--relay-total-rate 33554432] \
+    [--relay-tag-bytes 4294967296] [--relay-idle 300] [--relay-per-tag 4] \
+    [--max-relays 1000] [--no-relay] \
     [--rate-put 60] [--rate-lookup 120] [--rate-coordinate 60] [--rate-udp 600] \
-    [--no-trust-proxy] [--log info]
+    [--rate-control 20] [--rate-tag-put 120] [--rate-tag-lookup 240] \
+    [--max-controls 50000] [--max-controls-per-ip 32] \
+    [--max-slots 200000] [--max-bytes 1073741824] \
+    [--no-trust-proxy] [--grace 5] [--log info] [--stats-every 600]
+varsto-rendezvous --self-test
 ```
+
+What the limits do (per minute unless stated; the defaults suit a public
+service and are far above what a household needs):
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--rate-put`, `--rate-lookup` | 60, 120 | writes and lookups per client address |
+| `--rate-tag-put`, `--rate-tag-lookup` | 120, 240 | the same per vault tag, so one vault cannot starve the rest |
+| `--rate-control` | 20 | control connections opened per address |
+| `--rate-coordinate` | 60 | punch and relay requests per address (and per tag) |
+| `--rate-udp` | 600 | observe datagrams per address |
+| `--relay-rate` | 4 MiB/s | bytes per second per relay session and direction (`0` turns the relay off) |
+| `--relay-total-rate` | 32 MiB/s | bytes per second over all relay sessions together (`0`: no cap) |
+| `--relay-tag-bytes` | 4 GiB | relay bytes one vault may move per hour (`0`: no cap) |
+| `--relay-idle` | 300 s | a session that moves nothing either way ends |
+| `--relay-per-tag`, `--max-relays` | 4, 1000 | sessions at once per vault and in all |
+| `--max-controls`, `--max-controls-per-ip` | 50000, 32 | open control connections |
+| `--max-slots`, `--max-bytes` | 200000, 1 GiB | memory bounds of the registry; past them new slots are refused `unavailable` |
+
+IPv6 clients are counted by their /64. A refused request is answered `429`
+(`rate_limited`); clients wait and try again, and everything they need keeps
+working from the local network and the storages meanwhile.
 
 ### systemd user unit
 
 Run it as an unprivileged user (`loginctl enable-linger <user>` so it starts
-at boot without a login). `~/.config/systemd/user/varsto-rendezvous.service`:
+at boot without a login). The unit is
+`ops/rendezvous/varsto-rendezvous.service`; install it as
+`~/.config/systemd/user/varsto-rendezvous.service`:
 
 ```ini
 [Unit]
@@ -95,18 +180,29 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=%h/bin/varsto-rendezvous --listen 127.0.0.1:8790 --udp 0.0.0.0:17893 --public-udp-addr rv.example.org:17893
+ExecStart=%h/bin/varsto-rendezvous
+EnvironmentFile=-%h/.config/varsto-rendezvous.env
+KillSignal=SIGTERM
+TimeoutStopSec=15
 Restart=always
 RestartSec=2
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=65536
 MemoryMax=1536M
 
 [Install]
 WantedBy=default.target
 ```
+
+Put your options in `~/.config/varsto-rendezvous.env` (copy
+`ops/rendezvous/varsto-rendezvous.env.example`; at least
+`VARSTO_RV_PUBLIC_UDP_ADDR`). Then:
 
 ```
 systemctl --user daemon-reload
@@ -114,12 +210,19 @@ systemctl --user enable --now varsto-rendezvous
 journalctl --user -u varsto-rendezvous -f
 ```
 
-Open the UDP port in the firewall (for example `ufw allow 17893/udp`).
+`systemctl --user stop` sends SIGTERM: the server stops accepting, tells
+every open connection to close and exits when they have, or after
+`--grace` seconds (5). Devices notice, reconnect after a few seconds and
+write their records again; nothing is lost that a restart does not restore
+within minutes.
 
 ### Caddy
 
 Every route works with and without the `/rv` prefix, so either form works.
-WebSockets pass through `reverse_proxy` as they are.
+WebSockets pass through `reverse_proxy` as they are; the server pings its
+control connections every 30 s, which keeps proxies with short idle timeouts
+from cutting them (Caddy's default needs no change). The snippets are in
+`ops/rendezvous/Caddyfile.snippet`.
 
 Under a path of an existing site:
 
@@ -146,17 +249,109 @@ Clients then use `https://rv.example.org`.
 
 The server takes the client address from the last `X-Forwarded-For` entry
 only when the connection comes from loopback (the proxy on the same host);
-`--no-trust-proxy` turns that off.
+`--no-trust-proxy` turns that off. Behind a proxy on another host, either
+run the server on that proxy's host or accept that all clients share the
+proxy's address for rate limiting.
+
+### Firewall
+
+| Port | Protocol | Open to | For |
+| --- | --- | --- | --- |
+| 443 (and 80 for certificates) | TCP | everyone | the proxy: HTTP, the control WebSocket and the relay |
+| 17893, or your `--udp` port | UDP | everyone | observe datagrams and hole-punch coordination |
+| 8790, or your `--listen` port | TCP | nobody (loopback only) | the proxy's upstream |
+
+If the UDP port is forwarded from another port (a cloud security group, a
+router), pass the outside port in `--public-udp-addr`.
 
 ### Checking it
 
 ```
+varsto-rendezvous --self-test
 curl -s https://rv.example.org/info
 curl -s https://rv.example.org/health
 ```
 
-`/health` answers one line of counters, for example
+`--self-test` starts a private server on loopback and plays two devices
+against it (register, lookup, a refused overwrite, observe, claims, a relayed
+stream, health); it proves the binary works on this machine, not the proxy
+or the firewall. `/info` shows what clients will use (the `udp` endpoints,
+`relay`, the limits). `/health` answers one line of counters, for example
 `ok v=1 up=3600 tags=12 slots=31 pair=0 control=29 relays=1 relay_bytes=81234 udp=4410 refused=3 limited=0`.
+From a device, `varsto p2p rendezvous status` shows whether it is
+connected and which address the server observed.
+
+### Logs
+
+Logs go to stderr (journald), one line each, without timestamps of their
+own. At the default `info` level they are:
+
+- the start (version, listen and UDP addresses) and the stop;
+- a totals line every 10 minutes (`--stats-every`): the `/health` counters
+  plus `dropped` (control messages lost to connections that do not read),
+  `slow_closed` (those connections closed) and `quota_stopped` (relay
+  sessions ended by the hourly per-vault quota).
+
+They never contain a tag, a slot, a key or an address. `--log debug` also
+logs when control connections open and close and how many bytes a relay
+session carried; a connection is identified there by a salted hash of its
+address that changes at every restart. Use it to find out whether a problem
+is yours, then turn it off again.
+
+### What the operator can see
+
+Everything under "Privacy: what the server sees" above, and nothing more. In
+practice: `/health` gives totals only; the process can list, in memory,
+which addresses belong to one vault tag and when they talk to each other
+(that is inherent in a meeting point), but it cannot read any record, name
+or key. There is no database to leak and no log to subpoena beyond the
+totals lines. If you run a service for other people, say so in plain words
+to them; the paragraph above is a good start.
+
+### Memory and capacity
+
+Everything is in memory with a hard bound:
+
+- a slot costs its sealed record (usually 1 to 2 kB, at most 64 kB) plus
+  about 200 bytes; `--max-slots` and `--max-bytes` stop growth (refused
+  `unavailable`). A vault with 5 devices is 5 slots; peer records expire
+  after 48 h without a refresh;
+- an open control connection costs a few tens of kB (socket buffers and a
+  64-message queue); `--max-controls` bounds them. Each device holds one
+  while its service runs;
+- a relay session buffers up to 128 kB per direction;
+- rate-limit buckets are capped at 200 000 and pruned every minute.
+
+Measured by the load test (`cargo test -p varsto-rendezvous --test load --
+--ignored`): 10 000 slots of 1 kB, 1 000 held control connections and 50
+concurrent relay sessions grew the resident memory of one process holding
+both the server and all the test clients by 83 MiB. A server for a few
+hundred vaults runs happily in 128 MiB; the 1.5 GiB in the unit is a
+ceiling, not an expectation.
+
+Bandwidth is the real cost, and only for relayed connections: the caps above
+(4 MiB/s per session, 32 MiB/s in all, 4 GiB per vault and hour) bound it.
+Most connections never relay; they are direct, or punched through with the
+server only coordinating.
+
+### Upgrading
+
+The service is stateless, so an upgrade is a restart:
+
+```
+install -m 755 varsto-daily-rendezvous-linux-x86_64 ~/bin/varsto-rendezvous.new
+~/bin/varsto-rendezvous.new --self-test && mv ~/bin/varsto-rendezvous.new ~/bin/varsto-rendezvous
+systemctl --user restart varsto-rendezvous
+curl -s https://rv.example.org/info
+```
+
+(`mv` over the running binary is safe; the old process keeps its inode.)
+Connected devices reconnect within seconds (5 s, then up to 5 min if the
+service stays away) and republish their records; relayed sessions in
+flight are cut and the apps retry through the route list. The wire format is
+versioned (`v` in every message); a server answers an unknown version with
+`version`, and old and new apps keep working against a newer server because
+fields are only ever added. If you roll back, no data has to be migrated.
 
 <!-- U: a "troubleshooting" section once the client shows rendezvous state
      (unreachable, clock off by more than five minutes, relay off). -->

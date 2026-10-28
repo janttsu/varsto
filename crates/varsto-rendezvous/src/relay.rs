@@ -7,6 +7,7 @@
 use crate::proto::{self, ErrorCode, Tag, Token};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -114,6 +115,11 @@ impl RelayTable {
         }
     }
 
+    /// The tag a session was created under.
+    pub fn tag_of(&self, session: u64) -> Option<Tag> {
+        self.sessions.get(&session).copied()
+    }
+
     /// Sessions created and not finished.
     pub fn active(&self) -> usize {
         self.sessions.len()
@@ -123,6 +129,127 @@ impl RelayTable {
     pub fn has_tag(&self, tag: &Tag) -> bool {
         self.per_tag.contains_key(tag)
     }
+}
+
+/// A byte-rate cap shared by many sessions (the global relay cap): each
+/// caller reserves the time its bytes take at `rate` and sleeps for it.
+#[derive(Debug)]
+pub struct Throttle {
+    rate: u64,
+    /// When the shared pipe is free again.
+    free_at: Mutex<Option<Instant>>,
+}
+
+impl Throttle {
+    /// `rate` bytes per second (use `Option<Throttle>` for "no cap").
+    pub fn new(rate: u64) -> Throttle {
+        Throttle {
+            rate: rate.max(1),
+            free_at: Mutex::new(None),
+        }
+    }
+
+    /// Reserve `n` bytes: how long to wait before sending them. At most a
+    /// quarter second of burst is credited to an idle pipe.
+    pub fn reserve(&self, n: u64, now: Instant) -> Duration {
+        let cost = Duration::from_secs_f64(n as f64 / self.rate as f64);
+        let mut free = self.free_at.lock().unwrap_or_else(|e| e.into_inner());
+        let floor = now.checked_sub(Duration::from_millis(250)).unwrap_or(now);
+        let start = free.map_or(floor, |f| f.max(floor));
+        *free = Some(start + cost);
+        start.saturating_duration_since(now)
+    }
+}
+
+/// The relay bytes one tag may move per window (an hour): shared by all
+/// the tag's sessions, so a vault cannot use the relay as a file host.
+#[derive(Debug)]
+pub struct Quota {
+    used: AtomicU64,
+    limit: u64,
+}
+
+impl Quota {
+    pub fn used(&self) -> u64 {
+        self.used.load(Ordering::Relaxed)
+    }
+    pub fn exhausted(&self) -> bool {
+        self.limit > 0 && self.used() >= self.limit
+    }
+    pub fn add(&self, n: u64) {
+        self.used.fetch_add(n, Ordering::Relaxed);
+    }
+}
+
+/// Per-tag byte quotas in windows.
+#[derive(Debug)]
+pub struct TagBytes {
+    limit: u64,
+    window: Duration,
+    cells: Mutex<HashMap<Tag, (Instant, Arc<Quota>)>>,
+}
+
+impl TagBytes {
+    /// `limit` bytes per tag per `window`; 0 turns the quota off.
+    pub fn new(limit: u64, window: Duration) -> TagBytes {
+        TagBytes {
+            limit,
+            window,
+            cells: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn fresh(&self) -> Arc<Quota> {
+        Arc::new(Quota {
+            used: AtomicU64::new(0),
+            limit: self.limit,
+        })
+    }
+
+    /// The tag's quota in the current window.
+    pub fn cell(&self, tag: &Tag, now: Instant) -> Arc<Quota> {
+        let mut m = self.cells.lock().unwrap_or_else(|e| e.into_inner());
+        let e = m.entry(*tag).or_insert_with(|| (now, self.fresh()));
+        if now.saturating_duration_since(e.0) >= self.window {
+            *e = (now, self.fresh());
+        }
+        e.1.clone()
+    }
+
+    /// Whether `tag` has used up its window.
+    pub fn exhausted(&self, tag: &Tag, now: Instant) -> bool {
+        if self.limit == 0 {
+            return false;
+        }
+        let m = self.cells.lock().unwrap_or_else(|e| e.into_inner());
+        match m.get(tag) {
+            Some((at, q)) => now.saturating_duration_since(*at) < self.window && q.exhausted(),
+            None => false,
+        }
+    }
+
+    /// Forget finished windows.
+    pub fn prune(&self, now: Instant) {
+        let mut m = self.cells.lock().unwrap_or_else(|e| e.into_inner());
+        m.retain(|_, (at, _)| now.saturating_duration_since(*at) < self.window);
+    }
+
+    pub fn len(&self) -> usize {
+        self.cells.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Caps shared beyond one session; both optional.
+#[derive(Clone, Copy, Default)]
+pub struct Caps<'a> {
+    /// The byte rate of all relay sessions together.
+    pub total: Option<&'a Throttle>,
+    /// The tag's byte quota; a session ends when it runs out.
+    pub quota: Option<&'a Quota>,
 }
 
 /// Limits of one spliced session.
@@ -146,6 +273,7 @@ async fn pump<R, W>(
     counter: &AtomicU64,
     epoch: Instant,
     last: &AtomicU64,
+    caps: Caps<'_>,
 ) -> u64
 where
     R: AsyncRead + Unpin,
@@ -176,6 +304,18 @@ where
         last.store(epoch.elapsed().as_millis() as u64, Ordering::Relaxed);
         total += n as u64;
         counter.fetch_add(n as u64, Ordering::Relaxed);
+        if let Some(q) = caps.quota {
+            q.add(n as u64);
+            if q.exhausted() {
+                break;
+            }
+        }
+        if let Some(t) = caps.total {
+            let wait = t.reserve(n as u64, Instant::now());
+            if !wait.is_zero() {
+                tokio::time::sleep(wait).await;
+            }
+        }
         if lim.rate > 0 {
             // Sleep until the average since the start is back under the cap.
             let due = Duration::from_secs_f64(total as f64 / lim.rate as f64);
@@ -199,13 +339,28 @@ where
     A: AsyncRead + AsyncWrite + Unpin,
     B: AsyncRead + AsyncWrite + Unpin,
 {
+    splice_with(a, b, lim, counter, Caps::default()).await
+}
+
+/// [`splice`] with the global rate and the tag's byte quota.
+pub async fn splice_with<A, B>(
+    a: A,
+    b: B,
+    lim: SpliceLimits,
+    counter: &AtomicU64,
+    caps: Caps<'_>,
+) -> (u64, u64)
+where
+    A: AsyncRead + AsyncWrite + Unpin,
+    B: AsyncRead + AsyncWrite + Unpin,
+{
     let (ar, aw) = tokio::io::split(a);
     let (br, bw) = tokio::io::split(b);
     let epoch = Instant::now();
     let last = AtomicU64::new(0);
     tokio::join!(
-        pump(ar, bw, lim, counter, epoch, &last),
-        pump(br, aw, lim, counter, epoch, &last)
+        pump(ar, bw, lim, counter, epoch, &last, caps),
+        pump(br, aw, lim, counter, epoch, &last, caps)
     )
 }
 
@@ -324,5 +479,95 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn the_global_throttle_serialises_reservations() {
+        let t = Throttle::new(1000);
+        let now = Instant::now();
+        // The first 250 ms of credit pass at once, then each reservation
+        // waits for those before it.
+        assert_eq!(t.reserve(100, now), Duration::ZERO);
+        let w = t.reserve(1000, now);
+        assert!(w < Duration::from_millis(1), "{w:?}");
+        let w2 = t.reserve(1000, now);
+        assert!(
+            w2 >= Duration::from_millis(800) && w2 <= Duration::from_millis(1000),
+            "{w2:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_global_cap_slows_sessions_together() {
+        let thr = Throttle::new(100_000);
+        let started = Instant::now();
+        let mut jobs = Vec::new();
+        for _ in 0..2 {
+            let thr = &thr;
+            jobs.push(async move {
+                let (mut a_client, a_server) = tokio::io::duplex(1 << 16);
+                let (mut b_client, b_server) = tokio::io::duplex(1 << 16);
+                let counter = AtomicU64::new(0);
+                let caps = Caps {
+                    total: Some(thr),
+                    quota: None,
+                };
+                let sp = splice_with(a_server, b_server, lim(), &counter, caps);
+                let talk = async {
+                    a_client.write_all(&vec![1u8; 50_000]).await.unwrap();
+                    a_client.shutdown().await.unwrap();
+                    let mut got = Vec::new();
+                    b_client.read_to_end(&mut got).await.unwrap();
+                    assert_eq!(got.len(), 50_000);
+                    b_client.shutdown().await.unwrap();
+                };
+                tokio::join!(sp, talk);
+            });
+        }
+        futures_join(jobs).await;
+        // 100 kB through a 100 kB/s pipe shared by two sessions.
+        assert!(
+            started.elapsed() >= Duration::from_millis(600),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    async fn futures_join<F: std::future::Future<Output = ()>>(jobs: Vec<F>) {
+        let mut it = jobs.into_iter();
+        let (a, b) = (it.next().unwrap(), it.next().unwrap());
+        tokio::join!(a, b);
+    }
+
+    #[tokio::test]
+    async fn a_spent_tag_quota_ends_the_session() {
+        let tb = TagBytes::new(10_000, Duration::from_secs(3600));
+        let now = Instant::now();
+        let q = tb.cell(&[1; 16], now);
+        let (mut a_client, a_server) = tokio::io::duplex(1 << 16);
+        let (mut b_client, b_server) = tokio::io::duplex(1 << 16);
+        let counter = AtomicU64::new(0);
+        let caps = Caps {
+            total: None,
+            quota: Some(&q),
+        };
+        let sp = splice_with(a_server, b_server, lim(), &counter, caps);
+        let talk = async {
+            a_client.write_all(&vec![1u8; 40_000]).await.unwrap();
+            let mut got = Vec::new();
+            // The relay stops copying once the quota is spent.
+            b_client.read_to_end(&mut got).await.unwrap();
+            assert!(got.len() < 40_000, "{}", got.len());
+            drop(a_client);
+        };
+        tokio::join!(sp, talk);
+        assert!(tb.exhausted(&[1; 16], now));
+        assert!(!tb.exhausted(&[2; 16], now));
+        // A new window starts afresh, and old windows are pruned.
+        let later = now + Duration::from_secs(3601);
+        assert!(!tb.exhausted(&[1; 16], later));
+        assert_eq!(tb.cell(&[1; 16], later).used(), 0);
+        tb.prune(later + Duration::from_secs(3601));
+        assert!(tb.is_empty());
     }
 }
