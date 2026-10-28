@@ -58,7 +58,7 @@ def one(art: pathlib.Path, pattern: str) -> pathlib.Path:
         assembled = [h for h in hits if "downloads" in h.relative_to(art).parts]
         if assembled:
             hits = assembled[:1]
-        elif len({sha256_of(h) for h in hits}) == 1:
+        elif len({sha256(h) for h in hits}) == 1:
             hits = hits[:1]
     if len(hits) != 1:
         sys.exit(f"expected exactly one {pattern} below {art}, found {[str(h) for h in hits]}")

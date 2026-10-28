@@ -141,7 +141,7 @@ jobs:
           path: |
             website/public/downloads/varsto-*-x86_64-unknown-linux-musl.tar.gz
           if-no-files-found: error
-      # RENDEZVOUS (spec 83, integrator: review). The rendezvous server as a
+      # The rendezvous server (spec 83) as a
       # static musl binary, for the lead to deploy; the daily set carries it as
       # varsto-daily-rendezvous-linux-x86_64 (scripts/daily-assemble.py). Same
       # C compiler settings as website/build-release.sh uses for musl.

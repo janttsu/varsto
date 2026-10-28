@@ -5251,7 +5251,7 @@ fn run(cli: &Cli) -> Result<()> {
                         // One line a script reads before it starts the other side.
                         println!(
                             "{}",
-                            serde_json::json!({"code": st.code, "port": st.port, "addresses": st.addresses})
+                            serde_json::json!({"code": st.code, "port": st.port, "addresses": st.addresses, "link": st.link().to_uri()?})
                         );
                         use std::io::Write as _;
                         let _ = std::io::stdout().flush();

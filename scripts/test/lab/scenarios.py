@@ -971,6 +971,46 @@ def s_rv_pair():
     run("vl-work", "rm -rf ~/rvjoin", check_rc=False)
 
 
+@scenario("rendezvous-pair-link")
+def s_rv_pair_link():
+    """Spec 51 and 83.9, the link path: the laptop offers and prints its pairing link; the
+    link carries the offer's rendezvous token (`rv=`) and, the lab's server not being the
+    default, the server's address (`rvu=`). A new device in the office whose environment
+    names no rendezvous at all opens the link: it finds the offer by the token at the
+    server the link names and pairs through the relay; both show the same six words."""
+    run("vl-laptop", "pkill -f 'varsto pair offer'", check_rc=False)
+    run("vl-laptop", f"{ENV} {RV_ENV} nohup varsto --json pair offer --yes > ~/rvlink.log 2>&1 &")
+    link = None
+    for _ in range(30):
+        m = re.search(r'"link":"(varsto://pair\?[^"]+)"', run("vl-laptop", "cat ~/rvlink.log").stdout)
+        if m:
+            link = m.group(1)
+            break
+        time.sleep(0.5)
+    check(link, "no pairing link: " + run("vl-laptop", "cat ~/rvlink.log").stdout[-300:])
+    CTX["rv_link"] = re.sub(r"c=\d+", "c=<code>", link)
+    check(re.search(r"[?&]rv=[0-9a-f]{32}(&|$)", link), f"no rv= token in {link}")
+    check(f"rvu={lab.RENDEZVOUS}" in link, f"no rvu={lab.RENDEZVOUS} in {link}")
+    # Without the token the offer is still in the link, without rvu= it would be at the
+    # default service: the joiner knows only what the link says.
+    time.sleep(3)  # the offer registers in the background
+    run("vl-work", "rm -rf ~/rvjoin", check_rc=False)
+    t0 = time.time()
+    out = run("vl-work", f"{ENV} env -u VARSTO_RENDEZVOUS VARSTO_RENDEZVOUS_PLAIN_HTTP=1 "
+                         f"varsto --home ~/rvjoin pair join --name office-link --code {shlex.quote(link)} 2>&1",
+              check_rc=False).stdout
+    CTX["rv_link_secs"] = round(time.time() - t0, 1)
+    check("joined vault" in out, out[-600:])
+    check("rendezvous" in out, "the join did not go through the rendezvous: " + out[-600:])
+    joiner = re.search(r"This device's six words: (.+)", out)
+    time.sleep(1)
+    offer = run("vl-laptop", "cat ~/rvlink.log").stdout
+    asked = re.search(r"office-link asks to join\. Its six words: (.+)", offer)
+    check(joiner and asked and joiner.group(1).split() == asked.group(1).split(),
+          f"the six words differ: {joiner and joiner.group(1)!r} vs {asked and asked.group(1)!r}")
+    run("vl-work", "rm -rf ~/rvjoin", check_rc=False)
+
+
 @scenario("rendezvous-down")
 def s_rv_down():
     """Spec 83.1, additive: with the rendezvous stopped the services say `unreachable` and
@@ -3546,7 +3586,7 @@ SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, 
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_approval_flow, s_recovery_escrow, s_member_removal,
              s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop,
-             s_rv_setup, s_rv_symmetric, s_rv_udp_blocked, s_rv_pair, s_rv_down, s_share, s_disks,
+             s_rv_setup, s_rv_symmetric, s_rv_udp_blocked, s_rv_pair, s_rv_pair_link, s_rv_down, s_share, s_disks,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale, s_format3_scale,
              s_backup, s_gc_settling, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_mailbox_offline_disk,
              s_scrub, s_restic, s_ledger_loss, s_ledger_withhold, s_ledger_rollback, s_rollback_warning,
@@ -3573,7 +3613,7 @@ REQUIRED = {"reset", "init-and-s3-through-nat", "pair-over-lan", "sync-to-second
             "offline-approve-then-flush",
             # the rendezvous service (spec 83)
             "rendezvous-setup", "rendezvous-symmetric-nat-without-peer-relay", "rendezvous-relay-when-udp-is-blocked",
-            "rendezvous-pair-across-networks", "rendezvous-down"}
+            "rendezvous-pair-across-networks", "rendezvous-pair-link", "rendezvous-down"}
 
 
 def self_check():
