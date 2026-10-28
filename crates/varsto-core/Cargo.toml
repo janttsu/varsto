@@ -39,7 +39,7 @@ ml-kem = "0.3.2"
 x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 ureq = "3"
 hmac = "0.12"
-zstd = "0.13"
+zstd = "0.14"
 base64 = "0.22"
 # QR codes for invitations: encode (SVG, terminal) and decode camera frames.
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
@@ -57,6 +57,12 @@ md-5 = "0.10"
 blake2 = "0.10"
 postcard = { version = "1", default-features = false, features = ["use-std"]}
 smallvec = { version = "1.13", features = ["serde", "union"] }
+# Rendezvous service (spec 83): the control channel and the relay stream are
+# WebSockets. Blocking tungstenite without its TLS features: TLS is our own
+# rustls (ring) with the roots ureq already uses. The same version as the
+# server's axum, so one copy in the lock file.
+tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+webpki-roots = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -71,3 +77,6 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32
 tempfile.workspace = true
 # Integration tests stand in a software key for a FIDO2 authenticator.
 varsto-core = { path = ".", features = ["software-key"] }
+# The rendezvous tests run the real server in-process (it links only the
+# wire formats of this crate, by `#[path]`, so there is no cycle).
+varsto-rendezvous = { path = "../varsto-rendezvous" }

@@ -116,6 +116,8 @@ fn a_share_through_qr_links() {
     let pair = Link::Pair {
         code: "123456789".into(),
         addresses: vec!["192.168.1.20:41234".into()],
+        rendezvous: Some([0x5a; 16]),
+        rendezvous_url: None,
     };
     report("pairing", "123-456-789", &pair);
 }

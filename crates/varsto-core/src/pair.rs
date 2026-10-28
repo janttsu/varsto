@@ -180,7 +180,71 @@ pub struct OfferStatus {
     pub paired_with: Option<String>,
     /// Why the offer closed, if it closed without pairing.
     pub closed_reason: Option<String>,
+    /// The offer is registered at the rendezvous service and its control
+    /// connection is up: it works across networks (section 83.9).
+    pub rendezvous: bool,
+    /// The token of the link's `rv=` parameter (hex), while the offer uses
+    /// the rendezvous.
+    pub rendezvous_token: Option<String>,
+    /// The rendezvous base URL the offer is registered at, when it is not
+    /// the default service: the link's `rvu=` parameter (section 51).
+    pub rendezvous_url: Option<String>,
 }
+
+impl OfferStatus {
+    /// The pairing link of this offer (code, addresses, `rv=` token).
+    pub fn link(&self) -> crate::qr::Link {
+        crate::qr::Link::Pair {
+            code: self.code.clone(),
+            addresses: self.addresses.clone(),
+            rendezvous: self
+                .rendezvous_token
+                .as_deref()
+                .and_then(crate::rendezvous::keys::parse_token),
+            rendezvous_url: self
+                .rendezvous_token
+                .as_ref()
+                .and(self.rendezvous_url.clone()),
+        }
+    }
+}
+
+/// A pairing connection: TCP from the LAN, or a session relayed by the
+/// rendezvous service (section 83.7). The exchange is the same on both.
+pub trait PairStream: Read + Write + Send {
+    /// Read and write timeouts of the stream.
+    fn set_timeouts(&self, read: Option<Duration>, write: Option<Duration>) -> std::io::Result<()>;
+}
+
+impl PairStream for TcpStream {
+    fn set_timeouts(&self, read: Option<Duration>, write: Option<Duration>) -> std::io::Result<()> {
+        self.set_nonblocking(false)?;
+        self.set_read_timeout(read)?;
+        self.set_write_timeout(write)
+    }
+}
+
+impl PairStream for crate::rendezvous::RelayStream {
+    fn set_timeouts(
+        &self,
+        read: Option<Duration>,
+        _write: Option<Duration>,
+    ) -> std::io::Result<()> {
+        self.set_read_timeout(read)
+    }
+}
+
+/// The `rvu=` value of a pairing link for an offer registered at `url`:
+/// `None` for the default service (a link stays as short as it can be and
+/// readable by every client), the URL without a trailing slash otherwise.
+pub fn url_for_link(url: Option<&str>) -> Option<String> {
+    let u = url?.trim().trim_end_matches('/');
+    let default = crate::rendezvous::proto::DEFAULT_URL.trim_end_matches('/');
+    (!u.eq_ignore_ascii_case(default)).then(|| u.to_string())
+}
+
+/// The exchange an offer runs on each connection.
+type Exchange = dyn Fn(Box<dyn PairStream>, &str) -> Result<String, Attempt> + Send;
 
 struct OfferInner {
     status: OfferStatus,
@@ -196,10 +260,13 @@ impl Offer {
     /// An offer whose discovery answers to `rendezvous(digits)` and whose
     /// connections run `exchange` (`Offer::start_v3`). Discovery is best
     /// effort: when the UDP port is taken the offer still works through a
-    /// typed address.
+    /// typed address. With `rv` (a rendezvous base URL) the offer is also
+    /// registered there in the background (section 83.9) and a joiner
+    /// elsewhere reaches it through the relay; nothing waits for it.
     fn start_with(
         rendezvous: &dyn Fn(&str) -> String,
-        exchange: impl Fn(TcpStream, &str) -> Result<String, Attempt> + Send + 'static,
+        rv: Option<&str>,
+        exchange: impl Fn(Box<dyn PairStream>, &str) -> Result<String, Attempt> + Send + 'static,
     ) -> Result<Offer> {
         let code = new_code();
         let digits = normalize(&code)?;
@@ -209,20 +276,36 @@ impl Offer {
         // Every usable interface address, the one most likely reachable
         // first (spec section 68); the interface shows the first and the
         // pairing link carries them all.
-        let addresses = crate::netif::candidates()
+        let addresses: Vec<String> = crate::netif::candidates()
             .into_iter()
             .map(|c| format!("{}:{port}", c.ip))
             .collect();
+        let rv_url_given = rv;
+        let rv = rv.and_then(|url| match crate::rendezvous::RvClient::new(url) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                log::warn!("pairing: rendezvous {url} not used: {e:#}");
+                None
+            }
+        });
+        let token = rv
+            .as_ref()
+            .map(|_| crate::rendezvous::proto::random_token());
+        // A joiner asks the default service unless the link names another.
+        let rv_url = url_for_link(rv_url_given);
         let inner = Arc::new(Mutex::new(OfferInner {
             status: OfferStatus {
                 open: true,
                 code,
                 port,
-                addresses,
+                addresses: addresses.clone(),
                 expires_in_secs: OFFER_TTL.as_secs(),
                 failed_attempts: 0,
                 paired_with: None,
                 closed_reason: None,
+                rendezvous: false,
+                rendezvous_token: token.map(hex::encode),
+                rendezvous_url: rv_url.filter(|_| token.is_some()),
             },
             expires: Instant::now() + OFFER_TTL,
         }));
@@ -233,11 +316,20 @@ impl Offer {
                 .name("pair-discovery".into())
                 .spawn(move || answer_queries(sock, &rv, port, &stop))?;
         }
+        let (relayed_tx, relayed_rx) = std::sync::mpsc::channel();
+        if let (Some(rv), Some(token)) = (rv, token) {
+            let (inner, stop, digits) = (inner.clone(), stop.clone(), digits.clone());
+            std::thread::Builder::new()
+                .name("pair-rendezvous".into())
+                .spawn(move || {
+                    rendezvous_offer(&rv, &digits, token, addresses, &inner, &stop, relayed_tx)
+                })?;
+        }
         {
             let (inner, stop) = (inner.clone(), stop.clone());
             std::thread::Builder::new()
                 .name("pair-offer".into())
-                .spawn(move || serve(listener, &digits, &exchange, &inner, &stop))?;
+                .spawn(move || serve(listener, relayed_rx, &digits, &exchange, &inner, &stop))?;
         }
         Ok(Offer { inner, stop })
     }
@@ -307,8 +399,9 @@ fn answer_queries(sock: UdpSocket, rv: &str, port: u16, stop: &AtomicBool) {
 
 fn serve(
     listener: TcpListener,
+    relayed: std::sync::mpsc::Receiver<crate::rendezvous::RelayStream>,
     digits: &str,
-    exchange: &dyn Fn(TcpStream, &str) -> Result<String, Attempt>,
+    exchange: &Exchange,
     inner: &Mutex<OfferInner>,
     stop: &AtomicBool,
 ) {
@@ -324,12 +417,16 @@ fn serve(
             close(Some("expired"), None);
             return;
         }
-        let stream = match listener.accept() {
-            Ok((s, _)) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(200));
-                continue;
-            }
+        // A joiner on the LAN, or one elsewhere through the rendezvous relay.
+        let stream: Box<dyn PairStream> = match listener.accept() {
+            Ok((s, _)) => Box::new(s),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => match relayed.try_recv() {
+                Ok(s) => Box::new(s),
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(200));
+                    continue;
+                }
+            },
             Err(_) => continue,
         };
         match exchange(stream, digits) {
@@ -356,6 +453,134 @@ fn serve(
             Err(Attempt::Broken) => {}
         }
     }
+}
+
+/// Keep an offer at the rendezvous service while it is open (section
+/// 83.9): register it under the link token and the code's tag (sealed
+/// addresses, an ephemeral owner key), hold a control connection with both
+/// claimed so a joiner elsewhere can ask for a relay, hand every relayed
+/// session to the offer's loop, and withdraw it when the offer closes. A
+/// code tag another offer holds is skipped (the link token still works).
+/// Every failure is logged; the LAN side of the offer never waits for this.
+fn rendezvous_offer(
+    rv: &crate::rendezvous::RvClient,
+    digits: &str,
+    token: crate::rendezvous::Token,
+    addresses: Vec<String>,
+    inner: &Mutex<OfferInner>,
+    stop: &AtomicBool,
+    relayed: std::sync::mpsc::Sender<crate::rendezvous::RelayStream>,
+) {
+    use crate::rendezvous::{keys, now, proto, Control, RelayStream};
+    let log = |what: &str| log::info!("pairing: rendezvous {what}");
+    let owner = keys::ephemeral_owner();
+    let expires = now() + OFFER_TTL.as_secs();
+    let mut addrs = addresses;
+    addrs.truncate(proto::MAX_OFFER_ADDRS);
+    let offer = proto::PairOffer {
+        v: proto::VERSION,
+        addrs,
+        expires,
+        relay: true,
+    };
+    // The token tag first: it is random and never taken.
+    let mut tags = Vec::new();
+    for (what, k) in [
+        ("link token", keys::pair_token_keys(&token, digits)),
+        ("code", keys::pair_code_keys(digits)),
+    ] {
+        if stop.load(Ordering::SeqCst) {
+            return;
+        }
+        let k = match k {
+            Ok(k) => k,
+            Err(e) => {
+                log(&format!("{what}: {e:#}"));
+                continue;
+            }
+        };
+        let put = match k.seal(&offer) {
+            Ok(blob) => proto::PutSlot::sign(
+                proto::Kind::Pair,
+                k.tag,
+                proto::PAIR_SLOT,
+                &owner,
+                now(),
+                OFFER_TTL.as_secs() as u32,
+                blob,
+            ),
+            Err(e) => {
+                log(&format!("{what}: {e:#}"));
+                continue;
+            }
+        };
+        match rv.put(&put) {
+            Ok(_) => tags.push(k.tag),
+            Err(e) => log(&format!("offer not registered by {what}: {e}")),
+        }
+    }
+    if tags.is_empty() {
+        return;
+    }
+    let withdraw = |tags: &[crate::rendezvous::Tag]| {
+        for t in tags {
+            let d = proto::DeleteSlot::sign(*t, proto::PAIR_SLOT, &owner, now());
+            if let Err(e) = rv.delete(&d) {
+                log::debug!("pairing: rendezvous offer not withdrawn: {e}");
+            }
+        }
+    };
+    let set_on = |on: bool| inner.lock().unwrap().status.rendezvous = on;
+    let mut wait = Duration::from_secs(5);
+    while !stop.load(Ordering::SeqCst) && now() < expires {
+        let run = || -> Result<()> {
+            let mut c = Control::open(rv.base())?;
+            let claims = tags
+                .iter()
+                .map(|t| c.claim(*t, proto::PAIR_SLOT, &owner))
+                .collect();
+            let w = c.hello(claims, Duration::from_secs(5))?;
+            if w.claimed.is_empty() {
+                bail!("the rendezvous took no claim of the offer");
+            }
+            set_on(true);
+            log("offer registered; it works across networks");
+            let mut last_ping = Instant::now();
+            while !stop.load(Ordering::SeqCst) && now() < expires {
+                if last_ping.elapsed() >= Duration::from_secs(25) {
+                    last_ping = Instant::now();
+                    c.send(&proto::ToServer::Ping { id: 1 })?;
+                }
+                if let Some(proto::ToClient::RelayOffer { token, tag, .. }) =
+                    c.recv(Duration::from_millis(300))?
+                {
+                    if !tags.contains(&tag.0) {
+                        continue;
+                    }
+                    match RelayStream::open(rv.base(), &token.0) {
+                        Ok(s) => {
+                            log("a device asks through the relay");
+                            let _ = relayed.send(s);
+                        }
+                        Err(e) => log(&format!("relay not taken: {e:#}")),
+                    }
+                }
+            }
+            c.close();
+            Ok(())
+        };
+        if let Err(e) = run() {
+            set_on(false);
+            log(&format!("control connection: {e:#}"));
+            let until = Instant::now() + wait;
+            while Instant::now() < until && !stop.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            wait = (wait * 2).min(Duration::from_secs(60));
+        }
+    }
+    set_on(false);
+    withdraw(&tags);
 }
 
 enum Attempt {
@@ -525,6 +750,20 @@ pub enum Step {
     Trying(SocketAddr),
     /// No address worked (or none was given): searching the local network.
     Looking,
+    /// Nothing on this network: looking the offer up at the rendezvous
+    /// service (section 83.9).
+    Rendezvous,
+    /// The offer's addresses did not answer: pairing through the
+    /// rendezvous relay.
+    RendezvousRelay,
+}
+
+/// An offer the rendezvous service holds for a code.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RvFound {
+    /// The tag it was found under (the link token's or the code's).
+    pub tag: crate::rendezvous::Tag,
+    pub offer: crate::rendezvous::PairOffer,
 }
 
 /// The network side of joining, so that the order of attempts can be tested.
@@ -533,6 +772,29 @@ pub trait Connector {
     fn fetch(&self, code: &str, keys: &v3::JoinKeys<'_>, addr: SocketAddr) -> Result<Bundle>;
     fn discover(&self, code: &str, timeout: Duration) -> Result<Vec<SocketAddr>>;
     fn own_interfaces(&self) -> Vec<crate::netif::Iface>;
+    /// Whether a rendezvous service is to be asked at all.
+    fn has_rendezvous(&self) -> bool {
+        false
+    }
+    /// Look the offer up at the rendezvous: by the link's token first, then
+    /// by the code. `Ok(None)`: it holds no offer for them.
+    fn rendezvous(
+        &self,
+        _code: &str,
+        _token: Option<&crate::rendezvous::Token>,
+    ) -> Result<Option<RvFound>> {
+        Ok(None)
+    }
+    /// Run the exchange through the rendezvous relay with the offer found
+    /// under `found.tag`.
+    fn fetch_relayed(
+        &self,
+        _code: &str,
+        _keys: &v3::JoinKeys<'_>,
+        _found: &RvFound,
+    ) -> Result<Bundle> {
+        bail!("no rendezvous")
+    }
 }
 
 /// The real network.
@@ -550,6 +812,94 @@ impl Connector for Lan {
     }
     fn own_interfaces(&self) -> Vec<crate::netif::Iface> {
         crate::netif::interfaces()
+    }
+}
+
+/// The real network with a rendezvous service (section 83.9): the LAN as
+/// [`Lan`], then the offer looked up at the service and its relay.
+pub struct Net {
+    pub rendezvous: Option<Arc<crate::rendezvous::RvClient>>,
+}
+
+impl Net {
+    /// The network with the rendezvous at `url` (none: LAN only). A URL
+    /// that does not parse is logged and left out.
+    pub fn new(url: Option<&str>) -> Net {
+        Net {
+            rendezvous: url.and_then(|u| match crate::rendezvous::RvClient::new(u) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    log::warn!("pairing: rendezvous {u} not used: {e:#}");
+                    None
+                }
+            }),
+        }
+    }
+}
+
+impl Connector for Net {
+    fn fetch(&self, code: &str, keys: &v3::JoinKeys<'_>, addr: SocketAddr) -> Result<Bundle> {
+        Lan.fetch(code, keys, addr)
+    }
+    fn discover(&self, code: &str, timeout: Duration) -> Result<Vec<SocketAddr>> {
+        Lan.discover(code, timeout)
+    }
+    fn own_interfaces(&self) -> Vec<crate::netif::Iface> {
+        Lan.own_interfaces()
+    }
+    fn has_rendezvous(&self) -> bool {
+        self.rendezvous.is_some()
+    }
+    fn rendezvous(
+        &self,
+        code: &str,
+        token: Option<&crate::rendezvous::Token>,
+    ) -> Result<Option<RvFound>> {
+        let Some(rv) = &self.rendezvous else {
+            return Ok(None);
+        };
+        let digits = normalize(code)?;
+        Ok(crate::rendezvous::find_pair_offer(rv, &digits, token)?
+            .map(|(k, offer)| RvFound { tag: k.tag, offer }))
+    }
+    fn fetch_relayed(
+        &self,
+        code: &str,
+        keys: &v3::JoinKeys<'_>,
+        found: &RvFound,
+    ) -> Result<Bundle> {
+        use crate::rendezvous::{proto, Control, RelayStream};
+        let rv = self
+            .rendezvous
+            .as_ref()
+            .ok_or_else(|| anyhow!("no rendezvous"))?;
+        let mut c = Control::open(rv.base())?;
+        c.hello(Vec::new(), Duration::from_secs(5))?;
+        c.send(&proto::ToServer::Relay {
+            id: 1,
+            tag: proto::Hex(found.tag),
+            slot: proto::Hex(proto::PAIR_SLOT),
+        })?;
+        let until = Instant::now() + Duration::from_secs(5);
+        let token = loop {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                bail!("the rendezvous did not answer the relay request");
+            }
+            match c.recv(left)? {
+                Some(proto::ToClient::RelayReady { token, .. }) => break token.0,
+                Some(proto::ToClient::Error { error, .. }) => {
+                    bail!("the rendezvous refused the relay: {error}")
+                }
+                _ => {}
+            }
+        };
+        let stream = RelayStream::open(rv.base(), &token)?;
+        c.close();
+        let (mut bundle, key) = v3::fetch_over(code, keys, Box::new(stream))?;
+        bundle.vault_key = key.to_hex();
+        crate::logging::register_secret(&bundle.vault_key);
+        Ok(bundle)
     }
 }
 
@@ -610,6 +960,22 @@ pub fn join(
     progress: &mut dyn FnMut(Step),
     net: &dyn Connector,
 ) -> Result<Bundle> {
+    join_with(code, keys, typed, offered, None, progress, net)
+}
+
+/// `join`, and when the network has a rendezvous service and nothing on
+/// this network answered: the offer looked up there (by the link's
+/// `token` first, then by the code), its addresses tried, and last the
+/// exchange through the rendezvous relay (section 83.9).
+pub fn join_with(
+    code: &str,
+    keys: &v3::JoinKeys<'_>,
+    typed: Option<&str>,
+    offered: &[String],
+    token: Option<&crate::rendezvous::Token>,
+    progress: &mut dyn FnMut(Step),
+    net: &dyn Connector,
+) -> Result<Bundle> {
     normalize(code)?;
     let mut tried: Vec<Tried> = Vec::new();
     let mut seen: Vec<SocketAddr> = Vec::new();
@@ -661,6 +1027,52 @@ pub fn join(
             }
         }
     }
+    if net.has_rendezvous() {
+        progress(Step::Rendezvous);
+        match net.rendezvous(code, token) {
+            Ok(Some(rv)) => {
+                found += 1;
+                let mut addrs: Vec<SocketAddr> = rv
+                    .offer
+                    .addrs
+                    .iter()
+                    .filter_map(|a| a.parse().ok())
+                    .collect();
+                crate::netif::sort_by_reach(&mut addrs, &net.own_interfaces());
+                for a in addrs {
+                    if let Some(b) = attempt(a, progress)? {
+                        return Ok(b);
+                    }
+                }
+                if rv.offer.relay {
+                    progress(Step::RendezvousRelay);
+                    match net.fetch_relayed(code, keys, &rv) {
+                        Ok(b) => return Ok(b),
+                        Err(e) if e.downcast_ref::<WrongCode>().is_some() => return Err(e),
+                        Err(e) if e.downcast_ref::<v3::Declined>().is_some() => return Err(e),
+                        Err(e) => {
+                            log::info!("pairing: rendezvous relay failed: {e:#}");
+                            tried.push(Tried {
+                                what: "the rendezvous relay".into(),
+                                why: why(&e).into(),
+                            });
+                        }
+                    }
+                }
+            }
+            Ok(None) => tried.push(Tried {
+                what: "the rendezvous service".into(),
+                why: "no offer for this code".into(),
+            }),
+            Err(e) => {
+                log::info!("pairing: rendezvous lookup failed: {e:#}");
+                tried.push(Tried {
+                    what: "the rendezvous service".into(),
+                    why: "not reached".into(),
+                });
+            }
+        }
+    }
     Err(NotFound { tried, found }.into())
 }
 
@@ -675,6 +1087,29 @@ pub fn receive_with_progress(
     progress: &mut dyn FnMut(Step),
 ) -> Result<Bundle> {
     join(code, keys, address, offered, progress, &Lan)
+}
+
+/// `receive_with_progress` with the rendezvous service at `rendezvous`
+/// (`rendezvous::for_joining`; `None`: LAN only) and the link's `rv=`
+/// token, if the joiner has the link.
+pub fn receive_with_rendezvous(
+    code: &str,
+    keys: &v3::JoinKeys<'_>,
+    address: Option<&str>,
+    offered: &[String],
+    rendezvous: Option<&str>,
+    token: Option<&crate::rendezvous::Token>,
+    progress: &mut dyn FnMut(Step),
+) -> Result<Bundle> {
+    join_with(
+        code,
+        keys,
+        address,
+        offered,
+        token,
+        progress,
+        &Net::new(rendezvous),
+    )
 }
 
 /// Join: the typed address if any, then the search of the network.
@@ -882,6 +1317,131 @@ mod tests {
         fn own_interfaces(&self) -> Vec<crate::netif::Iface> {
             self.own.clone()
         }
+    }
+
+    /// `FakeNet` with a rendezvous that holds `found` and whose relay
+    /// works when `relay_ok`.
+    struct RvNet {
+        lan: FakeNet,
+        found: Option<RvFound>,
+        relay_ok: bool,
+    }
+
+    impl Connector for RvNet {
+        fn fetch(&self, code: &str, keys: &v3::JoinKeys<'_>, addr: SocketAddr) -> Result<Bundle> {
+            self.lan.fetch(code, keys, addr)
+        }
+        fn discover(&self, code: &str, t: Duration) -> Result<Vec<SocketAddr>> {
+            self.lan.discover(code, t)
+        }
+        fn own_interfaces(&self) -> Vec<crate::netif::Iface> {
+            self.lan.own_interfaces()
+        }
+        fn has_rendezvous(&self) -> bool {
+            true
+        }
+        fn rendezvous(
+            &self,
+            _code: &str,
+            token: Option<&crate::rendezvous::Token>,
+        ) -> Result<Option<RvFound>> {
+            self.lan
+                .log
+                .lock()
+                .unwrap()
+                .push(format!("rendezvous token={}", token.is_some()));
+            Ok(self.found.clone())
+        }
+        fn fetch_relayed(&self, _c: &str, _k: &v3::JoinKeys<'_>, _f: &RvFound) -> Result<Bundle> {
+            self.lan.log.lock().unwrap().push("relay".into());
+            if self.relay_ok {
+                Ok(bundle())
+            } else {
+                Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset).into())
+            }
+        }
+    }
+
+    #[test]
+    fn the_rendezvous_comes_after_the_lan_its_addresses_before_its_relay() {
+        let offer = |addrs: &[&str], relay: bool| RvFound {
+            tag: [1; 16],
+            offer: crate::rendezvous::PairOffer {
+                v: 1,
+                addrs: addrs.iter().map(|s| s.to_string()).collect(),
+                expires: u64::MAX,
+                relay,
+            },
+        };
+        let keys = v3::PairingKeys::generate();
+        let go = |net: &RvNet, token: Option<&crate::rendezvous::Token>| {
+            let mut steps = Vec::new();
+            let r = join_with(
+                "123-456-789",
+                &keys.join_keys("phone"),
+                Some("10.8.0.2:4000"),
+                &[],
+                token,
+                &mut |s| steps.push(s),
+                net,
+            );
+            (r, steps)
+        };
+        // The offer's own address answers (a public one, as with a port
+        // forwarded): no relay.
+        let mut lan = FakeNet::new();
+        lan.good = Some(sa("203.0.113.9:4000"));
+        let net = RvNet {
+            lan,
+            found: Some(offer(&["10.8.0.2:4000", "203.0.113.9:4000"], true)),
+            relay_ok: true,
+        };
+        let (r, steps) = go(&net, Some(&[7; 16]));
+        assert!(r.is_ok());
+        assert_eq!(
+            net.lan.log(),
+            [
+                "fetch 10.8.0.2:4000",
+                "discover",
+                "rendezvous token=true",
+                "fetch 203.0.113.9:4000"
+            ],
+            "typed, LAN search, rendezvous; an address tried already is not tried again"
+        );
+        assert_eq!(steps[1], Step::Looking);
+        assert_eq!(steps[2], Step::Rendezvous);
+        // Nothing answers: the relay.
+        let net = RvNet {
+            lan: FakeNet::new(),
+            found: Some(offer(&["203.0.113.9:4000"], true)),
+            relay_ok: true,
+        };
+        let (r, steps) = go(&net, None);
+        assert!(r.is_ok());
+        assert_eq!(net.lan.log().last().map(String::as_str), Some("relay"));
+        assert_eq!(steps.last(), Some(&Step::RendezvousRelay));
+        // An offer without a control connection is not asked for a relay;
+        // a failed relay and no offer at all are named in the error.
+        for (found, relay_ok, why) in [
+            (Some(offer(&[], false)), true, None),
+            (Some(offer(&[], true)), false, Some("connection closed")),
+            (None, true, Some("no offer for this code")),
+        ] {
+            let net = RvNet {
+                lan: FakeNet::new(),
+                found,
+                relay_ok,
+            };
+            let e = go(&net, None).0.unwrap_err();
+            let nf = e.downcast_ref::<NotFound>().unwrap();
+            match why {
+                Some(w) => assert!(nf.tried.iter().any(|t| t.why == w), "{:?}", nf.tried),
+                None => assert!(!net.lan.log().contains(&"relay".to_string())),
+            }
+        }
+        // Without a rendezvous nothing of it is tried or shown.
+        let (_, steps) = run(&FakeNet::new(), None, &[]);
+        assert!(!steps.contains(&Step::Rendezvous));
     }
 
     fn sa(s: &str) -> SocketAddr {

@@ -12,6 +12,7 @@ artifact; the files are found by pattern, anywhere below). Writes into --out
   varsto-daily-linux-x86_64.tar.gz       varsto-daily-android-debug.apk
   varsto-daily-windows-setup.exe         varsto-daily-macos-apple-silicon.dmg
   varsto-daily-ios-unsigned.ipa          varsto-daily-screenshots.tar.gz
+  varsto-daily-rendezvous-linux-x86_64   (the rendezvous server, static)
   SHA256SUMS                             (unsigned; scripts/sign-daily.sh signs it)
   latest.json                            (what the daily page and daily-sync.py read)
 
@@ -34,6 +35,8 @@ PLATFORMS = [
     ("windows-setup", "Varsto-*-setup.exe", "varsto-daily-windows-setup.exe"),
     ("macos", "Varsto-*-macos.dmg", "varsto-daily-macos-apple-silicon.dmg"),
     ("ios", "Varsto-*-ios-unsigned.ipa", "varsto-daily-ios-unsigned.ipa"),
+    # The rendezvous server (spec 83), for self-hosting and the lead's deploy.
+    ("rendezvous-linux-x86_64", "varsto-rendezvous-linux-x86_64", "varsto-daily-rendezvous-linux-x86_64"),
 ]
 SCREENSHOTS = "varsto-daily-screenshots.tar.gz"
 
@@ -55,7 +58,7 @@ def one(art: pathlib.Path, pattern: str) -> pathlib.Path:
         assembled = [h for h in hits if "downloads" in h.relative_to(art).parts]
         if assembled:
             hits = assembled[:1]
-        elif len({sha256_of(h) for h in hits}) == 1:
+        elif len({sha256(h) for h in hits}) == 1:
             hits = hits[:1]
     if len(hits) != 1:
         sys.exit(f"expected exactly one {pattern} below {art}, found {[str(h) for h in hits]}")

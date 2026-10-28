@@ -71,6 +71,12 @@ BUILD_VM = "vl-build"
 WAN_HOST = "198.51.100.1"
 STUN = [f"{WAN_HOST}:3478", "198.51.100.20:3478"]
 S3 = {"endpoint": f"http://{WAN_HOST}:9900", "key": "vlab-access", "secret": "vlab-secret-key-123"}
+# The rendezvous service on the host (plain HTTP: the devices say
+# VARSTO_RENDEZVOUS_PLAIN_HTTP=1, the lab has no TLS proxy).
+RENDEZVOUS_PORT = 8790
+RENDEZVOUS_UDP = 3334
+RENDEZVOUS = f"http://{WAN_HOST}:{RENDEZVOUS_PORT}"
+RENDEZVOUS_BIN = pathlib.Path(os.environ.get("VARSTO_LAB_RENDEZVOUS_BIN", str(DIR / "bin" / "varsto-rendezvous")))
 
 
 def log(*a):
@@ -366,20 +372,76 @@ def cmd_services(a):
     p = subprocess.Popen([sys.executable, __file__, "stun-serve"], stdout=open(run / "stun.log", "a"),
                          stderr=subprocess.STDOUT, start_new_session=True)
     pids["stun"] = p.pid
+    # The rendezvous service (spec 83) on "the internet", when its binary is
+    # there (`cargo build -p varsto-rendezvous`, copied to RENDEZVOUS_BIN).
+    if RENDEZVOUS_BIN.exists():
+        p = subprocess.Popen([str(RENDEZVOUS_BIN), "--listen", f"{WAN_HOST}:{RENDEZVOUS_PORT}",
+                              "--udp", f"{WAN_HOST}:{RENDEZVOUS_UDP}", "--log", "debug"],
+                             stdout=open(run / "rendezvous.log", "a"), stderr=subprocess.STDOUT,
+                             start_new_session=True)
+        pids["rendezvous"] = p.pid
+        rv_proc = p
+    else:
+        rv_proc = None
+        log(f"no {RENDEZVOUS_BIN}: the rendezvous scenarios will fail")
     (run / "pids.json").write_text(json.dumps(pids))
     time.sleep(1.5)
-    log(f"S3 at {S3['endpoint']} (bucket dirs under {s3dir}), STUN at {WAN_HOST}:3478; pids {pids}")
+    if rv_proc is not None and rv_proc.poll() is not None:
+        log(f"the rendezvous server exited at once (see {run / 'rendezvous.log'}): the rendezvous scenarios will fail")
+    log(f"S3 at {S3['endpoint']} (bucket dirs under {s3dir}), STUN at {WAN_HOST}:3478, "
+        f"rendezvous at {RENDEZVOUS}; pids {pids}")
+
+
+def rendezvous_stop():
+    """Stop only the rendezvous service (the scenario "rendezvous down")."""
+    f = DIR / "run" / "pids.json"
+    if not f.exists():
+        return
+    pids = json.loads(f.read_text())
+    pid = pids.pop("rendezvous", None)
+    if pid:
+        try:
+            os.kill(pid, 15)
+            log(f"stopped rendezvous ({pid})")
+            wait_gone(pid)
+        except ProcessLookupError:
+            pass
+    f.write_text(json.dumps(pids))
+
+
+def wait_gone(pid, secs=15.0):
+    """Wait until a process we stopped is gone (or a zombie), so that the next start
+    finds its ports free: the rendezvous server takes up to its grace period."""
+    end = time.time() + secs
+    while time.time() < end:
+        try:
+            if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                return
+        except ChildProcessError:
+            pass
+        try:
+            with open(f"/proc/{pid}/stat") as st:
+                if st.read().rsplit(")", 1)[1].split()[0] == "Z":
+                    return
+        except (FileNotFoundError, ProcessLookupError, IndexError):
+            return
+        time.sleep(0.2)
+    log(f"process {pid} still there after {secs:.0f} s")
 
 
 def cmd_services_stop(_a):
     f = DIR / "run" / "pids.json"
     if f.exists():
+        stopped = []
         for name, pid in json.loads(f.read_text()).items():
             try:
                 os.kill(pid, 15)
                 log(f"stopped {name} ({pid})")
+                stopped.append(pid)
             except ProcessLookupError:
                 pass
+        for pid in stopped:
+            wait_gone(pid)
         f.unlink()
 
 

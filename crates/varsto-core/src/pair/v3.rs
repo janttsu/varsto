@@ -17,7 +17,7 @@
 
 use super::{
     discover_rv, field, normalize, read_line, session_key, spake_ids, write_line, Attempt, Bundle,
-    Offer, WrongCode, CONNECT_TIMEOUT, IO_TIMEOUT,
+    Offer, PairStream, WrongCode, CONNECT_TIMEOUT, IO_TIMEOUT,
 };
 use crate::crypto::{self, SecretKey, VerifyingKey};
 use crate::kem::{DecapsKey, EncapsKey};
@@ -128,24 +128,35 @@ impl Offer {
     /// the vault key, which goes sealed to the joiner's K8 once `approve`
     /// said yes.
     pub fn start_v3(bundle: Bundle, vault_key: SecretKey, approve: Approve) -> Result<Offer> {
-        Offer::start_with(&rendezvous, move |stream, digits| {
+        Offer::start_v3_with(bundle, vault_key, approve, None)
+    }
+
+    /// `start_v3`, registered at the rendezvous service at `rendezvous`
+    /// too (`rendezvous::configured`; section 83.9) so that a device on
+    /// another network can pair through its relay.
+    pub fn start_v3_with(
+        bundle: Bundle,
+        vault_key: SecretKey,
+        approve: Approve,
+        rendezvous: Option<&str>,
+    ) -> Result<Offer> {
+        Offer::start_with(&self::rendezvous, rendezvous, move |stream, digits| {
             offer_exchange(stream, digits, &bundle, &vault_key, &approve)
         })
     }
 }
 
 fn offer_exchange(
-    stream: TcpStream,
+    stream: Box<dyn PairStream>,
     digits: &str,
     bundle: &Bundle,
     vault_key: &SecretKey,
     approve: &Approve,
 ) -> Result<String, Attempt> {
     let broken = |_| Attempt::Broken;
-    stream.set_nonblocking(false).map_err(broken)?;
-    stream.set_read_timeout(Some(IO_TIMEOUT)).map_err(broken)?;
-    stream.set_write_timeout(Some(IO_TIMEOUT)).map_err(broken)?;
-    let mut w = stream.try_clone().map_err(broken)?;
+    stream
+        .set_timeouts(Some(IO_TIMEOUT), Some(IO_TIMEOUT))
+        .map_err(broken)?;
     let mut r = BufReader::new(stream);
     let hello = read_line(&mut r).map_err(|_| Attempt::Broken)?;
     if hello.get("v").and_then(|v| v.as_u64()) != Some(VERSION) {
@@ -171,7 +182,7 @@ fn offer_exchange(
         .and_then(|k| session_key(&k).ok())
         .ok_or(Attempt::Broken)?;
     write_line(
-        &mut w,
+        r.get_mut(),
         &serde_json::json!({"spake": hex::encode(msg_a), "confirm": confirm(&key, "offer", &tr)}),
     )
     .map_err(|_| Attempt::Broken)?;
@@ -191,7 +202,7 @@ fn offer_exchange(
         kem_pub: k8,
     };
     if !approve(&joiner) {
-        let _ = write_line(&mut w, &serde_json::json!({"error": "declined"}));
+        let _ = write_line(r.get_mut(), &serde_json::json!({"error": "declined"}));
         return Err(Attempt::Declined(name));
     }
     let mut sent = bundle.clone();
@@ -223,8 +234,11 @@ fn offer_exchange(
         &plain,
     )
     .map_err(|_| Attempt::Broken)?;
-    write_line(&mut w, &serde_json::json!({"bundle": hex::encode(sealed)}))
-        .map_err(|_| Attempt::Broken)?;
+    write_line(
+        r.get_mut(),
+        &serde_json::json!({"bundle": hex::encode(sealed)}),
+    )
+    .map_err(|_| Attempt::Broken)?;
     let done = read_line(&mut r).map_err(|_| Attempt::Broken)?;
     if done.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         return Err(Attempt::Broken);
@@ -292,20 +306,29 @@ impl std::error::Error for Declined {}
 
 /// Run the exchange with an offering device: the bundle and the vault key.
 pub fn fetch(code: &str, keys: &JoinKeys<'_>, addr: SocketAddr) -> Result<(Bundle, SecretKey)> {
-    let digits = normalize(code)?;
+    normalize(code)?;
     let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
         .with_context(|| format!("cannot reach {addr}"))?;
+    fetch_over(code, keys, Box::new(stream))
+}
+
+/// `fetch` over a connection that is open already: TCP, or a session the
+/// rendezvous service relays to the offering device (section 83.7).
+pub fn fetch_over(
+    code: &str,
+    keys: &JoinKeys<'_>,
+    stream: Box<dyn PairStream>,
+) -> Result<(Bundle, SecretKey)> {
+    let digits = normalize(code)?;
     // The person at the other device decides; give them time.
-    stream.set_read_timeout(Some(Duration::from_secs(300)))?;
-    stream.set_write_timeout(Some(IO_TIMEOUT))?;
-    let mut w = stream.try_clone()?;
+    stream.set_timeouts(Some(Duration::from_secs(300)), Some(IO_TIMEOUT))?;
     let mut r = BufReader::new(stream);
     let k8 = keys.kem.public().to_bytes();
     let tr = transcript(keys.name, &keys.signing_pub, &k8);
     let (ida, idb) = spake_ids();
     let (spake, msg_b) = Spake2::<Ed25519Group>::start_b(&Password::new(&digits), &ida, &idb);
     write_line(
-        &mut w,
+        r.get_mut(),
         &serde_json::json!({
             "v": VERSION,
             "name": keys.name,
@@ -325,11 +348,11 @@ pub fn fetch(code: &str, keys: &JoinKeys<'_>, addr: SocketAddr) -> Result<(Bundl
         field(&answer, "confirm")?.as_bytes(),
         confirm(&key, "offer", &tr).as_bytes(),
     ) {
-        let _ = write_line(&mut w, &serde_json::json!({"error": "wrong code"}));
+        let _ = write_line(r.get_mut(), &serde_json::json!({"error": "wrong code"}));
         return Err(WrongCode.into());
     }
     write_line(
-        &mut w,
+        r.get_mut(),
         &serde_json::json!({"confirm": confirm(&key, "join", &tr)}),
     )?;
     let reply = read_line(&mut r)?;
@@ -360,7 +383,7 @@ pub fn fetch(code: &str, keys: &JoinKeys<'_>, addr: SocketAddr) -> Result<(Bundl
         }
         bundle.vault_epochs = Some(opened);
     }
-    write_line(&mut w, &serde_json::json!({"ok": true}))?;
+    write_line(r.get_mut(), &serde_json::json!({"ok": true}))?;
     Ok((bundle, vault_key))
 }
 

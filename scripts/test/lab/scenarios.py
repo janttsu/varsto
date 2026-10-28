@@ -53,6 +53,10 @@ LOG_LEVEL = os.environ.get("VARSTO_LOG") or "debug"
 # Secrets travel in the environment, never on the command line: the S3 secret
 # for every command, the vault key per `join` (see v(..., env=)).
 ENV = f"VARSTO_PASSPHRASE={PASS_} VARSTO_NO_INSTALL=1 VARSTO_LOG={shlex.quote(LOG_LEVEL)} VARSTO_S3_SECRET={shlex.quote(lab.S3['secret'])}"
+# The rendezvous service (spec 83) is off in every scenario but its own: those
+# add RV_ENV after ENV (the later assignment wins) to use the lab's server.
+ENV += " VARSTO_RENDEZVOUS=off"
+RV_ENV = f"VARSTO_RENDEZVOUS={lab.RENDEZVOUS} VARSTO_RENDEZVOUS_PLAIN_HTTP=1"
 REPO = pathlib.Path(__file__).resolve().parents[3]
 LOGS_DIR = REPO / "test-results" / "lab" / "logs"
 BUCKET = "vault1"
@@ -740,8 +744,8 @@ def api(vm, method, path, body=None, timeout=900):
         return {"_raw": out}
 
 
-def start_service(vm):
-    run(vm, f"{ENV} nohup varsto service run --interval 15 > ~/svc.log 2>&1 < /dev/null &")
+def start_service(vm, env=""):
+    run(vm, f"{ENV} {env} nohup varsto service run --interval 15 > ~/svc.log 2>&1 < /dev/null &")
     for _ in range(60):
         if run(vm, "test -s ~/.local/share/varsto/service.json", check_rc=False).returncode == 0:
             try:
@@ -846,6 +850,194 @@ def s_p2p_stop():
     for k, val in CTX.items():
         if k.startswith(("p2p_", "nat_")):
             print(f"      {k}: {val}", flush=True)
+
+
+# ----- the rendezvous service (spec 83) -----------------------------------------------------
+
+# The public address each device's router (or the device itself) shows the internet.
+RV_PUBLIC = {"vl-laptop": "198.51.100.11", "vl-desktop": "198.51.100.11", "vl-work": "198.51.100.12",
+             "vl-pub": "198.51.100.20"}
+
+
+def rv_status(vm):
+    return api(vm, "GET", "/api/p2p").get("rendezvous") or {}
+
+
+def rv_wait_on(vms, secs=90):
+    """Every service in `vms` holds its control connection and was observed."""
+    st = {}
+    for _ in range(secs // 3):
+        st = {vm: rv_status(vm) for vm in vms}
+        if all(s.get("state") == "on" and s.get("observed") for s in st.values()):
+            return st
+        time.sleep(3)
+    raise Fail(f"rendezvous not up everywhere: {st}")
+
+
+def rv_services(vms):
+    kill_services(*vms)
+    for vm in vms:
+        start_service(vm, RV_ENV)
+
+
+@scenario("rendezvous-setup")
+def s_rv_setup():
+    """Spec 83.5 and 83.9: with the rendezvous on the lab's internet, the devices of the
+    p2p vault restart their services pointed at it; each holds a control connection, the
+    server observed its QUIC socket at the public address of its router (the cone and the
+    symmetric NAT), and that address leads its peer record's UDP addresses."""
+    check(lab.RENDEZVOUS_BIN.exists(), f"no rendezvous binary at {lab.RENDEZVOUS_BIN}")
+    if "p2p_sha" not in CTX:
+        s_p2p_setup()
+    lab.cmd_services(None)
+    rv_services(lab.DEVICES)
+    st = rv_wait_on(lab.DEVICES)
+    for vm, s in st.items():
+        ip = s["observed"].rsplit(":", 1)[0]
+        check(ip == RV_PUBLIC[vm], f"{vm} observed at {s['observed']}, expected {RV_PUBLIC[vm]}")
+        CTX[f"rv_{vm}"] = {"observed": s["observed"], "slots_seen": s.get("slots_seen")}
+    # The observed address goes first in the record's public UDP addresses.
+    time.sleep(20)
+    for vm in lab.DEVICES:
+        pub = api(vm, "GET", "/api/p2p").get("public") or []
+        check(pub and pub[0] == st[vm]["observed"], f"{vm}: public {pub}, observed {st[vm]['observed']}")
+
+
+@scenario("rendezvous-symmetric-nat-without-peer-relay")
+def s_rv_symmetric():
+    """Spec 83.9 route order: the office device behind the symmetric NAT fetches every block
+    from the laptop behind the cone NAT with the public device (the peer relay) stopped:
+    only a punch the rendezvous coordinates or its relay gets through."""
+    kill_services("vl-pub")
+    try:
+        p2p_pull("vl-work", "rv_symmetric")
+        path = CTX["p2p_rv_symmetric"]["paths"].get("laptop", "")
+        check(path in ("direct", "relayed via rendezvous"), f"work reached the laptop over {path!r}")
+    finally:
+        start_service("vl-pub", RV_ENV)
+
+
+@scenario("rendezvous-relay-when-udp-is-blocked")
+def s_rv_udp_blocked():
+    """Spec 83.7: the office router drops every UDP datagram to the internet (no QUIC, no
+    observe, no punch); the office device still fetches every block from the laptop,
+    through the rendezvous relay, and the Peers status says `relayed via rendezvous`."""
+    kill_services("vl-pub")
+    lab.ssh("vl-roffice", "sudo nft insert rule ip filter forward iifname eth0 oifname eth1 meta l4proto udp drop")
+    try:
+        rv_services(["vl-work"])
+        for _ in range(30):
+            if rv_status("vl-work").get("state") == "on":
+                break
+            time.sleep(3)
+        # "on" is the control connection; the slot claim and /info (whether the server
+        # relays) follow within a moment, and only then is the relay a route. A peer
+        # attempt that started before that ends "unreachable" for its own run.
+        time.sleep(8)
+        p2p_pull("vl-work", "rv_udp_blocked")
+        path = CTX["p2p_rv_udp_blocked"]["paths"].get("laptop", "")
+        check(path == "relayed via rendezvous", f"work reached the laptop over {path!r}")
+        check(rv_status("vl-work").get("relayed_peers", 0) >= 1, f"no relayed peer: {rv_status('vl-work')}")
+    finally:
+        lab.ssh("vl-roffice", "sudo nft -f /etc/nftables.conf")
+        start_service("vl-pub", RV_ENV)
+
+
+@scenario("rendezvous-pair-across-networks")
+def s_rv_pair():
+    """Spec 83.9 pairing: the laptop at home offers; a new device in the office (another
+    network, no address typed, nothing on its LAN) finds the offer through the rendezvous
+    and pairs through its relay; both show the same six words."""
+    run("vl-laptop", "pkill -f 'varsto pair offer'", check_rc=False)
+    run("vl-laptop", f"{ENV} {RV_ENV} nohup varsto pair offer --yes > ~/rvpair.log 2>&1 &")
+    code = None
+    for _ in range(30):
+        m = re.search(r"Pairing code: (\d{3}-\d{3}-\d{3})", run("vl-laptop", "cat ~/rvpair.log").stdout)
+        if m:
+            code = m.group(1)
+            break
+        time.sleep(0.5)
+    check(code, "no pairing code: " + run("vl-laptop", "cat ~/rvpair.log").stdout[-300:])
+    time.sleep(3)  # the offer registers in the background
+    run("vl-work", "rm -rf ~/rvjoin", check_rc=False)
+    t0 = time.time()
+    out = run("vl-work", f"{ENV} {RV_ENV} varsto --home ~/rvjoin pair join --name office-new --code {code} 2>&1",
+              check_rc=False).stdout
+    CTX["rv_pair_secs"] = round(time.time() - t0, 1)
+    check("joined vault" in out, out[-600:])
+    check("rendezvous" in out, "the join did not go through the rendezvous: " + out[-600:])
+    joiner = re.search(r"This device's six words: (.+)", out)
+    time.sleep(1)
+    offer = run("vl-laptop", "cat ~/rvpair.log").stdout
+    asked = re.search(r"office-new asks to join\. Its six words: (.+)", offer)
+    check(joiner and asked and joiner.group(1).split() == asked.group(1).split(),
+          f"the six words differ: {joiner and joiner.group(1)!r} vs {asked and asked.group(1)!r}")
+    run("vl-work", "rm -rf ~/rvjoin", check_rc=False)
+
+
+@scenario("rendezvous-pair-link")
+def s_rv_pair_link():
+    """Spec 51 and 83.9, the link path: the laptop offers and prints its pairing link; the
+    link carries the offer's rendezvous token (`rv=`) and, the lab's server not being the
+    default, the server's address (`rvu=`). A new device in the office whose environment
+    names no rendezvous at all opens the link: it finds the offer by the token at the
+    server the link names and pairs through the relay; both show the same six words."""
+    run("vl-laptop", "pkill -f 'varsto pair offer'", check_rc=False)
+    run("vl-laptop", f"{ENV} {RV_ENV} nohup varsto --json pair offer --yes > ~/rvlink.log 2>&1 &")
+    link = None
+    for _ in range(30):
+        m = re.search(r'"link":"(varsto://pair\?[^"]+)"', run("vl-laptop", "cat ~/rvlink.log").stdout)
+        if m:
+            link = m.group(1)
+            break
+        time.sleep(0.5)
+    check(link, "no pairing link: " + run("vl-laptop", "cat ~/rvlink.log").stdout[-300:])
+    CTX["rv_link"] = re.sub(r"c=\d+", "c=<code>", link)
+    check(re.search(r"[?&]rv=[0-9a-f]{32}(&|$)", link), f"no rv= token in {link}")
+    check(f"rvu={lab.RENDEZVOUS}" in link, f"no rvu={lab.RENDEZVOUS} in {link}")
+    # Without the token the offer is still in the link, without rvu= it would be at the
+    # default service: the joiner knows only what the link says.
+    time.sleep(3)  # the offer registers in the background
+    run("vl-work", "rm -rf ~/rvjoin", check_rc=False)
+    t0 = time.time()
+    out = run("vl-work", f"{ENV} env -u VARSTO_RENDEZVOUS VARSTO_RENDEZVOUS_PLAIN_HTTP=1 "
+                         f"varsto --home ~/rvjoin pair join --name office-link --code {shlex.quote(link)} 2>&1",
+              check_rc=False).stdout
+    CTX["rv_link_secs"] = round(time.time() - t0, 1)
+    check("joined vault" in out, out[-600:])
+    check("rendezvous" in out, "the join did not go through the rendezvous: " + out[-600:])
+    joiner = re.search(r"This device's six words: (.+)", out)
+    time.sleep(1)
+    offer = run("vl-laptop", "cat ~/rvlink.log").stdout
+    asked = re.search(r"office-link asks to join\. Its six words: (.+)", offer)
+    check(joiner and asked and joiner.group(1).split() == asked.group(1).split(),
+          f"the six words differ: {joiner and joiner.group(1)!r} vs {asked and asked.group(1)!r}")
+    run("vl-work", "rm -rf ~/rvjoin", check_rc=False)
+
+
+@scenario("rendezvous-down")
+def s_rv_down():
+    """Spec 83.1, additive: with the rendezvous stopped the services say `unreachable` and
+    nothing else changes: the desktop still fetches every block from the laptop on the LAN,
+    and syncs through the storage still work."""
+    lab.rendezvous_stop()
+    try:
+        st = {}
+        for _ in range(40):
+            st = {vm: rv_status(vm).get("state") for vm in ("vl-laptop", "vl-desktop")}
+            if all(s == "unreachable" for s in st.values()):
+                break
+            time.sleep(3)
+        check(all(s == "unreachable" for s in st.values()), f"rendezvous state with the server stopped: {st}")
+        p2p_pull("vl-desktop", "rv_down")
+        check(CTX["p2p_rv_down"]["paths"].get("laptop", "").startswith("direct"),
+              f"laptop not direct from desktop: {CTX['p2p_rv_down']}")
+        run("vl-laptop", "echo rv-down > ~/data/media/rv-down.txt")
+        api("vl-laptop", "POST", "/api/sync", {"folder": "media"})
+        check(not storages_down("vl-laptop"), f"storages down: {storages_down('vl-laptop')}")
+    finally:
+        lab.cmd_services(None)
+        kill_services(*lab.DEVICES)
 
 
 # ----- two people, one shared folder through S3 ---------------------------------------------
@@ -3397,7 +3589,8 @@ def s_offline_approve():
 SCENARIOS = [s_reset, s_init, s_pair, s_sync, s_words, s_conflict, s_selective, s_repair, s_policy,
              s_strongroom, s_org, s_remove_user, s_revoke,
              s_approval_flow, s_recovery_escrow, s_member_removal,
-             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop, s_share, s_disks,
+             s_p2p_setup, s_p2p_lan, s_p2p_pub, s_p2p_sym, s_p2p_stop,
+             s_rv_setup, s_rv_symmetric, s_rv_udp_blocked, s_rv_pair, s_rv_pair_link, s_rv_down, s_share, s_disks,
              s_outage, s_blackhole, s_crash, s_clock, s_clock_behind, s_p2p_upload, s_scale, s_format3_scale,
              s_backup, s_gc_settling, s_activity, s_disk_init, s_disk_fetch_plan, s_staged_move, s_mailbox_offline_disk,
              s_scrub, s_restic, s_ledger_loss, s_ledger_withhold, s_ledger_rollback, s_rollback_warning,
@@ -3421,7 +3614,10 @@ REQUIRED = {"reset", "init-and-s3-through-nat", "pair-over-lan", "sync-to-second
             "torrent-spool", "youtube-spool",
             # working offline (spec 79, 77.8 "Offline", 77.6 "Offline", 68)
             "offline-storage-down-mid-sync", "offline-lan-only", "offline-pair-join-without-storage",
-            "offline-approve-then-flush"}
+            "offline-approve-then-flush",
+            # the rendezvous service (spec 83)
+            "rendezvous-setup", "rendezvous-symmetric-nat-without-peer-relay", "rendezvous-relay-when-udp-is-blocked",
+            "rendezvous-pair-across-networks", "rendezvous-pair-link", "rendezvous-down"}
 
 
 def self_check():

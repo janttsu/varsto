@@ -8,8 +8,10 @@
 //!   value is its request code (public keys and name, nothing secret). The
 //!   owner answers on the storage (a grant to the code's key), not with a
 //!   link.
-//! - `varsto://pair?c=<nine digits>&a=<host:port>,…`: one of your devices
-//!   offers pairing; the code is the pairing password.
+//! - `varsto://pair?c=<nine digits>&a=<host:port>,…&rv=<32 hex>`: one of
+//!   your devices offers pairing; the code is the pairing password, `rv`
+//!   the token its offer is registered under at the rendezvous service
+//!   (section 83.3; versions before it refuse a link that carries it).
 //!
 //! Request codes carry a hybrid Ed25519 + ML-DSA-65 key and a hybrid
 //! X25519 + ML-KEM-768 key (about three kilobytes), so a link stores them in
@@ -47,10 +49,15 @@ const REQUEST_FORMAT: u8 = 2;
 pub enum Link {
     /// A share request code, `vsr1.<K6 hex>.<K8 hex>[.<name>]`.
     ShareRequest(String),
-    /// A pairing offer: the nine digits and the addresses it listens on.
+    /// A pairing offer: the nine digits, the addresses it listens on, the
+    /// token of its rendezvous registration (`rv=`), if it has one, and the
+    /// rendezvous base URL it is registered at (`rvu=`), written only when
+    /// that is not the default service.
     Pair {
         code: String,
         addresses: Vec<String>,
+        rendezvous: Option<crate::rendezvous::Token>,
+        rendezvous_url: Option<String>,
     },
 }
 
@@ -107,6 +114,8 @@ impl Link {
             return Ok(Link::Pair {
                 code: crate::pair::normalize(s)?,
                 addresses: Vec::new(),
+                rendezvous: None,
+                rendezvous_url: None,
             });
         }
         if s.starts_with("vst1.") || s.starts_with("vst2.") || s.split('.').count() == 4 {
@@ -127,12 +136,25 @@ impl Link {
     pub fn to_uri(&self) -> Result<String> {
         Ok(match self {
             Link::ShareRequest(_) => format!("{SCHEME}share/request?c={}", self.value()?),
-            Link::Pair { code, addresses } => {
+            Link::Pair {
+                code,
+                addresses,
+                rendezvous,
+                rendezvous_url,
+            } => {
                 let code = crate::pair::normalize(code)?;
                 let mut u = format!("{SCHEME}pair?c={code}");
                 if !addresses.is_empty() {
                     u.push_str("&a=");
                     u.push_str(&addresses.join(","));
+                }
+                if let Some(t) = rendezvous {
+                    u.push_str("&rv=");
+                    u.push_str(&hex::encode(t));
+                }
+                if let Some(url) = rendezvous_url {
+                    u.push_str("&rvu=");
+                    u.push_str(&percent_encode(url));
                 }
                 u
             }
@@ -212,7 +234,7 @@ pub fn parse(s: &str) -> Result<Scanned> {
     }
     let allowed: &[&str] = match path.as_str() {
         "share/request" => &["c", "p"],
-        "pair" => &["c", "a"],
+        "pair" => &["c", "a", "rv", "rvu"],
         other => bail!("unknown varsto:// link: {other}"),
     };
     if let Some(k) = params.keys().find(|k| !allowed.contains(&k.as_str())) {
@@ -239,7 +261,30 @@ pub fn parse(s: &str) -> Result<Scanned> {
         if addresses.len() > 16 {
             bail!("too many addresses in the pairing link");
         }
-        return Ok(Scanned::Link(Link::Pair { code, addresses }));
+        let rendezvous = match params.get("rv") {
+            Some(t) => Some(
+                crate::rendezvous::keys::parse_token(t)
+                    .ok_or_else(|| anyhow!("malformed rv= value in the pairing link"))?,
+            ),
+            None => None,
+        };
+        // The offerer's own rendezvous server (spec 51): a base URL the
+        // client would accept as its setting, or the link is refused.
+        let rendezvous_url = match params.get("rvu") {
+            Some(u) => {
+                let u = u.trim().trim_end_matches('/').to_string();
+                crate::rendezvous::BaseUrl::parse(&u)
+                    .map_err(|e| anyhow!("malformed rvu= value in the pairing link: {e}"))?;
+                Some(u)
+            }
+            None => None,
+        };
+        return Ok(Scanned::Link(Link::Pair {
+            code,
+            addresses,
+            rendezvous,
+            rendezvous_url,
+        }));
     }
     let (kind, param) = ("request", "c");
     let value = params
@@ -298,6 +343,20 @@ fn b32(v: &str) -> Result<Vec<u8>> {
     BASE32_NOPAD
         .decode(v.to_ascii_uppercase().as_bytes())
         .map_err(|_| anyhow!("the link's value is not valid Base32"))
+}
+
+/// Percent-encode a link parameter value: everything but the unreserved
+/// characters and `:` `/` (a URL stays readable).
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~:/".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 fn percent_decode(s: &str) -> Result<String> {
@@ -635,6 +694,8 @@ mod tests {
         let l = Link::Pair {
             code: "123-456-789".into(),
             addresses: vec!["192.168.1.20:41234".into(), "[fe80::1]:41234".into()],
+            rendezvous: None,
+            rendezvous_url: None,
         };
         let uri = l.to_uri().unwrap();
         assert_eq!(
@@ -642,11 +703,103 @@ mod tests {
             "varsto://pair?c=123456789&a=192.168.1.20:41234,[fe80::1]:41234"
         );
         match parse(&uri).unwrap() {
-            Scanned::Link(Link::Pair { code, addresses }) => {
+            Scanned::Link(Link::Pair {
+                code,
+                addresses,
+                rendezvous,
+                rendezvous_url,
+            }) => {
                 assert_eq!(code, "123456789");
                 assert_eq!(addresses.len(), 2);
+                assert_eq!(rendezvous, None);
+                assert_eq!(rendezvous_url, None);
             }
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn pairing_links_carry_the_rendezvous_token() {
+        let t = [0xabu8; 16];
+        let l = Link::Pair {
+            code: "123-456-789".into(),
+            addresses: vec!["192.168.1.20:41234".into()],
+            rendezvous: Some(t),
+            rendezvous_url: None,
+        };
+        let uri = l.to_uri().unwrap();
+        assert_eq!(
+            uri,
+            format!(
+                "varsto://pair?c=123456789&a=192.168.1.20:41234&rv={}",
+                "ab".repeat(16)
+            )
+        );
+        assert!(code_for(&uri).is_ok(), "fits one QR code");
+        let mut want = l.clone();
+        if let Link::Pair { code, .. } = &mut want {
+            *code = "123456789".into();
+        }
+        assert_eq!(parse(&uri).unwrap(), Scanned::Link(want));
+        // A token alone, without addresses.
+        let only = format!("varsto://pair?c=123456789&rv={}", "0f".repeat(16));
+        match parse(&only).unwrap() {
+            Scanned::Link(Link::Pair { rendezvous, .. }) => {
+                assert_eq!(rendezvous, Some([0x0f; 16]))
+            }
+            other => panic!("{other:?}"),
+        }
+        for bad in [
+            format!("varsto://pair?c=123456789&rv={}", "AB".repeat(16)),
+            "varsto://pair?c=123456789&rv=abcd".to_string(),
+            format!(
+                "varsto://pair?c=123456789&rv={}&rv={}",
+                "ab".repeat(16),
+                "ab".repeat(16)
+            ),
+        ] {
+            assert!(parse(&bad).is_err(), "accepted {bad}");
+        }
+    }
+
+    #[test]
+    fn pairing_links_name_a_self_hosted_rendezvous() {
+        let l = Link::Pair {
+            code: "123456789".into(),
+            addresses: vec![],
+            rendezvous: Some([0x11; 16]),
+            rendezvous_url: Some("https://rv.example.org/varsto rv".into()),
+        };
+        let uri = l.to_uri().unwrap();
+        assert_eq!(
+            uri,
+            format!(
+                "varsto://pair?c=123456789&rv={}&rvu=https://rv.example.org/varsto%20rv",
+                "11".repeat(16)
+            )
+        );
+        assert!(code_for(&uri).is_ok(), "fits one QR code");
+        assert_eq!(parse(&uri).unwrap(), Scanned::Link(l));
+        // A trailing slash is dropped; the link stays valid without `rv=`.
+        match parse("varsto://pair?c=123456789&rvu=https%3A%2F%2Frv.example.org%2Frv%2F").unwrap() {
+            Scanned::Link(Link::Pair {
+                rendezvous,
+                rendezvous_url,
+                ..
+            }) => {
+                assert_eq!(rendezvous, None);
+                assert_eq!(rendezvous_url.as_deref(), Some("https://rv.example.org/rv"));
+            }
+            other => panic!("{other:?}"),
+        }
+        for bad in [
+            "varsto://pair?c=123456789&rvu=ftp://rv.example.org",
+            "varsto://pair?c=123456789&rvu=http://rv.example.org/rv",
+            "varsto://pair?c=123456789&rvu=https://rv.example.org/rv%3Fx=1",
+            "varsto://pair?c=123456789&rvu=https://user@rv.example.org",
+            "varsto://pair?c=123456789&rvu=https://a.example&rvu=https://b.example",
+        ] {
+            assert!(parse(bad).is_err(), "accepted {bad}");
         }
     }
 
@@ -687,11 +840,15 @@ mod tests {
         let l = Link::Pair {
             code: "123-456-789".into(),
             addresses: addresses.clone(),
+            rendezvous: Some([0x5a; 16]),
+            rendezvous_url: None,
         };
         let uri = l.to_uri().unwrap();
         assert!(code_for(&uri).is_ok(), "fits one QR code");
         match parse(&uri).unwrap() {
-            Scanned::Link(Link::Pair { code, addresses: a }) => {
+            Scanned::Link(Link::Pair {
+                code, addresses: a, ..
+            }) => {
                 assert_eq!(code, "123456789");
                 assert_eq!(a, addresses, "order is the ranking");
             }
@@ -704,6 +861,8 @@ mod tests {
         let big = Link::Pair {
             code: "123-456-789".into(),
             addresses: many,
+            rendezvous: Some([0xff; 16]),
+            rendezvous_url: None,
         }
         .to_uri()
         .unwrap();

@@ -152,7 +152,7 @@ fn publish(storage: &dyn Storage, keys: &Keys, dev: &Dev, body: &mut PeerBody) -
         signer: &signer,
         keys,
     };
-    peer::publish(storage, &w, body, 0).unwrap()
+    peer::publish(storage, &w, body, 0, 0).unwrap()
 }
 
 fn read_dir(

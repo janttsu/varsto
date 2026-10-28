@@ -66,6 +66,7 @@ pub mod record_shim;
 pub mod records3;
 pub mod recovery;
 pub mod recovery_guide;
+pub mod rendezvous;
 pub mod replica;
 pub mod restic;
 pub mod s3;

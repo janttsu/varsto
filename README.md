@@ -79,6 +79,7 @@ varsto --home ~/.varsto-laptop strongroom unlock taxes --minutes 15
 varsto --home ~/.varsto-server p2p enable --public 203.0.113.5:17893   # reachable: relays for the others
 varsto --home ~/.varsto-laptop p2p status   # NAT guess, public address, path to every peer
 varsto --home ~/.varsto-laptop p2p traffic --watch   # live speed, totals and path per peer
+varsto --home ~/.varsto-laptop p2p rendezvous status   # the optional meeting-point service that finds devices across networks (set <url>, --off; docs/rendezvous.md)
 
 # a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3.
 # A folder without its own policy uses the default: 1 copy on any storage, 1 in external storage,

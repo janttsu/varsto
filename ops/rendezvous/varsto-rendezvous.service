@@ -1,0 +1,32 @@
+# systemd user unit for the Varsto rendezvous service (docs/rendezvous.md).
+# Install as ~/.config/systemd/user/varsto-rendezvous.service, then
+#   loginctl enable-linger $USER
+#   systemctl --user daemon-reload && systemctl --user enable --now varsto-rendezvous
+# Options come from the command line and from ~/.config/varsto-rendezvous.env
+# (copy varsto-rendezvous.env.example; the file is optional).
+[Unit]
+Description=Varsto rendezvous service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/bin/varsto-rendezvous
+EnvironmentFile=-%h/.config/varsto-rendezvous.env
+# SIGTERM is a graceful stop: open connections are told to close and get
+# VARSTO_RV_GRACE seconds (5).
+KillSignal=SIGTERM
+TimeoutStopSec=15
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=65536
+MemoryMax=1536M
+
+[Install]
+WantedBy=default.target

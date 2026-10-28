@@ -1,0 +1,37 @@
+[package]
+name = "varsto-rendezvous"
+description = "Rendezvous service of Varsto: devices find each other, punch through NATs and relay pinned TLS across networks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "varsto-rendezvous"
+path = "src/main.rs"
+
+# The wire formats are `crates/varsto-core/src/rendezvous/proto.rs`, included
+# with `#[path]`: the server needs those few crates, not the core library.
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+blake3.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+rand.workspace = true
+clap.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "sync", "time", "io-util", "macros", "signal"] }
+base64 = "0.22"
+log = { version = "0.4", features = ["std"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+[dev-dependencies]
+ureq = "3"
+varsto-core = { path = "../varsto-core" }

@@ -83,6 +83,8 @@ pub struct ServiceState {
     pub p2p_cert_sha256: String,
     /// The port the home router forwards to us (PCP, NAT-PMP, UPnP), if any.
     pub p2p_portmap: varsto_core::p2p::portmap::PortMapStatus,
+    /// The rendezvous service (spec 83): URL, state, observed address.
+    pub p2p_rendezvous: varsto_core::p2p::rendezvous::RendezvousStatus,
     /// Automatic verification: schedule, last run and next run.
     pub auto_verify: Option<varsto_core::autoverify::VerifyStatus>,
     /// Automatic repair: queue, last run and copies that could not be repaired.
@@ -159,6 +161,8 @@ impl ServiceState {
         // Added apart: one more key in the literal passes the macro's
         // recursion limit.
         v["forward"] = json!(self.forward);
+        v["p2p_rendezvous"] = json!(self.p2p_rendezvous);
+        v["p2p_rendezvous_text"] = json!(self.p2p_rendezvous.describe());
         v["forward_text"] = json!(self.forward.as_ref().map(|f| f.describe()));
         v["mailbox"] = json!(self.mailbox);
         v["mailbox_text"] = json!(self
@@ -1136,6 +1140,13 @@ struct P2p {
     /// When our record may be published again after a failed attempt, and
     /// the wait after the next failure.
     publish_retry: Mutex<(Option<Instant>, Duration)>,
+    /// The rendezvous service (spec 83.9) while it is on, and what it
+    /// needs to start again when `p2p.rendezvous` changes.
+    rv: Mutex<Option<Arc<varsto_core::p2p::rendezvous::Rendezvous>>>,
+    rv_url: Mutex<Option<String>>,
+    tls: Arc<varsto_core::p2p::v3::tls::TcpTls>,
+    /// The record last handed to the rendezvous slot.
+    rv_last: Mutex<Option<varsto_core::p2p::v3::PeerBody>>,
 }
 
 /// An unknown certificate makes the records be read again at most this often.
@@ -1350,6 +1361,21 @@ impl P2p {
             "Varsto p2p: listening on {listen} (TLS over TCP{}; encrypted blocks only; peers need a signed peer record)",
             if quic.is_some() { " and QUIC" } else { "" }
         );
+        let rv_url = varsto_core::rendezvous::configured(&cfg);
+        let rv = {
+            let st = state.lock().unwrap();
+            st.engine.as_ref().and_then(|e| {
+                Self::start_rendezvous(
+                    e,
+                    rv_url.as_deref(),
+                    quic.clone(),
+                    &tls,
+                    &snapshot,
+                    &stop,
+                    &traffic,
+                )
+            })
+        };
         Some(P2p {
             snapshot,
             lan_peers,
@@ -1374,7 +1400,134 @@ impl P2p {
             knock_read: Mutex::new(None),
             knock_wait: Mutex::new(KNOCK_REREAD),
             publish_retry: Mutex::new((None, PUBLISH_RETRY_MIN)),
+            rv: Mutex::new(rv),
+            rv_url: Mutex::new(rv_url),
+            tls,
+            rv_last: Mutex::new(None),
         })
+    }
+
+    /// Start the rendezvous runtime (spec 83.9) for `url`: the control
+    /// connection with our slot, observes from the QUIC socket, record
+    /// writes and lookups, and relayed sessions served by the TLS
+    /// responder. `None` when it is off, the device is a member device, or
+    /// the URL does not parse (logged).
+    #[allow(clippy::too_many_arguments)]
+    fn start_rendezvous(
+        e: &varsto_core::Engine,
+        url: Option<&str>,
+        quic: Option<Arc<varsto_core::p2p::quic::Node>>,
+        tls: &Arc<varsto_core::p2p::v3::tls::TcpTls>,
+        snapshot: &Arc<Mutex<Option<Arc<varsto_core::p2p::Snapshot>>>>,
+        stop: &Arc<AtomicBool>,
+        traffic: &Arc<varsto_core::p2p::Traffic>,
+    ) -> Option<Arc<varsto_core::p2p::rendezvous::Rendezvous>> {
+        let url = url?;
+        let vault = e.rendezvous_keys()?;
+        let me = varsto_core::record::id16(e.device_id())?;
+        let owner = e.rendezvous_owner(&vault.tag());
+        let (tls, snapshot, stop, traffic) =
+            (tls.clone(), snapshot.clone(), stop.clone(), traffic.clone());
+        let serve: varsto_core::p2p::rendezvous::ServeRelayed = Arc::new(move |stream| {
+            if let Err(e) =
+                varsto_core::p2p::serve_relayed(&tls, stream, &snapshot, &stop, &traffic)
+            {
+                log::debug!("p2p: rendezvous relayed session ended: {e:#}");
+            }
+        });
+        match varsto_core::p2p::rendezvous::Rendezvous::start(varsto_core::p2p::rendezvous::Setup {
+            url: url.to_string(),
+            vault,
+            owner,
+            me,
+            quic,
+            serve: Some(serve),
+        }) {
+            Ok(rv) => Some(rv),
+            Err(err) => {
+                log::warn!("p2p: rendezvous {url} not used: {err:#}");
+                None
+            }
+        }
+    }
+
+    /// The rendezvous runtime, while it is on.
+    fn rendezvous(&self) -> Option<Arc<varsto_core::p2p::rendezvous::Rendezvous>> {
+        self.rv.lock().unwrap().clone()
+    }
+
+    /// `p2p.rendezvous` (or `VARSTO_RENDEZVOUS`) changed while running:
+    /// stop the runtime and start one for the new URL (none: off). The
+    /// peer table is built again so it reaches peers through the new one.
+    fn set_rendezvous(&self, st: &mut State, url: Option<String>) {
+        if *self.rv_url.lock().unwrap() == url {
+            return;
+        }
+        if let Some(old) = self.rv.lock().unwrap().take() {
+            old.stop();
+        }
+        let new = st.engine.as_ref().and_then(|e| {
+            Self::start_rendezvous(
+                e,
+                url.as_deref(),
+                self.quic.clone(),
+                &self.tls,
+                &self.snapshot,
+                &self.stop,
+                &self.traffic,
+            )
+        });
+        log::info!(
+            "p2p: rendezvous {}",
+            url.as_deref()
+                .map_or("turned off".to_string(), |u| format!("now {u}"))
+        );
+        *self.rv.lock().unwrap() = new;
+        *self.rv_url.lock().unwrap() = url;
+        *self.rv_last.lock().unwrap() = None;
+        st.service.p2p_rendezvous = self.rendezvous_status();
+        self.refresh_from_saved(st);
+        self.publish_record(st);
+    }
+
+    fn rendezvous_status(&self) -> varsto_core::p2p::rendezvous::RendezvousStatus {
+        self.rendezvous()
+            .map(|r| r.status())
+            .unwrap_or_else(varsto_core::p2p::rendezvous::RendezvousStatus::off)
+    }
+
+    /// Records the rendezvous found since the last call (other devices'
+    /// slots), to merge into the saved directory.
+    fn take_rendezvous_found(
+        &self,
+    ) -> Option<Vec<(varsto_core::rendezvous::Slot, varsto_core::record::Parts)>> {
+        self.rendezvous().and_then(|r| r.take_found())
+    }
+
+    /// The server saw our QUIC socket at a new address: our record should
+    /// say so.
+    fn take_observed_change(&self) -> bool {
+        self.rendezvous().is_some_and(|r| r.take_observed_change())
+    }
+
+    /// Merge what the rendezvous found into the saved directory and, when
+    /// an entry changed, build the peer table again from the directory
+    /// saved here (no storage is asked: this works with all of them away).
+    fn merge_rendezvous(
+        &self,
+        st: &mut State,
+        found: Vec<(varsto_core::rendezvous::Slot, varsto_core::record::Parts)>,
+    ) -> bool {
+        let Some(e) = st.engine.as_ref() else {
+            return false;
+        };
+        let changed = e.merge_rendezvous_records(found);
+        if changed == 0 {
+            return false;
+        }
+        log::info!("p2p: rendezvous brought {changed} newer peer records");
+        self.refresh_from_saved(st);
+        true
     }
 
     /// Ask every peer of the current table once, on a thread of its own, and
@@ -1411,6 +1564,10 @@ impl P2p {
             return false;
         }
         *last = Some(Instant::now());
+        // Its record may be at the rendezvous before any storage has it.
+        if let Some(rv) = self.rendezvous() {
+            rv.fetch_soon();
+        }
         true
     }
 
@@ -1691,6 +1848,31 @@ impl P2p {
             *wait = (*wait * 2).min(KNOCK_REREAD_MAX);
         }
         drop(wait);
+        self.install_directory(st, dir, lan);
+    }
+
+    /// The directory saved on this device (after the rendezvous merged
+    /// records into it), with the entries in use kept: the table is built
+    /// again without asking any storage.
+    fn refresh_from_saved(&self, st: &mut State) {
+        let Some(e) = st.engine.as_ref() else { return };
+        let mut lan = self.lan_peers.lock().unwrap().clone();
+        lan.retain(|p| !e.is_revoked(&p.device));
+        let mut dir = e.local_peer_directory();
+        dir.merge(self.responder.directory().as_ref().clone());
+        self.install_directory(st, dir, lan);
+    }
+
+    /// Hand `dir` to the answering side of both transports and build the
+    /// peer table over it and the LAN peers, for the engine and the
+    /// activity view.
+    fn install_directory(
+        &self,
+        st: &mut State,
+        dir: varsto_core::p2p::v3::PeerDirectory,
+        lan: Vec<varsto_core::p2p::PeerAddr>,
+    ) {
+        let Some(e) = st.engine.as_mut() else { return };
         self.responder.set_directory(dir.clone());
         let mut flat = lan.clone();
         for i in dir.infos() {
@@ -1709,7 +1891,8 @@ impl P2p {
         *self.records.lock().unwrap() = dir.bodies().cloned().collect();
         let p = Arc::new(
             varsto_core::p2p::Peers::build_v3(self.client.clone(), &dir, &lan, self.quic.clone())
-                .with_traffic(self.traffic.clone()),
+                .with_traffic(self.traffic.clone())
+                .with_rendezvous(self.rendezvous()),
         );
         let mut slot = self.peers.lock().unwrap();
         if let Some(prev) = slot.as_ref() {
@@ -1747,6 +1930,13 @@ impl P2p {
         let info = self.nat.lock().unwrap().clone();
         let mut rec = e.peer_body(self.listen.port());
         rec.udp_public = info.probe.public_addrs();
+        // What the rendezvous saw of our QUIC socket goes first: it is the
+        // mapping every peer's punch aims at (spec 83.5).
+        let rv = self.rendezvous();
+        if let Some(a) = rv.as_ref().and_then(|r| r.observed()) {
+            rec.udp_public.retain(|x| *x != a);
+            rec.udp_public.insert(0, a);
+        }
         rec.udp_public
             .truncate(varsto_core::p2p::v3::peer::MAX_ADDRS);
         rec.nat = info.probe.nat;
@@ -1795,6 +1985,8 @@ impl P2p {
         let changed = last_rec.as_ref().is_none_or(|r| !r.same_as(&rec));
         let mut retry = self.publish_retry.lock().unwrap();
         let resting = retry.0.is_some_and(|t| Instant::now() < t);
+        st.service.p2p_rendezvous = self.rendezvous_status();
+        let for_rv = rec.clone();
         if (changed || last.is_none_or(|t| t.elapsed() > RECORD_MAX_AGE)) && !resting {
             // Only a publish that every storage took counts as done: a
             // failed one is tried again (with a growing wait), not an hour
@@ -1818,12 +2010,32 @@ impl P2p {
                 }
             }
         }
+        // The rendezvous slot carries the same record (spec 83.9; the seq
+        // the storages got when they took it), written in the background.
+        // It does not wait for the storages: a device whose storages are
+        // all away still tells its peers where it is.
+        if let Some(rv) = &rv {
+            let mut rv_last = self.rv_last.lock().unwrap();
+            if rv_last.as_ref().is_none_or(|r| !r.same_as(&for_rv)) {
+                let mut copy = for_rv;
+                match e.peer_record_parts(&mut copy) {
+                    Ok(parts) => {
+                        rv.set_record(parts);
+                        *rv_last = Some(copy);
+                    }
+                    Err(err) => log::debug!("p2p: rendezvous record not made: {err:#}"),
+                }
+            }
+        }
     }
 }
 
 impl Drop for P2p {
     fn drop(&mut self) {
         self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(rv) = self.rv.lock().unwrap().take() {
+            rv.stop();
+        }
         // Wait for the router mappings to be removed (a few seconds at most:
         // every request has a short timeout).
         if let Some(t) = self.portmap_thread.take() {
@@ -2315,7 +2527,30 @@ pub fn run(opts: Options) -> Result<()> {
             // A relay registration just succeeded: tell the other devices
             // now. Publishing writes to the storages: with the engine out of
             // the state, so the interface answers meanwhile.
-            let republish = p.take_republish();
+            // The rendezvous (spec 83.9): another URL in the settings starts
+            // it again; records it found go into the saved directory.
+            let rv_url = {
+                let st = desktop::lock_idle(&state);
+                st.engine
+                    .as_ref()
+                    .map(|e| varsto_core::rendezvous::configured(&e.p2p_config()))
+            };
+            if let Some(url) = rv_url {
+                if *p.rv_url.lock().unwrap() != url {
+                    let mut st = desktop::checkout(&state, "rendezvous");
+                    p.set_rendezvous(&mut st, url);
+                }
+            }
+            if let Some(found) = p.take_rendezvous_found() {
+                let mut st = desktop::checkout(&state, "rendezvous records");
+                if p.merge_rendezvous(&mut st, found) {
+                    crate::readcache::invalidate_all();
+                    varsto_core::events::publish("peers.changed", json!({}));
+                    p.probe_soon(&state);
+                }
+            }
+            desktop::lock_idle(&state).service.p2p_rendezvous = p.rendezvous_status();
+            let republish = p.take_republish() | p.take_observed_change();
             let synced = desktop::lock_idle(&state).service.syncs != snapshot_syncs;
             if republish || synced {
                 let mut st = desktop::checkout(&state, "peer record");

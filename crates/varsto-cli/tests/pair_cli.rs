@@ -15,6 +15,7 @@ fn cmd(home: &Path) -> Command {
         .env("VARSTO_PASSPHRASE", "test passphrase")
         .env("VARSTO_NO_INSTALL", "1")
         .env("VARSTO_NO_PORT_MAPPING", "1")
+        .env("VARSTO_RENDEZVOUS", "off")
         .env_remove("VARSTO_RECOVERY_WORDS");
     c
 }

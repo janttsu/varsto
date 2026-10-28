@@ -141,13 +141,14 @@
       <form id="pair" class="card">
         <h3 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Pair with your other device</h3>
         <p class="muted small">On a device that already uses Varsto, open Devices and choose Add a device. Type the code it shows, or scan its QR code.</p>
+        <p class="muted small">Works on the same network and across the internet (rendezvous).</p>
         <div class="row"><button type="button" id="pairscan" class="secondary"><svg class="icon"><use href="#i-qr"/></svg>Scan QR code</button></div>
         <label>Code <input name="code" type="tel" inputmode="numeric" pattern="[0-9 -]*" maxlength="11" autocomplete="one-time-code" placeholder="123-456-789" required></label>
         <label>Name for this device <input name="name" placeholder="phone" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="12" placeholder="At least 12 characters" required></label>
         <details class="small" id="pairdetails"><summary>The other device is not found</summary>
           <label>Its address, shown under the code (optional) <input name="address" placeholder="192.168.1.20:41234" autocapitalize="none"></label>
-          <p class="muted small">If this address does not work, Varsto tries the other addresses of the QR code and then looks for the device on the network.</p>
+          <p class="muted small">If this address does not work, Varsto tries the other addresses of the QR code, looks for the device on the network and then asks the rendezvous service, which also finds a device on another network.</p>
         </details>
         <p class="muted small" id="pairprogress" role="status" aria-live="polite"></p>
         <p class="small" id="pairwords" role="status" aria-live="polite"></p>
@@ -848,6 +849,17 @@
         <div class="table-wrap"><table id="tr-table" class="hidden"><thead><tr><th>Device</th><th>Path</th><th>Address</th><th class="num">Down</th><th class="num">Up</th><th class="num">Received</th><th class="num">Sent</th><th>Last activity</th></tr></thead><tbody></tbody></table></div>
         <div id="tr-relays" class="hidden"><h3 class="tr-sub">Relayed through this device</h3><ul class="list"></ul></div>
       </div>
+      <div id="rvcard" class="card">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-device"/></svg>Rendezvous service</h2>
+        <p class="muted small">A small meeting point that helps your devices find each other across networks, get through routers together and, as a last resort, relay their connection, which stays end-to-end encrypted. It sees random-looking tags and network addresses, never your files, names or keys. Without it everything still works on the local network and through your storages.</p>
+        <div id="rvstatus" class="status-line" role="status" aria-live="polite"></div>
+        <div id="rvobs" class="muted small"></div>
+        <form id="rvform" class="form-grid">
+          <label class="inline"><input name="rendezvous_on" type="checkbox"> Use the rendezvous service</label>
+          <label>Service address <input name="rendezvous_url" placeholder="https://varsto.net/rv" autocapitalize="none" autocomplete="off" spellcheck="false"></label>
+          <div class="actions"><button type="submit">Save</button><button type="button" id="rvdefault" class="secondary">Use the default</button></div>
+        </form>
+      </div>
       <details id="p2pbox" class="card" open>
         <summary class="card-title">Peer-to-peer transfer</summary>
         <p class="muted small">Your devices exchange encrypted blocks directly: on the LAN automatically, across the internet through NAT with hole punching, and when that fails through one of your own reachable devices acting as a relay. Blocks are verified by name; a peer needs the vault key and a known certificate to get anything.</p>
@@ -1170,7 +1182,7 @@
   </details>
   <details class="guide" data-guide="p2p">
     <summary>Peer-to-peer</summary>
-    <p>Your devices send blocks to each other directly when they can, on the same network or over the internet, and fall back to the storages when they cannot. The Peers page shows how each device is reached and how fast data moves.</p>
+    <p>Your devices send blocks to each other directly when they can, on the same network or over the internet, and fall back to the storages when they cannot. The Peers page shows how each device is reached and how fast data moves. The rendezvous service helps devices on different networks find each other, pair with a code and, when nothing direct works, relay their encrypted connection; it can be turned off or replaced by your own on the Peers page.</p>
   </details>
   <details class="guide" data-guide="sharing">
     <summary>Sharing a folder</summary>
