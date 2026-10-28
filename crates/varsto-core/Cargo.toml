@@ -39,7 +39,7 @@ ml-kem = "0.3.2"
 x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 ureq = "3"
 hmac = "0.12"
-zstd = "0.13"
+zstd = "0.14"
 base64 = "0.22"
 # QR codes for invitations: encode (SVG, terminal) and decode camera frames.
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
