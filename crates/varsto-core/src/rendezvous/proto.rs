@@ -44,10 +44,16 @@ pub type Token = [u8; ID_LEN];
 /// The slot of a pairing offer (a pairing tag has exactly one slot).
 pub const PAIR_SLOT: Slot = [0u8; ID_LEN];
 
-/// Largest blob a slot holds (bytes, before base64).
-pub const MAX_BLOB: usize = 64 * 1024;
-/// Largest HTTP request body the server reads.
-pub const MAX_BODY: usize = 96 * 1024;
+/// Largest blob a slot holds (bytes, before base64). A format-3 record
+/// part is padded to at least 64 KiB of body (format-3 design, section 5)
+/// plus its envelope, about 68 KiB for a peer record: the blob must hold
+/// that with room for a larger record.
+pub const MAX_BLOB: usize = 128 * 1024;
+/// Largest HTTP request body the server reads (a put: the blob in base64
+/// and the JSON around it).
+pub const MAX_BODY: usize = 192 * 1024;
+/// Largest lookup answer a client reads: every slot of a full tag.
+pub const MAX_LOOKUP_ANSWER: usize = MAX_SLOTS_PER_TAG * (MAX_BLOB.div_ceil(3) * 4 + 1024);
 /// Largest control message (one WebSocket text frame).
 pub const MAX_CONTROL_MSG: usize = 16 * 1024;
 /// Most claims in one `hello` or `claim`.

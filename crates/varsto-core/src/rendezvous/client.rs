@@ -291,7 +291,7 @@ fn answer<A: serde::de::DeserializeOwned>(
     let bytes = resp
         .body_mut()
         .with_config()
-        .limit(2 * proto::MAX_BODY as u64)
+        .limit(proto::MAX_LOOKUP_ANSWER as u64)
         .read_to_vec()
         .map_err(|e| RvError::Transport(e.into()))?;
     if status == 200 {
@@ -607,6 +607,12 @@ impl RelayStream {
 
     /// End the session.
     pub fn close(mut self) {
+        self.shutdown();
+    }
+
+    /// Say goodbye on the stream (a WebSocket close); what was written
+    /// before still reaches the other side.
+    pub fn shutdown(&mut self) {
         let _ = self.ws.close(None);
         let _ = self.ws.flush();
     }

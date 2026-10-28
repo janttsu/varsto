@@ -179,15 +179,18 @@ pub fn highest_seq(storage: &dyn Storage, device: Id16) -> Result<u64> {
 /// of vault epoch `epoch` (put-if-absent at the next free seq), then delete
 /// its records older than the one before it, so the stream stays two
 /// records long while a reader that listed a moment ago still finds one.
-/// Returns the seq written.
+/// Returns the seq written. The seq is above `floor` as well: the highest
+/// this device wrote anywhere (another storage, the rendezvous, section
+/// 83.9), so a record written here later is never shadowed by an older one.
 pub fn publish(
     storage: &dyn Storage,
     writer: &RecordWriter<'_>,
     body: &mut PeerBody,
     epoch: u32,
+    floor: u64,
 ) -> Result<u64> {
     let stream = PeerBody::stream(body.device);
-    let first = highest_seq(storage, body.device)? + 1;
+    let first = highest_seq(storage, body.device)?.max(floor) + 1;
     // Another writer of this device's stream may take a seq: try the next.
     for seq in first..first + 4 {
         body.seq = seq;

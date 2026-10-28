@@ -1852,12 +1852,34 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     let words = keys.fingerprint();
     set_join_step(json!({"active": true, "step": "start", "tried": [], "fingerprint": words}));
     let mut tried: Vec<String> = Vec::new();
-    let result = varsto_core::pair::receive_with_progress(
+    // The link's `rv=` token (from a scanned link), and the rendezvous a
+    // joining device asks when nothing on this network answers (spec 83.9).
+    let token = opt(input, "rv")
+        .as_deref()
+        .and_then(varsto_core::rendezvous::keys::parse_token);
+    let rendezvous = if cfg!(test) {
+        None
+    } else {
+        varsto_core::rendezvous::for_joining()
+    };
+    let result = varsto_core::pair::receive_with_rendezvous(
         &code,
         &keys.join_keys(&name),
         opt(input, "address").as_deref(),
         &offered,
+        rendezvous.as_deref(),
+        token.as_ref(),
         &mut |step| match step {
+            varsto_core::pair::Step::Rendezvous => {
+                set_join_step(
+                    json!({"active": true, "step": "rendezvous", "tried": tried, "fingerprint": words}),
+                );
+            }
+            varsto_core::pair::Step::RendezvousRelay => {
+                set_join_step(
+                    json!({"active": true, "step": "rendezvous-relay", "tried": tried, "fingerprint": words}),
+                );
+            }
             varsto_core::pair::Step::Trying(a) => {
                 tried.push(a.to_string());
                 set_join_step(
@@ -1921,9 +1943,14 @@ fn link_info(link: &varsto_core::qr::Link) -> Result<Value> {
             v["fingerprint"] = json!(r.fingerprint);
             v["name"] = json!(r.name);
         }
-        Link::Pair { code, addresses } => {
+        Link::Pair {
+            code,
+            addresses,
+            rendezvous,
+        } => {
             v["code"] = json!(format!("{}-{}-{}", &code[0..3], &code[3..6], &code[6..9]));
             v["addresses"] = json!(addresses);
+            v["rv"] = json!(rendezvous.map(hex::encode));
         }
     }
     Ok(v)
@@ -1933,11 +1960,7 @@ fn link_info(link: &varsto_core::qr::Link) -> Result<Value> {
 fn pair_status(st: varsto_core::pair::OfferStatus) -> Result<Value> {
     let mut v = serde_json::to_value(&st)?;
     if st.open {
-        v["uri"] = json!(varsto_core::qr::Link::Pair {
-            code: st.code.clone(),
-            addresses: st.addresses.clone(),
-        }
-        .to_uri()?);
+        v["uri"] = json!(st.link().to_uri()?);
     }
     Ok(v)
 }
@@ -3748,6 +3771,7 @@ fn api_unlocked(
             "cert_sha256": service.p2p_cert_sha256,
             "portmap": service.p2p_portmap,
             "portmap_text": service.p2p_portmap.describe(),
+            "rendezvous": service.p2p_rendezvous,
         })),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();
@@ -4460,7 +4484,14 @@ mod f3_api {
                 st.ask = None;
                 answer
             });
-            varsto_core::pair::Offer::start_v3(bundle, key, approve)
+            // Registered at the rendezvous too (spec 83.9), in the
+            // background; unit tests never reach a real one.
+            let rendezvous = if cfg!(test) {
+                None
+            } else {
+                varsto_core::rendezvous::configured(&e.p2p_config())
+            };
+            varsto_core::pair::Offer::start_v3_with(bundle, key, approve, rendezvous.as_deref())
         }
 
         /// What the pairing dialog shows: the joining device's name and

@@ -18,6 +18,26 @@ use std::time::{Duration, Instant};
 /// whenever they are loaded.
 pub const SAVED_PEERS: &str = "peer-records.json";
 
+/// The highest seq this device gave its own peer record anywhere (any
+/// storage, the rendezvous) and a hash of what that record said, so the
+/// rendezvous copy can reuse the seq of an unchanged record and a storage
+/// publish never goes below a seq used elsewhere (section 83.9).
+pub const OWN_PEER_SEQ: &str = "own-peer-seq.json";
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct OwnPeerSeq {
+    seq: u64,
+    /// `peer_body_hash` of the record at `seq`, hex.
+    body: String,
+}
+
+/// A hash of a peer record apart from its seq.
+fn peer_body_hash(body: &PeerBody) -> String {
+    let mut b = body.clone();
+    b.seq = 0;
+    hex::encode(crypto::hash(&serde_json::to_vec(&b).unwrap_or_default()))
+}
+
 /// How one read of the peer records over the storages went.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DirectoryRead {
@@ -358,9 +378,13 @@ impl Engine {
         let mut failed = Vec::new();
         let storages = self.record_storages()?;
         let total = storages.len();
+        let floor = self.own_peer_seq().seq;
         for (_, backend) in storages {
-            match peer::publish(backend.as_ref(), &writer, body, epoch) {
-                Ok(seq) => last = seq,
+            match peer::publish(backend.as_ref(), &writer, body, epoch, floor) {
+                Ok(seq) => {
+                    last = seq;
+                    self.note_own_peer_seq(body);
+                }
                 Err(e) => failed.push(format!("{}: {e:#}", backend.name())),
             }
         }
@@ -372,6 +396,145 @@ impl Engine {
             );
         }
         Ok(last)
+    }
+
+    /// The highest seq this device gave its peer record anywhere, and what
+    /// the record said then (`OWN_PEER_SEQ`).
+    fn own_peer_seq(&self) -> OwnPeerSeq {
+        util::read_json_or_default(&self.home.join(OWN_PEER_SEQ)).unwrap_or_default()
+    }
+
+    /// Remember that `body` went out at its seq (when that is the highest).
+    fn note_own_peer_seq(&self, body: &PeerBody) {
+        let mut own = self.own_peer_seq();
+        if body.seq < own.seq {
+            return;
+        }
+        own.seq = body.seq;
+        own.body = peer_body_hash(body);
+        if let Err(e) = util::write_json(&self.home.join(OWN_PEER_SEQ), &own) {
+            log::warn!("own peer record seq not saved: {e:#}");
+        }
+    }
+
+    /// The rendezvous keys of this vault (tag, slots, the outer seal),
+    /// from K3₀; `None` for a member device, which publishes no peer
+    /// record (spec section 83.3).
+    pub fn rendezvous_keys(&self) -> Option<crate::rendezvous::VaultKeys> {
+        (!self.vault.member).then(|| {
+            crate::rendezvous::VaultKeys::new(self.root_key(), self.vault.vault_id.as_str())
+        })
+    }
+
+    /// This device's owner key of its slot under `tag` (from its K6 secret
+    /// and the tag, section 83.3).
+    pub fn rendezvous_owner(&self, tag: &crate::rendezvous::Tag) -> ed25519_dalek::SigningKey {
+        crate::rendezvous::keys::owner_key(&self.keys.signer.to_bytes(), tag)
+    }
+
+    /// The signed peer record of `body` as the rendezvous slot carries it
+    /// (section 83.9): the parts exactly as a storage gets them. The seq is
+    /// the one the newest publish used when the body did not change since
+    /// (so the rendezvous holds the same record as the storages), the next
+    /// one otherwise (no storage took the change: the rendezvous copy is
+    /// newer, and the next storage publish goes above it). `body.seq` is
+    /// set to it.
+    pub fn peer_record_parts(&self, body: &mut PeerBody) -> Result<crate::record::Parts> {
+        if self.vault.member {
+            bail!("a member device publishes no peer record");
+        }
+        if body.cert_sha256 == [0u8; 32] {
+            bail!("no peer-to-peer certificate yet: enable peer-to-peer first");
+        }
+        let own = self.own_peer_seq();
+        let hash = peer_body_hash(body);
+        body.seq = if own.seq > 0 && own.body == hash {
+            own.seq
+        } else {
+            own.seq + 1
+        };
+        if body.seq != own.seq {
+            self.note_own_peer_seq(body);
+        }
+        let vault = members3::bin(&self.vault.vault_id)?;
+        let vault_keys = self.vault_keys3();
+        let epoch = vault_keys.newest_epoch();
+        let keys = self.keys3(&vault_keys);
+        let signer = DeviceSigner {
+            device: self.me3(),
+            key: &self.keys.signer,
+        };
+        let writer = RecordWriter {
+            vault,
+            signer: &signer,
+            keys: &keys,
+        };
+        let sealed = writer.seal(
+            &PeerBody::stream(body.device),
+            body.seq,
+            body.seq,
+            &crate::record::KeyId::Registry(epoch),
+            &*body,
+        )?;
+        Ok(sealed.parts)
+    }
+
+    /// Merge peer records found at the rendezvous (`(slot, parts)`, opened
+    /// already) into the directory saved on this device, exactly as a
+    /// storage's records are (section 77.8): each checked by the
+    /// acceptance rule, of a trusted full device of the vault, in the slot
+    /// of that device; the newest seq of each device wins and nothing is
+    /// removed. Returns how many entries changed (the service then
+    /// rebuilds its peer table); the saved file is written when any did.
+    pub fn merge_rendezvous_records(
+        &self,
+        found: Vec<(crate::rendezvous::Slot, crate::record::Parts)>,
+    ) -> usize {
+        let Some(rv) = self.rendezvous_keys() else {
+            return 0;
+        };
+        let (mut dir, saved) = self.local_peer_directory_saved();
+        let devices = self.peer_devices();
+        let Ok(vault) = members3::bin(&self.vault.vault_id) else {
+            return 0;
+        };
+        let vault_keys = self.vault_keys3();
+        let keys = self.keys3(&vault_keys);
+        let trust = self.f3.members.trust();
+        let acceptor = Acceptor {
+            vault,
+            keys: &keys,
+            trust: &trust,
+        };
+        let mut refused = RecordsRefused::default();
+        let mut changed = 0;
+        for (slot, parts) in found {
+            match acceptor.accept::<PeerBody>(&parts) {
+                crate::record::Outcome::Accepted(r)
+                    if devices.contains(&r.body.device) && rv.slot(&r.body.device) == slot =>
+                {
+                    if dir.offer_parts(r, parts) {
+                        changed += 1;
+                    }
+                }
+                crate::record::Outcome::Refused(r) => {
+                    refused.note(&r);
+                }
+                _ => {}
+            }
+        }
+        if refused.total() > 0 {
+            log::info!("rendezvous peer records refused: {:?}", refused.by_kind);
+        }
+        if changed > 0 {
+            let now = dir.saved();
+            if now != saved {
+                if let Err(e) = util::write_json(&self.home.join(SAVED_PEERS), &now) {
+                    log::warn!("peer records not saved here: {e:#}");
+                }
+            }
+        }
+        changed
     }
 
     /// Publish this device's newest peer record again under the newest

@@ -967,6 +967,40 @@ impl Node {
         })
     }
 
+    /// One rendezvous observe (`alpha-0-format.md` section 83.5) from the
+    /// shared socket: a STUN Binding Request to `server` carrying the
+    /// control connection's UDP `token`, answered with the address the
+    /// server saw. Goes through the same side channel and transaction-id
+    /// gate as [`Node::stun`] (the two take turns), so the answer also
+    /// refreshes our NAT mapping. `None` when no answer came in `timeout`.
+    pub fn observe(
+        &self,
+        server: SocketAddr,
+        token: Option<&crate::rendezvous::Token>,
+        timeout: Duration,
+    ) -> Option<SocketAddr> {
+        self.rt.block_on(async {
+            let mut rx = self.side_rx.lock().await;
+            while rx.try_recv().is_ok() {} // stale answers
+            let tx = stun::new_transaction_id();
+            self.sock.begin_probe(tx);
+            self.send_raw(
+                server,
+                &crate::rendezvous::proto::encode_observe(&tx, token),
+            );
+            let deadline = tokio::time::Instant::now() + timeout;
+            let mut seen = None;
+            while seen.is_none() {
+                let Ok(Some((_, buf))) = tokio::time::timeout_at(deadline, rx.recv()).await else {
+                    break;
+                };
+                seen = crate::rendezvous::proto::parse_observed(&buf, &tx);
+            }
+            self.sock.end_probe();
+            seen
+        })
+    }
+
     fn client_config(&self, expected: &str) -> Result<quinn::ClientConfig> {
         let prov = provider();
         let mut tls = rustls::ClientConfig::builder_with_provider(prov.clone())
