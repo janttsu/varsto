@@ -71,6 +71,12 @@ BUILD_VM = "vl-build"
 WAN_HOST = "198.51.100.1"
 STUN = [f"{WAN_HOST}:3478", "198.51.100.20:3478"]
 S3 = {"endpoint": f"http://{WAN_HOST}:9900", "key": "vlab-access", "secret": "vlab-secret-key-123"}
+# The rendezvous service on the host (plain HTTP: the devices say
+# VARSTO_RENDEZVOUS_PLAIN_HTTP=1, the lab has no TLS proxy).
+RENDEZVOUS_PORT = 8790
+RENDEZVOUS_UDP = 17893
+RENDEZVOUS = f"http://{WAN_HOST}:{RENDEZVOUS_PORT}"
+RENDEZVOUS_BIN = pathlib.Path(os.environ.get("VARSTO_LAB_RENDEZVOUS_BIN", str(DIR / "bin" / "varsto-rendezvous")))
 
 
 def log(*a):
@@ -366,9 +372,36 @@ def cmd_services(a):
     p = subprocess.Popen([sys.executable, __file__, "stun-serve"], stdout=open(run / "stun.log", "a"),
                          stderr=subprocess.STDOUT, start_new_session=True)
     pids["stun"] = p.pid
+    # The rendezvous service (spec 83) on "the internet", when its binary is
+    # there (`cargo build -p varsto-rendezvous`, copied to RENDEZVOUS_BIN).
+    if RENDEZVOUS_BIN.exists():
+        p = subprocess.Popen([str(RENDEZVOUS_BIN), "--listen", f"{WAN_HOST}:{RENDEZVOUS_PORT}",
+                              "--udp", f"{WAN_HOST}:{RENDEZVOUS_UDP}", "--log", "debug"],
+                             stdout=open(run / "rendezvous.log", "a"), stderr=subprocess.STDOUT,
+                             start_new_session=True)
+        pids["rendezvous"] = p.pid
+    else:
+        log(f"no {RENDEZVOUS_BIN}: the rendezvous scenarios will fail")
     (run / "pids.json").write_text(json.dumps(pids))
     time.sleep(1.5)
-    log(f"S3 at {S3['endpoint']} (bucket dirs under {s3dir}), STUN at {WAN_HOST}:3478; pids {pids}")
+    log(f"S3 at {S3['endpoint']} (bucket dirs under {s3dir}), STUN at {WAN_HOST}:3478, "
+        f"rendezvous at {RENDEZVOUS}; pids {pids}")
+
+
+def rendezvous_stop():
+    """Stop only the rendezvous service (the scenario "rendezvous down")."""
+    f = DIR / "run" / "pids.json"
+    if not f.exists():
+        return
+    pids = json.loads(f.read_text())
+    pid = pids.pop("rendezvous", None)
+    if pid:
+        try:
+            os.kill(pid, 15)
+            log(f"stopped rendezvous ({pid})")
+        except ProcessLookupError:
+            pass
+    f.write_text(json.dumps(pids))
 
 
 def cmd_services_stop(_a):

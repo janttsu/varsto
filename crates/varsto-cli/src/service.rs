@@ -1564,6 +1564,10 @@ impl P2p {
             return false;
         }
         *last = Some(Instant::now());
+        // Its record may be at the rendezvous before any storage has it.
+        if let Some(rv) = self.rendezvous() {
+            rv.fetch_soon();
+        }
         true
     }
 

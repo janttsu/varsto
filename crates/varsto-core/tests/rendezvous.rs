@@ -130,7 +130,9 @@ fn serving(d: &common::p2p::QuicDev, snap: common::p2p::Snap) -> ServeRelayed {
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let traffic: Arc<p2p::Traffic> = Arc::default();
     Arc::new(move |stream| {
-        let _ = p2p::serve_relayed(&tls, stream, &snap, &stop, &traffic);
+        if let Err(e) = p2p::serve_relayed(&tls, stream, &snap, &stop, &traffic) {
+            eprintln!("relayed session ended: {e:#}");
+        }
     })
 }
 
