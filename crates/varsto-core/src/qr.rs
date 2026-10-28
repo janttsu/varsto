@@ -49,12 +49,15 @@ const REQUEST_FORMAT: u8 = 2;
 pub enum Link {
     /// A share request code, `vsr1.<K6 hex>.<K8 hex>[.<name>]`.
     ShareRequest(String),
-    /// A pairing offer: the nine digits, the addresses it listens on and
-    /// the token of its rendezvous registration (`rv=`), if it has one.
+    /// A pairing offer: the nine digits, the addresses it listens on, the
+    /// token of its rendezvous registration (`rv=`), if it has one, and the
+    /// rendezvous base URL it is registered at (`rvu=`), written only when
+    /// that is not the default service.
     Pair {
         code: String,
         addresses: Vec<String>,
         rendezvous: Option<crate::rendezvous::Token>,
+        rendezvous_url: Option<String>,
     },
 }
 
@@ -112,6 +115,7 @@ impl Link {
                 code: crate::pair::normalize(s)?,
                 addresses: Vec::new(),
                 rendezvous: None,
+                rendezvous_url: None,
             });
         }
         if s.starts_with("vst1.") || s.starts_with("vst2.") || s.split('.').count() == 4 {
@@ -136,6 +140,7 @@ impl Link {
                 code,
                 addresses,
                 rendezvous,
+                rendezvous_url,
             } => {
                 let code = crate::pair::normalize(code)?;
                 let mut u = format!("{SCHEME}pair?c={code}");
@@ -146,6 +151,10 @@ impl Link {
                 if let Some(t) = rendezvous {
                     u.push_str("&rv=");
                     u.push_str(&hex::encode(t));
+                }
+                if let Some(url) = rendezvous_url {
+                    u.push_str("&rvu=");
+                    u.push_str(&percent_encode(url));
                 }
                 u
             }
@@ -225,7 +234,7 @@ pub fn parse(s: &str) -> Result<Scanned> {
     }
     let allowed: &[&str] = match path.as_str() {
         "share/request" => &["c", "p"],
-        "pair" => &["c", "a", "rv"],
+        "pair" => &["c", "a", "rv", "rvu"],
         other => bail!("unknown varsto:// link: {other}"),
     };
     if let Some(k) = params.keys().find(|k| !allowed.contains(&k.as_str())) {
@@ -259,10 +268,22 @@ pub fn parse(s: &str) -> Result<Scanned> {
             ),
             None => None,
         };
+        // The offerer's own rendezvous server (spec 51): a base URL the
+        // client would accept as its setting, or the link is refused.
+        let rendezvous_url = match params.get("rvu") {
+            Some(u) => {
+                let u = u.trim().trim_end_matches('/').to_string();
+                crate::rendezvous::BaseUrl::parse(&u)
+                    .map_err(|e| anyhow!("malformed rvu= value in the pairing link: {e}"))?;
+                Some(u)
+            }
+            None => None,
+        };
         return Ok(Scanned::Link(Link::Pair {
             code,
             addresses,
             rendezvous,
+            rendezvous_url,
         }));
     }
     let (kind, param) = ("request", "c");
@@ -322,6 +343,20 @@ fn b32(v: &str) -> Result<Vec<u8>> {
     BASE32_NOPAD
         .decode(v.to_ascii_uppercase().as_bytes())
         .map_err(|_| anyhow!("the link's value is not valid Base32"))
+}
+
+/// Percent-encode a link parameter value: everything but the unreserved
+/// characters and `:` `/` (a URL stays readable).
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~:/".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 fn percent_decode(s: &str) -> Result<String> {
@@ -660,6 +695,7 @@ mod tests {
             code: "123-456-789".into(),
             addresses: vec!["192.168.1.20:41234".into(), "[fe80::1]:41234".into()],
             rendezvous: None,
+            rendezvous_url: None,
         };
         let uri = l.to_uri().unwrap();
         assert_eq!(
@@ -671,10 +707,12 @@ mod tests {
                 code,
                 addresses,
                 rendezvous,
+                rendezvous_url,
             }) => {
                 assert_eq!(code, "123456789");
                 assert_eq!(addresses.len(), 2);
                 assert_eq!(rendezvous, None);
+                assert_eq!(rendezvous_url, None);
             }
             other => panic!("{other:?}"),
         }
@@ -687,6 +725,7 @@ mod tests {
             code: "123-456-789".into(),
             addresses: vec!["192.168.1.20:41234".into()],
             rendezvous: Some(t),
+            rendezvous_url: None,
         };
         let uri = l.to_uri().unwrap();
         assert_eq!(
@@ -720,6 +759,47 @@ mod tests {
             ),
         ] {
             assert!(parse(&bad).is_err(), "accepted {bad}");
+        }
+    }
+
+    #[test]
+    fn pairing_links_name_a_self_hosted_rendezvous() {
+        let l = Link::Pair {
+            code: "123456789".into(),
+            addresses: vec![],
+            rendezvous: Some([0x11; 16]),
+            rendezvous_url: Some("https://rv.example.org/varsto rv".into()),
+        };
+        let uri = l.to_uri().unwrap();
+        assert_eq!(
+            uri,
+            format!(
+                "varsto://pair?c=123456789&rv={}&rvu=https://rv.example.org/varsto%20rv",
+                "11".repeat(16)
+            )
+        );
+        assert!(code_for(&uri).is_ok(), "fits one QR code");
+        assert_eq!(parse(&uri).unwrap(), Scanned::Link(l));
+        // A trailing slash is dropped; the link stays valid without `rv=`.
+        match parse("varsto://pair?c=123456789&rvu=https%3A%2F%2Frv.example.org%2Frv%2F").unwrap() {
+            Scanned::Link(Link::Pair {
+                rendezvous,
+                rendezvous_url,
+                ..
+            }) => {
+                assert_eq!(rendezvous, None);
+                assert_eq!(rendezvous_url.as_deref(), Some("https://rv.example.org/rv"));
+            }
+            other => panic!("{other:?}"),
+        }
+        for bad in [
+            "varsto://pair?c=123456789&rvu=ftp://rv.example.org",
+            "varsto://pair?c=123456789&rvu=http://rv.example.org/rv",
+            "varsto://pair?c=123456789&rvu=https://rv.example.org/rv%3Fx=1",
+            "varsto://pair?c=123456789&rvu=https://user@rv.example.org",
+            "varsto://pair?c=123456789&rvu=https://a.example&rvu=https://b.example",
+        ] {
+            assert!(parse(bad).is_err(), "accepted {bad}");
         }
     }
 
@@ -761,6 +841,7 @@ mod tests {
             code: "123-456-789".into(),
             addresses: addresses.clone(),
             rendezvous: Some([0x5a; 16]),
+            rendezvous_url: None,
         };
         let uri = l.to_uri().unwrap();
         assert!(code_for(&uri).is_ok(), "fits one QR code");
@@ -781,6 +862,7 @@ mod tests {
             code: "123-456-789".into(),
             addresses: many,
             rendezvous: Some([0xff; 16]),
+            rendezvous_url: None,
         }
         .to_uri()
         .unwrap();

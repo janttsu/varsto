@@ -49,10 +49,17 @@ pub fn configured(cfg: &crate::vault::P2pConfig) -> Option<String> {
 }
 
 /// The rendezvous a device that is joining (it has no configuration yet)
-/// looks a pairing offer up at: the default service unless
-/// [`ENV_OVERRIDE`] says otherwise.
-pub fn for_joining() -> Option<String> {
-    from_env().unwrap_or_else(crate::vault::default_rendezvous)
+/// looks a pairing offer up at: the one the pairing link names (`rvu=`,
+/// an offer at a self-hosted server), else the default service, unless
+/// [`ENV_OVERRIDE`] says otherwise (`off` wins over the link).
+pub fn for_joining(link_url: Option<&str>) -> Option<String> {
+    match from_env() {
+        Some(None) => None,
+        env => link_url
+            .map(str::to_string)
+            .or_else(|| env.flatten())
+            .or_else(crate::vault::default_rendezvous),
+    }
 }
 
 /// Unix seconds, as every signed timestamp carries them.

@@ -1134,9 +1134,12 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // All addresses of a scanned pairing link, best first: the field shows the
   // first, and joining tries the others when it fails.
   var pairOffered = [];
+  // The link's rendezvous token and self-hosted server (rv=, rvu=), passed on to the join.
+  var pairRv = null;
   function fillPair(info) {
     var form = $("pair"); form.querySelector("input[name=code]").value = info.code;
     pairOffered = (info.addresses || []).slice();
+    pairRv = { rv: info.rv || null, rvu: info.rvu || null };
     if (pairOffered.length) { form.querySelector("input[name=address]").value = pairOffered[0]; $("pairdetails").open = true; }
     var n = form.querySelector("input[name=name]"); if (n) { n.focus(); }
   }
@@ -3903,17 +3906,19 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("pair").onsubmit = function (ev) {
     ev.preventDefault(); var d = formData(ev.target); busy(true); log("looking for the device showing code " + d.code);
     d.addresses = pairOffered;
+    if (pairRv && pairRv.rv) { d.rv = pairRv.rv; }
+    if (pairRv && pairRv.rvu) { d.rvu = pairRv.rvu; }
     // The service tells which address it is trying while the request runs.
     var shown = ""; var prog = $("pairprogress");
     function showStep(v) {
       // The other device shows this device's six words to its person before it lets this one join.
       var words = v.active && v.fingerprint ? "This device's six words: " + v.fingerprint + ". The other device shows the same words before it lets this one join." : "";
       if ($("pairwords").textContent !== words) { $("pairwords").textContent = words; }
-      var msg = !v.active ? "" : v.step === "trying" ? "Trying " + v.address + " …" : v.step === "looking" ? "Looking for the device on the network …" : v.step === "rendezvous" ? "Looking for the device through the rendezvous service …" : "";
+      var msg = !v.active ? "" : v.step === "trying" ? "Trying " + v.address + " …" : v.step === "looking" ? "Looking for the device on the network …" : v.step === "rendezvous" ? "Looking for the device through the rendezvous service …" : v.step === "rendezvous-relay" ? "Pairing through the rendezvous relay …" : "";
       if (msg !== shown) { shown = msg; prog.textContent = msg; if (msg) { log(msg.charAt(0).toLowerCase() + msg.slice(1)); } }
     }
     var poll = setInterval(function () { api("GET", "/api/pair/join-status").then(showStep).catch(function () {}); }, 500);
-    api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); pairOffered = []; log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(pairFailed).then(function () { clearInterval(poll); prog.textContent = ""; $("pairwords").textContent = ""; busy(false); });
+    api("POST", "/api/pair/join", d).then(function (r) { ev.target.reset(); pairOffered = []; pairRv = null; log("paired with " + r.from + ": " + r.storages.join("; ")); nav("files"); return refreshState(); }).catch(pairFailed).then(function () { clearInterval(poll); prog.textContent = ""; $("pairwords").textContent = ""; busy(false); });
   };
   // Nothing answered: name every address tried and what the user can check.
   function pairFailed(e) {

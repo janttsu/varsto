@@ -39,20 +39,6 @@ pub struct ServiceFile {
 
 varsto_core::redacted_debug!(ServiceFile { pid, port, started_utc, version ; token });
 
-// rv-c provides the real one: the rendezvous thread's status (contract: URL,
-// state "off"|"on"|"unreachable"|"connecting", observed UDP address, last
-// error, clock skew, peers reached through the relay). The stub is never
-// filled, so the pages show the configured URL and "not connected".
-#[derive(Default, Clone, Debug, Serialize)]
-pub struct RendezvousStatus {
-    pub url: Option<String>,
-    pub state: String,
-    pub observed: Option<std::net::SocketAddr>,
-    pub last_error: Option<String>,
-    pub clock_skew: Option<i64>,
-    pub relayed_peers: usize,
-}
-
 /// Runtime state of the service, shared with the API.
 #[derive(Default)]
 pub struct ServiceState {
@@ -94,8 +80,6 @@ pub struct ServiceState {
     pub p2p_reachable: bool,
     pub p2p_relays: Vec<String>,
     pub p2p_paths: Vec<varsto_core::p2p::PeerStatus>,
-    /// The rendezvous service: state, observed address, relayed peers.
-    pub rendezvous: RendezvousStatus, // rv-c provides the real one
     pub p2p_cert_sha256: String,
     /// The port the home router forwards to us (PCP, NAT-PMP, UPnP), if any.
     pub p2p_portmap: varsto_core::p2p::portmap::PortMapStatus,

@@ -5335,14 +5335,16 @@ fn run(cli: &Cli) -> Result<()> {
                     // The link of the other device's QR code carries the code and
                     // all its candidate addresses, best first. Order of tries:
                     // --address, the link's addresses, then the LAN search.
-                    let (code, offered, token) = match varsto_core::qr::Link::from_text(code) {
-                        Ok(varsto_core::qr::Link::Pair {
-                            code,
-                            addresses,
-                            rendezvous,
-                        }) => (code, addresses, rendezvous),
-                        _ => (code.clone(), Vec::new(), None),
-                    };
+                    let (code, offered, token, rv_url) =
+                        match varsto_core::qr::Link::from_text(code) {
+                            Ok(varsto_core::qr::Link::Pair {
+                                code,
+                                addresses,
+                                rendezvous,
+                                rendezvous_url,
+                            }) => (code, addresses, rendezvous, rendezvous_url),
+                            _ => (code.clone(), Vec::new(), None, None),
+                        };
                     let pass = passphrase()?;
                     // This device's keys: the other device shows their six
                     // words before it lets this one join.
@@ -5353,7 +5355,7 @@ fn run(cli: &Cli) -> Result<()> {
                     );
                     // Then the rendezvous service (spec 83.9), when nothing
                     // on this network answered.
-                    let rendezvous = varsto_core::rendezvous::for_joining();
+                    let rendezvous = varsto_core::rendezvous::for_joining(rv_url.as_deref());
                     let result = varsto_core::pair::receive_with_rendezvous(
                         &code,
                         &keys.join_keys(name),

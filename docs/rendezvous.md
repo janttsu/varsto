@@ -118,6 +118,12 @@ link (which also carries a random token), then work from any network:
 The pairing exchange is encrypted end to end between the two devices in every
 case. Without internet, pairing on the same network works as before.
 
+When the offering device uses your own server instead of the default, its QR
+code and link also carry that server's address (`rvu=`), and the new device
+looks the offer up there. A code typed by hand does not carry it: on another
+network, scan the QR code or open the link, or start the new device with
+`VARSTO_RENDEZVOUS=<your server's URL>`.
+
 ## Running your own
 
 The server is one static binary, `varsto-rendezvous` (Linux x86_64, in the

@@ -186,6 +186,9 @@ pub struct OfferStatus {
     /// The token of the link's `rv=` parameter (hex), while the offer uses
     /// the rendezvous.
     pub rendezvous_token: Option<String>,
+    /// The rendezvous base URL the offer is registered at, when it is not
+    /// the default service: the link's `rvu=` parameter (section 51).
+    pub rendezvous_url: Option<String>,
 }
 
 impl OfferStatus {
@@ -198,6 +201,10 @@ impl OfferStatus {
                 .rendezvous_token
                 .as_deref()
                 .and_then(crate::rendezvous::keys::parse_token),
+            rendezvous_url: self
+                .rendezvous_token
+                .as_ref()
+                .and(self.rendezvous_url.clone()),
         }
     }
 }
@@ -225,6 +232,15 @@ impl PairStream for crate::rendezvous::RelayStream {
     ) -> std::io::Result<()> {
         self.set_read_timeout(read)
     }
+}
+
+/// The `rvu=` value of a pairing link for an offer registered at `url`:
+/// `None` for the default service (a link stays as short as it can be and
+/// readable by every client), the URL without a trailing slash otherwise.
+pub fn url_for_link(url: Option<&str>) -> Option<String> {
+    let u = url?.trim().trim_end_matches('/');
+    let default = crate::rendezvous::proto::DEFAULT_URL.trim_end_matches('/');
+    (!u.eq_ignore_ascii_case(default)).then(|| u.to_string())
 }
 
 /// The exchange an offer runs on each connection.
@@ -264,6 +280,7 @@ impl Offer {
             .into_iter()
             .map(|c| format!("{}:{port}", c.ip))
             .collect();
+        let rv_url_given = rv;
         let rv = rv.and_then(|url| match crate::rendezvous::RvClient::new(url) {
             Ok(c) => Some(c),
             Err(e) => {
@@ -274,6 +291,8 @@ impl Offer {
         let token = rv
             .as_ref()
             .map(|_| crate::rendezvous::proto::random_token());
+        // A joiner asks the default service unless the link names another.
+        let rv_url = url_for_link(rv_url_given);
         let inner = Arc::new(Mutex::new(OfferInner {
             status: OfferStatus {
                 open: true,
@@ -286,6 +305,7 @@ impl Offer {
                 closed_reason: None,
                 rendezvous: false,
                 rendezvous_token: token.map(hex::encode),
+                rendezvous_url: rv_url.filter(|_| token.is_some()),
             },
             expires: Instant::now() + OFFER_TTL,
         }));

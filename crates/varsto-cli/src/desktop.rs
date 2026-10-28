@@ -1860,7 +1860,7 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
     let rendezvous = if cfg!(test) {
         None
     } else {
-        varsto_core::rendezvous::for_joining()
+        varsto_core::rendezvous::for_joining(opt(input, "rvu").as_deref())
     };
     let result = varsto_core::pair::receive_with_rendezvous(
         &code,
@@ -1889,14 +1889,6 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
             varsto_core::pair::Step::Looking => {
                 set_join_step(
                     json!({"active": true, "step": "looking", "tried": tried, "fingerprint": words}),
-                );
-            }
-            // The rendezvous steps (looking the offer up, trying the found
-            // addresses, relaying) all show as one line.
-            #[allow(unreachable_patterns)]
-            _ => {
-                set_join_step(
-                    json!({"active": true, "step": "rendezvous", "tried": tried, "fingerprint": words}),
                 );
             }
         },
@@ -1955,10 +1947,12 @@ fn link_info(link: &varsto_core::qr::Link) -> Result<Value> {
             code,
             addresses,
             rendezvous,
+            rendezvous_url,
         } => {
             v["code"] = json!(format!("{}-{}-{}", &code[0..3], &code[3..6], &code[6..9]));
             v["addresses"] = json!(addresses);
             v["rv"] = json!(rendezvous.map(hex::encode));
+            v["rvu"] = json!(rendezvous_url);
         }
     }
     Ok(v)
@@ -1967,10 +1961,14 @@ fn link_info(link: &varsto_core::qr::Link) -> Result<Value> {
 /// The rendezvous service as the pages and `varsto p2p status` show it:
 /// the configured URL (`null` = off), the default, and what the service
 /// last saw (state, observed UDP address, relayed peers).
-fn rendezvous_json(cfg: &varsto_core::vault::P2pConfig, st: &service::RendezvousStatus) -> Value {
+fn rendezvous_json(
+    cfg: &varsto_core::vault::P2pConfig,
+    st: &varsto_core::p2p::rendezvous::RendezvousStatus,
+) -> Value {
     let state = match (&cfg.rendezvous, st.state.as_str()) {
         (None, _) => "off",
-        (Some(_), "") => "connecting",
+        // The service has not started its rendezvous thread (yet).
+        (Some(_), "" | "off") => "connecting",
         (Some(_), s) => s,
     };
     json!({
@@ -1982,6 +1980,8 @@ fn rendezvous_json(cfg: &varsto_core::vault::P2pConfig, st: &service::Rendezvous
         "last_error": st.last_error,
         "clock_skew": st.clock_skew,
         "relayed_peers": st.relayed_peers,
+        "slots_seen": st.slots_seen,
+        "relay_sessions": st.relay_sessions,
     })
 }
 
@@ -3827,11 +3827,10 @@ fn api_unlocked(
             "reachable": service.p2p_reachable,
             "relays": service.p2p_relays,
             "paths": service.p2p_paths,
-            "rendezvous": rendezvous_json(&engine.p2p_config(), &service.rendezvous),
+            "rendezvous": rendezvous_json(&engine.p2p_config(), &service.p2p_rendezvous),
             "cert_sha256": service.p2p_cert_sha256,
             "portmap": service.p2p_portmap,
             "portmap_text": service.p2p_portmap.describe(),
-            "rendezvous": service.p2p_rendezvous,
         })),
         (Method::Post, "/api/p2p") => {
             let mut c = engine.p2p_config();
@@ -6048,7 +6047,7 @@ mod tests {
         // Off, then a self-hosted address (a trailing slash is dropped).
         assert!(apply_rendezvous_input(&mut c, &json!({"rendezvous_on": false})).unwrap());
         assert_eq!(c.rendezvous, None);
-        let st = service::RendezvousStatus::default();
+        let st = varsto_core::p2p::rendezvous::RendezvousStatus::default();
         let off = rendezvous_json(&c, &st);
         assert_eq!(off["state"], "off");
         assert_eq!(off["enabled"], false);
@@ -6064,7 +6063,7 @@ mod tests {
         let on = rendezvous_json(&c, &st);
         assert_eq!(on["state"], "connecting");
         assert_eq!(on["url"], "https://rv.example.org/rv");
-        let seen = service::RendezvousStatus {
+        let seen = varsto_core::p2p::rendezvous::RendezvousStatus {
             state: "on".into(),
             observed: Some("203.0.113.9:40000".parse().unwrap()),
             relayed_peers: 2,
@@ -6083,6 +6082,8 @@ mod tests {
             "last_error",
             "clock_skew",
             "relayed_peers",
+            "slots_seen",
+            "relay_sessions",
         ] {
             assert!(v.get(k).is_some(), "lacks {k}");
         }
