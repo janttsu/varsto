@@ -4545,6 +4545,7 @@ dependencies = [
  "unicode-normalization",
  "ureq",
  "varsto-core",
+ "varsto-rendezvous",
  "walkdir",
  "webpki-roots",
  "windows-sys 0.59.0",

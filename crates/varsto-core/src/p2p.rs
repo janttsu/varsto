@@ -20,6 +20,7 @@
 
 pub mod portmap;
 pub mod quic;
+pub mod rendezvous;
 pub mod stun;
 pub mod traffic;
 pub mod v3;
@@ -444,6 +445,7 @@ impl Server {
                     let _ = tls.serve(sock, remote, |stream, handler| {
                         serve_connection(
                             stream, remote, &snapshot, &stop, &slots, &traffic, &heads, handler,
+                            false,
                         )
                     });
                 });
@@ -477,6 +479,7 @@ fn serve_connection<S: Read + Write + CloseWrite>(
     traffic: &Traffic,
     heads: &Arc<PerIp>,
     handler: &Handler<'_>,
+    relayed: bool,
 ) -> Result<()> {
     let mut buf: Vec<u8> = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
@@ -590,8 +593,12 @@ fn serve_connection<S: Read + Write + CloseWrite>(
                 traffic::Direction::Out,
                 body.len() as u64,
                 is_object(&path, status),
-                &Route::Tcp(remote).label(),
-                Some(remote),
+                &if relayed {
+                    RV_LABEL.to_string()
+                } else {
+                    Route::Tcp(remote).label()
+                },
+                (!relayed).then_some(remote),
             );
         }
         if !keep {
@@ -612,6 +619,40 @@ impl CloseWrite for TcpStream {
     fn close_write(&mut self) {
         let _ = self.shutdown(std::net::Shutdown::Write);
     }
+}
+
+/// The path name of a session relayed by the rendezvous service (section
+/// 83.7), in the status displays and the traffic counters.
+pub const RV_LABEL: &str = "relayed via rendezvous";
+
+/// How long the TLS handshake of a relayed session may take: the other
+/// side may join the relay up to 15 s after us.
+const RELAYED_HANDSHAKE: Duration = Duration::from_secs(25);
+
+/// Serve one session relayed by the rendezvous service (the answering side
+/// of section 83.7): the same TLS handshake (only certificates of the
+/// directory are admitted), tokens and requests as a TCP connection, until
+/// the asker closes it, it stays idle, or `stop` is set.
+pub fn serve_relayed(
+    tls: &v3::tls::TcpTls,
+    stream: crate::rendezvous::RelayStream,
+    snapshot: &Mutex<Option<Arc<Snapshot>>>,
+    stop: &std::sync::atomic::AtomicBool,
+    traffic: &Traffic,
+) -> Result<()> {
+    // Short reads, so the loop watches its deadlines and `stop`.
+    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+    let slots = Slots {
+        free: Mutex::new(serve_threads().min(4)),
+        cv: std::sync::Condvar::new(),
+    };
+    let heads = Arc::new(PerIp::default());
+    let remote = SocketAddr::from(([0, 0, 0, 0], 0));
+    tls.serve_stream(stream, remote, RELAYED_HANDSHAKE, |s, handler| {
+        serve_connection(
+            s, remote, snapshot, stop, &slots, traffic, &heads, handler, true,
+        )
+    })
 }
 
 /// Answer `path` for `dev`, whose request was authenticated already (by its
@@ -712,10 +753,26 @@ pub fn is_lan(ip: IpAddr) -> bool {
 /// for addresses beyond the LAN and was slower there than a new TCP
 /// connection per request (October 2026, cloud machines in three
 /// countries), so TCP stays first and QUIC is the way through NATs.
+#[cfg(test)]
 fn order_routes(tcp: &[SocketAddr], udp: &[SocketAddr], relays: Vec<Route>) -> Vec<Route> {
+    order_routes_with(tcp, udp, None, relays, None)
+}
+
+/// `order_routes` with the rendezvous routes (section 83.9): a QUIC dial
+/// after a server-coordinated punch right after the record's QUIC
+/// addresses, the rendezvous relay after every peer relay.
+fn order_routes_with(
+    tcp: &[SocketAddr],
+    udp: &[SocketAddr],
+    rv_punch: Option<Route>,
+    relays: Vec<Route>,
+    rv_relay: Option<Route>,
+) -> Vec<Route> {
     let mut out: Vec<Route> = tcp.iter().map(|a| Route::Tcp(*a)).collect();
     out.extend(udp.iter().map(|a| Route::Quic(*a)));
+    out.extend(rv_punch);
     out.extend(relays);
+    out.extend(rv_relay);
     out
 }
 
@@ -782,6 +839,11 @@ enum Route {
     Relay(DeviceId, String, SocketAddr),
     /// The connection the peer keeps open with us as its relay.
     Registered(SocketAddr),
+    /// QUIC to the address the rendezvous service observed for the peer,
+    /// both sides punching at once (`punch`, section 83.6).
+    RvPunch,
+    /// A session relayed by the rendezvous service (section 83.7).
+    Rendezvous,
 }
 
 impl Route {
@@ -790,16 +852,24 @@ impl Route {
             Route::Tcp(a) | Route::Quic(a) | Route::Registered(a) if is_lan(a.ip()) => {
                 "direct-lan".into()
             }
-            Route::Tcp(_) | Route::Quic(_) | Route::Registered(_) => "direct".into(),
+            Route::Tcp(_) | Route::Quic(_) | Route::Registered(_) | Route::RvPunch => {
+                "direct".into()
+            }
             Route::Relay(dev, name, _) => format!(
                 "relayed via {}",
                 if name.is_empty() { dev.short() } else { name }
             ),
+            Route::Rendezvous => RV_LABEL.into(),
         }
     }
-    fn addr(&self) -> SocketAddr {
+    /// The address the route dials; none for the rendezvous routes (the
+    /// punched address is the server's to tell, a relay has none).
+    fn addr(&self) -> Option<SocketAddr> {
         match self {
-            Route::Tcp(a) | Route::Quic(a) | Route::Relay(_, _, a) | Route::Registered(a) => *a,
+            Route::Tcp(a) | Route::Quic(a) | Route::Relay(_, _, a) | Route::Registered(a) => {
+                Some(*a)
+            }
+            Route::RvPunch | Route::Rendezvous => None,
         }
     }
     /// For the log: transport and address, and the relay's name.
@@ -812,6 +882,8 @@ impl Route {
                 "relay {} at {a}",
                 if name.is_empty() { dev.short() } else { name }
             ),
+            Route::RvPunch => "quic after a rendezvous punch".into(),
+            Route::Rendezvous => "rendezvous relay".into(),
         }
     }
 }
@@ -958,6 +1030,9 @@ pub struct Peers {
     /// address of a peer outside all of them is not tried (it is the
     /// peer's LAN, not ours). `None` tries every address.
     subnets: Option<Vec<(Ipv4Addr, u8)>>,
+    /// The rendezvous service, when it is on (section 83): a coordinated
+    /// punch and its relay are the last routes to a peer.
+    rv: Option<Arc<rendezvous::Rendezvous>>,
 }
 
 crate::redacted_opaque!(Peers);
@@ -1032,9 +1107,11 @@ const RACE_STAGGER: Duration = Duration::from_millis(300);
 /// One request over `route` to `p`, with no bookkeeping: what the raced
 /// routes run on their own threads (`Peers::race`). `relay_cert` is the
 /// relay's pinned certificate for a relayed route.
+#[allow(clippy::too_many_arguments)]
 fn attempt_route(
     client: &v3::Client,
     quic: Option<&quic::Node>,
+    rv: Option<&rendezvous::Rendezvous>,
     route: &Route,
     relay_cert: Option<&str>,
     p: &PeerInfo,
@@ -1042,6 +1119,17 @@ fn attempt_route(
     timeout: Duration,
 ) -> Result<(u16, Vec<u8>)> {
     match route {
+        Route::RvPunch => {
+            let node = quic.ok_or_else(|| anyhow!("no QUIC node"))?;
+            let rv = rv.ok_or_else(|| anyhow!("no rendezvous"))?;
+            let a = rv.punch_addr(&p.device)?;
+            node.request_with(a, &p.cert_sha256, path, true, &|e: &[u8; 32]| {
+                client.token(e, &p.device, path)
+            })
+        }
+        Route::Rendezvous => rv
+            .ok_or_else(|| anyhow!("no rendezvous"))?
+            .request(client, p, path),
         Route::Tcp(a) => client.tcp_get(*a, &p.cert_sha256, &p.device, path, timeout),
         Route::Quic(a) => {
             let node = quic.ok_or_else(|| anyhow!("no QUIC node"))?;
@@ -1140,7 +1228,15 @@ impl Peers {
             client,
             saved_only: false,
             subnets: own_subnets(),
+            rv: None,
         }
+    }
+
+    /// Reach peers through the rendezvous service too (a coordinated
+    /// punch, then its relay, after every other route).
+    pub fn with_rendezvous(mut self, rv: Option<Arc<rendezvous::Rendezvous>>) -> Peers {
+        self.rv = rv;
+        self
     }
 
     /// Mark a table built from the directory saved on this device only.
@@ -1193,6 +1289,11 @@ impl Peers {
         *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
         *self.objects.lock().unwrap() = previous.objects.lock().unwrap().clone();
         *self.selfs.lock().unwrap() = previous.selfs.lock().unwrap().clone();
+    }
+
+    /// The rendezvous service this table reaches peers through, if any.
+    pub fn rendezvous(&self) -> Option<&Arc<rendezvous::Rendezvous>> {
+        self.rv.as_ref()
     }
 
     /// Whether `addr` is known to be this device itself.
@@ -1320,6 +1421,16 @@ impl Peers {
                 Ok((status, body))
             }
             Route::Registered(_) => self.try_registrant(p, path),
+            Route::RvPunch | Route::Rendezvous => attempt_route(
+                &self.client,
+                self.quic.as_deref(),
+                self.rv.as_deref(),
+                route,
+                None,
+                p,
+                path,
+                self.timeout,
+            ),
             Route::Relay(relay, _, a) => {
                 let cert = self
                     .peers
@@ -1349,7 +1460,7 @@ impl Peers {
             Route::Quic(a) => self
                 .is_self_addr(*a)
                 .then_some("that address is this device itself"),
-            Route::Registered(_) | Route::Relay(..) => None,
+            Route::Registered(_) | Route::Relay(..) | Route::RvPunch | Route::Rendezvous => None,
         }
     }
 
@@ -1377,9 +1488,10 @@ impl Peers {
                     .map(|r| r.cert_sha256.clone()),
                 _ => None,
             };
-            let (client, quic, route, peer, tx, done, timeout) = (
+            let (client, quic, rv, route, peer, tx, done, timeout) = (
                 self.client.clone(),
                 self.quic.clone(),
+                self.rv.clone(),
                 route.clone(),
                 p.clone(),
                 tx.clone(),
@@ -1399,6 +1511,7 @@ impl Peers {
                     let got = attempt_route(
                         &client,
                         quic.as_deref(),
+                        rv.as_deref(),
                         &route,
                         relay_cert.as_deref(),
                         &peer,
@@ -1417,12 +1530,14 @@ impl Peers {
         while let Ok((i, got)) = rx.recv() {
             let r = &routes[i];
             match got {
-                Ok((403, body)) if body == SELF_ANSWER && !matches!(r, Route::Relay(..)) => {
-                    log(&format!(
-                        "{} answered as this very device; not used again",
-                        r.addr()
-                    ));
-                    self.selfs.lock().unwrap().insert(r.addr());
+                Ok((403, body))
+                    if body == SELF_ANSWER
+                        && !matches!(r, Route::Relay(..) | Route::RvPunch | Route::Rendezvous) =>
+                {
+                    if let Some(a) = r.addr() {
+                        log(&format!("{a} answered as this very device; not used again"));
+                        self.selfs.lock().unwrap().insert(a);
+                    }
                     tried.push(format!(
                         "{}: that address is this device itself",
                         r.describe()
@@ -1489,7 +1604,22 @@ impl Peers {
             .filter(|a| !selfs.contains(a) && on_our_side(a, nets))
             .copied()
             .collect();
-        let mut routes = order_routes(&tcp, if quic { &udp } else { &[] }, relays);
+        // The rendezvous service: a punch it coordinates after the record's
+        // own QUIC addresses, its relay after the peer relays (section 83.9).
+        let (rv_punch, rv_relay) = match &self.rv {
+            Some(rv) if !p.cert_sha256.is_empty() => (
+                (quic && rv.can_punch()).then_some(Route::RvPunch),
+                rv.can_relay().then_some(Route::Rendezvous),
+            ),
+            _ => (None, None),
+        };
+        let mut routes = order_routes_with(
+            &tcp,
+            if quic { &udp } else { &[] },
+            rv_punch,
+            relays,
+            rv_relay,
+        );
         // A peer that keeps its relay registration with us is reached on
         // that connection first: it is open already, and behind a symmetric
         // NAT nothing else reaches it from here.
@@ -1538,7 +1668,7 @@ impl Peers {
                 body.len() as u64,
                 is_object(path, *status),
                 &route.label(),
-                Some(route.addr()),
+                route.addr(),
             );
         }
         got
@@ -1598,7 +1728,7 @@ impl Peers {
                         b.len() as u64,
                         false,
                         &r.label(),
-                        Some(r.addr()),
+                        r.addr(),
                     );
                     self.over(&r, path, p)
                 };
@@ -1729,12 +1859,9 @@ impl Peers {
         // `ok` means the peer answered as a vault device: 200, or 404 for an
         // object it does not hold. A 403 means the path works but we do not.
         let (path, addr, ok, when) = match routes.get(&p.device) {
-            Some((Some(r), status, when)) => (
-                r.label(),
-                Some(r.addr()),
-                matches!(status, 200 | 404),
-                Some(when),
-            ),
+            Some((Some(r), status, when)) => {
+                (r.label(), r.addr(), matches!(status, 200 | 404), Some(when))
+            }
             Some((None, _, when)) => ("unreachable".to_string(), None, false, Some(when)),
             None => ("untried".to_string(), None, false, None),
         };
@@ -1964,10 +2091,31 @@ mod tests {
                 Route::Tcp(wide),
                 Route::Quic(wide),
                 Route::Quic(lan),
-                relay
+                relay.clone()
             ]
         );
         assert_eq!(order_routes(&[lan], &[], vec![]), vec![Route::Tcp(lan)]);
+        // The rendezvous: its punch after the record's QUIC addresses, its
+        // relay after the peer relays.
+        let got = order_routes_with(
+            &[lan],
+            &[wide],
+            Some(Route::RvPunch),
+            vec![relay.clone()],
+            Some(Route::Rendezvous),
+        );
+        assert_eq!(
+            got,
+            vec![
+                Route::Tcp(lan),
+                Route::Quic(wide),
+                Route::RvPunch,
+                relay,
+                Route::Rendezvous
+            ]
+        );
+        assert_eq!(Route::Rendezvous.label(), "relayed via rendezvous");
+        assert_eq!(Route::Rendezvous.addr(), None);
     }
 
     #[test]

@@ -124,21 +124,39 @@ impl TcpTls {
     /// closed.
     pub(crate) fn serve(
         &self,
-        mut sock: TcpStream,
+        sock: TcpStream,
         remote: SocketAddr,
         run: impl FnOnce(ServerStream, &crate::p2p::Handler<'_>) -> Result<()>,
+    ) -> Result<()> {
+        self.serve_stream(sock, remote, HANDSHAKE_DEADLINE, run)
+    }
+
+    /// `serve` on any byte stream (a TCP connection, or a rendezvous relay
+    /// session, `alpha-0-format.md` section 83.7): the same certificates,
+    /// pins and request handler. The stream's reads must time out now and
+    /// then (the handshake watches `deadline`, the connection loop its
+    /// idle limits). `remote` names the other end in the log.
+    pub(crate) fn serve_stream<S: Read + Write + ShutdownWrite>(
+        &self,
+        mut sock: S,
+        remote: SocketAddr,
+        deadline: Duration,
+        run: impl FnOnce(
+            rustls::StreamOwned<rustls::ServerConnection, S>,
+            &crate::p2p::Handler<'_>,
+        ) -> Result<()>,
     ) -> Result<()> {
         let mut conn = rustls::ServerConnection::new(self.config.clone())?;
         let started = Instant::now();
         while conn.is_handshaking() {
-            if started.elapsed() > HANDSHAKE_DEADLINE {
+            if started.elapsed() > deadline {
                 bail!("{remote}: TLS handshake took too long");
             }
             match conn.complete_io(&mut sock) {
                 Ok(_) => {}
                 Err(e) if is_timeout(&e) => {}
                 Err(e) => {
-                    let _ = sock.shutdown(std::net::Shutdown::Write);
+                    sock.shutdown_write();
                     return Err(anyhow!("{remote}: TLS handshake failed: {e}"));
                 }
             }
@@ -176,11 +194,31 @@ fn timed_out(e: &anyhow::Error) -> bool {
         .any(|c| c.downcast_ref::<std::io::Error>().is_some_and(is_timeout))
 }
 
-impl crate::p2p::CloseWrite for ServerStream {
+/// Ending the sending side of the byte stream under a TLS session, so that
+/// what was written reaches the other end before the stream closes.
+pub trait ShutdownWrite {
+    fn shutdown_write(&mut self);
+}
+
+impl ShutdownWrite for TcpStream {
+    fn shutdown_write(&mut self) {
+        let _ = self.shutdown(std::net::Shutdown::Write);
+    }
+}
+
+impl ShutdownWrite for crate::rendezvous::RelayStream {
+    fn shutdown_write(&mut self) {
+        self.shutdown();
+    }
+}
+
+impl<S: Read + Write + ShutdownWrite> crate::p2p::CloseWrite
+    for rustls::StreamOwned<rustls::ServerConnection, S>
+{
     fn close_write(&mut self) {
         self.conn.send_close_notify();
         let _ = self.conn.complete_io(&mut self.sock);
-        let _ = self.sock.shutdown(std::net::Shutdown::Write);
+        self.sock.shutdown_write();
     }
 }
 
@@ -241,8 +279,30 @@ pub fn connect(
     Ok((rustls::StreamOwned::new(conn, sock), exp))
 }
 
+/// Run the client handshake pinning `expected` over a byte stream that is
+/// open already (a rendezvous relay session, section 83.7), and return the
+/// session with its exporter value. The stream's read timeout bounds each
+/// step.
+pub fn connect_stream<S: Read + Write>(
+    identity: &Identity,
+    mut sock: S,
+    expected: &str,
+) -> Result<(rustls::StreamOwned<rustls::ClientConnection, S>, [u8; 32])> {
+    let cfg = client_config(identity, expected)?;
+    let name = ServerName::try_from("varsto").map_err(|e| anyhow!("server name: {e}"))?;
+    let mut conn = rustls::ClientConnection::new(cfg, name)?;
+    while conn.is_handshaking() {
+        conn.complete_io(&mut sock)
+            .context("TLS handshake over the rendezvous relay")?;
+    }
+    let exp = conn
+        .export_keying_material([0u8; 32], EXPORTER_LABEL, Some(b""))
+        .map_err(|e| anyhow!("TLS exporter: {e}"))?;
+    Ok((rustls::StreamOwned::new(conn, sock), exp))
+}
+
 /// Each read of an answer over TLS may wait this long.
-const RESPONSE_IDLE: Duration = Duration::from_secs(30);
+pub const RESPONSE_IDLE: Duration = Duration::from_secs(30);
 /// The longest a connection attempt waits, however slow the link was.
 pub const HANDSHAKE_MAX: Duration = Duration::from_secs(6);
 

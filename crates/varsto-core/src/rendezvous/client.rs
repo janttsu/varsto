@@ -25,6 +25,10 @@ use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// Set to `1`, a process may use plain `http://` to any address (the lab,
+/// whose test "internet" has no TLS proxy). Never set on a real device.
+pub const PLAIN_HTTP_ENV: &str = "VARSTO_RENDEZVOUS_PLAIN_HTTP";
+
 /// Connect, resolve and first-byte timeout of every HTTP call.
 pub const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 /// Whole-call limit of an HTTP call.
@@ -97,7 +101,10 @@ impl BaseUrl {
                 .parse::<std::net::IpAddr>()
                 .map(|ip| ip.is_loopback() || crate::p2p::is_lan(ip))
                 .unwrap_or(host == "localhost");
-            if !local {
+            // The lab's "internet" is a public-looking test network with no
+            // TLS proxy: it says so for its processes only.
+            let lab = std::env::var_os(PLAIN_HTTP_ENV).is_some_and(|v| v == "1");
+            if !local && !lab {
                 bail!("plain http:// is allowed only to a loopback or LAN address; use https://");
             }
         }
@@ -291,7 +298,7 @@ fn answer<A: serde::de::DeserializeOwned>(
     let bytes = resp
         .body_mut()
         .with_config()
-        .limit(2 * proto::MAX_BODY as u64)
+        .limit(proto::MAX_LOOKUP_ANSWER as u64)
         .read_to_vec()
         .map_err(|e| RvError::Transport(e.into()))?;
     if status == 200 {
@@ -607,6 +614,12 @@ impl RelayStream {
 
     /// End the session.
     pub fn close(mut self) {
+        self.shutdown();
+    }
+
+    /// Say goodbye on the stream (a WebSocket close); what was written
+    /// before still reaches the other side.
+    pub fn shutdown(&mut self) {
         let _ = self.ws.close(None);
         let _ = self.ws.flush();
     }

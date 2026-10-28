@@ -663,23 +663,27 @@ fn ws_stream(mut socket: WebSocket, mut down: watch::Receiver<bool>) -> DuplexSt
 async fn relay_side(shared: Arc<Shared>, session: u64, side: Side, socket: WebSocket) {
     let stream = ws_stream(socket, shared.shutdown.subscribe());
     // The first side to arrive waits for the other; the second splices.
-    let waiter = {
+    // Looking and registering happen under one lock: two sides arriving at
+    // once would otherwise both register, one overwriting the other.
+    let rx = {
         let mut w = shared.waiting.lock().unwrap();
         match w.remove(&session) {
-            Some((s, tx)) if s != side => Some(tx),
+            Some((s, tx)) if s != side => {
+                drop(w);
+                let _ = tx.send(stream);
+                return;
+            }
             Some(other) => {
                 w.insert(session, other);
-                None
+                return;
             }
-            None => None,
+            None => {
+                let (tx, rx) = oneshot::channel();
+                w.insert(session, (side, tx));
+                rx
+            }
         }
     };
-    if let Some(tx) = waiter {
-        let _ = tx.send(stream);
-        return;
-    }
-    let (tx, rx) = oneshot::channel();
-    shared.waiting.lock().unwrap().insert(session, (side, tx));
     let other = tokio::time::timeout(Duration::from_secs(proto::RELAY_JOIN_SECS), rx).await;
     shared.waiting.lock().unwrap().remove(&session);
     if let Ok(Ok(other)) = other {

@@ -15,6 +15,7 @@ fn run(home: &Path, args: &[&str]) -> Output {
         .env("VARSTO_PASSPHRASE", "test passphrase")
         .env("VARSTO_NO_INSTALL", "1")
         .env("VARSTO_NO_PORT_MAPPING", "1")
+        .env("VARSTO_RENDEZVOUS", "off")
         .output()
         .expect("run varsto")
 }
@@ -104,6 +105,7 @@ fn lost_local_ledger_is_reported_and_rebuilt() {
         .env("VARSTO_PASSPHRASE", "test passphrase")
         .env("VARSTO_NO_INSTALL", "1")
         .env("VARSTO_NO_PORT_MAPPING", "1")
+        .env("VARSTO_RENDEZVOUS", "off")
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&human.stdout);

@@ -5228,7 +5228,13 @@ fn run(cli: &Cli) -> Result<()> {
                                 .recv_timeout(std::time::Duration::from_secs(300))
                                 .unwrap_or(false)
                         });
-                    let offer = varsto_core::pair::Offer::start_v3(bundle, key, approve)?;
+                    let rendezvous = varsto_core::rendezvous::configured(&engine.p2p_config());
+                    let offer = varsto_core::pair::Offer::start_v3_with(
+                        bundle,
+                        key,
+                        approve,
+                        rendezvous.as_deref(),
+                    )?;
                     let st = offer.status();
                     if cli.json {
                         // One line a script reads before it starts the other side.
@@ -5240,10 +5246,7 @@ fn run(cli: &Cli) -> Result<()> {
                         let _ = std::io::stdout().flush();
                     }
                     if *qr {
-                        let link = varsto_core::qr::Link::Pair {
-                            code: st.code.clone(),
-                            addresses: st.addresses.clone(),
-                        };
+                        let link = st.link();
                         show_qr(&link.to_uri()?, false, false)?;
                         println!("Scan it with the new device's camera, or in Varsto: Pair with your other device, Scan QR code.");
                     }
@@ -5313,9 +5316,13 @@ fn run(cli: &Cli) -> Result<()> {
                     // The link of the other device's QR code carries the code and
                     // all its candidate addresses, best first. Order of tries:
                     // --address, the link's addresses, then the LAN search.
-                    let (code, offered) = match varsto_core::qr::Link::from_text(code) {
-                        Ok(varsto_core::qr::Link::Pair { code, addresses }) => (code, addresses),
-                        _ => (code.clone(), Vec::new()),
+                    let (code, offered, token) = match varsto_core::qr::Link::from_text(code) {
+                        Ok(varsto_core::qr::Link::Pair {
+                            code,
+                            addresses,
+                            rendezvous,
+                        }) => (code, addresses, rendezvous),
+                        _ => (code.clone(), Vec::new(), None),
                     };
                     let pass = passphrase()?;
                     // This device's keys: the other device shows their six
@@ -5325,15 +5332,28 @@ fn run(cli: &Cli) -> Result<()> {
                     eprintln!(
                         "The other device shows the same words before it lets this one join."
                     );
-                    let result = varsto_core::pair::receive_with_progress(
+                    // Then the rendezvous service (spec 83.9), when nothing
+                    // on this network answered.
+                    let rendezvous = varsto_core::rendezvous::for_joining();
+                    let result = varsto_core::pair::receive_with_rendezvous(
                         &code,
                         &keys.join_keys(name),
                         address.as_deref(),
                         &offered,
+                        rendezvous.as_deref(),
+                        token.as_ref(),
                         &mut |step| match step {
                             varsto_core::pair::Step::Trying(a) => eprintln!("trying {a} ..."),
                             varsto_core::pair::Step::Looking => {
                                 eprintln!("looking for the device on the network ...")
+                            }
+                            varsto_core::pair::Step::Rendezvous => {
+                                eprintln!(
+                                    "looking for the device through the rendezvous service ..."
+                                )
+                            }
+                            varsto_core::pair::Step::RendezvousRelay => {
+                                eprintln!("pairing through the rendezvous relay ...")
                             }
                         },
                     );

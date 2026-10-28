@@ -28,6 +28,33 @@ pub use proto::{Kind, PairOffer, Slot, Tag, Token};
 use crate::record::{Id16, Parts};
 use ed25519_dalek::SigningKey;
 
+/// The environment variable that overrides the setting for one process:
+/// `off` turns the rendezvous off, a URL replaces the configured one (the
+/// lab, tests, a device that joins through a self-hosted server).
+pub const ENV_OVERRIDE: &str = "VARSTO_RENDEZVOUS";
+
+fn from_env() -> Option<Option<String>> {
+    let v = std::env::var(ENV_OVERRIDE).ok()?;
+    let v = v.trim();
+    Some(match v {
+        "" | "off" | "none" | "0" => None,
+        url => Some(url.to_string()),
+    })
+}
+
+/// The rendezvous base URL a vault device uses: `p2p.rendezvous` of its
+/// configuration, unless [`ENV_OVERRIDE`] says otherwise. `None`: off.
+pub fn configured(cfg: &crate::vault::P2pConfig) -> Option<String> {
+    from_env().unwrap_or_else(|| cfg.rendezvous.clone())
+}
+
+/// The rendezvous a device that is joining (it has no configuration yet)
+/// looks a pairing offer up at: the default service unless
+/// [`ENV_OVERRIDE`] says otherwise.
+pub fn for_joining() -> Option<String> {
+    from_env().unwrap_or_else(crate::vault::default_rendezvous)
+}
+
 /// Unix seconds, as every signed timestamp carries them.
 pub fn now() -> u64 {
     std::time::SystemTime::now()
@@ -55,9 +82,22 @@ pub fn publish_peer(
     device: &Id16,
     parts: &Parts,
 ) -> Result<proto::PutAnswer, RvError> {
+    publish_peer_at(rv, vault, owner, device, parts, now())
+}
+
+/// `publish_peer` with the signed timestamp `ts` (it must rise from one
+/// write of the slot to the next: `max(now, last + 1)`).
+pub fn publish_peer_at(
+    rv: &RvClient,
+    vault: &VaultKeys,
+    owner: &SigningKey,
+    device: &Id16,
+    parts: &Parts,
+    ts: u64,
+) -> Result<proto::PutAnswer, RvError> {
     let slot = vault.slot(device);
     let blob = vault.seal_peer(&slot, parts).map_err(RvError::Transport)?;
-    let put = proto::PutSlot::sign(Kind::Peer, vault.tag(), slot, owner, now(), PEER_TTL, blob);
+    let put = proto::PutSlot::sign(Kind::Peer, vault.tag(), slot, owner, ts, PEER_TTL, blob);
     rv.put(&put)
 }
 

@@ -19,6 +19,7 @@ fn varsto(home: &Path, args: &[&str]) -> Output {
         .env("VARSTO_PASSPHRASE", "test passphrase")
         .env("VARSTO_NO_INSTALL", "1")
         .env("VARSTO_NO_PORT_MAPPING", "1")
+        .env("VARSTO_RENDEZVOUS", "off")
         .output()
         .expect("run varsto")
 }

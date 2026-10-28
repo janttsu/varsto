@@ -77,3 +77,6 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32
 tempfile.workspace = true
 # Integration tests stand in a software key for a FIDO2 authenticator.
 varsto-core = { path = ".", features = ["software-key"] }
+# The rendezvous tests run the real server in-process (it links only the
+# wire formats of this crate, by `#[path]`, so there is no cycle).
+varsto-rendezvous = { path = "../varsto-rendezvous" }
