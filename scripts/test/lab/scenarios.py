@@ -930,6 +930,10 @@ def s_rv_udp_blocked():
             if rv_status("vl-work").get("state") == "on":
                 break
             time.sleep(3)
+        # "on" is the control connection; the slot claim and /info (whether the server
+        # relays) follow within a moment, and only then is the relay a route. A peer
+        # attempt that started before that ends "unreachable" for its own run.
+        time.sleep(8)
         p2p_pull("vl-work", "rv_udp_blocked")
         path = CTX["p2p_rv_udp_blocked"]["paths"].get("laptop", "")
         check(path == "relayed via rendezvous", f"work reached the laptop over {path!r}")
