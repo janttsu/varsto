@@ -131,7 +131,8 @@ daily build as `varsto-daily-rendezvous-linux-x86_64`). It keeps everything
 in memory and writes nothing to disk. It needs:
 
 - one TCP port on loopback for HTTP and WebSocket, behind a TLS proxy;
-- one public UDP port for observe requests (default 17893; any free port).
+- one public UDP port for observe requests (default 3334; any free port but
+  17893, which a Varsto device on the same host uses for its own peer-to-peer).
 
 Clients read the UDP endpoint from `/info`, so it can be any port, but it
 must be the one the internet reaches: when a firewall or NAT maps another
@@ -155,7 +156,7 @@ firewall commands differ by distribution:
 
 ```
 sudo apt install caddy ufw
-sudo ufw allow 17893/udp
+sudo ufw allow 3334/udp
 sudo ufw allow 80,443/tcp
 # put the Caddy snippet in /etc/caddy/Caddyfile, then
 sudo systemctl reload caddy
@@ -165,7 +166,7 @@ sudo systemctl reload caddy
 
 ```
 sudo dnf install caddy firewalld
-sudo firewall-cmd --permanent --add-port=17893/udp
+sudo firewall-cmd --permanent --add-port=3334/udp
 sudo firewall-cmd --permanent --add-service=http --add-service=https
 sudo firewall-cmd --reload
 # put the Caddy snippet in /etc/caddy/Caddyfile, then
@@ -176,8 +177,8 @@ sudo systemctl enable --now caddy
 
 ```
 sudo pacman -S caddy nftables
-# nftables: accept udp dport 17893 in the input chain, for example
-#   sudo nft add rule inet filter input udp dport 17893 accept
+# nftables: accept udp dport 3334 in the input chain, for example
+#   sudo nft add rule inet filter input udp dport 3334 accept
 # put the Caddy snippet in /etc/caddy/Caddyfile, then
 sudo systemctl enable --now caddy
 ```
@@ -185,7 +186,7 @@ sudo systemctl enable --now caddy
 The UDP port is not optional for punching and the address check: without it
 devices still pair and sync through the WebSocket relay, but every
 connection goes through your server. Check it from another machine with
-`nc -u -z -w2 rv.example.org 17893` (no error is not proof; the real check
+`nc -u -z -w2 rv.example.org 3334` (no error is not proof; the real check
 is a device's `varsto p2p rendezvous status` showing an observed address).
 
 ### Options
@@ -195,8 +196,8 @@ example `VARSTO_RV_LISTEN`); `ops/rendezvous/varsto-rendezvous.env.example`
 lists them.
 
 ```
-varsto-rendezvous --listen 127.0.0.1:8790 --udp 0.0.0.0:17893 \
-    --public-udp-addr rv.example.org:17893 \
+varsto-rendezvous --listen 127.0.0.1:8790 --udp 0.0.0.0:3334 \
+    --public-udp-addr rv.example.org:3334 \
     [--relay-rate 4194304] [--relay-total-rate 33554432] \
     [--relay-tag-bytes 4294967296] [--relay-idle 300] [--relay-per-tag 4] \
     [--max-relays 1000] [--no-relay] \
@@ -322,7 +323,7 @@ proxy's address for rate limiting.
 | Port | Protocol | Open to | For |
 | --- | --- | --- | --- |
 | 443 (and 80 for certificates) | TCP | everyone | the proxy: HTTP, the control WebSocket and the relay |
-| 17893, or your `--udp` port | UDP | everyone | observe datagrams and hole-punch coordination |
+| 3334, or your `--udp` port | UDP | everyone | observe datagrams and hole-punch coordination |
 | 8790, or your `--listen` port | TCP | nobody (loopback only) | the proxy's upstream |
 
 If the UDP port is forwarded from another port (a cloud security group, a

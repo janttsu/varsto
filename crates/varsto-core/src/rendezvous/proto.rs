@@ -31,7 +31,7 @@ pub const VERSION: u32 = 1;
 pub const DEFAULT_URL: &str = "https://varsto.net/rv";
 /// The default UDP port of a self-hosted server. Clients never assume it:
 /// they read the UDP endpoints from [`Info`].
-pub const DEFAULT_UDP_PORT: u16 = 17893;
+pub const DEFAULT_UDP_PORT: u16 = 3334;
 
 /// Length of a tag and of a slot.
 pub const ID_LEN: usize = 16;

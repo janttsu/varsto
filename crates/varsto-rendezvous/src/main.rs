@@ -19,7 +19,7 @@ struct Args {
     #[arg(long, env = "VARSTO_RV_LISTEN", default_value = "127.0.0.1:8790")]
     listen: SocketAddr,
     /// UDP socket for observe requests, or "off".
-    #[arg(long, env = "VARSTO_RV_UDP", default_value = "0.0.0.0:17893")]
+    #[arg(long, env = "VARSTO_RV_UDP", default_value = "0.0.0.0:3334")]
     udp: String,
     /// The UDP endpoint clients are told to use (`host:port`), when the
     /// bound address is not what the internet sees (a firewall port, NAT).
