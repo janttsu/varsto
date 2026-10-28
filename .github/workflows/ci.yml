@@ -141,6 +141,24 @@ jobs:
           path: |
             website/public/downloads/varsto-*-x86_64-unknown-linux-musl.tar.gz
           if-no-files-found: error
+      # RENDEZVOUS (spec 83, integrator: review). The rendezvous server as a
+      # static musl binary, for the lead to deploy; the daily set carries it as
+      # varsto-daily-rendezvous-linux-x86_64 (scripts/daily-assemble.py). Same
+      # C compiler settings as website/build-release.sh uses for musl.
+      - name: Rendezvous server (static Linux binary)
+        run: |
+          export CC_x86_64_unknown_linux_musl=musl-gcc
+          export CFLAGS_x86_64_unknown_linux_musl="-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
+          cargo build --release --target x86_64-unknown-linux-musl -p varsto-rendezvous
+          mkdir -p dist/rendezvous
+          cp target/x86_64-unknown-linux-musl/release/varsto-rendezvous dist/rendezvous/varsto-rendezvous-linux-x86_64
+          file dist/rendezvous/varsto-rendezvous-linux-x86_64
+          dist/rendezvous/varsto-rendezvous-linux-x86_64 --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rendezvous-linux
+          path: dist/rendezvous/varsto-rendezvous-linux-x86_64
+          if-no-files-found: error
       # The cross-compiled Windows programs: input of the installer job and of
       # the Windows smoke test, not a download.
       - uses: actions/upload-artifact@v4
@@ -455,7 +473,7 @@ jobs:
       - name: Assemble
         run: |
           mkdir -p dist/downloads
-          find art/packages-linux-windows art/installer-windows art/packages-android -type f -exec cp {} dist/downloads/ \;
+          find art/packages-linux-windows art/installer-windows art/packages-android art/rendezvous-linux -type f -exec cp {} dist/downloads/ \;
           cp art/Varsto-macos/dist/Varsto-*-macos.dmg dist/downloads/ 2>/dev/null || find art/Varsto-macos -name 'Varsto-*-macos.dmg' -exec cp {} dist/downloads/ \;
           website/assemble-release.sh dist/downloads
           ls -la dist/downloads

@@ -1329,11 +1329,21 @@ pub struct P2pConfig {
     /// the other ways through NAT; `varsto p2p port-mapping on|off`.
     #[serde(default = "yes")]
     pub port_mapping: bool,
+    /// The rendezvous service (spec 83): its base URL, `None` (JSON
+    /// `null`) when the user turned it off; a missing key means the default
+    /// `https://varsto.net/rv`. `varsto p2p rendezvous set <url> | --off`.
+    #[serde(default = "default_rendezvous")]
+    pub rendezvous: Option<String>,
 }
 
 /// The port peer-to-peer listens on unless told otherwise: a fixed one is
 /// easier to forward, and the same on every start keeps NAT mappings.
 pub const DEFAULT_P2P_PORT: u16 = 17893;
+
+/// The rendezvous service a new device uses.
+pub fn default_rendezvous() -> Option<String> {
+    Some(crate::rendezvous::proto::DEFAULT_URL.to_string())
+}
 
 pub fn default_stun() -> Vec<String> {
     crate::p2p::stun::DEFAULT_SERVERS
@@ -1351,6 +1361,7 @@ impl Default for P2pConfig {
             stun: default_stun(),
             user_disabled: false,
             port_mapping: true,
+            rendezvous: default_rendezvous(),
         }
     }
 }

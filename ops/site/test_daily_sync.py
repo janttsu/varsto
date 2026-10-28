@@ -45,6 +45,7 @@ class Publisher:
             "installer-windows/Varsto-1-setup.exe": b"exe" + payload,
             "Varsto-macos/dist/Varsto-1-macos.dmg": b"dmg" + payload,
             "Varsto-ios-unsigned/Varsto-1-ios-unsigned.ipa": b"ipa" + payload,
+            "rendezvous-linux/varsto-rendezvous-linux-x86_64": b"rv" + payload,
             "screenshots/desktop-overview-light.png": PNG,
             "screenshots/shots.json": b"{}",
         }.items():
@@ -125,7 +126,7 @@ class DailySyncTest(unittest.TestCase):
         self.assertEqual(latest["id"], "20261016-316c579")
         self.assertEqual(latest["version"], "0.0.1-test")
         self.assertEqual([h["id"] for h in latest["history"]], ["20261016-316c579"])
-        self.assertEqual({p["key"] for p in latest["platforms"]}, {"linux-x86_64", "android", "windows-setup", "macos", "ios", "screenshots"})
+        self.assertEqual({p["key"] for p in latest["platforms"]}, {"linux-x86_64", "android", "windows-setup", "macos", "ios", "rendezvous-linux-x86_64", "screenshots"})
         # the local list still verifies with the same primitive
         ds.verify_list((d / "latest/SHA256SUMS").read_bytes(), (d / "latest/SHA256SUMS.sig").read_text(), pub.pub_text)
         # a second run finds nothing to do

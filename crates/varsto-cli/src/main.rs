@@ -5729,6 +5729,7 @@ fn run(cli: &Cli) -> Result<()> {
                         stun,
                         user_disabled: false,
                         port_mapping: engine.p2p_config().port_mapping,
+                        rendezvous: engine.p2p_config().rendezvous,
                     })?;
                     let id = engine.p2p_identity()?;
                     println!(
