@@ -27,13 +27,34 @@ The default is `https://varsto.net/rv`. You can run your own.
 
 ## Settings
 
-<!-- U: describe the Peers page control and the CLI with real output. -->
+On the **Peers** page, the *Rendezvous service* card shows the address in
+use, whether the device is connected, the address the internet sees this
+device as, and how many connections it relays. Tick or untick *Use the
+rendezvous service*, type another address, and choose *Save*; *Use the default*
+goes back to `https://varsto.net/rv`. Peers reached through the service show the
+path `relayed via rendezvous` in the Peers table and in the traffic view.
+
+The same from the command line (a running background service applies it at once):
 
 ```
-varsto p2p rendezvous status
-varsto p2p rendezvous set https://rv.example.org/rv
-varsto p2p rendezvous --off
+$ varsto p2p rendezvous status
+rendezvous: https://varsto.net/rv, connected, seen from outside as 203.0.113.77:41233, relaying 1 peer(s)
+
+$ varsto p2p rendezvous set https://rv.example.org/rv
+rendezvous service: https://rv.example.org/rv
+
+$ varsto p2p rendezvous --off          # same as: varsto p2p rendezvous off
+rendezvous service is off; devices find each other without it
+
+$ varsto p2p rendezvous on             # back to the default service
 ```
+
+`set` checks the address and asks the service for its `/info` (up to five
+seconds). If it does not answer, you get a warning and the setting is saved
+anyway: the service is optional, and a server that is down now may be up
+later. `varsto p2p status` shows the same line among the other peer-to-peer
+facts, and `--json` prints the fields (`url`, `enabled`, `state`, `observed`,
+`relayed_peers`, `last_error`, `clock_skew`).
 
 The setting is per device (`p2p.rendezvous` in the device's `config.json`).
 Devices of one vault should use the same service to find each other through
@@ -55,10 +76,47 @@ addresses inside your records, file names or content. Relayed connections are
 TLS 1.3 between your devices; the server forwards encrypted records only. It
 keeps nothing on disk, logs no tags or addresses, and has no accounts.
 
-<!-- U: honest limits in plain words (spec 83.11): the operator can see which
-     addresses form a vault over time; a removed device can still find the
-     vault's tag; pairing codes are protected by a slow hash plus the
-     six-word check. -->
+### Honest limits
+
+- The operator can see which IP addresses talk to the service under one tag,
+  so over time it can tell which addresses belong to one vault and roughly
+  where its devices are and when they are online. Use your own service, or turn
+  it off, if that matters to you.
+- A device you removed from the vault can still compute the vault's tag until
+  you create a new vault. It learns nothing it did not know, and cannot read
+  the records (they are sealed under keys it no longer receives), but it can
+  see that the tag is still in use.
+- A pairing code is only nine digits. The service stores the offer under a slow
+  hash of the code and sealed with a key from the code, so the server cannot
+  read the addresses or practise guessing quickly, and the six-word check that
+  both people compare at pairing is what stops someone who guessed the code
+  from joining.
+- The service cannot read relayed traffic, but it sees that it flows, between
+  which two addresses and how much.
+- It is a single point you may depend on to find devices on other networks. If
+  it is down, devices that are already connected stay connected, and everything
+  that worked without it still works.
+
+## Pairing across networks
+
+`Add a device` (and `varsto pair offer`) registers the offer with the service
+as well as announcing it on the local network. The code, and the QR code or
+link (which also carries a random token), then work from any network:
+
+1. On a device that already uses Varsto choose *Add a device*. While the offer
+   is registered the page says *It works on the same network and across the
+   internet (rendezvous)*.
+2. On the new device choose *Pair with your other device*, type the code and
+   fill in a name and passphrase. No address is needed.
+3. The new device tries, in order, an address you typed, the addresses in a
+   scanned link, a search of the local network, and then the rendezvous
+   service. The progress line shows *Looking for the device through the
+   rendezvous service ...* for the last step. If the two devices cannot reach
+   each other directly the connection is relayed.
+4. Both people compare the six words, as always.
+
+The pairing exchange is encrypted end to end between the two devices in every
+case. Without internet, pairing on the same network works as before.
 
 ## Running your own
 
@@ -353,5 +411,13 @@ versioned (`v` in every message); a server answers an unknown version with
 `version`, and old and new apps keep working against a newer server because
 fields are only ever added. If you roll back, no data has to be migrated.
 
-<!-- U: a "troubleshooting" section once the client shows rendezvous state
-     (unreachable, clock off by more than five minutes, relay off). -->
+## Troubleshooting
+
+| What you see | What it means | What to do |
+| --- | --- | --- |
+| `not reachable (everything else keeps working)` | The service does not answer: your internet is down, a firewall blocks it, or the server is down. | Nothing is lost. Check `curl -s <address>/info`. Devices on the same network still find each other. |
+| `not connected yet` | The background service has just started and has not talked to it yet, or the background service is not running. | Wait a minute; start the service with `varsto service start`. |
+| A warning that the clock is off | This device's clock differs from the service's by more than 30 seconds. Requests are signed with the time and refused outside a five-minute window. | Set the clock right (turn on automatic time). |
+| Pairing says it could not reach the device | The code expired (ten minutes), was typed wrongly, or one of the devices cannot reach the service. | Start a new offer; check both devices are online; on a phone check that the app may use the network. |
+| `relayed via rendezvous` for a peer | No direct route worked (two strict routers, UDP blocked), so the service relays the encrypted connection. | Fine to leave. For a faster link, forward the peer-to-peer port on one router or run a device with a public address. |
+| Peers on other networks never appear | The devices use different services. | Run `varsto p2p rendezvous status` on each and make the addresses the same. |

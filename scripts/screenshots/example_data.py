@@ -65,6 +65,24 @@ def traffic():
     }
 
 
+def p2p_extra():
+    """Fields merged into the real GET /api/p2p answer: the rendezvous
+    service (an invented self-hosted address) and one peer reached through
+    its relay."""
+    return {
+        "rendezvous": {
+            "url": "https://rv.example.org", "default_url": "https://varsto.net/rv", "enabled": True,
+            "state": "on", "observed": "203.0.113.77:41233", "last_error": None, "clock_skew": 0,
+            "relayed_peers": 1,
+        },
+        "paths": [
+            {"device": DEV["desktop"], "name": "desktop", "path": "direct-lan", "addr": "192.168.1.20:17893", "ok": True},
+            {"device": DEV["nas"], "name": "nas", "path": "direct", "addr": "203.0.113.10:17893", "ok": True},
+            {"device": DEV["office-pc"], "name": "office-pc", "path": "relayed via rendezvous", "addr": None, "ok": True},
+        ],
+    }
+
+
 def locations():
     # Encrypted bytes per folder and where each folder is kept.
     folders = [

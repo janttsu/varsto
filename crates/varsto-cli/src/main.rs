@@ -908,6 +908,17 @@ enum P2pCmd {
         #[arg(long)]
         watch: bool,
     },
+    /// The rendezvous service that helps devices find each other across networks:
+    /// `status` (default), `set <url>`, `on` (the default service) or `--off`.
+    Rendezvous {
+        #[arg(value_parser = ["status", "set", "on", "off"])]
+        action: Option<String>,
+        /// The service URL for `set` (https://host/rv; plain http only to a local address).
+        url: Option<String>,
+        /// Turn it off (same as the word `off`): devices then find each other without it.
+        #[arg(long, conflicts_with = "url")]
+        off: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -5252,6 +5263,14 @@ fn run(cli: &Cli) -> Result<()> {
                     }
                     println!("Pairing code: {}", st.code);
                     println!("On the new device choose \"Pair\" (or run `varsto pair join`).");
+                    // Set when the offer is registered with the rendezvous service.
+                    if serde_json::to_value(&st)
+                        .ok()
+                        .and_then(|v| v["rendezvous"].as_bool())
+                        == Some(true)
+                    {
+                        println!("It works on the same network and across the internet (rendezvous service).");
+                    }
                     if !st.addresses.is_empty() {
                         println!(
                             "If it does not find this device, give the address: {}",
@@ -5675,6 +5694,9 @@ fn run(cli: &Cli) -> Result<()> {
         Cmd::P2p {
             cmd: P2pCmd::Traffic { watch },
         } => p2p_traffic(&home, *watch, cli.json)?,
+        Cmd::P2p {
+            cmd: P2pCmd::Rendezvous { action, url, off },
+        } => rendezvous_cmd(&home, action.as_deref(), url.as_deref(), *off, cli.json)?,
         Cmd::P2p { cmd } => {
             // With the background service running, settings go through it:
             // it applies them (on and off at once), and its own copy of the
@@ -5775,7 +5797,9 @@ fn run(cli: &Cli) -> Result<()> {
                     );
                 }
                 P2pCmd::Status => p2p_status(&engine, &home, cli.json)?,
-                P2pCmd::Traffic { .. } => unreachable!("handled above"),
+                P2pCmd::Traffic { .. } | P2pCmd::Rendezvous { .. } => {
+                    unreachable!("handled above")
+                }
             }
         }
         Cmd::Policy { cmd } => {
@@ -7769,6 +7793,135 @@ fn quit_on_signals() {
 #[cfg(not(unix))]
 fn quit_on_signals() {}
 
+/// What the service answers to `/info`, within a few seconds, to say whether
+/// a URL is reachable. Never an error: offline is a normal state here.
+fn rendezvous_probe(url: &str) -> std::result::Result<(), String> {
+    let client = varsto_core::rendezvous::RvClient::new(url).map_err(|e| format!("{e:#}"))?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(client.info().map(|_| ()).map_err(|e| e.to_string()));
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(r) => r,
+        Err(_) => Err("no answer within 5 seconds".to_string()),
+    }
+}
+
+/// One line for `p2p status` and `p2p rendezvous status`.
+fn rendezvous_text(r: &serde_json::Value) -> String {
+    let Some(url) = r["url"].as_str() else {
+        return "rendezvous: off (devices find each other on the local network, by direct addresses, through your own devices and through the storages)".to_string();
+    };
+    let state = match r["state"].as_str().unwrap_or("") {
+        "on" | "connected" => "connected",
+        "unreachable" => "not reachable (everything else keeps working)",
+        "connecting" | "" => "not connected yet",
+        other => other,
+    };
+    let mut t = format!("rendezvous: {url}, {state}");
+    if let Some(a) = r["observed"].as_str() {
+        t.push_str(&format!(", seen from outside as {a}"));
+    }
+    match r["relayed_peers"].as_u64() {
+        Some(n) if n > 0 => t.push_str(&format!(", relaying {n} peer(s)")),
+        _ => {}
+    }
+    if let Some(skew) = r["clock_skew"].as_i64().filter(|s| s.abs() > 30) {
+        t.push_str(&format!(
+            "; this device's clock is {} s off the service's: set the clock right or signed requests are refused",
+            skew
+        ));
+    }
+    if let Some(e) = r["last_error"].as_str().filter(|e| !e.is_empty()) {
+        t.push_str(&format!("; last problem: {e}"));
+    }
+    t
+}
+
+/// `p2p rendezvous status | set <url> | on | off | --off`.
+fn rendezvous_cmd(
+    home: &std::path::Path,
+    action: Option<&str>,
+    url: Option<&str>,
+    off: bool,
+    json: bool,
+) -> Result<()> {
+    let action = if off {
+        "off"
+    } else {
+        action.unwrap_or("status")
+    };
+    if action != "set" && url.is_some() {
+        bail!("a URL goes with `set`: varsto p2p rendezvous set <url>");
+    }
+    let live = service::status(home);
+    if action == "status" {
+        let engine = open_engine(home)?;
+        let c = engine.p2p_config();
+        let mut r = live
+            .and_then(|(sf, _)| {
+                let u = format!("http://127.0.0.1:{}/api/p2p", sf.port);
+                service::http_get(&u, &sf.token).ok()
+            })
+            .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
+            .map(|v| v["rendezvous"].clone())
+            .filter(|v| v.is_object())
+            .unwrap_or_else(|| {
+                serde_json::json!({
+                    "url": c.rendezvous,
+                    "enabled": c.rendezvous.is_some(),
+                    "state": if c.rendezvous.is_some() { "not running" } else { "off" },
+                })
+            });
+        r["default_url"] = varsto_core::rendezvous::proto::DEFAULT_URL.into();
+        if json {
+            println!("{r}");
+        } else {
+            println!("{}", rendezvous_text(&r));
+            if r["state"] == "not running" {
+                println!("(the background service is not running; it connects when it starts)");
+            }
+        }
+        return Ok(());
+    }
+    // The URL to save: None = off.
+    let new: Option<String> = match action {
+        "off" => None,
+        "on" => Some(varsto_core::rendezvous::proto::DEFAULT_URL.to_string()),
+        _ => {
+            let u = url.ok_or_else(|| anyhow!("usage: varsto p2p rendezvous set <url>"))?;
+            let u = u.trim().trim_end_matches('/').to_string();
+            varsto_core::rendezvous::BaseUrl::parse(&u)?;
+            Some(u)
+        }
+    };
+    if let Some(u) = &new {
+        if let Err(why) = rendezvous_probe(u) {
+            eprintln!("warning: {u} does not answer now ({why}); saved anyway, devices keep working without it");
+        }
+    }
+    if let Some((sf, _)) = live {
+        // The service applies it and keeps its own copy of the configuration
+        // in step.
+        let body = serde_json::json!({
+            "rendezvous_on": new.is_some(),
+            "rendezvous_url": new.clone().unwrap_or_default(),
+        });
+        let u = format!("http://127.0.0.1:{}/api/p2p", sf.port);
+        service::http_post(&u, &sf.token, &body.to_string())?;
+    } else {
+        let mut engine = open_engine(home)?;
+        let mut c = engine.p2p_config();
+        c.rendezvous = new.clone();
+        engine.set_p2p_config(c)?;
+    }
+    match new {
+        Some(u) => println!("rendezvous service: {u}"),
+        None => println!("rendezvous service is off; devices find each other without it"),
+    }
+    Ok(())
+}
+
 /// `p2p status`: the running service's view when there is one (its socket
 /// is the one the NAT maps), otherwise the records plus a probe over TCP and
 /// a STUN query from a temporary socket.
@@ -7830,6 +7983,9 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
                 .as_str()
                 .unwrap_or("router port mapping: not available")
         );
+        if v["rendezvous"].is_object() {
+            println!("{}", rendezvous_text(&v["rendezvous"]));
+        }
         let paths = v["paths"].as_array().cloned().unwrap_or_default();
         if paths.is_empty() {
             println!("no peers known yet (other devices publish a record when their service runs with p2p enabled)");
@@ -7916,6 +8072,10 @@ fn p2p_status(engine: &Engine, home: &std::path::Path, json: bool) -> Result<()>
         }
     );
     println!("background service not running; probing over TLS on TCP from this command");
+    println!(
+        "{}",
+        rendezvous_text(&serde_json::json!({"url": c.rendezvous, "state": "connecting"}))
+    );
     println!(
         "router port mapping: {} (the background service asks the router when it runs)",
         if c.port_mapping { "on" } else { "off" }
@@ -8330,5 +8490,32 @@ mod update_flag_tests {
             None
         );
         assert_eq!(version_request(&a(&["varsto"])), None);
+    }
+}
+
+#[cfg(test)]
+mod rendezvous_text_tests {
+    use super::rendezvous_text;
+    use serde_json::json;
+
+    #[test]
+    fn status_lines_say_state_and_never_alarm() {
+        assert!(rendezvous_text(&json!({"url": null})).starts_with("rendezvous: off"));
+        let t = rendezvous_text(&json!({
+            "url": "https://rv.example.org/rv", "state": "on",
+            "observed": "203.0.113.9:40000", "relayed_peers": 2, "clock_skew": 90
+        }));
+        assert!(t.contains("https://rv.example.org/rv, connected"), "{t}");
+        assert!(t.contains("seen from outside as 203.0.113.9:40000"), "{t}");
+        assert!(t.contains("relaying 2 peer(s)"), "{t}");
+        assert!(t.contains("clock is 90 s off"), "{t}");
+        let t = rendezvous_text(
+            &json!({"url": "https://rv.example.org", "state": "unreachable", "last_error": "timed out"}),
+        );
+        assert!(
+            t.contains("not reachable (everything else keeps working)"),
+            "{t}"
+        );
+        assert!(t.contains("last problem: timed out"), "{t}");
     }
 }

@@ -29,6 +29,7 @@ WIDTHS = {
     "desktop-organization-light": 1280, "desktop-organization-dark": 1280,
     "desktop-where-light": None, "desktop-where-dark": None,
     "desktop-traffic-light": None, "desktop-traffic-dark": None,
+    "desktop-rendezvous-light": None, "desktop-rendezvous-dark": None,
     "mobile-light": 824, "mobile-dark": 824,
     "macos-app": 1024,
     "linux-app": 1280, "linux-tray": None,

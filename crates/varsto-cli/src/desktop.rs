@@ -1891,6 +1891,14 @@ fn pair_join(state: &Shared, input: &Value) -> Result<Value> {
                     json!({"active": true, "step": "looking", "tried": tried, "fingerprint": words}),
                 );
             }
+            // The rendezvous steps (looking the offer up, trying the found
+            // addresses, relaying) all show as one line.
+            #[allow(unreachable_patterns)]
+            _ => {
+                set_join_step(
+                    json!({"active": true, "step": "rendezvous", "tried": tried, "fingerprint": words}),
+                );
+            }
         },
     );
     set_join_step(json!({"active": false}));
@@ -1954,6 +1962,57 @@ fn link_info(link: &varsto_core::qr::Link) -> Result<Value> {
         }
     }
     Ok(v)
+}
+
+/// The rendezvous service as the pages and `varsto p2p status` show it:
+/// the configured URL (`null` = off), the default, and what the service
+/// last saw (state, observed UDP address, relayed peers).
+fn rendezvous_json(cfg: &varsto_core::vault::P2pConfig, st: &service::RendezvousStatus) -> Value {
+    let state = match (&cfg.rendezvous, st.state.as_str()) {
+        (None, _) => "off",
+        (Some(_), "") => "connecting",
+        (Some(_), s) => s,
+    };
+    json!({
+        "url": cfg.rendezvous,
+        "default_url": varsto_core::rendezvous::proto::DEFAULT_URL,
+        "enabled": cfg.rendezvous.is_some(),
+        "state": state,
+        "observed": st.observed.map(|a| a.to_string()),
+        "last_error": st.last_error,
+        "clock_skew": st.clock_skew,
+        "relayed_peers": st.relayed_peers,
+    })
+}
+
+/// `POST /api/p2p` fields `rendezvous_on` (bool) and `rendezvous_url`
+/// (text; empty or "default" = the default): the URL is checked before it
+/// is saved. Returns whether the setting changed.
+fn apply_rendezvous_input(c: &mut varsto_core::vault::P2pConfig, input: &Value) -> Result<bool> {
+    let on = input.get("rendezvous_on").and_then(|v| v.as_bool());
+    let url = input
+        .get("rendezvous_url")
+        .and_then(|v| v.as_str())
+        .map(str::trim);
+    if on.is_none() && url.is_none() {
+        return Ok(false);
+    }
+    let before = c.rendezvous.clone();
+    if on == Some(false) {
+        c.rendezvous = None;
+    } else {
+        let default = varsto_core::rendezvous::proto::DEFAULT_URL.to_string();
+        let u = match url {
+            Some(u) if !u.is_empty() && !u.eq_ignore_ascii_case("default") => {
+                u.trim_end_matches('/').to_string()
+            }
+            Some(_) => default,
+            None => c.rendezvous.clone().unwrap_or(default),
+        };
+        varsto_core::rendezvous::BaseUrl::parse(&u)?;
+        c.rendezvous = Some(u);
+    }
+    Ok(c.rendezvous != before)
 }
 
 /// A pairing offer's status with its `varsto://pair` link.
@@ -3768,6 +3827,7 @@ fn api_unlocked(
             "reachable": service.p2p_reachable,
             "relays": service.p2p_relays,
             "paths": service.p2p_paths,
+            "rendezvous": rendezvous_json(&engine.p2p_config(), &service.rendezvous),
             "cert_sha256": service.p2p_cert_sha256,
             "portmap": service.p2p_portmap,
             "portmap_text": service.p2p_portmap.describe(),
@@ -3795,6 +3855,7 @@ fn api_unlocked(
             if let Some(pm) = input.get("port_mapping").and_then(|v| v.as_bool()) {
                 c.port_mapping = pm;
             }
+            apply_rendezvous_input(&mut c, input)?;
             let enabled = c.enabled;
             let same_settings = was.1 == c.port && was.2 == c.public_addrs && was.3 == c.stun;
             engine.set_p2p_config(c)?;
@@ -5844,6 +5905,7 @@ mod tests {
         // number or a name).
         const SAME: &[&str] = &[
             "*.tmp",
+            "https://varsto.net/rv",
             "Android",
             "DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA",
             "Documents",
@@ -5972,6 +6034,69 @@ mod tests {
                 assert!(pairs.contains(c), "{lang} lacks the pattern {c}");
             }
         }
+    }
+
+    #[test]
+    fn rendezvous_setting_input_and_status_shape() {
+        let default = varsto_core::rendezvous::proto::DEFAULT_URL;
+        let mut c = varsto_core::vault::P2pConfig {
+            rendezvous: Some(default.to_string()),
+            ..Default::default()
+        };
+        // Nothing asked: unchanged.
+        assert!(!apply_rendezvous_input(&mut c, &json!({"port": 1})).unwrap());
+        // Off, then a self-hosted address (a trailing slash is dropped).
+        assert!(apply_rendezvous_input(&mut c, &json!({"rendezvous_on": false})).unwrap());
+        assert_eq!(c.rendezvous, None);
+        let st = service::RendezvousStatus::default();
+        let off = rendezvous_json(&c, &st);
+        assert_eq!(off["state"], "off");
+        assert_eq!(off["enabled"], false);
+        assert!(off["url"].is_null());
+        assert_eq!(off["default_url"], default);
+        assert!(apply_rendezvous_input(
+            &mut c,
+            &json!({"rendezvous_on": true, "rendezvous_url": "https://rv.example.org/rv/"})
+        )
+        .unwrap());
+        assert_eq!(c.rendezvous.as_deref(), Some("https://rv.example.org/rv"));
+        // Never connected yet: "connecting"; the service's own state wins.
+        let on = rendezvous_json(&c, &st);
+        assert_eq!(on["state"], "connecting");
+        assert_eq!(on["url"], "https://rv.example.org/rv");
+        let seen = service::RendezvousStatus {
+            state: "on".into(),
+            observed: Some("203.0.113.9:40000".parse().unwrap()),
+            relayed_peers: 2,
+            ..Default::default()
+        };
+        let v = rendezvous_json(&c, &seen);
+        assert_eq!(v["state"], "on");
+        assert_eq!(v["observed"], "203.0.113.9:40000");
+        assert_eq!(v["relayed_peers"], 2);
+        for k in [
+            "url",
+            "default_url",
+            "enabled",
+            "state",
+            "observed",
+            "last_error",
+            "clock_skew",
+            "relayed_peers",
+        ] {
+            assert!(v.get(k).is_some(), "lacks {k}");
+        }
+        // The default by word or by empty field; a bad URL is refused and nothing changes.
+        assert!(apply_rendezvous_input(&mut c, &json!({"rendezvous_url": "default"})).unwrap());
+        assert_eq!(c.rendezvous.as_deref(), Some(default));
+        let before = c.rendezvous.clone();
+        assert!(apply_rendezvous_input(&mut c, &json!({"rendezvous_url": "ftp://x"})).is_err());
+        assert!(apply_rendezvous_input(
+            &mut c,
+            &json!({"rendezvous_url": "http://example.org/rv"})
+        )
+        .is_err());
+        assert_eq!(c.rendezvous, before);
     }
 
     #[test]
