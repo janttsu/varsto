@@ -1524,6 +1524,37 @@ fn a_non_admin_cannot_revoke_or_wipe() {
     assert_eq!(open.vault_keys.newest_epoch(), 1);
 }
 
+/// A device removed from the vault can remain a participant of a folder
+/// this device could not re-key. The next folder epoch must not hand it
+/// the new key through the stay set.
+#[test]
+fn a_revoked_device_is_not_in_the_next_folder_stay_set() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut mc = device(&st, &c, &keys, "owner");
+    let f = mc.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    mc.approve(&f, &mb.me, Role::Editor).unwrap();
+    ma.refresh().unwrap();
+    let report = ma.remove_device(&mb.me, 0, false, None).unwrap();
+    assert!(report.folders_not_rotated.contains(&f));
+    mc.refresh().unwrap();
+    let start = mc.start_folder_epoch(&f, &[], None).unwrap();
+    assert_eq!(start.epoch, 1);
+    assert!(
+        !start.granted_to.contains(&mb.me),
+        "the revoked device was granted the new key"
+    );
+    let kept = &mc.folder_epochs(&f).applied[&1];
+    assert!(kept.participants.iter().all(|p| p.device != mb.me));
+    mb.refresh().unwrap();
+    assert!(!mb.read_my_grants().holds(&f, 1));
+    assert!(mc.read_my_grants().holds(&f, 1));
+}
+
 /// A device removed from the vault can still sign folder records and grants
 /// with the keys it kept. A stamp set before the removal would, on stamp
 /// order alone, deny the owners who removed it. Spec 77.20: those records

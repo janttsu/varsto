@@ -1642,7 +1642,11 @@ impl<'a> Membership<'a> {
         let stay: Vec<Participant> = st
             .participants()
             .into_iter()
-            .filter(|p| !gone.contains(&p.device) && !ep.removed_at(&p.device, current))
+            .filter(|p| {
+                !gone.contains(&p.device)
+                    && !self.revoked.contains(&p.device)
+                    && !ep.removed_at(&p.device, current)
+            })
             .collect();
         let me = self.me;
         let e = current + 1;
@@ -2257,6 +2261,7 @@ impl<'a> Membership<'a> {
         for p in &rec.participants {
             if p.device == self.me
                 || have.contains(&p.device)
+                || self.revoked.contains(&p.device)
                 || self.devices.kem_key(&p.device).is_none()
             {
                 continue;
