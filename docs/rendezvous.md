@@ -385,7 +385,7 @@ Everything is in memory with a hard bound:
   64-message queue); `--max-controls` bounds them. Each device holds one
   while its service runs;
 - a relay session buffers up to 128 kB per direction;
-- rate-limit buckets are capped at 200 000 and pruned every minute.
+- rate-limit buckets are capped at 200 000 per class of request and pruned every minute. A flood of UDP observe sources fills only the observe map; it cannot crowd out new TCP clients.
 
 Measured by the load test (`cargo test -p varsto-rendezvous --test load --
 --ignored`): 10 000 slots of 1 kB, 1 000 held control connections and 50

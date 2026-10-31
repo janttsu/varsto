@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! Rate limits (spec 83.8): token buckets per client address (IPv6 by
 //! /64) and per tag, per class of request. The [`RateLimit`] trait is the
-//! hook; [`Buckets`] the default. Nothing here is logged or kept longer
-//! than a bucket needs to refill.
+//! hook; [`Buckets`] the default. Each class has its own map, so a flood
+//! of one class cannot fill the map that admits clients of another. Nothing
+//! here is logged or kept longer than a bucket needs to refill.
 
 use crate::proto::Tag;
 use std::collections::HashMap;
@@ -127,36 +128,66 @@ struct Bucket {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Key {
-    Ip(Class, [u8; 16]),
-    Tag(Class, Tag),
+enum SubKey {
+    Ip([u8; 16]),
+    Tag(Tag),
 }
 
 /// Token buckets: capacity one minute's worth, refilled continuously.
+/// One map per [`Class`]. The cap is per map.
 pub struct Buckets {
     cfg: RateConfig,
-    map: Mutex<HashMap<Key, Bucket>>,
+    max_buckets: usize,
+    maps: [Mutex<HashMap<SubKey, Bucket>>; CLASS_COUNT],
 }
 
-/// Most buckets kept; past this new keys are refused until a prune (a
-/// flood of fresh addresses must not grow memory without end).
+/// Most buckets one class keeps. Past this, new keys of that class are
+/// refused until a prune. A flood of fresh addresses must not grow memory
+/// without end, and must not spend a budget that belongs to another class.
+/// The UDP observe port answers any source, so its map is the one a spoofed
+/// flood can fill; puts, lookups and control connections have their own.
 const MAX_BUCKETS: usize = 200_000;
+
+const CLASS_COUNT: usize = 7;
+
+impl Class {
+    fn index(self) -> usize {
+        match self {
+            Class::Put => 0,
+            Class::Lookup => 1,
+            Class::Control => 2,
+            Class::Coordinate => 3,
+            Class::Relay => 4,
+            Class::Udp => 5,
+            Class::Meta => 6,
+        }
+    }
+}
 
 impl Buckets {
     pub fn new(cfg: RateConfig) -> Buckets {
+        Self::with_max(cfg, MAX_BUCKETS)
+    }
+
+    fn with_max(cfg: RateConfig, max_buckets: usize) -> Buckets {
         Buckets {
             cfg,
-            map: Mutex::new(HashMap::new()),
+            max_buckets,
+            maps: std::array::from_fn(|_| Mutex::new(HashMap::new())),
         }
     }
 
-    fn take(&self, key: Key, per_min: u32, now: Instant) -> bool {
+    fn map(&self, class: Class) -> &Mutex<HashMap<SubKey, Bucket>> {
+        &self.maps[class.index()]
+    }
+
+    fn take(&self, class: Class, key: SubKey, per_min: u32, now: Instant) -> bool {
         if per_min == 0 {
             return true;
         }
         let cap = per_min as f64;
-        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
-        if !map.contains_key(&key) && map.len() >= MAX_BUCKETS {
+        let mut map = self.map(class).lock().unwrap_or_else(|e| e.into_inner());
+        if !map.contains_key(&key) && map.len() >= self.max_buckets {
             return false;
         }
         let b = map.entry(key).or_insert(Bucket {
@@ -175,7 +206,10 @@ impl Buckets {
     }
 
     pub fn len(&self) -> usize {
-        self.map.lock().unwrap_or_else(|e| e.into_inner()).len()
+        self.maps
+            .iter()
+            .map(|m| m.lock().unwrap_or_else(|e| e.into_inner()).len())
+            .sum()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -185,20 +219,23 @@ impl Buckets {
 
 impl RateLimit for Buckets {
     fn allow_ip(&self, class: Class, ip: IpAddr, now: Instant) -> bool {
-        self.take(Key::Ip(class, ip_key(ip)), self.cfg.per_ip(class), now)
+        self.take(class, SubKey::Ip(ip_key(ip)), self.cfg.per_ip(class), now)
     }
     fn allow_tag(&self, class: Class, tag: &Tag, now: Instant) -> bool {
-        self.take(Key::Tag(class, *tag), self.cfg.per_tag(class), now)
+        self.take(class, SubKey::Tag(*tag), self.cfg.per_tag(class), now)
     }
     fn prune(&self, now: Instant) {
-        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
-        map.retain(|_, b| now.saturating_duration_since(b.at) < Duration::from_secs(60));
+        for map in &self.maps {
+            let mut map = map.lock().unwrap_or_else(|e| e.into_inner());
+            map.retain(|_, b| now.saturating_duration_since(b.at) < Duration::from_secs(60));
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn a_bucket_allows_a_minute_s_worth_and_refills() {
@@ -250,5 +287,71 @@ mod tests {
         for _ in 0..1000 {
             assert!(u.allow_ip(Class::Udp, "192.0.2.1".parse().unwrap(), t0));
         }
+    }
+
+    #[test]
+    fn a_full_udp_map_does_not_block_other_classes() {
+        // The cap is per class. Filling the observe map (the one a spoofed
+        // source can fill, because UDP does not check the sender) must
+        // still leave room for a new TCP client.
+        let b = Buckets::with_max(
+            RateConfig {
+                udp_per_ip: 1,
+                put_per_ip: 1,
+                lookup_per_ip: 1,
+                control_per_ip: 1,
+                coordinate_per_ip: 1,
+                relay_per_ip: 1,
+                meta_per_ip: 1,
+                ..RateConfig::default()
+            },
+            3,
+        );
+        let t0 = Instant::now();
+        for i in 1..=3u32 {
+            let ip = IpAddr::V4(Ipv4Addr::from(i));
+            assert!(b.allow_ip(Class::Udp, ip, t0), "{ip}");
+        }
+        let fresh = IpAddr::V4(Ipv4Addr::from(99));
+        assert!(
+            !b.allow_ip(Class::Udp, fresh, t0),
+            "a new observe address is refused once that map is full"
+        );
+        // An address that already has a bucket is not a new key: it is
+        // limited by its own tokens, and those refill while the map is full.
+        let known = IpAddr::V4(Ipv4Addr::from(1));
+        assert!(!b.allow_ip(Class::Udp, known, t0));
+        assert!(b.allow_ip(Class::Udp, known, t0 + Duration::from_secs(60)));
+        assert!(!b.allow_ip(Class::Udp, fresh, t0 + Duration::from_secs(60)));
+        for class in [
+            Class::Put,
+            Class::Lookup,
+            Class::Control,
+            Class::Coordinate,
+            Class::Relay,
+            Class::Meta,
+        ] {
+            assert!(
+                b.allow_ip(class, fresh, t0),
+                "{class:?} must still admit a new address"
+            );
+        }
+        assert!(b.allow_tag(Class::Put, &[7; 16], t0));
+        // The other way round: a full put map does not lock out observe.
+        // Observe is already full, so use a second limiter for this direction.
+        let puts = Buckets::with_max(
+            RateConfig {
+                put_per_ip: 1,
+                udp_per_ip: 1,
+                ..RateConfig::default()
+            },
+            2,
+        );
+        assert!(puts.allow_ip(Class::Put, IpAddr::V4(Ipv4Addr::from(1)), t0));
+        assert!(puts.allow_ip(Class::Put, IpAddr::V4(Ipv4Addr::from(2)), t0));
+        assert!(!puts.allow_ip(Class::Put, fresh, t0));
+        assert!(puts.allow_ip(Class::Udp, fresh, t0));
+        b.prune(t0 + Duration::from_secs(121));
+        assert!(b.allow_ip(Class::Udp, fresh, t0 + Duration::from_secs(121)));
     }
 }
