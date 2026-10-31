@@ -18,6 +18,9 @@ artifact; the files are found by pattern, anywhere below). Writes into --out
 
 Every file must be found exactly once; anything else stops the script, so a
 build with a missing platform is never published half.
+
+The Android stable name stays varsto-daily-android-debug.apk. The bytes are
+the release APK. Renaming that object would break the signed daily list.
 """
 import argparse
 import hashlib
@@ -28,7 +31,8 @@ import shutil
 import sys
 import tarfile
 
-# (key, glob below --art, stable name)
+# (key, glob below --art, stable name). Android's glob is the legacy name;
+# android_apk() prefers varsto-*-android.apk and still accepts this one.
 PLATFORMS = [
     ("linux-x86_64", "varsto-*-x86_64-unknown-linux-musl.tar.gz", "varsto-daily-linux-x86_64.tar.gz"),
     ("android", "varsto-*-android-debug.apk", "varsto-daily-android-debug.apk"),
@@ -49,8 +53,11 @@ def sha256(path: pathlib.Path) -> str:
     return h.hexdigest()
 
 
-def one(art: pathlib.Path, pattern: str) -> pathlib.Path:
+def choose(art: pathlib.Path, pattern: str) -> list[pathlib.Path]:
     hits = sorted(p for p in art.rglob(pattern) if p.is_file())
+    # varsto-*-android.apk must not swallow the legacy varsto-*-android-debug.apk name.
+    if pattern.endswith("-android.apk"):
+        hits = [p for p in hits if not p.name.endswith("-android-debug.apk")]
     if len(hits) > 1:
         # The same package is uploaded by its build job and again inside the
         # assembled download set; take the download set when it has one, and
@@ -60,9 +67,33 @@ def one(art: pathlib.Path, pattern: str) -> pathlib.Path:
             hits = assembled[:1]
         elif len({sha256(h) for h in hits}) == 1:
             hits = hits[:1]
+    return hits
+
+
+def one(art: pathlib.Path, pattern: str) -> pathlib.Path:
+    hits = choose(art, pattern)
     if len(hits) != 1:
         sys.exit(f"expected exactly one {pattern} below {art}, found {[str(h) for h in hits]}")
     return hits[0]
+
+
+def android_apk(art: pathlib.Path) -> pathlib.Path:
+    """Release APK if the build published one, else the legacy debug-named glob.
+
+    The stable daily object is still varsto-daily-android-debug.apk either way.
+    """
+    release = choose(art, "varsto-*-android.apk")
+    if len(release) == 1:
+        return release[0]
+    if release:
+        sys.exit(f"expected exactly one varsto-*-android.apk below {art}, found {[str(h) for h in release]}")
+    legacy = choose(art, "varsto-*-android-debug.apk")
+    if len(legacy) != 1:
+        sys.exit(
+            "expected one varsto-*-android.apk (release) or varsto-*-android-debug.apk "
+            f"below {art}, found {[str(h) for h in legacy]}"
+        )
+    return legacy[0]
 
 
 def main() -> None:
@@ -87,7 +118,8 @@ def main() -> None:
 
     entries = []
     for key, pattern, stable in PLATFORMS:
-        shutil.copyfile(one(a.art, pattern), a.out / stable)
+        src = android_apk(a.art) if key == "android" else one(a.art, pattern)
+        shutil.copyfile(src, a.out / stable)
         entries.append((key, stable))
     # The screenshots artifact is the packed website layout: en/, fi/, sv/,
     # viz/ and shots.json, possibly with loose files beside them. Keep the

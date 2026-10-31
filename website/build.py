@@ -323,8 +323,8 @@ PLATFORMS = [
      "Apple Silicon. Open the disk image and drag Varsto to Applications. The app has its own window, a menu-bar item, Finder actions (right-click a file: Download or Free up space with Varsto; double-click a placeholder to download and open it), the background service and the varsto command line inside the bundle. Unsigned: right-click, Open the first time."),
     ("Windows", "windows", lambda n: n.endswith("-setup.exe"), [],
      "x86_64 installer. Installs for your user without administrator rights (or for everyone): Start menu and desktop icons, Varsto in its own window, the background service and tray at login, automatic updates. Run it again to upgrade or repair; your data stays. Not code-signed, so SmartScreen may ask you to confirm. Built and smoke-tested on Windows Server 2025 in CI; not yet through the manual checklist on a real machine."),
-    ("Android", "android", lambda n: n.endswith("-android-debug.apk"), [],
-     "Debug-signed APK for sideloading: allow the install when the phone asks. Runs the same core as a foreground service. Tested in the Android 15 emulator only."),
+    ("Android", "android", lambda n: n.endswith("-android.apk") or n.endswith("-android-debug.apk"), [],
+     "Release-signed APK for sideloading: allow the install when the phone asks. Not a debug build, so an update replaces the previous install. Runs the same core as a foreground service."),
     ("iOS", "ios", lambda n: n.endswith("-ios-unsigned.ipa"), [],
      "Unsigned .ipa for iPhone and iPad: it does not install by itself. Sideload it with AltStore, SideStore or Sideloadly (they sign it with your own Apple ID; see docs/ios-build.md). Built by CI on a Mac runner; not yet run on a real device."),
     ("Source", "source", lambda n: n.endswith("-source.tar.gz"), [],
@@ -426,7 +426,7 @@ def downloads_table(depth: int) -> str:
     for title, icon, primary, alts, status in PLATFORMS:
         candidates = [(n, d, sz) for n, d, sz in files if primary and primary(n)]
         # The Mac-built app before the interim lite apps.
-        candidates.sort(key=lambda t: t[0].endswith("-lite.zip"))
+        candidates.sort(key=lambda t: (t[0].endswith("-android-debug.apk"), t[0].endswith("-lite.zip")))
         main = candidates[0] if candidates else None
         icon_svg = f'<svg class="dl-icon" viewBox="0 0 24 24" aria-hidden="true">{ICONS[icon]}</svg>'
         if main:
