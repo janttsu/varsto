@@ -281,12 +281,38 @@ jobs:
           targets: aarch64-linux-android, x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
       - name: Build the APK
+        env:
+          VARSTO_ANDROID_KEYSTORE: ${{ secrets.VARSTO_ANDROID_KEYSTORE }}
+          VARSTO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.VARSTO_ANDROID_KEYSTORE_PASSWORD }}
+          VARSTO_ANDROID_KEY_ALIAS: ${{ secrets.VARSTO_ANDROID_KEY_ALIAS }}
+          VARSTO_ANDROID_KEY_PASSWORD: ${{ secrets.VARSTO_ANDROID_KEY_PASSWORD }}
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"; ls "$ANDROID_HOME/ndk" "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
           version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
           apps/android/build.sh 2>&1 | tee build.log
-          mkdir -p dist/android
-          cp apps/android/app/build/outputs/apk/debug/app-debug.apk "dist/android/varsto-$version-android-debug.apk"
+          mkdir -p dist/android dist/emulator
+          shopt -s nullglob
+          signed=()
+          for f in apps/android/app/build/outputs/apk/release/*.apk; do
+            case "$f" in *-unsigned.apk) ;; *) signed+=("$f") ;; esac
+          done
+          if [ "${#signed[@]}" -eq 1 ]; then
+            cp "${signed[0]}" "dist/android/varsto-$version-android.apk"
+            # Same release bytes under the name daily-assemble.py already globs.
+            # The stable daily object stays varsto-daily-android-debug.apk:
+            # renaming it would break the signed daily list.
+            cp "${signed[0]}" "dist/android/varsto-$version-android-debug.apk"
+            # Screenshots use adb run-as, which Android allows only for a debuggable app.
+            if [ ! -f apps/android/app/build/outputs/apk/debug/app-debug.apk ]; then
+              ( cd apps/android && ./gradlew --no-daemon -q assembleDebug )
+            fi
+          elif [ -f apps/android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "no signed release APK; the debug APK is for the emulator only and is not published" >&2
+          else
+            echo "no APK was built" >&2
+            exit 1
+          fi
+          cp apps/android/app/build/outputs/apk/debug/app-debug.apk dist/emulator/app-debug.apk
       - name: Enable KVM for the emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -305,11 +331,25 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: scripts/screenshots/android.sh dist/android/varsto-*-android-debug.apk dist/shots
+          script: scripts/screenshots/android.sh dist/emulator/app-debug.apk dist/shots
       - name: Output to the job summary
         if: failure()
         run: |
           [ -f build.log ] && { echo '## build.log (last 150 lines)'; echo '```'; tail -n 150 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Refuse a debug APK as the published package
+        run: |
+          shopt -s nullglob
+          apks=(dist/android/*.apk)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "no release APK in dist/android. Set GitHub secrets VARSTO_ANDROID_KEYSTORE, VARSTO_ANDROID_KEYSTORE_PASSWORD, VARSTO_ANDROID_KEY_ALIAS and VARSTO_ANDROID_KEY_PASSWORD. Not uploading app-debug.apk." >&2
+            exit 1
+          fi
+          for f in "${apks[@]}"; do
+            case "$f" in
+              *app-debug.apk|*-unsigned.apk) echo "refusing $f" >&2; exit 1 ;;
+            esac
+          done
+          ls -l "${apks[@]}"
       - uses: actions/upload-artifact@v4
         with:
           name: packages-android
