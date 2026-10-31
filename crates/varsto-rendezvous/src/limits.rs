@@ -148,6 +148,12 @@ pub struct Buckets {
 /// flood can fill; puts, lookups and control connections have their own.
 const MAX_BUCKETS: usize = 200_000;
 
+/// Lookup tokens an address may hold at once. The per-minute rate still
+/// refills; the bucket never stores a whole minute of them. A lookup is the
+/// response that can be large, and a slow reader holds it until it finishes,
+/// so starting (and refilling up to) the full allowance did not limit that.
+const LOOKUP_IP_BURST: u32 = 4;
+
 const CLASS_COUNT: usize = 7;
 
 impl Class {
@@ -186,16 +192,20 @@ impl Buckets {
             return true;
         }
         let cap = per_min as f64;
+        let ceiling = match (class, key) {
+            (Class::Lookup, SubKey::Ip(_)) => cap.min(LOOKUP_IP_BURST as f64),
+            _ => cap,
+        };
         let mut map = self.map(class).lock().unwrap_or_else(|e| e.into_inner());
         if !map.contains_key(&key) && map.len() >= self.max_buckets {
             return false;
         }
         let b = map.entry(key).or_insert(Bucket {
-            tokens: cap,
+            tokens: ceiling,
             at: now,
         });
         let dt = now.saturating_duration_since(b.at).as_secs_f64();
-        b.tokens = (b.tokens + dt * cap / 60.0).min(cap);
+        b.tokens = (b.tokens + dt * cap / 60.0).min(ceiling);
         b.at = now;
         if b.tokens >= 1.0 {
             b.tokens -= 1.0;
@@ -353,5 +363,67 @@ mod tests {
         assert!(puts.allow_ip(Class::Udp, fresh, t0));
         b.prune(t0 + Duration::from_secs(121));
         assert!(b.allow_ip(Class::Udp, fresh, t0 + Duration::from_secs(121)));
+    }
+
+    #[test]
+    fn a_lookup_address_cannot_spend_its_minute_at_once() {
+        let b = Buckets::new(RateConfig::default());
+        let ip: IpAddr = "192.0.2.9".parse().unwrap();
+        let t0 = Instant::now();
+        let mut n = 0;
+        for _ in 0..120 {
+            if b.allow_ip(Class::Lookup, ip, t0) {
+                n += 1;
+            } else {
+                break;
+            }
+        }
+        assert_eq!(n, LOOKUP_IP_BURST as usize);
+        // Waiting out the minute refills at the per-minute rate, but the
+        // bucket still will not store more than the burst.
+        n = 0;
+        let later = t0 + Duration::from_secs(60);
+        for _ in 0..120 {
+            if b.allow_ip(Class::Lookup, ip, later) {
+                n += 1;
+            } else {
+                break;
+            }
+        }
+        assert_eq!(n, LOOKUP_IP_BURST as usize);
+        // One second later two of the 120-per-minute tokens are back.
+        n = 0;
+        let tick = later + Duration::from_secs(1);
+        for _ in 0..10 {
+            if b.allow_ip(Class::Lookup, ip, tick) {
+                n += 1;
+            } else {
+                break;
+            }
+        }
+        assert_eq!(n, 2);
+        // A tag keeps the allowance it was given, and a small per-address
+        // cap is unchanged (the burst is not an extra limit below it).
+        let tags = Buckets::new(RateConfig {
+            lookup_per_tag: 10,
+            lookup_per_ip: 2,
+            ..RateConfig::default()
+        });
+        n = 0;
+        for _ in 0..10 {
+            if tags.allow_tag(Class::Lookup, &[3; 16], t0) {
+                n += 1;
+            }
+        }
+        assert_eq!(n, 10);
+        n = 0;
+        for _ in 0..5 {
+            if tags.allow_ip(Class::Lookup, ip, t0) {
+                n += 1;
+            } else {
+                break;
+            }
+        }
+        assert_eq!(n, 2);
     }
 }

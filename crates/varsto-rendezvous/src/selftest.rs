@@ -48,14 +48,57 @@ pub async fn http(
     s.write_all(body).await?;
     let mut raw = Vec::new();
     s.read_to_end(&mut raw).await?;
-    let text = String::from_utf8_lossy(&raw).into_owned();
-    let (head, body) = text.split_once("\r\n\r\n").context("no HTTP header")?;
+    let split = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .context("no HTTP header")?;
+    let head = std::str::from_utf8(&raw[..split]).context("HTTP header is not UTF-8")?;
     let status: u16 = head
         .split_whitespace()
         .nth(1)
         .and_then(|c| c.parse().ok())
         .context("no HTTP status")?;
-    Ok((status, body.to_string()))
+    let body = decode_body(head, &raw[split + 4..])?;
+    Ok((status, body))
+}
+
+/// The bytes after the header. A streamed lookup is chunked; anything
+/// else (a `Content-Length` body) is returned as it arrived.
+fn decode_body(head: &str, body: &[u8]) -> Result<String> {
+    if !head.lines().any(|line| {
+        let Some((name, value)) = line.split_once(':') else {
+            return false;
+        };
+        name.eq_ignore_ascii_case("transfer-encoding")
+            && value.to_ascii_lowercase().contains("chunked")
+    }) {
+        return Ok(String::from_utf8_lossy(body).into_owned());
+    }
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < body.len() {
+        let Some(rel) = body[i..].windows(2).position(|w| w == b"\r\n") else {
+            bail!("chunk size line was cut short");
+        };
+        let line = std::str::from_utf8(&body[i..i + rel]).context("chunk size")?;
+        let size_hex = line.split(';').next().unwrap_or(line).trim();
+        let n = usize::from_str_radix(size_hex, 16).context("chunk size")?;
+        i += rel + 2;
+        if n == 0 {
+            break;
+        }
+        let end = i + n;
+        if end > body.len() {
+            bail!("chunk was cut short");
+        }
+        out.extend_from_slice(&body[i..end]);
+        i = end;
+        if body.get(i..i + 2) != Some(b"\r\n") {
+            bail!("chunk missing CRLF");
+        }
+        i += 2;
+    }
+    Ok(String::from_utf8_lossy(&out).into_owned())
 }
 
 /// POST a JSON value.
@@ -291,6 +334,15 @@ fn rand_bytes() -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chunked_bodies_are_joined_and_plain_bodies_stay() {
+        let head = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n";
+        let raw = b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n";
+        assert_eq!(super::decode_body(head, raw).unwrap(), "hello world");
+        let plain = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n";
+        assert_eq!(super::decode_body(plain, b"{}").unwrap(), "{}");
+    }
+
     #[test]
     fn the_self_test_passes() {
         let steps = super::run().unwrap();
