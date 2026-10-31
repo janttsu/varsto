@@ -1555,6 +1555,47 @@ fn a_revoked_device_is_not_in_the_next_folder_stay_set() {
     assert!(mc.read_my_grants().holds(&f, 1));
 }
 
+/// Junk under the next folder-epoch number must not block a removal, and a
+/// name of sixteen 9s must not overflow the next vault or folder epoch.
+#[test]
+fn junk_epoch_names_do_not_block_removal_or_panic() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut mc = device(&st, &c, &keys, "other");
+    let f = ma.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    ma.approve(&f, &mb.me, Role::Editor).unwrap();
+    ma.approve(&f, &mc.me, Role::Editor).unwrap();
+    let folder = hex::encode(f);
+    s.put_if_absent(
+        &format!("vault/folder-epochs/{folder}/0000000000000001-0000.rec"),
+        b"junk",
+    )
+    .unwrap();
+    s.put_if_absent("vault/epochs/9999999999999999-0000.rec", b"junk")
+        .unwrap();
+    s.put_if_absent(
+        &format!("vault/folder-epochs/{folder}/9999999999999999-0000.rec"),
+        b"junk",
+    )
+    .unwrap();
+    let report = ma
+        .remove_device(&mb.me, 0, false, None)
+        .expect("junk and a huge name do not block the removal");
+    assert_eq!(report.vault_epoch, 1);
+    assert_eq!(report.folder_epochs, vec![(f, 2)]);
+    mc.refresh().unwrap();
+    assert_eq!(mc.vault_keys.newest_epoch(), 1);
+    assert_eq!(mc.folder_epochs(&f).current(), 2);
+    assert_eq!(mc.role(&mb.me, &f, 2), None);
+    assert_eq!(mc.role(&mc.me, &f, 2), Some(Role::Editor));
+    mb.refresh().unwrap();
+    assert!(!mb.read_my_grants().holds(&f, 2));
+}
+
 /// A device removed from the vault can still sign folder records and grants
 /// with the keys it kept. A stamp set before the removal would, on stamp
 /// order alone, deny the owners who removed it. Spec 77.20: those records

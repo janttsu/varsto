@@ -409,18 +409,32 @@ pub(crate) fn walk_vault_chain(
     Ok((VaultKeys { keys }, opened))
 }
 
-/// The highest vault epoch number any object on the storages is named
-/// with (0: none).
-pub(crate) fn highest_number(storages: &[&dyn Storage]) -> Result<u32> {
-    let mut top = 0;
+/// The highest epoch number any object under `prefix` is named with (0:
+/// none). A seq that does not fit in an epoch, or that has no successor
+/// (`u32::MAX`), is skipped: a name of sixteen 9s is a valid record name
+/// and must not become the next number.
+pub(crate) fn highest_listed(storages: &[&dyn Storage], prefix: &str, kind: Kind) -> Result<u32> {
+    let mut top = 0u32;
     for s in storages {
-        for name in s.list("vault/epochs/")? {
-            if let Some(n) = crate::record::RecordName::parse_as(Kind::Epoch, &name) {
-                top = top.max(u32::try_from(n.seq).unwrap_or(u32::MAX));
+        for name in s.list(prefix)? {
+            let Some(n) = crate::record::RecordName::parse_as(kind, &name) else {
+                continue;
+            };
+            let Ok(e) = u32::try_from(n.seq) else {
+                continue;
+            };
+            if e < u32::MAX {
+                top = top.max(e);
             }
         }
     }
     Ok(top)
+}
+
+/// The highest vault epoch number any object on the storages is named
+/// with (0: none).
+pub(crate) fn highest_number(storages: &[&dyn Storage]) -> Result<u32> {
+    highest_listed(storages, "vault/epochs/", Kind::Epoch)
 }
 
 /// The vault epoch a vault key belongs to: the highest number on the

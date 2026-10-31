@@ -683,6 +683,15 @@ impl<'a> Membership<'a> {
             .collect()
     }
 
+    /// `e` is the next epoch after `current` when no signed record sits
+    /// strictly between them. Junk names are not in `envs`.
+    fn next_signed_epoch(envs: &BTreeMap<u64, Vec<store::Numbered>>, current: u32, e: u32) -> bool {
+        e > current
+            && !envs
+                .keys()
+                .any(|s| u32::try_from(*s).is_ok_and(|n| n > current && n < e))
+    }
+
     /// Whether `d` may grant (and start epochs) in `folder` at `epoch`.
     fn owner_at(st: &FolderState, ep: &FolderEpochs, d: &Id16, epoch: u32) -> bool {
         !ep.removed_at(d, epoch)
@@ -788,8 +797,9 @@ impl<'a> Membership<'a> {
                     continue;
                 }
                 ep.seen.insert(e, owners.iter().map(|n| n.device).collect());
-                if stopped || e != ep.current() + 1 {
-                    stopped = true;
+                // A number with no signed record is not an epoch (junk under
+                // the name). The next signed record is the next epoch.
+                if stopped {
                     continue;
                 }
                 let chosen: Vec<&&store::Numbered> = match kept.get(&e) {
@@ -833,9 +843,10 @@ impl<'a> Membership<'a> {
                             .as_ref()
                             .and_then(|k| k.epochs.get(&e))
                             .is_some_and(|held| held.0 == b.k9)
-                } else if e == ep.current() + 1 {
+                } else if Self::next_signed_epoch(&envs, ep.current(), e) {
                     // The epoch record is not applied yet: the grant's key
-                    // must open the one record of an owner under e.
+                    // must open the one record of an owner under e. The
+                    // number may skip names that hold no signed record.
                     let issuer_ok = Self::owner_at(&st, &ep, &b.issuer, e - 1)
                         || ep.seen.get(&e).is_some_and(|s| s.contains(&b.issuer));
                     let one = envs.get(&u64::from(e)).and_then(|c| {
@@ -1649,7 +1660,18 @@ impl<'a> Membership<'a> {
             })
             .collect();
         let me = self.me;
-        let e = current + 1;
+        let prefix = FolderEpochRecord::stream(*folder, [0u8; 16])
+            .prefix()
+            .unwrap_or_default();
+        // Junk under the next number (anyone with the storage credentials
+        // can write it) is skipped, not waited for. A seq that does not
+        // fit in an epoch does not count, so it cannot block the removal
+        // or overflow the next number.
+        let listed = epochs::highest_listed(self.storages, &prefix, Kind::ShareEpoch)?;
+        let e = listed
+            .max(current)
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("no folder epoch number is left"))?;
         let k9 = SecretKey::random();
         let body = FolderEpochRecord {
             folder: *folder,
@@ -1831,8 +1853,12 @@ impl<'a> Membership<'a> {
         }
         // Junk under the next number (anyone with the storage's credentials
         // can write it) is skipped, not waited for: readers take only a
-        // signed record of a device of the vault there.
-        let new = listed.max(old) + 1;
+        // signed record of a device of the vault there. `listed` never
+        // includes a seq that has no successor.
+        let new = listed
+            .max(old)
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("no vault epoch number is left"))?;
         let k3 = SecretKey::random();
         let record = VaultEpochRecord {
             epoch: new,
