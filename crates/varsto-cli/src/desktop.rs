@@ -463,17 +463,26 @@ pub fn bind(port: u16) -> Result<(Server, String)> {
     Ok((server, format!("127.0.0.1:{}", addr.port())))
 }
 
+/// Threads that read bodies and write responses. The dispatch thread only
+/// queues: one stalled peer used to block it, and with it the liveness
+/// probe, the tray and MCP. A full pool waits out the socket timeout
+/// ([`tiny_http::SOCKET_IO_TIMEOUT`]) and then takes the next request.
+const IO_THREADS: usize = 8;
+
 /// Serve requests until the server is unblocked. Blocks.
 ///
-/// This thread answers what needs no state itself: the page and its assets,
-/// the traffic counters and the liveness probe. Reads go to threads of their
-/// own (`read_elsewhere`), and so do the routes that need no engine (pause,
+/// The dispatch thread does no socket I/O. Bodies (including
+/// `POST /api/session`, which needs no token) and responses (including the
+/// page and its assets) run on [`IO_THREADS`] threads. Accepted sockets time
+/// out on read and write, so a peer that sends or reads nothing gives its
+/// thread back. Reads that only look at state go to threads of their own
+/// (`read_elsewhere`), and so do the routes that need no engine (pause,
 /// lock, quit, settings, the update check: `engine_free`). Everything else
-/// goes, in arrival order, to one worker thread, which works on the engine
-/// taken out of the state ([`checkout`]). No network I/O runs under the
-/// state lock: a sync on a slow or dead link holds the engine, not the lock
-/// (spec section 79.3). The host name, token and counters it needs never
-/// change after start, so they are copied here once.
+/// goes to one worker thread, which works on the engine taken out of the
+/// state ([`checkout`]). No network I/O runs under the state lock: a sync
+/// on a slow or dead link holds the engine, not the lock (spec section
+/// 79.3). The host name, token and counters it needs never change after
+/// start, so they are copied here once.
 pub fn serve_arc(server: Arc<Server>, state: Shared) {
     let fixed = {
         let st = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -499,39 +508,81 @@ pub fn serve_arc(server: Arc<Server>, state: Shared) {
         log::error!("cannot start the API worker thread");
         return;
     }
-    for request in server.incoming_requests() {
-        log::trace!(method = request.method().to_string(), path = loggable_url(request.url()); "api request received");
-        match handle_unlocked(&fixed, request) {
-            Ok(None) => {}
-            Ok(Some(request)) => {
-                let Some(request) = read_elsewhere(&fixed, request) else {
-                    continue;
-                };
-                // A change is coming: no cached answer from before it (a
-                // sync or a check keeps them until it has been answered).
-                let change = *request.method() != Method::Get
-                    && crate::readcache::drops_answers(
-                        request.url().split('?').next().unwrap_or(""),
-                    );
-                if change {
-                    fixed
-                        .reads
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .invalidate();
+    let (io_tx, io_rx) = std::sync::mpsc::channel::<Request>();
+    let io_rx = Arc::new(Mutex::new(io_rx));
+    for _ in 0..IO_THREADS {
+        let rx = io_rx.clone();
+        let fixed = fixed.clone();
+        let tx = tx.clone();
+        let spawned = std::thread::Builder::new()
+            .name("http-io".into())
+            .spawn(move || {
+                loop {
+                    let request = {
+                        let rx = rx.lock().unwrap_or_else(|e| e.into_inner());
+                        rx.recv()
+                    };
+                    let Ok(request) = request else {
+                        break;
+                    };
+                    // A panic answers 500 while the request drops, on this
+                    // thread, and the thread stays up for the next one.
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        route_request(&fixed, &tx, request);
+                    }))
+                    .is_err()
+                    {
+                        log::error!("api I/O handler panicked");
+                    }
                 }
-                // Pause, lock, quit and the other routes that need no
-                // engine: a thread of their own, so that they neither wait
-                // behind a request the worker is busy with nor for a job.
-                let Some(request) = elsewhere_if_engine_free(&fixed, request) else {
-                    continue;
-                };
-                if tx.send(request).is_err() {
-                    break;
-                }
-            }
-            Err(e) => log::warn!("request failed: {e:#}"),
+            });
+        if spawned.is_err() {
+            log::error!("cannot start an API I/O thread");
+            return;
         }
+    }
+    drop(tx);
+    for request in server.incoming_requests() {
+        // Queuing does not read or write the socket. Dropping a request
+        // here would: tiny_http writes a 500 from `Drop`.
+        if io_tx.send(request).is_err() {
+            break;
+        }
+    }
+}
+
+/// What the dispatch thread used to do itself: the unlocked routes, then
+/// either a reader thread, an engine-free thread, or the single worker.
+fn route_request(fixed: &Fixed, tx: &std::sync::mpsc::Sender<Request>, request: Request) {
+    log::trace!(method = request.method().to_string(), path = loggable_url(request.url()); "api request received");
+    match handle_unlocked(fixed, request) {
+        Ok(None) => {}
+        Ok(Some(request)) => {
+            let Some(request) = read_elsewhere(fixed, request) else {
+                return;
+            };
+            // A change is coming: no cached answer from before it (a
+            // sync or a check keeps them until it has been answered).
+            let change = *request.method() != Method::Get
+                && crate::readcache::drops_answers(request.url().split('?').next().unwrap_or(""));
+            if change {
+                fixed
+                    .reads
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .invalidate();
+            }
+            // Pause, lock, quit and the other routes that need no
+            // engine: a thread of their own, so that they neither wait
+            // behind a request the worker is busy with nor for a job.
+            let Some(request) = elsewhere_if_engine_free(fixed, request) else {
+                return;
+            };
+            if tx.send(request).is_err() {
+                log::warn!("api worker is gone");
+            }
+        }
+        Err(e) => log::warn!("request failed: {e:#}"),
     }
 }
 
@@ -5152,6 +5203,133 @@ mod tests {
         assert_eq!(raw(port, "POST", "/api/session", &[], "{}").0, 401);
         // Asking for a code needs the token.
         assert_eq!(raw(port, "POST", "/api/session/boot", &[], "{}").0, 401);
+    }
+
+    /// A local process that opens `POST /api/session` (no token) and never
+    /// sends the body, or that asks for a large asset and never reads it,
+    /// must not stop the liveness probe. The body is larger than tiny_http's
+    /// own 1 KiB buffer, so the read really waits on the socket.
+    #[test]
+    fn a_stalled_peer_does_not_freeze_the_api() {
+        use std::io::{Read, Write};
+        use std::time::{Duration, Instant};
+        let (port, token, _tmp) = test_server();
+        let started = Instant::now();
+        let stall_one = |path: &str| {
+            let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let req = format!(
+                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 8192\r\nConnection: close\r\n\r\n"
+            );
+            c.write_all(req.as_bytes()).unwrap();
+            c
+        };
+        // Two at once: a single I/O thread would still freeze the probe.
+        let mut stalls = vec![stall_one("/api/session"), stall_one("/api/session")];
+        std::thread::sleep(Duration::from_millis(200));
+        let h = [("X-Varsto-Token", token.as_str())];
+        let alive = |what: &str| {
+            let t = Instant::now();
+            let (st, _, body) = raw(port, "GET", "/api/alive", &h, "");
+            let took = t.elapsed();
+            assert_eq!(st, 200, "{what}: {body}");
+            assert!(
+                took < Duration::from_secs(2),
+                "{what}: /api/alive took {took:?}"
+            );
+        };
+        alive("while a session body is withheld");
+        // The page script is a few hundred kilobytes. A tiny receive
+        // window, set before connect so it is advertised, and a client
+        // that stops reading, fills the socket. That write used to block
+        // the dispatch thread.
+        let mut slow = connect_small_window(port);
+        slow.write_all(
+            format!("GET /app.js HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .unwrap();
+        // Read the start, then stop. Draining it would open the window and
+        // the rest of the script would go out; left unread, the write blocks.
+        slow.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut partial = [0u8; 1024];
+        let n = slow.read(&mut partial).unwrap();
+        assert!(
+            partial[..n].starts_with(b"HTTP/"),
+            "asset response did not start: {}",
+            String::from_utf8_lossy(&partial[..n])
+        );
+        assert!(n < partial.len(), "the whole asset fit in one read");
+        std::thread::sleep(Duration::from_millis(200));
+        alive("while an asset write is stalled");
+        // The withheld bodies must end with the socket timeout, not stay open.
+        let limit = tiny_http::SOCKET_IO_TIMEOUT + Duration::from_secs(15);
+        for c in &mut stalls {
+            c.set_read_timeout(Some(limit)).unwrap();
+            let mut buf = Vec::new();
+            let _ = c.read_to_end(&mut buf);
+            let text = String::from_utf8_lossy(&buf);
+            assert!(
+                text.contains("401") || text.contains("408") || text.is_empty(),
+                "stalled session answered unexpectedly: {text}"
+            );
+        }
+        let took = started.elapsed();
+        assert!(
+            took < limit,
+            "stalled session bodies were not timed out ({took:?})"
+        );
+        assert!(
+            took + Duration::from_secs(5) >= tiny_http::SOCKET_IO_TIMEOUT,
+            "stalled session bodies failed at once ({took:?}), not on the socket timeout"
+        );
+        alive("after the stalled peers were dropped");
+        drop(slow);
+    }
+
+    /// A connected socket whose receive window was shrunk before connect,
+    /// so a large response cannot hide in the buffer. Plain `connect` on
+    /// other systems, where the stall is only best-effort.
+    fn connect_small_window(port: u16) -> std::net::TcpStream {
+        #[cfg(unix)]
+        {
+            use std::os::fd::FromRawFd;
+            unsafe {
+                let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
+                assert!(fd >= 0, "{}", std::io::Error::last_os_error());
+                let n: libc::c_int = 1024;
+                let rc = libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_RCVBUF,
+                    &n as *const libc::c_int as *const libc::c_void,
+                    std::mem::size_of_val(&n) as libc::socklen_t,
+                );
+                assert_eq!(rc, 0, "{}", std::io::Error::last_os_error());
+                let addr = libc::sockaddr_in {
+                    sin_family: libc::AF_INET as libc::sa_family_t,
+                    sin_port: port.to_be(),
+                    sin_addr: libc::in_addr {
+                        s_addr: u32::from(std::net::Ipv4Addr::LOCALHOST).to_be(),
+                    },
+                    sin_zero: [0; 8],
+                };
+                let rc = libc::connect(
+                    fd,
+                    &addr as *const libc::sockaddr_in as *const libc::sockaddr,
+                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                );
+                if rc != 0 {
+                    let err = std::io::Error::last_os_error();
+                    libc::close(fd);
+                    panic!("connect: {err}");
+                }
+                std::net::TcpStream::from_raw_fd(fd)
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            std::net::TcpStream::connect(("127.0.0.1", port)).unwrap()
+        }
     }
 
     #[test]

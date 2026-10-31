@@ -41,3 +41,8 @@ mimalloc = "0.1"
 lto = "thin"
 codegen-units = 1
 panic = "unwind"
+
+# Accepted sockets need a read and a write timeout. Published tiny_http
+# never sets one, and setting it on the listening socket makes `accept` fail.
+[patch.crates-io]
+tiny_http = { path = "third_party/tiny_http" }
