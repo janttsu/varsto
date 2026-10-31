@@ -33,8 +33,10 @@ on:
         required: false
         default: ""
 
+# Read by default. The build job does not push. contents: write is only on
+# the job that attaches the .ipa to a release.
 permissions:
-  contents: write
+  contents: read
 
 # github.workflow is the caller's name in a called workflow.
 concurrency:
@@ -46,12 +48,13 @@ jobs:
     name: Build unsigned .ipa
     runs-on: macos-15
     timeout-minutes: 60
-    env:
-      TAG_INPUT: ${{ inputs.release_tag }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
@@ -112,11 +115,27 @@ jobs:
             apps/ios/build/ipa/xcodebuild.log
           retention-days: 14
           if-no-files-found: ignore
+
+  release:
+    name: Attach the .ipa to a release
+    needs: ipa
+    if: ${{ github.ref_type == 'tag' || inputs.release_tag != '' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG_INPUT: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Varsto-ios-unsigned
+          path: dist/ios-ipa
       - name: Attach to a release
-        if: ${{ github.ref_type == 'tag' || inputs.release_tag != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${TAG_INPUT:-$GITHUB_REF_NAME}"
+          mapfile -t files < <(find dist/ios-ipa -type f -name '*.ipa' | sort)
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::no .ipa in the artifact"; exit 1; }
           gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft --prerelease --title "$tag" --notes "Unsigned iOS build for AltStore, SideStore or Sideloadly." --target "$GITHUB_SHA"
-          gh release upload "$tag" dist/ios-ipa/*.ipa --clobber
+          gh release upload "$tag" "${files[@]}" --clobber

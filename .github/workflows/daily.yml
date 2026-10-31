@@ -26,8 +26,12 @@ on:
         required: false
         default: true
 
+# Read by default. contents: write is only on the job that publishes the
+# rolling `daily` pre-release. The called CI and iOS workflows narrow this
+# further: their build jobs stay read, and only their release-asset jobs
+# ask for write (they cannot exceed the ceiling on the call below).
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: daily
@@ -64,6 +68,14 @@ jobs:
             echo "main is still at $sha, the commit of the published daily build: nothing to do"
           fi
           version="$(gh api "repos/$GITHUB_REPOSITORY/contents/Cargo.toml?ref=$sha" --jq .content | base64 -d | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/')"
+          # Cargo.toml is 0.0.1-alpha.N (optionally with a git-describe suffix
+          # -<n>-g<hex>). Reject anything else before it is an output: a quote,
+          # semicolon or newline would be shell next to the daily key.
+          version_re='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?(-[0-9]+-g[0-9a-f]{7,40})?$'
+          if [[ ${#version} -gt 128 ]] || [[ ! "$version" =~ $version_re ]]; then
+            printf '::error::Cargo.toml version is not a Varsto version (expected 0.0.1-alpha.N)\n'
+            exit 1
+          fi
           {
             echo "build=$build"
             echo "sha=$sha"
@@ -77,6 +89,10 @@ jobs:
     name: Build and test
     needs: check
     if: needs.check.outputs.build == 'true'
+    # Ceiling for ci.yml. That workflow keeps contents: read on build and
+    # test jobs and asks for write only when attaching release assets.
+    permissions:
+      contents: write
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.check.outputs.sha }}
@@ -85,6 +101,10 @@ jobs:
     name: iOS ipa
     needs: check
     if: needs.check.outputs.build == 'true'
+    # Ceiling for ios-ipa.yml, which uploads an .ipa only on an ios-v* tag
+    # or an explicit release_tag. The build job itself stays contents: read.
+    permissions:
+      contents: write
     uses: ./.github/workflows/ios-ipa.yml
     with:
       ref: ${{ needs.check.outputs.sha }}
@@ -94,21 +114,38 @@ jobs:
     needs: [check, ci, ipa]
     if: needs.check.outputs.build == 'true'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     env:
       BUILD_ID: ${{ needs.check.outputs.id }}
       SHA: ${{ needs.check.outputs.sha }}
+      DATE: ${{ needs.check.outputs.date }}
+      VERSION: ${{ needs.check.outputs.version }}
       PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
     steps:
       # The workflow's own ref (main for the schedule): the scripts and
       # daily-key.pub come from there, whatever commit is being built.
+      # No git push here; gh uses GH_TOKEN only on the publish step.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: art
       - name: Assemble the stable names, SHA256SUMS and latest.json
         run: |
+          # Same rule as the check job. The value arrives only through the
+          # environment, never interpolated into this script.
+          version_re='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?(-[0-9]+-g[0-9a-f]{7,40})?$'
+          if [[ ${#VERSION} -gt 128 ]] || [[ ! "$VERSION" =~ $version_re ]]; then
+            printf '::error::refusing daily version that is not a Varsto version (expected 0.0.1-alpha.N)\n'
+            exit 1
+          fi
+          [[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { printf '::error::refusing daily date\n'; exit 1; }
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { printf '::error::refusing daily commit\n'; exit 1; }
+          [[ "$BUILD_ID" =~ ^[0-9]{8}-[0-9a-f]{7}$ ]] || { printf '::error::refusing daily build id\n'; exit 1; }
           python3 -I scripts/daily-assemble.py --art art --out dist --build-id "$BUILD_ID" \
-            --date "${{ needs.check.outputs.date }}" --version "${{ needs.check.outputs.version }}" --commit "$SHA" \
+            --date "$DATE" --version "$VERSION" --commit "$SHA" \
             --ci-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           ls -l dist
       - name: Sign SHA256SUMS with the daily key
