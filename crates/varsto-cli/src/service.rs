@@ -3112,6 +3112,85 @@ pub fn restart_running(home: &Path) -> bool {
     }
 }
 
+/// What `service stop` should do. A systemd user unit that is running, or
+/// about to be started again, has to be stopped with systemctl: quitting it
+/// over HTTP only makes the process exit, and the unit then starts another.
+#[derive(Debug, PartialEq, Eq)]
+enum StopAction {
+    StopUnit,
+    QuitApi,
+    NotRunning,
+}
+
+/// `systemd_usable` and `unit_installed` describe the user unit this program
+/// installs. `active_state` is systemd's ActiveState (`activating` covers the
+/// gap between a restart and the next process). `service_recorded` is a
+/// `service.json` left by a process, including one that was not started by
+/// the unit.
+fn stop_action(
+    systemd_usable: bool,
+    unit_installed: bool,
+    active_state: &str,
+    service_recorded: bool,
+) -> StopAction {
+    if systemd_usable && unit_installed && unit_is_running(active_state) {
+        StopAction::StopUnit
+    } else if service_recorded {
+        StopAction::QuitApi
+    } else {
+        StopAction::NotRunning
+    }
+}
+
+/// States in which the unit still has a process, or will start one
+/// (`activating` is also the RestartSec wait). `failed` and `inactive` are
+/// already stopped.
+fn unit_is_running(active_state: &str) -> bool {
+    matches!(
+        active_state,
+        "active" | "activating" | "deactivating" | "reloading"
+    )
+}
+
+/// Ask the process recorded for this home to quit. The caller has already
+/// decided that no systemd unit is supervising it.
+fn quit_recorded(home: &Path) -> Result<()> {
+    let Some(f) = read_service_file(home) else {
+        return Ok(());
+    };
+    http_post(
+        &format!("http://127.0.0.1:{}/api/quit", f.port),
+        &f.token,
+        "{}",
+    )?;
+    Ok(())
+}
+
+/// Stop the background service for `home`.
+///
+/// On Linux, a running user unit is stopped with `systemctl --user stop`
+/// (the unit `varsto install` writes). That cancels a pending restart as
+/// well. HTTP quit is the fallback when systemd is not there, or when the
+/// process was not started by that unit. Returns whether anything was asked
+/// to stop.
+pub fn stop(home: &Path) -> Result<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        return linux::stop_service(home);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // No user unit on this platform: only the recorded process, if any.
+        if stop_action(false, false, "", read_service_file(home).is_some()) != StopAction::QuitApi {
+            return Ok(false);
+        }
+        quit_recorded(home)?;
+        return Ok(true);
+    }
+    #[allow(unreachable_code)]
+    Err(anyhow!("not available on this platform"))
+}
+
 /// Restart the running service and wait until a new one answers. A
 /// supervisor (launchd, systemd, the tray app) starts it again after exit
 /// code 75; without one, the service is started here. Returns whether a
@@ -3259,8 +3338,9 @@ pub fn uninstall() -> Result<String> {
 /// Linux: install like an ordinary program, without root. The binary goes to
 /// `~/.local/bin` (added to PATH in the shell profiles when missing), a
 /// systemd user unit runs the background service (restarting it after a
-/// self-update, exit code 75), the tray starts at login and attaches to that
-/// service, and the application menu gets an entry with the icon.
+/// self-update, exit code 75, but not after a clean stop), the tray starts
+/// at login and attaches to that service, and the application menu gets an
+/// entry with the icon.
 #[cfg(target_os = "linux")]
 pub mod linux {
     use super::*;
@@ -3269,8 +3349,15 @@ pub mod linux {
     use std::process::Command;
 
     const ICON_PNG: &[u8] = include_bytes!("../../../brand/png/logo-256.png");
-    const UNIT: &str = "varsto.service";
+    pub(super) const UNIT: &str = "varsto.service";
     const MARK: &str = "# Added by varsto install";
+    /// Crash-loop cap. The burst has to fit in the interval even when every
+    /// restart waits [`RESTART_SEC`]. The manager default interval is 10s,
+    /// which never fills a burst of 5 at that spacing, so the loop would not
+    /// stop.
+    const START_LIMIT_INTERVAL_SEC: u64 = 120;
+    const START_LIMIT_BURST: u64 = 5;
+    const RESTART_SEC: u64 = 3;
 
     fn user_home() -> Result<PathBuf> {
         Ok(PathBuf::from(
@@ -3289,10 +3376,17 @@ pub mod linux {
         Ok(user_home()?.join(".local/bin/varsto"))
     }
 
+    /// The user unit `install` writes (`~/.config/systemd/user/varsto.service`,
+    /// or the same path under `XDG_CONFIG_HOME`).
+    fn unit_path() -> Result<PathBuf> {
+        Ok(xdg("XDG_CONFIG_HOME", ".config")?
+            .join("systemd/user")
+            .join(UNIT))
+    }
+
     /// Whether the background service unit (or at least the binary) is installed.
     pub fn installed() -> bool {
-        let unit = xdg("XDG_CONFIG_HOME", ".config").map(|c| c.join("systemd/user").join(UNIT));
-        unit.map(|u| u.exists()).unwrap_or(false)
+        unit_path().map(|u| u.exists()).unwrap_or(false)
             || installed_binary().map(|b| b.exists()).unwrap_or(false)
     }
 
@@ -3336,6 +3430,88 @@ pub mod linux {
             format!("\"{s}\"")
         } else {
             s
+        }
+    }
+
+    /// `Restart=on-failure`, not `always`: a clean stop (exit 0, or SIGTERM
+    /// from `systemctl stop`) must not start another process. Exit code 75
+    /// is a failure, so a self-update still comes back. The start limit is
+    /// what ends a crash loop; see [`START_LIMIT_INTERVAL_SEC`].
+    pub(super) fn unit_text(exec: &str, interval_secs: u64) -> String {
+        format!(
+            "\
+[Unit]
+Description=Varsto background sync
+After=network-online.target
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+ExecStart={exec} service run --port 0 --interval {interval_secs}
+Restart=on-failure
+RestartSec={RESTART_SEC}
+
+[Install]
+WantedBy=default.target
+"
+        )
+    }
+
+    fn active_state() -> Result<String> {
+        let out = Command::new("systemctl")
+            .args(["--user", "show", UNIT, "-p", "ActiveState", "--value"])
+            .output()?;
+        if !out.status.success() {
+            bail!(
+                "systemctl --user show {UNIT} failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    /// `(systemd usable, unit file installed, ActiveState)`.
+    fn stop_facts() -> (bool, bool, String) {
+        if !systemd_user() {
+            return (false, false, String::new());
+        }
+        let Ok(path) = unit_path() else {
+            return (false, false, String::new());
+        };
+        if !path.exists() {
+            return (true, false, String::new());
+        }
+        match active_state() {
+            Ok(state) => (true, true, state),
+            // The user manager answered, but not for this unit. Treat systemd
+            // as absent so the caller can still ask the process to quit.
+            Err(_) => (false, true, String::new()),
+        }
+    }
+
+    /// Stop the installed user unit when it is running. Otherwise quit the
+    /// recorded process, if there is one.
+    pub(super) fn stop_service(home: &Path) -> Result<bool> {
+        let recorded = super::read_service_file(home).is_some();
+        let (usable, installed, state) = stop_facts();
+        match super::stop_action(usable, installed, &state, recorded) {
+            super::StopAction::StopUnit => {
+                // Stop the unit itself. Quitting over HTTP first would look
+                // like an unexpected exit to a unit that still has
+                // Restart=always, and systemd would start another process.
+                systemctl(&["stop", UNIT])?;
+                // A second process for this home was not the unit. The unit
+                // is already stopped, so quitting it cannot restart the unit.
+                if super::status(home).is_some() {
+                    super::quit_recorded(home)?;
+                }
+                Ok(true)
+            }
+            super::StopAction::QuitApi => {
+                super::quit_recorded(home)?;
+                Ok(recorded)
+            }
+            super::StopAction::NotRunning => Ok(false),
         }
     }
 
@@ -3395,14 +3571,11 @@ pub mod linux {
         fs::create_dir_all(home)?;
         let exec = format!("{} --home {}", quote(&target), quote(home));
         if systemd_user() {
-            let dir = xdg("XDG_CONFIG_HOME", ".config")?.join("systemd/user");
-            fs::create_dir_all(&dir)?;
-            fs::write(
-                dir.join(UNIT),
-                format!(
-                    "[Unit]\nDescription=Varsto background sync\nAfter=network-online.target\n\n[Service]\nExecStart={exec} service run --port 0 --interval {interval_secs}\nRestart=always\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n"
-                ),
-            )?;
+            let unit = unit_path()?;
+            if let Some(dir) = unit.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(&unit, unit_text(&exec, interval_secs))?;
             stop_running(home);
             systemctl(&["daemon-reload"])?;
             systemctl(&["enable", UNIT])?;
@@ -3455,9 +3628,7 @@ pub mod linux {
         let mut done = Vec::new();
         if systemd_user() {
             let _ = systemctl(&["disable", "--now", UNIT]);
-            let unit = xdg("XDG_CONFIG_HOME", ".config")?
-                .join("systemd/user")
-                .join(UNIT);
+            let unit = unit_path()?;
             if fs::remove_file(unit).is_ok() {
                 let _ = systemctl(&["daemon-reload"]);
                 done.push("background service: stopped and removed".into());
@@ -3655,5 +3826,89 @@ mod tests {
             EventKind::Create(CreateKind::File),
             ".varsto-tmp-1"
         )));
+    }
+
+    /// `service stop` stops a running user unit (including one waiting out
+    /// RestartSec) instead of only quitting the process. Without systemd, or
+    /// when that unit is not running, it falls back to the recorded process.
+    #[test]
+    fn service_stop_stops_a_running_user_unit() {
+        assert_eq!(
+            stop_action(true, true, "active", true),
+            StopAction::StopUnit
+        );
+        assert_eq!(
+            stop_action(true, true, "activating", false),
+            StopAction::StopUnit
+        );
+        assert_eq!(
+            stop_action(true, true, "deactivating", true),
+            StopAction::StopUnit
+        );
+        assert_eq!(
+            stop_action(true, true, "reloading", false),
+            StopAction::StopUnit
+        );
+        assert!(unit_is_running("activating"));
+        assert!(!unit_is_running("inactive"));
+        assert!(!unit_is_running("failed"));
+        // No user manager: quit the process, do not claim the unit stopped.
+        assert_eq!(
+            stop_action(false, true, "active", true),
+            StopAction::QuitApi
+        );
+        assert_eq!(stop_action(false, false, "", true), StopAction::QuitApi);
+        // Unit installed but idle, and a process started by hand.
+        assert_eq!(
+            stop_action(true, true, "inactive", true),
+            StopAction::QuitApi
+        );
+        assert_eq!(stop_action(true, true, "failed", true), StopAction::QuitApi);
+        assert_eq!(
+            stop_action(true, false, "inactive", true),
+            StopAction::QuitApi
+        );
+        assert_eq!(
+            stop_action(true, true, "inactive", false),
+            StopAction::NotRunning
+        );
+        assert_eq!(stop_action(true, false, "", false), StopAction::NotRunning);
+        assert_eq!(stop_action(false, false, "", false), StopAction::NotRunning);
+    }
+
+    /// The installed user unit must not come back after a clean stop, and a
+    /// crash loop must hit a start limit. Exit 75 (self-update) is still a
+    /// failure, so `Restart=on-failure` starts it again.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn service_stop_unit_restarts_on_failure_within_a_start_limit() {
+        let text = linux::unit_text("/home/me/.local/bin/varsto --home /h", 300);
+        assert!(text.contains("Restart=on-failure\n"), "{text}");
+        assert!(
+            !text.contains("Restart=always"),
+            "clean exits would start another process: {text}"
+        );
+        assert!(text.contains(
+            "ExecStart=/home/me/.local/bin/varsto --home /h service run --port 0 --interval 300\n"
+        ));
+        assert!(text.contains("WantedBy=default.target\n"));
+        let field = |key: &str| -> u64 {
+            text.lines()
+                .find_map(|line| line.strip_prefix(key)?.parse().ok())
+                .unwrap_or_else(|| panic!("missing {key} in {text}"))
+        };
+        let interval = field("StartLimitIntervalSec=");
+        let burst = field("StartLimitBurst=");
+        let restart = field("RestartSec=");
+        assert_eq!(restart, 3);
+        assert!(burst >= 2, "{burst}");
+        // Spaced by RestartSec, `burst` starts still fall inside the window.
+        // The 10s manager default does not, so it would not stop the loop.
+        assert!(
+            interval > (burst - 1) * restart,
+            "interval {interval}s does not cover {burst} starts {restart}s apart"
+        );
+        assert!(interval > 10, "default 10s window would not fill");
+        assert_eq!(linux::UNIT, "varsto.service");
     }
 }
