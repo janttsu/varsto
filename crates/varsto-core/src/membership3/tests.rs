@@ -16,7 +16,7 @@ use crate::storage::Storage;
 use anyhow::Result;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 const VAULT: Id16 = [0x5a; 16];
@@ -1474,6 +1474,54 @@ fn a_folder_epoch_that_stops_after_its_record_is_finished_from_the_kept_key() {
         !mc.read_my_grants().holds(&f, 1),
         "the removed device did not"
     );
+}
+
+/// In an organization a roster member's vault epoch, revocation and wipe
+/// are not adopted (spec 27). Without the administrator list they would be.
+#[test]
+fn a_non_admin_cannot_revoke_or_wipe() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let ma = device(&st, &a, &keys, "admin");
+    let mut mb = device(&st, &b, &keys, "member");
+    let _mc = device(&st, &c, &keys, "other");
+    mb.refresh().unwrap();
+    let admins = BTreeSet::from([ma.me]);
+    mb.remove_device(&ma.me, 0, true, None)
+        .expect("a modified client can write the epoch");
+    let ma = Membership::open_with_admins(
+        VAULT,
+        &st,
+        &a.sign,
+        &a.kem,
+        keys.clone(),
+        BTreeMap::new(),
+        Some(admins.clone()),
+    )
+    .unwrap();
+    assert!(ma.own_revocation.is_none(), "a member's wipe is ignored");
+    assert!(!ma.is_revoked(&ma.me));
+    assert_eq!(ma.vault_keys.newest_epoch(), 0);
+    let mc = Membership::open_with_admins(
+        VAULT,
+        &st,
+        &c.sign,
+        &c.kem,
+        keys.clone(),
+        BTreeMap::new(),
+        Some(admins),
+    )
+    .unwrap();
+    assert!(!mc.is_revoked(&ma.me));
+    assert_eq!(mc.vault_keys.newest_epoch(), 0);
+    let open = Membership::open(VAULT, &st, &c.sign, &c.kem, keys).unwrap();
+    assert!(
+        open.is_revoked(&ma.me),
+        "the same records count without an organization"
+    );
+    assert_eq!(open.vault_keys.newest_epoch(), 1);
 }
 
 /// A device removed from the vault can still sign folder records and grants
