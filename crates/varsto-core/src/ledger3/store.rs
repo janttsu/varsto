@@ -60,6 +60,11 @@ struct PushedFile {
     storages: BTreeMap<String, u64>,
     #[serde(default)]
     pruned: BTreeMap<String, u64>,
+    /// Per storage, the highest batch number that is a real prefix: every
+    /// batch from the first one still kept through this number is on that
+    /// storage. The watermark in `storages` can sit past a gap; this does not.
+    #[serde(default)]
+    prefix: BTreeMap<String, u64>,
 }
 
 /// A batch held while its predecessor is missing.
@@ -180,6 +185,12 @@ impl LedgerStore {
         self.pushed.storages.get(storage).copied().unwrap_or(0)
     }
 
+    /// Batches `1..=` this number are known to be on `storage`, with no gap.
+    /// Absent on older `pushed.json` files (treated as nothing confirmed).
+    pub fn pushed_prefix(&self, storage: &str) -> u64 {
+        self.pushed.prefix.get(storage).copied().unwrap_or(0)
+    }
+
     pub fn pruned(&self, storage: &str) -> u64 {
         self.pushed.pruned.get(storage).copied().unwrap_or(0)
     }
@@ -194,6 +205,20 @@ impl LedgerStore {
             return Ok(());
         }
         self.pushed.storages.insert(storage.to_string(), seq);
+        util::write_json(&self.dir.join("pushed.json"), &self.pushed)
+    }
+
+    /// `storage` holds every kept batch through `seq`. The watermark and the
+    /// confirmed prefix both move there, including backward when a gap was
+    /// found under an earlier watermark.
+    pub fn set_pushed_prefix(&mut self, storage: &str, seq: u64) -> Result<()> {
+        if self.pushed.storages.get(storage) == Some(&seq)
+            && self.pushed.prefix.get(storage) == Some(&seq)
+        {
+            return Ok(());
+        }
+        self.pushed.storages.insert(storage.to_string(), seq);
+        self.pushed.prefix.insert(storage.to_string(), seq);
         util::write_json(&self.dir.join("pushed.json"), &self.pushed)
     }
 
