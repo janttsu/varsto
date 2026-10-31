@@ -4407,13 +4407,18 @@ fn run(cli: &Cli) -> Result<()> {
                     );
                 }
                 format!(
-                    "{}: scanned {}, changed {}, uploaded {} chunks ({} bytes), manifest {:?}",
+                    "{}: scanned {}, changed {}, uploaded {} chunks ({} bytes), manifest {:?}{}",
                     r.folder,
                     r.files_scanned,
                     r.files_changed,
                     r.chunks_uploaded,
                     r.bytes_uploaded,
-                    r.manifest_seq
+                    r.manifest_seq,
+                    if r.files_unreadable > 0 {
+                        format!(", {} unreadable", r.files_unreadable)
+                    } else {
+                        String::new()
+                    }
                 )
             })?;
         }

@@ -246,8 +246,10 @@ struct FolderState {
     /// used it: their index described plain files in the folder directory.
     #[serde(default)]
     block_cache: bool,
-    /// A backup's source: files the last scan could not read (left out of
-    /// the snapshot and named in it).
+    /// Files and directories the last scan could not read. A backup names
+    /// them in its snapshot; an ordinary folder keeps them (and paths inside
+    /// an unreadable directory) and tries again next time. An empty entry
+    /// means the folder directory itself could not be read.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     unreadable: BTreeSet<String>,
     /// Vault paths written under another local name on this device (the
@@ -339,6 +341,11 @@ pub struct PushReport {
     /// count once).
     #[serde(default)]
     pub files_ignored: u64,
+    /// Files and directories the scan could not read. They are left as they
+    /// were (nothing under an unreadable directory is deleted) and tried
+    /// again next time. A directory counts once.
+    #[serde(default)]
+    pub files_unreadable: u64,
     /// Of the changed files, those whose metadata alone changed (no blocks).
     #[serde(default)]
     pub metadata_changed: u64,
@@ -817,6 +824,13 @@ pub struct Engine {
     local_rules: Option<crate::names::LocalRules>,
     /// Tests: the paths of the files downloaded, in order (`record_downloads`).
     download_log: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+    /// Tests: called with the destination just before a pull replaces or
+    /// deletes it (`set_replace_hook`), so an edit during the download can
+    /// be simulated.
+    replace_hook: Option<std::sync::Arc<dyn Fn(&Path) + Send + Sync>>,
+    /// Tests: the next pull fails with this message after the scan
+    /// (`fail_next_pull_for_tests`).
+    pull_fault: Option<String>,
     /// Which file metadata this system can represent (`fsmeta::Caps`).
     meta_caps: crate::fsmeta::Caps,
     /// Of the last scan: entries ignored, files whose metadata alone changed.
@@ -1231,10 +1245,51 @@ fn mtime_ns_of(md: &fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
+/// Whether `disk` is still the file `index` described at scan time.
+/// Nothing at the path is unchanged (there is nothing to overwrite). A
+/// path that exists with no index entry appeared after the scan. A
+/// symbolic link is indexed with size 0, so its own length (the target)
+/// is not compared; a regular file's size and mtime are.
+fn disk_matches_index(disk: &Path, index: Option<&LocalIndexEntry>) -> bool {
+    match (fs::symlink_metadata(disk), index) {
+        (Err(_), _) => true,
+        (Ok(_), None) => false,
+        (Ok(md), Some(ix)) => {
+            mtime_ns_of(&md) == ix.mtime
+                && if md.file_type().is_symlink() {
+                    ix.size == 0
+                } else {
+                    md.len() == ix.size
+                }
+        }
+    }
+}
+
+/// Passed to a download that may replace a synced file. Restores and
+/// conflict copies land on a new path and do not check.
+enum PlaceGuard {
+    No,
+    Check(Option<LocalIndexEntry>),
+}
+
 /// Names Varsto keeps for itself inside folders (`.varsto*`), except the
 /// synced ignore file.
 fn reserved_name(name: &str) -> bool {
     name.starts_with(".varsto") && name != ignore_rules::IGNORE_FILE
+}
+
+/// `path` is an unreadable entry, or lies inside an unreadable directory.
+/// An empty entry in `unreadable` means the folder directory itself.
+fn unreadable_covers(unreadable: &BTreeSet<String>, path: &str) -> bool {
+    if unreadable.contains("") || unreadable.contains(path) {
+        return true;
+    }
+    unreadable.iter().any(|dir| {
+        !dir.is_empty()
+            && path.len() > dir.len()
+            && path.as_bytes().get(dir.len()) == Some(&b'/')
+            && path.starts_with(dir.as_str())
+    })
 }
 
 fn placeholder_path(disk: &Path) -> PathBuf {
@@ -1949,6 +2004,8 @@ impl Engine {
             manifest_policy: Default::default(),
             hold_exempt: None,
             download_log: None,
+            replace_hook: None,
+            pull_fault: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
             last_scan: None,
@@ -2057,6 +2114,8 @@ impl Engine {
             manifest_policy: Default::default(),
             hold_exempt: None,
             download_log: None,
+            replace_hook: None,
+            pull_fault: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
             last_scan: None,
@@ -3549,18 +3608,22 @@ impl Engine {
         while let Some(entry) = walker.next() {
             let entry = match entry {
                 Ok(e) => e,
-                Err(e) if backup => {
-                    if let Some(p) = e
-                        .path()
-                        .and_then(|p| p.strip_prefix(root).ok())
-                        .and_then(util::manifest_path)
-                    {
-                        let p = state.local_names.vault_of(rules, &p);
-                        state.unreadable.insert(p);
+                Err(e) => {
+                    // A directory that cannot be listed (or a file that
+                    // cannot be stated). Skip that subtree; paths already
+                    // indexed under it are not deletions.
+                    let rel = e.path().and_then(|p| p.strip_prefix(root).ok());
+                    match rel.and_then(util::manifest_path) {
+                        Some(p) => {
+                            let p = state.local_names.vault_of(rules, &p);
+                            state.unreadable.insert(p);
+                        }
+                        None => {
+                            state.unreadable.insert(String::new());
+                        }
                     }
                     continue;
                 }
-                Err(e) => return Err(e.into()),
             };
             if entry.depth() == 0 {
                 continue;
@@ -3592,7 +3655,13 @@ impl Engine {
                 continue;
             }
             let path = state.local_names.vault_of(rules, &local);
-            let md = entry.metadata()?;
+            let md = match entry.metadata() {
+                Ok(md) => md,
+                Err(_) => {
+                    state.unreadable.insert(path);
+                    continue;
+                }
+            };
             let mtime = md
                 .modified()
                 .ok()
@@ -3725,25 +3794,30 @@ impl Engine {
             // Changed or new: chunk, hash, (upload).
             let file = match fs::File::open(entry.path()) {
                 Ok(f) => f,
-                Err(_) if backup => {
-                    state.unreadable.insert(path.clone());
+                Err(_) => {
+                    state.unreadable.insert(path);
                     continue;
                 }
-                Err(e) => return Err(e.into()),
             };
             let mut hasher = KeyedHasher::new(&fk.hash);
             let mut chunks = Vec::new();
             let params = self.chunker_for(size, &fk);
             let events_before = self.pending.len();
             let mut read_failed = false;
-            for chunk in Chunker::new(std::io::BufReader::new(file), params)? {
+            let chunker = match Chunker::new(std::io::BufReader::new(file), params) {
+                Ok(c) => c,
+                Err(_) => {
+                    state.unreadable.insert(path);
+                    continue;
+                }
+            };
+            for chunk in chunker {
                 let chunk = match chunk {
                     Ok(c) => c,
-                    Err(_) if backup => {
+                    Err(_) => {
                         read_failed = true;
                         break;
                     }
-                    Err(e) => return Err(e.into()),
                 };
                 hasher.update(&chunk);
                 let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
@@ -3787,6 +3861,8 @@ impl Engine {
                 });
             }
             if read_failed {
+                // Not a version: the blocks read so far are not offered.
+                self.pending.truncate(events_before);
                 state.unreadable.insert(path.clone());
                 continue;
             }
@@ -3894,12 +3970,27 @@ impl Engine {
             })
             .map(|(p, _)| p.clone())
             .filter(|p| !ignore.as_mut().is_some_and(|m| m.is_ignored(p, false)))
+            .filter(|p| !unreadable_covers(&state.unreadable, p))
             .collect();
         self.scan_extra = (ignored, meta_changed);
+        if !state.unreadable.is_empty() {
+            log::warn!(
+                folder = rec.name.as_str();
+                "scan: {} unreadable",
+                state.unreadable.len()
+            );
+        }
         // Index entries of ignored files go; those of kept links stay.
+        // Entries under an unreadable file or directory keep the index
+        // they had, so a later scan can still see what changed.
         for p in &kept {
             if let Some(e) = state.local_index.get(p) {
                 new_index.insert(p.clone(), e.clone());
+            }
+        }
+        for (p, e) in &state.local_index {
+            if unreadable_covers(&state.unreadable, p) {
+                new_index.entry(p.clone()).or_insert_with(|| e.clone());
             }
         }
         if receive_only {
@@ -4061,6 +4152,7 @@ impl Engine {
         };
         report.files_scanned = scanned;
         report.files_changed = changed;
+        report.files_unreadable = state.unreadable.len() as u64;
         (report.files_ignored, report.metadata_changed) = self.scan_extra;
         let folder = members3::bin(&rec.folder_id)?;
         let epoch = self.folder_keys(&rec)?.epoch;
@@ -4561,6 +4653,10 @@ impl Engine {
             ..Default::default()
         };
         self.last_scan = None;
+        if let Some(msg) = self.pull_fault.take() {
+            // A pull that fails here must still let the following push run.
+            bail!("pull failed: {msg}");
+        }
         if self.share_read_only(&rec) {
             report.kept_aside = self.read_only_guard(&rec, &root, &mut state)?;
         } else {
@@ -4605,7 +4701,21 @@ impl Engine {
             if Self::skip_ignored(&mut ignore, &mut state, &remote, &mut report) {
                 continue;
             }
-            self.apply_remote(&rec, &fk, &root, &mut state, remote, &storages, &mut report)?;
+            let path = remote.path.clone();
+            // Drop the queued copy first. A download that fails queues it
+            // again; a merge that resolves must not leave it to be written
+            // over a local edit the next scan has already recorded.
+            state.pending_remote.remove(&path);
+            self.merge_or_defer(
+                &rec,
+                &fk,
+                &root,
+                &mut state,
+                &path,
+                &remote,
+                &storages,
+                &mut report,
+            );
         }
         if send_only {
             // Caught up by this device's own changes (or an override).
@@ -4624,7 +4734,7 @@ impl Engine {
                     continue;
                 }
                 let path = remote.path.clone();
-                self.merge_one(
+                self.merge_or_defer(
                     &rec,
                     &fk,
                     &root,
@@ -4633,7 +4743,7 @@ impl Engine {
                     &remote,
                     &storages,
                     &mut report,
-                )?;
+                );
             }
         }
         // Versions held back by a rule or setting that no longer applies.
@@ -4660,7 +4770,19 @@ impl Engine {
                 manifest::merge(state.files.get(&remote.path), &remote),
                 Merge::TakeRemote
             ) {
-                self.apply_remote(&rec, &fk, &root, &mut state, remote, &storages, &mut report)?;
+                let path = remote.path.clone();
+                if let Err(e) = self.apply_remote(
+                    &rec,
+                    &fk,
+                    &root,
+                    &mut state,
+                    remote.clone(),
+                    &storages,
+                    &mut report,
+                ) {
+                    report.files_unavailable.push(format!("{path}: {e}"));
+                    state.pending_remote.entry(path).or_insert(remote);
+                }
             }
         }
 
@@ -4753,7 +4875,7 @@ impl Engine {
                 if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
                     continue;
                 }
-                self.merge_one(
+                self.merge_or_defer(
                     &rec,
                     &fk,
                     &root,
@@ -4762,7 +4884,7 @@ impl Engine {
                     remote,
                     &storages,
                     &mut report,
-                )?;
+                );
             }
             state.last_seen.insert(dev, v.seq);
             self.prefetched.clear();
@@ -4775,6 +4897,30 @@ impl Engine {
         self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
+    }
+
+    /// `merge_one`, but a failure of this one file is recorded and the pull
+    /// continues. The remote version stays pending for the next sync.
+    #[allow(clippy::too_many_arguments)]
+    fn merge_or_defer(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        root: &Path,
+        state: &mut FolderState,
+        path: &str,
+        remote: &FileState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut PullReport,
+    ) {
+        if let Err(e) = self.merge_one(rec, fk, root, state, path, remote, storages, report) {
+            log::warn!("{path} was not merged: {e}");
+            report.files_unavailable.push(format!("{path}: {e}"));
+            state
+                .pending_remote
+                .entry(path.to_string())
+                .or_insert_with(|| remote.clone());
+        }
     }
 
     /// Combine one remote state of `path` with this device's (`manifest::merge`).
@@ -4817,37 +4963,49 @@ impl Engine {
                         fs::create_dir_all(parent)?;
                     }
                     let local = self.disk_of(root, state, path);
+                    let mut copied = true;
                     if local_is_loser && present(&local) {
                         fs::rename(&local, &disk)?;
                     } else if let Some(target) = loser.symlink() {
                         fsmeta::write_link(&disk, target)?;
-                    } else {
-                        self.download_to(rec, fk, &disk, &loser, storages, report)?;
+                    } else if let Err(e) =
+                        self.download_to(rec, fk, &disk, &loser, storages, report)
+                    {
+                        // The losing version could not be fetched. That must
+                        // not drop the winner or the rest of the pull; the
+                        // copy is retried from pending.
+                        report.files_unavailable.push(format!("{cpath}: {e}"));
+                        let mut pending = loser.clone();
+                        pending.path = cpath.clone();
+                        state.pending_remote.insert(cpath.clone(), pending);
+                        copied = false;
                     }
-                    // The conflict copy is a new local file: it gets its own version.
-                    let clock = self.tick()?;
-                    let mut cstate = loser.clone();
-                    cstate.path = cpath.clone();
-                    cstate.version = BTreeMap::from([(me.clone(), clock)]);
-                    cstate.modified_by = me.clone();
-                    cstate.modified_clock = clock;
-                    let seen = self.settle_meta(
-                        &rec.folder_id,
-                        &disk,
-                        &cstate,
-                        &mut report.metadata_problems,
-                    );
-                    let md = fs::symlink_metadata(&disk)?;
-                    state.local_index.insert(
-                        cpath.clone(),
-                        LocalIndexEntry {
-                            size: md.len(),
-                            mtime: mtime_ns_of(&md),
-                            content_hash: cstate.content_hash.clone(),
-                            meta_seen: seen,
-                        },
-                    );
-                    state.files.insert(cpath, cstate);
+                    if copied {
+                        // The conflict copy is a new local file: it gets its own version.
+                        let clock = self.tick()?;
+                        let mut cstate = loser.clone();
+                        cstate.path = cpath.clone();
+                        cstate.version = BTreeMap::from([(me.clone(), clock)]);
+                        cstate.modified_by = me.clone();
+                        cstate.modified_clock = clock;
+                        let seen = self.settle_meta(
+                            &rec.folder_id,
+                            &disk,
+                            &cstate,
+                            &mut report.metadata_problems,
+                        );
+                        let md = fs::symlink_metadata(&disk)?;
+                        state.local_index.insert(
+                            cpath.clone(),
+                            LocalIndexEntry {
+                                size: md.len(),
+                                mtime: mtime_ns_of(&md),
+                                content_hash: cstate.content_hash.clone(),
+                                meta_seen: seen,
+                            },
+                        );
+                        state.files.insert(cpath, cstate);
+                    }
                 }
                 let local_has_winner = state
                     .files
@@ -5061,6 +5219,18 @@ impl Engine {
                 let _ = fs::remove_file(fsmeta::note_path(&disk));
             }
             if present(&disk) {
+                // Edited after the scan: the index still describes the old
+                // file. Leave it; the deletion is retried and merged with
+                // the edit (`pending_remote`).
+                self.note_replace_hook(&disk);
+                if !disk_matches_index(&disk, state.local_index.get(&remote.path)) {
+                    report.files_unavailable.push(format!(
+                        "{}: changed while syncing; nothing was overwritten",
+                        remote.path
+                    ));
+                    state.pending_remote.insert(remote.path.clone(), remote);
+                    return Ok(());
+                }
                 self.move_to_trash(&rec.folder_id, &disk, &remote.path)?;
                 report.files_deleted += 1;
             }
@@ -5141,10 +5311,25 @@ impl Engine {
             .files
             .get(&remote.path)
             .is_some_and(|f| !f.deleted && !f.is_symlink());
+        let indexed = state.local_index.get(&remote.path).cloned();
         let fetched = if same_content_here {
-            Ok(())
+            // The check above and the metadata write are not one moment:
+            // an edit in between keeps the file and is merged next pull.
+            if disk_matches_index(&disk, indexed.as_ref()) {
+                Ok(())
+            } else {
+                Err(anyhow!("changed while syncing; nothing was overwritten"))
+            }
         } else {
-            self.download_to(rec, fk, &disk, &remote, storages, report)
+            self.download_to_guarded(
+                rec,
+                fk,
+                &disk,
+                &remote,
+                storages,
+                report,
+                PlaceGuard::Check(indexed),
+            )
         };
         match fetched {
             Ok(()) => {
@@ -5263,6 +5448,22 @@ impl Engine {
         file: &FileState,
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
+    ) -> Result<()> {
+        self.download_to_guarded(rec, fk, disk, file, storages, report, PlaceGuard::No)
+    }
+
+    /// `download_to`, optionally refusing to replace a file that no longer
+    /// matches the index from the scan (`PlaceGuard::Check`).
+    #[allow(clippy::too_many_arguments)]
+    fn download_to_guarded(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        disk: &Path,
+        file: &FileState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut PullReport,
+        guard: PlaceGuard,
     ) -> Result<()> {
         // Nothing new is written where the disk would keep less free space
         // than its limit; the caller keeps the file for a later sync.
@@ -5439,6 +5640,16 @@ impl Engine {
             // becomes visible under its name (the metadata step after the
             // rename sets it again and reports a failure).
             util::set_final_mode(&out, file.meta.as_ref().and_then(|m| m.mode));
+        }
+        if let PlaceGuard::Check(index) = &guard {
+            // The scan that chose this download is already over. An edit
+            // since then (size or mtime, or a file the index never had)
+            // stays; the caller keeps the remote version and merges it.
+            self.note_replace_hook(disk);
+            if !disk_matches_index(disk, index.as_ref()) {
+                let _ = fs::remove_file(&tmp);
+                bail!("changed while syncing; nothing was overwritten");
+            }
         }
         fsmeta::make_replaceable(disk);
         fs::rename(&tmp, disk)?;
@@ -6300,6 +6511,25 @@ impl Engine {
         self.download_log = Some(log);
     }
 
+    /// Tests: run just before a pull replaces or deletes a file.
+    #[doc(hidden)]
+    pub fn set_replace_hook(&mut self, hook: Option<std::sync::Arc<dyn Fn(&Path) + Send + Sync>>) {
+        self.replace_hook = hook;
+    }
+
+    /// Tests: the next pull fails with `message` before it merges.
+    #[doc(hidden)]
+    pub fn fail_next_pull_for_tests(&mut self, message: impl Into<String>) {
+        self.pull_fault = Some(message.into());
+    }
+
+    fn note_replace_hook(&self, disk: &Path) {
+        let hook = self.replace_hook.clone();
+        if let Some(hook) = hook {
+            hook(disk);
+        }
+    }
+
     pub fn set_peers(&mut self, peers: Option<std::sync::Arc<crate::p2p::Peers>>) {
         self.peers = peers;
     }
@@ -6883,15 +7113,25 @@ impl Engine {
             };
             let mut pull = match self.pull(&name) {
                 Ok(p) => p,
-                Err(e) => {
+                Err(e) if folder_safety::paused_error(&e).is_some() => {
                     self.last_scan = None;
-                    if folder_safety::paused_error(&e).is_some() {
-                        out.push(paused(e, PullReport::default())?);
-                        synced += 1;
-                    } else {
-                        out.push(failed(e, PullReport::default(), &mut first_failure));
-                    }
+                    out.push(paused(e, PullReport::default())?);
+                    synced += 1;
                     continue;
+                }
+                Err(e) => {
+                    // The pull stopped, but this device's own changes still
+                    // go out: one broken entry must not freeze the folder.
+                    log::warn!(
+                        folder = name.as_str();
+                        "pull failed, local changes are still pushed: {e:#}"
+                    );
+                    self.last_scan = None;
+                    PullReport {
+                        folder: name.clone(),
+                        error: Some(format!("{e:#}")),
+                        ..Default::default()
+                    }
                 }
             };
             // The pull scanned the folder; the push need not walk it again.
@@ -7612,4 +7852,51 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
         }
     }
     Ok(removed)
+}
+
+#[cfg(test)]
+mod index_guard_tests {
+    use super::*;
+
+    #[test]
+    fn a_file_missing_from_the_index_is_not_replaced() {
+        let dir = std::env::temp_dir().join(format!(
+            "varsto-index-guard-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let disk = dir.join("f");
+        // Nothing there yet: a download may create the file.
+        assert!(disk_matches_index(&disk, None));
+        fs::write(&disk, b"x").unwrap();
+        // Present, but the scan never indexed it.
+        assert!(!disk_matches_index(&disk, None));
+        let md = fs::symlink_metadata(&disk).unwrap();
+        let ix = LocalIndexEntry {
+            size: md.len(),
+            mtime: mtime_ns_of(&md),
+            ..Default::default()
+        };
+        assert!(disk_matches_index(&disk, Some(&ix)));
+        fs::write(&disk, b"xy").unwrap();
+        assert!(!disk_matches_index(&disk, Some(&ix)));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unreadable_directory_covers_only_its_children() {
+        let mut unread = BTreeSet::new();
+        unread.insert("sub".to_string());
+        assert!(unreadable_covers(&unread, "sub"));
+        assert!(unreadable_covers(&unread, "sub/a.txt"));
+        assert!(!unreadable_covers(&unread, "sublime"));
+        assert!(!unreadable_covers(&unread, "other/a.txt"));
+        unread.insert(String::new());
+        assert!(unreadable_covers(&unread, "other/a.txt"));
+    }
 }
