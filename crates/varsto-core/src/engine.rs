@@ -817,6 +817,10 @@ pub struct Engine {
     local_rules: Option<crate::names::LocalRules>,
     /// Tests: the paths of the files downloaded, in order (`record_downloads`).
     download_log: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+    /// Tests: called with the destination just before a pull replaces or
+    /// deletes it (`set_replace_hook`), so an edit during the download can
+    /// be simulated.
+    replace_hook: Option<std::sync::Arc<dyn Fn(&Path) + Send + Sync>>,
     /// Which file metadata this system can represent (`fsmeta::Caps`).
     meta_caps: crate::fsmeta::Caps,
     /// Of the last scan: entries ignored, files whose metadata alone changed.
@@ -1229,6 +1233,33 @@ fn mtime_ns_of(md: &fs::Metadata) -> i64 {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_nanos() as i64)
         .unwrap_or(0)
+}
+
+/// Whether `disk` is still the file `index` described at scan time.
+/// Nothing at the path is unchanged (there is nothing to overwrite). A
+/// path that exists with no index entry appeared after the scan. A
+/// symbolic link is indexed with size 0, so its own length (the target)
+/// is not compared; a regular file's size and mtime are.
+fn disk_matches_index(disk: &Path, index: Option<&LocalIndexEntry>) -> bool {
+    match (fs::symlink_metadata(disk), index) {
+        (Err(_), _) => true,
+        (Ok(_), None) => false,
+        (Ok(md), Some(ix)) => {
+            mtime_ns_of(&md) == ix.mtime
+                && if md.file_type().is_symlink() {
+                    ix.size == 0
+                } else {
+                    md.len() == ix.size
+                }
+        }
+    }
+}
+
+/// Passed to a download that may replace a synced file. Restores and
+/// conflict copies land on a new path and do not check.
+enum PlaceGuard {
+    No,
+    Check(Option<LocalIndexEntry>),
 }
 
 /// Names Varsto keeps for itself inside folders (`.varsto*`), except the
@@ -1949,6 +1980,7 @@ impl Engine {
             manifest_policy: Default::default(),
             hold_exempt: None,
             download_log: None,
+            replace_hook: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
             last_scan: None,
@@ -2057,6 +2089,7 @@ impl Engine {
             manifest_policy: Default::default(),
             hold_exempt: None,
             download_log: None,
+            replace_hook: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
             last_scan: None,
@@ -4605,7 +4638,21 @@ impl Engine {
             if Self::skip_ignored(&mut ignore, &mut state, &remote, &mut report) {
                 continue;
             }
-            self.apply_remote(&rec, &fk, &root, &mut state, remote, &storages, &mut report)?;
+            let path = remote.path.clone();
+            // Drop the queued copy first. A download that fails queues it
+            // again; a merge that resolves must not leave it to be written
+            // over a local edit the next scan has already recorded.
+            state.pending_remote.remove(&path);
+            self.merge_one(
+                &rec,
+                &fk,
+                &root,
+                &mut state,
+                &path,
+                &remote,
+                &storages,
+                &mut report,
+            )?;
         }
         if send_only {
             // Caught up by this device's own changes (or an override).
@@ -5061,6 +5108,18 @@ impl Engine {
                 let _ = fs::remove_file(fsmeta::note_path(&disk));
             }
             if present(&disk) {
+                // Edited after the scan: the index still describes the old
+                // file. Leave it; the deletion is retried and merged with
+                // the edit (`pending_remote`).
+                self.note_replace_hook(&disk);
+                if !disk_matches_index(&disk, state.local_index.get(&remote.path)) {
+                    report.files_unavailable.push(format!(
+                        "{}: changed while syncing; nothing was overwritten",
+                        remote.path
+                    ));
+                    state.pending_remote.insert(remote.path.clone(), remote);
+                    return Ok(());
+                }
                 self.move_to_trash(&rec.folder_id, &disk, &remote.path)?;
                 report.files_deleted += 1;
             }
@@ -5141,10 +5200,25 @@ impl Engine {
             .files
             .get(&remote.path)
             .is_some_and(|f| !f.deleted && !f.is_symlink());
+        let indexed = state.local_index.get(&remote.path).cloned();
         let fetched = if same_content_here {
-            Ok(())
+            // The check above and the metadata write are not one moment:
+            // an edit in between keeps the file and is merged next pull.
+            if disk_matches_index(&disk, indexed.as_ref()) {
+                Ok(())
+            } else {
+                Err(anyhow!("changed while syncing; nothing was overwritten"))
+            }
         } else {
-            self.download_to(rec, fk, &disk, &remote, storages, report)
+            self.download_to_guarded(
+                rec,
+                fk,
+                &disk,
+                &remote,
+                storages,
+                report,
+                PlaceGuard::Check(indexed),
+            )
         };
         match fetched {
             Ok(()) => {
@@ -5263,6 +5337,22 @@ impl Engine {
         file: &FileState,
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
+    ) -> Result<()> {
+        self.download_to_guarded(rec, fk, disk, file, storages, report, PlaceGuard::No)
+    }
+
+    /// `download_to`, optionally refusing to replace a file that no longer
+    /// matches the index from the scan (`PlaceGuard::Check`).
+    #[allow(clippy::too_many_arguments)]
+    fn download_to_guarded(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        disk: &Path,
+        file: &FileState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut PullReport,
+        guard: PlaceGuard,
     ) -> Result<()> {
         // Nothing new is written where the disk would keep less free space
         // than its limit; the caller keeps the file for a later sync.
@@ -5439,6 +5529,16 @@ impl Engine {
             // becomes visible under its name (the metadata step after the
             // rename sets it again and reports a failure).
             util::set_final_mode(&out, file.meta.as_ref().and_then(|m| m.mode));
+        }
+        if let PlaceGuard::Check(index) = &guard {
+            // The scan that chose this download is already over. An edit
+            // since then (size or mtime, or a file the index never had)
+            // stays; the caller keeps the remote version and merges it.
+            self.note_replace_hook(disk);
+            if !disk_matches_index(disk, index.as_ref()) {
+                let _ = fs::remove_file(&tmp);
+                bail!("changed while syncing; nothing was overwritten");
+            }
         }
         fsmeta::make_replaceable(disk);
         fs::rename(&tmp, disk)?;
@@ -6298,6 +6398,19 @@ impl Engine {
     #[doc(hidden)]
     pub fn record_downloads(&mut self, log: std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         self.download_log = Some(log);
+    }
+
+    /// Tests: run just before a pull replaces or deletes a file.
+    #[doc(hidden)]
+    pub fn set_replace_hook(&mut self, hook: Option<std::sync::Arc<dyn Fn(&Path) + Send + Sync>>) {
+        self.replace_hook = hook;
+    }
+
+    fn note_replace_hook(&self, disk: &Path) {
+        let hook = self.replace_hook.clone();
+        if let Some(hook) = hook {
+            hook(disk);
+        }
     }
 
     pub fn set_peers(&mut self, peers: Option<std::sync::Arc<crate::p2p::Peers>>) {
@@ -7612,4 +7725,39 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
         }
     }
     Ok(removed)
+}
+
+#[cfg(test)]
+mod index_guard_tests {
+    use super::*;
+
+    #[test]
+    fn a_file_missing_from_the_index_is_not_replaced() {
+        let dir = std::env::temp_dir().join(format!(
+            "varsto-index-guard-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let disk = dir.join("f");
+        // Nothing there yet: a download may create the file.
+        assert!(disk_matches_index(&disk, None));
+        fs::write(&disk, b"x").unwrap();
+        // Present, but the scan never indexed it.
+        assert!(!disk_matches_index(&disk, None));
+        let md = fs::symlink_metadata(&disk).unwrap();
+        let ix = LocalIndexEntry {
+            size: md.len(),
+            mtime: mtime_ns_of(&md),
+            ..Default::default()
+        };
+        assert!(disk_matches_index(&disk, Some(&ix)));
+        fs::write(&disk, b"xy").unwrap();
+        assert!(!disk_matches_index(&disk, Some(&ix)));
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
