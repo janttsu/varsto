@@ -134,8 +134,12 @@ impl TcpTls {
     /// `serve` on any byte stream (a TCP connection, or a rendezvous relay
     /// session, `alpha-0-format.md` section 83.7): the same certificates,
     /// pins and request handler. The stream's reads must time out now and
-    /// then (the handshake watches `deadline`, the connection loop its
-    /// idle limits). `remote` names the other end in the log.
+    /// then (a silent peer unblocks the handshake, the connection loop its
+    /// idle limits). `deadline` is overall: it is checked on every read and
+    /// write, because `complete_io` loops until the handshake finishes or a
+    /// read makes no progress, and a peer that trickles bytes would
+    /// otherwise hold the call past `deadline`. `remote` names the other
+    /// end in the log.
     pub(crate) fn serve_stream<S: Read + Write + ShutdownWrite>(
         &self,
         mut sock: S,
@@ -152,7 +156,12 @@ impl TcpTls {
             if started.elapsed() > deadline {
                 bail!("{remote}: TLS handshake took too long");
             }
-            match conn.complete_io(&mut sock) {
+            let mut io = DeadlineIo {
+                inner: &mut sock,
+                started,
+                deadline,
+            };
+            match conn.complete_io(&mut io) {
                 Ok(_) => {}
                 Err(e) if is_timeout(&e) => {}
                 Err(e) => {
@@ -178,6 +187,47 @@ impl TcpTls {
             responder.handle(snap, &ci, path, &h.auth, &h.for_device)
         };
         run(rustls::StreamOwned::new(conn, sock), &handler)
+    }
+}
+
+/// Reads and writes that fail once the handshake deadline has passed, so
+/// `Connection::complete_io` (which does not return while new bytes keep
+/// arriving) cannot run past it.
+struct DeadlineIo<'a, S> {
+    inner: &'a mut S,
+    started: Instant,
+    deadline: Duration,
+}
+
+impl<S> DeadlineIo<'_, S> {
+    fn check(&self) -> std::io::Result<()> {
+        if self.started.elapsed() > self.deadline {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "handshake deadline",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl<S: Read> Read for DeadlineIo<'_, S> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.check()?;
+        self.inner.read(buf)
+    }
+}
+
+impl<S: Write> Write for DeadlineIo<'_, S> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.check()?;
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.check()?;
+        self.inner.flush()
     }
 }
 
