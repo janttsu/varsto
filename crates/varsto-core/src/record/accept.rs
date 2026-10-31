@@ -228,6 +228,16 @@ pub trait RecordBody: Serialize + DeserializeOwned {
     fn max_decoded() -> u64 {
         super::envelope::MAX_DECODED_BODY
     }
+    /// Bytes left after the fields this build always understood. Empty for
+    /// every kind but a revocation, which grew a sequence cut-off a reader
+    /// of an older record does not find (`None` then).
+    fn take_tail(&mut self, tail: &[u8]) -> Result<(), String> {
+        if tail.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("{} bytes after the body", tail.len()))
+        }
+    }
 }
 
 /// What a batch of the writer announced for one record.
@@ -247,6 +257,21 @@ pub trait RecordTrust {
     /// Step (3): whether the device's role allows `kind` in `scope` at
     /// the epoch `key_id` names (section 9; `super::section9_allows` is the matrix).
     fn may_write(&self, device: &Id16, kind: Kind, scope: &Id16, key_id: &KeyId) -> bool;
+    /// Step (3), continued: a removed device's `folder`, `grant` and
+    /// `escrow` records count only up to the seq its stream had when it
+    /// was removed. `epoch` and `recipient` come from the storage name.
+    /// The default allows every seq (a trust with no cut-offs).
+    fn seq_allowed(
+        &self,
+        _device: &Id16,
+        _kind: Kind,
+        _scope: &Id16,
+        _seq: u64,
+        _epoch: Option<u32>,
+        _recipient: Option<Id16>,
+    ) -> bool {
+        true
+    }
     /// Step (5): the `record_published` of an accepted batch of `device`
     /// for (kind, scope, seq), up to the device's cut-off.
     fn announcement(
@@ -397,7 +422,11 @@ impl Acceptor<'_> {
             }
         }
         // (3)
-        if !self.trust.may_write(&e0.device, kind, &e0.scope, &key_id) {
+        if !self.trust.may_write(&e0.device, kind, &e0.scope, &key_id)
+            || !self
+                .trust
+                .seq_allowed(&e0.device, kind, &e0.scope, e0.seq, n0.epoch, n0.recipient)
+        {
             return Err(junk0(Junk::NotAllowed));
         }
         let size = parts.iter().map(|(_, b)| b.len() as u64).sum();

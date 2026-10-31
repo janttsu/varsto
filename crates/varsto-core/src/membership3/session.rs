@@ -4,7 +4,7 @@
 
 use super::devices::{DeviceRecord, DeviceRegistry};
 use super::epochs::{
-    self, FolderEpochRecord, FolderEpochs, RemovalReport, Removed, RevocationRecord,
+    self, FolderEpochRecord, FolderEpochs, RemovalReport, Removed, RevocationRecord, StreamCut,
     VaultEpochRecord,
 };
 use super::escrow::{EscrowRecord, MissingEscrow, RecoveryKey};
@@ -43,6 +43,11 @@ pub enum PendingKey {
         k3: [u8; 32],
         targets: Vec<(Id16, u64)>,
         wipe: bool,
+        /// Registry-stream cut-offs captured when the removal started, so
+        /// finishing the epoch later does not widen them. `None` on a key
+        /// kept by a build that did not record them.
+        #[serde(default)]
+        cuts: Option<BTreeMap<Id16, Vec<StreamCut>>>,
     },
     /// A folder epoch of `start_folder_epoch`: K9 and the folder's K11.
     Folder {
@@ -585,6 +590,12 @@ impl<'a> Membership<'a> {
             }
             self.revoked.insert(r.device);
             self.revocations.entry(r.device).or_insert(r);
+        }
+        self.devices.registry_cuts.clear();
+        for (d, r) in &self.revocations {
+            if let Some(c) = &r.registry_cuts {
+                self.devices.registry_cuts.insert(*d, c.clone());
+            }
         }
         Ok(())
     }
@@ -1783,11 +1794,16 @@ impl<'a> Membership<'a> {
         };
         // Keys first: K3 is kept on this device before the epoch record
         // leaves it, so an epoch whose record landed always has a holder.
+        let mut cuts: BTreeMap<Id16, Vec<StreamCut>> = BTreeMap::new();
+        for target in &gone {
+            cuts.insert(*target, self.signed_stream_cuts(*target)?);
+        }
         let pending_key = PendingKey::Vault {
             epoch: new,
             k3: k3.0,
             targets: targets.to_vec(),
             wipe,
+            cuts: Some(cuts.clone()),
         };
         self.keep(&pending_key, true)?;
         let written = {
@@ -1827,7 +1843,14 @@ impl<'a> Membership<'a> {
             sent.push(self.me);
         }
         for (target, cutoff_seq) in targets {
-            self.write_revocation(*target, *cutoff_seq, wipe, new)?;
+            let empty = Vec::new();
+            self.write_revocation(
+                *target,
+                *cutoff_seq,
+                wipe,
+                new,
+                Some(cuts.get(target).unwrap_or(&empty)),
+            )?;
         }
         for m in grant_to.into_iter().filter(|m| *m != self.me) {
             self.write_vault_grant(new, &k3, m)?;
@@ -1905,12 +1928,74 @@ impl<'a> Membership<'a> {
         Ok(())
     }
 
+    /// Highest signed seq of each `folder`, `grant` and `escrow` stream of
+    /// `device` (junk under the name does not count). Captured at removal
+    /// so a record the device writes afterwards is past the cut-off.
+    fn signed_stream_cuts(&self, device: Id16) -> Result<Vec<StreamCut>> {
+        let Some(pk) = self.devices.signing_key(&device) else {
+            return Ok(Vec::new());
+        };
+        let mut best: BTreeMap<(u8, Id16, u32, Id16), u64> = BTreeMap::new();
+        for storage in self.storages {
+            for prefix in ["vault/folders/", "vault/grants/", "vault/escrow/"] {
+                for name in storage.list(prefix)? {
+                    let Some(n) = RecordName::parse(&name) else {
+                        continue;
+                    };
+                    if n.device != Some(device) {
+                        continue;
+                    }
+                    if !matches!(n.kind, Kind::Folder | Kind::Grant | Kind::Escrow) {
+                        continue;
+                    }
+                    if n.kind == Kind::Grant && n.scope == VAULT_SCOPE {
+                        continue;
+                    }
+                    let Ok(Some(bytes)) = storage.get_bounded(&name, crate::record::MAX_PART_READ)
+                    else {
+                        continue;
+                    };
+                    let Ok(env) = SignedRecord::decode(&bytes) else {
+                        continue;
+                    };
+                    if env.device != device
+                        || env.vault != self.vault
+                        || env.seq != n.seq
+                        || env.kind != n.kind.code()
+                        || env.verify(&pk).is_err()
+                    {
+                        continue;
+                    }
+                    let key = (
+                        n.kind.code(),
+                        n.scope,
+                        n.epoch.unwrap_or(0),
+                        n.recipient.unwrap_or([0u8; 16]),
+                    );
+                    let slot = best.entry(key).or_insert(0);
+                    *slot = (*slot).max(n.seq);
+                }
+            }
+        }
+        Ok(best
+            .into_iter()
+            .map(|((kind, scope, epoch, recipient), seq)| StreamCut {
+                kind,
+                scope,
+                epoch,
+                recipient,
+                seq,
+            })
+            .collect())
+    }
+
     fn write_revocation(
         &self,
         target: Id16,
         cutoff_seq: u64,
         wipe: bool,
         epoch: u32,
+        cuts: Option<&[StreamCut]>,
     ) -> Result<()> {
         let rev = RevocationRecord {
             device: target,
@@ -1919,6 +2004,7 @@ impl<'a> Membership<'a> {
             cutoff_seq,
             wipe,
             new_epoch: epoch,
+            registry_cuts: cuts.map(|c| c.to_vec()),
         };
         self.writer().write(
             &self.ring(),
@@ -1946,7 +2032,8 @@ impl<'a> Membership<'a> {
                     k3,
                     targets,
                     wipe,
-                } => self.resume_vault_epoch(*epoch, &SecretKey(*k3), targets, *wipe)?,
+                    cuts,
+                } => self.resume_vault_epoch(*epoch, &SecretKey(*k3), targets, *wipe, cuts)?,
                 PendingKey::Folder {
                     folder,
                     epoch,
@@ -1967,6 +2054,7 @@ impl<'a> Membership<'a> {
         k3: &SecretKey,
         targets: &[(Id16, u64)],
         wipe: bool,
+        cuts: &Option<BTreeMap<Id16, Vec<StreamCut>>>,
     ) -> Result<bool> {
         let held = self.vault_keys.keys.get(&epoch).map(|k| k.0 == k3.0);
         if held == Some(false) {
@@ -2015,7 +2103,11 @@ impl<'a> Membership<'a> {
         }
         for (target, cutoff) in targets {
             if !self.revocations.contains_key(target) && self.devices.get(target).is_some() {
-                self.write_revocation(*target, *cutoff, wipe, epoch)?;
+                let empty = Vec::new();
+                let mine = cuts
+                    .as_ref()
+                    .map(|m| m.get(target).unwrap_or(&empty).as_slice());
+                self.write_revocation(*target, *cutoff, wipe, epoch, mine)?;
             }
         }
         self.grant_missing_vault_keys()?;

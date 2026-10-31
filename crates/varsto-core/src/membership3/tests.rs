@@ -2,14 +2,15 @@
 //! Tests of work package 8a (format 3 design, section 12, tests 2, 10, 11
 //! as far as they concern the data model).
 
+use super::epochs::StreamCut;
 use super::store::Writer;
 use super::*;
 use crate::crypto::{SecretKey, SigningKey};
 use crate::kem::DecapsKey;
 use crate::record::envelope::decode_body;
 use crate::record::{
-    Acceptor, DeviceSigner, Junk, KeyId, Kind, RecordBody, RecordMeta, RecordTrust, RecordWriter,
-    Refusal, StreamRef,
+    Acceptor, DeviceSigner, Id16, Junk, KeyId, Kind, RecordBody, RecordMeta, RecordTrust,
+    RecordWriter, Refusal, StreamRef,
 };
 use crate::storage::Storage;
 use anyhow::Result;
@@ -835,6 +836,7 @@ fn body_parsers_survive_random_bytes() {
             cutoff_seq: 4,
             wipe: true,
             new_epoch: 1,
+            registry_cuts: None,
         },
     );
     fuzz_one(
@@ -1417,6 +1419,7 @@ fn a_removal_that_stops_after_its_epoch_record_is_finished_with_the_key_kept_fir
         k3: [7; 32],
         targets: Vec::new(),
         wipe: false,
+        cuts: None,
     };
     assert_eq!(again.resume_pending(&[other]).unwrap().len(), 1);
 }
@@ -1471,4 +1474,118 @@ fn a_folder_epoch_that_stops_after_its_record_is_finished_from_the_kept_key() {
         !mc.read_my_grants().holds(&f, 1),
         "the removed device did not"
     );
+}
+
+/// A device removed from the vault can still sign folder records and grants
+/// with the keys it kept. A stamp set before the removal would, on stamp
+/// order alone, deny the owners who removed it. Spec 77.20: those records
+/// do not count past the sequence its streams had at removal.
+#[test]
+fn a_removed_owner_cannot_backdate_a_folder_over() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let f = mb.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    mb.approve(&f, &ma.me, Role::Owner).unwrap();
+    let mut mn = device(&st, &c, &keys, "new");
+    mb.refresh().unwrap();
+    ma.refresh().unwrap();
+    ma.observe_lamport(100);
+    ma.remove_device(&mb.me, 0, false, None).unwrap();
+    mb.issue_grant(&f, 0, &mn.me, Role::Owner)
+        .expect("the removed device still holds the old folder key");
+    let stamp = Stamp {
+        lamport: 50,
+        device: mb.me,
+    };
+    let attack = FolderRecord {
+        id: f,
+        name: "Taken".into(),
+        settings: BTreeMap::new(),
+        stamp,
+        creation: None,
+        participants: vec![Participant {
+            device: mb.me,
+            role: Role::Owner,
+            stamp,
+        }],
+        denied: vec![Denied {
+            device: ma.me,
+            stamp,
+        }],
+        members: vec![],
+        removed: None,
+    };
+    Writer {
+        vault: VAULT,
+        storages: &st,
+        local: None,
+        device: mb.me,
+        key: &b.sign,
+    }
+    .write(
+        &mb.record_keys(),
+        &FolderRegistry::stream(f, mb.me),
+        None,
+        &KeyId::Registry(0),
+        &attack,
+    )
+    .unwrap();
+
+    ma.refresh().unwrap();
+    let folder = ma.registry.get(&f).expect("the folder survives");
+    assert_eq!(folder.name, "Docs");
+    assert_eq!(folder.role(&ma.me), Some(Role::Owner));
+    assert_eq!(folder.role(&mb.me), None, "the removal stands");
+    assert!(ma.refused.get(Kind::Folder) >= 1);
+    mn.refresh().unwrap();
+    assert!(
+        !mn.read_my_grants().holds(&f, 0),
+        "a grant written after the removal does not count"
+    );
+    assert!(mn.refused.get(Kind::Grant) >= 1);
+    assert!(ma.read_my_grants().holds(&f, 0));
+}
+
+#[test]
+fn an_old_revocation_without_registry_cuts_still_decodes() {
+    #[derive(Serialize)]
+    struct Old {
+        device: Id16,
+        name: String,
+        issuer: Id16,
+        cutoff_seq: u64,
+        wipe: bool,
+        new_epoch: u32,
+    }
+    let old = Old {
+        device: [1; 16],
+        name: "n".into(),
+        issuer: [2; 16],
+        cutoff_seq: 4,
+        wipe: false,
+        new_epoch: 1,
+    };
+    let bytes = postcard::to_stdvec(&old).unwrap();
+    let (mut got, rest): (RevocationRecord, &[u8]) = postcard::take_from_bytes(&bytes).unwrap();
+    got.take_tail(rest).unwrap();
+    assert!(got.registry_cuts.is_none());
+    let cut = StreamCut {
+        kind: Kind::Folder.code(),
+        scope: [9; 16],
+        epoch: 0,
+        recipient: [0; 16],
+        seq: 3,
+    };
+    let fresh = RevocationRecord {
+        registry_cuts: Some(vec![cut.clone()]),
+        ..got
+    };
+    let enc = postcard::to_stdvec(&fresh).unwrap();
+    let (mut back, tail): (RevocationRecord, &[u8]) = postcard::take_from_bytes(&enc).unwrap();
+    back.take_tail(tail).unwrap();
+    assert_eq!(back.registry_cuts, Some(vec![cut]));
 }

@@ -163,6 +163,18 @@ impl RecordTrust for EngineTrust<'_> {
     fn announcement(&self, device: &Id16, kind: Kind, scope: &Id16, seq: u64) -> Option<Announced> {
         crate::manifest3::announcement(self.view, device, kind, scope, seq)
     }
+    fn seq_allowed(
+        &self,
+        device: &Id16,
+        kind: Kind,
+        scope: &Id16,
+        seq: u64,
+        epoch: Option<u32>,
+        recipient: Option<Id16>,
+    ) -> bool {
+        self.inner
+            .seq_allowed(device, kind, scope, seq, epoch, recipient)
+    }
 }
 
 /// A storage whose reads of membership records (`vault/`) are kept in a
