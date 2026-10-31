@@ -821,6 +821,9 @@ pub struct Engine {
     /// deletes it (`set_replace_hook`), so an edit during the download can
     /// be simulated.
     replace_hook: Option<std::sync::Arc<dyn Fn(&Path) + Send + Sync>>,
+    /// Tests: the next pull fails with this message after the scan
+    /// (`fail_next_pull_for_tests`).
+    pull_fault: Option<String>,
     /// Which file metadata this system can represent (`fsmeta::Caps`).
     meta_caps: crate::fsmeta::Caps,
     /// Of the last scan: entries ignored, files whose metadata alone changed.
@@ -1981,6 +1984,7 @@ impl Engine {
             hold_exempt: None,
             download_log: None,
             replace_hook: None,
+            pull_fault: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
             last_scan: None,
@@ -2090,6 +2094,7 @@ impl Engine {
             hold_exempt: None,
             download_log: None,
             replace_hook: None,
+            pull_fault: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
             last_scan: None,
@@ -4594,6 +4599,10 @@ impl Engine {
             ..Default::default()
         };
         self.last_scan = None;
+        if let Some(msg) = self.pull_fault.take() {
+            // A pull that fails here must still let the following push run.
+            bail!("pull failed: {msg}");
+        }
         if self.share_read_only(&rec) {
             report.kept_aside = self.read_only_guard(&rec, &root, &mut state)?;
         } else {
@@ -4643,7 +4652,7 @@ impl Engine {
             // again; a merge that resolves must not leave it to be written
             // over a local edit the next scan has already recorded.
             state.pending_remote.remove(&path);
-            self.merge_one(
+            self.merge_or_defer(
                 &rec,
                 &fk,
                 &root,
@@ -4652,7 +4661,7 @@ impl Engine {
                 &remote,
                 &storages,
                 &mut report,
-            )?;
+            );
         }
         if send_only {
             // Caught up by this device's own changes (or an override).
@@ -4671,7 +4680,7 @@ impl Engine {
                     continue;
                 }
                 let path = remote.path.clone();
-                self.merge_one(
+                self.merge_or_defer(
                     &rec,
                     &fk,
                     &root,
@@ -4680,7 +4689,7 @@ impl Engine {
                     &remote,
                     &storages,
                     &mut report,
-                )?;
+                );
             }
         }
         // Versions held back by a rule or setting that no longer applies.
@@ -4707,7 +4716,19 @@ impl Engine {
                 manifest::merge(state.files.get(&remote.path), &remote),
                 Merge::TakeRemote
             ) {
-                self.apply_remote(&rec, &fk, &root, &mut state, remote, &storages, &mut report)?;
+                let path = remote.path.clone();
+                if let Err(e) = self.apply_remote(
+                    &rec,
+                    &fk,
+                    &root,
+                    &mut state,
+                    remote.clone(),
+                    &storages,
+                    &mut report,
+                ) {
+                    report.files_unavailable.push(format!("{path}: {e}"));
+                    state.pending_remote.entry(path).or_insert(remote);
+                }
             }
         }
 
@@ -4800,7 +4821,7 @@ impl Engine {
                 if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
                     continue;
                 }
-                self.merge_one(
+                self.merge_or_defer(
                     &rec,
                     &fk,
                     &root,
@@ -4809,7 +4830,7 @@ impl Engine {
                     remote,
                     &storages,
                     &mut report,
-                )?;
+                );
             }
             state.last_seen.insert(dev, v.seq);
             self.prefetched.clear();
@@ -4822,6 +4843,30 @@ impl Engine {
         self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
+    }
+
+    /// `merge_one`, but a failure of this one file is recorded and the pull
+    /// continues. The remote version stays pending for the next sync.
+    #[allow(clippy::too_many_arguments)]
+    fn merge_or_defer(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        root: &Path,
+        state: &mut FolderState,
+        path: &str,
+        remote: &FileState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut PullReport,
+    ) {
+        if let Err(e) = self.merge_one(rec, fk, root, state, path, remote, storages, report) {
+            log::warn!("{path} was not merged: {e}");
+            report.files_unavailable.push(format!("{path}: {e}"));
+            state
+                .pending_remote
+                .entry(path.to_string())
+                .or_insert_with(|| remote.clone());
+        }
     }
 
     /// Combine one remote state of `path` with this device's (`manifest::merge`).
@@ -4864,37 +4909,49 @@ impl Engine {
                         fs::create_dir_all(parent)?;
                     }
                     let local = self.disk_of(root, state, path);
+                    let mut copied = true;
                     if local_is_loser && present(&local) {
                         fs::rename(&local, &disk)?;
                     } else if let Some(target) = loser.symlink() {
                         fsmeta::write_link(&disk, target)?;
-                    } else {
-                        self.download_to(rec, fk, &disk, &loser, storages, report)?;
+                    } else if let Err(e) =
+                        self.download_to(rec, fk, &disk, &loser, storages, report)
+                    {
+                        // The losing version could not be fetched. That must
+                        // not drop the winner or the rest of the pull; the
+                        // copy is retried from pending.
+                        report.files_unavailable.push(format!("{cpath}: {e}"));
+                        let mut pending = loser.clone();
+                        pending.path = cpath.clone();
+                        state.pending_remote.insert(cpath.clone(), pending);
+                        copied = false;
                     }
-                    // The conflict copy is a new local file: it gets its own version.
-                    let clock = self.tick()?;
-                    let mut cstate = loser.clone();
-                    cstate.path = cpath.clone();
-                    cstate.version = BTreeMap::from([(me.clone(), clock)]);
-                    cstate.modified_by = me.clone();
-                    cstate.modified_clock = clock;
-                    let seen = self.settle_meta(
-                        &rec.folder_id,
-                        &disk,
-                        &cstate,
-                        &mut report.metadata_problems,
-                    );
-                    let md = fs::symlink_metadata(&disk)?;
-                    state.local_index.insert(
-                        cpath.clone(),
-                        LocalIndexEntry {
-                            size: md.len(),
-                            mtime: mtime_ns_of(&md),
-                            content_hash: cstate.content_hash.clone(),
-                            meta_seen: seen,
-                        },
-                    );
-                    state.files.insert(cpath, cstate);
+                    if copied {
+                        // The conflict copy is a new local file: it gets its own version.
+                        let clock = self.tick()?;
+                        let mut cstate = loser.clone();
+                        cstate.path = cpath.clone();
+                        cstate.version = BTreeMap::from([(me.clone(), clock)]);
+                        cstate.modified_by = me.clone();
+                        cstate.modified_clock = clock;
+                        let seen = self.settle_meta(
+                            &rec.folder_id,
+                            &disk,
+                            &cstate,
+                            &mut report.metadata_problems,
+                        );
+                        let md = fs::symlink_metadata(&disk)?;
+                        state.local_index.insert(
+                            cpath.clone(),
+                            LocalIndexEntry {
+                                size: md.len(),
+                                mtime: mtime_ns_of(&md),
+                                content_hash: cstate.content_hash.clone(),
+                                meta_seen: seen,
+                            },
+                        );
+                        state.files.insert(cpath, cstate);
+                    }
                 }
                 let local_has_winner = state
                     .files
@@ -6406,6 +6463,12 @@ impl Engine {
         self.replace_hook = hook;
     }
 
+    /// Tests: the next pull fails with `message` before it merges.
+    #[doc(hidden)]
+    pub fn fail_next_pull_for_tests(&mut self, message: impl Into<String>) {
+        self.pull_fault = Some(message.into());
+    }
+
     fn note_replace_hook(&self, disk: &Path) {
         let hook = self.replace_hook.clone();
         if let Some(hook) = hook {
@@ -6996,15 +7059,25 @@ impl Engine {
             };
             let mut pull = match self.pull(&name) {
                 Ok(p) => p,
-                Err(e) => {
+                Err(e) if folder_safety::paused_error(&e).is_some() => {
                     self.last_scan = None;
-                    if folder_safety::paused_error(&e).is_some() {
-                        out.push(paused(e, PullReport::default())?);
-                        synced += 1;
-                    } else {
-                        out.push(failed(e, PullReport::default(), &mut first_failure));
-                    }
+                    out.push(paused(e, PullReport::default())?);
+                    synced += 1;
                     continue;
+                }
+                Err(e) => {
+                    // The pull stopped, but this device's own changes still
+                    // go out: one broken entry must not freeze the folder.
+                    log::warn!(
+                        folder = name.as_str();
+                        "pull failed, local changes are still pushed: {e:#}"
+                    );
+                    self.last_scan = None;
+                    PullReport {
+                        folder: name.clone(),
+                        error: Some(format!("{e:#}")),
+                        ..Default::default()
+                    }
                 }
             };
             // The pull scanned the folder; the push need not walk it again.

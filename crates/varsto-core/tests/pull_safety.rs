@@ -16,6 +16,7 @@ const PASS: &str = "correct horse battery staple";
 
 struct Lab {
     _tmp: tempfile::TempDir,
+    storage_path: PathBuf,
     storage: StorageSpec,
     a_home: PathBuf,
     b_home: PathBuf,
@@ -28,10 +29,12 @@ fn lab() -> Lab {
     let root = tmp.path().to_path_buf();
     fs::create_dir_all(root.join("a-docs")).unwrap();
     fs::create_dir_all(root.join("b-docs")).unwrap();
+    let storage_path = root.join("storage");
     Lab {
+        storage_path: storage_path.clone(),
         storage: StorageSpec::LocalDir {
             name: "box".into(),
-            path: root.join("storage"),
+            path: storage_path,
             cold: false,
             carrier: false,
             place: String::new(),
@@ -206,5 +209,96 @@ fn a_file_that_appears_during_the_download_is_not_overwritten() {
             .any(|s| s.contains("newfile.txt") && s.contains("nothing was overwritten")),
         "{:?}",
         pull.files_unavailable
+    );
+}
+
+#[test]
+fn one_unavailable_file_does_not_stop_the_pull_or_the_push() {
+    let lab = lab();
+    fs::write(lab.a_dir.join("a.txt"), b"v1").unwrap();
+    fs::write(lab.a_dir.join("c.txt"), b"v1").unwrap();
+    let (mut a, mut b) = pair(&lab);
+    a.push("docs").unwrap();
+    b.pull("docs").unwrap();
+
+    // d.txt is stored on its own, then a.txt changes. Only the new a.txt
+    // blocks are removed, so the other file can still be fetched.
+    fs::write(lab.a_dir.join("d.txt"), b"DDD").unwrap();
+    a.push("docs").unwrap();
+    let before = common::object_names(&lab.storage_path);
+    fs::write(lab.a_dir.join("a.txt"), b"AAA").unwrap();
+    a.push("docs").unwrap();
+    let added: Vec<String> = common::object_names(&lab.storage_path)
+        .difference(&before)
+        .cloned()
+        .collect();
+    assert!(!added.is_empty(), "the new version of a.txt stored nothing");
+    for object in &added {
+        common::lose_object(&lab.storage_path, object);
+    }
+    drop(a);
+
+    // B's clock is ahead, so B's edit of a.txt wins and A's version is the
+    // conflict copy that can no longer be downloaded.
+    for _ in 0..50 {
+        b.tick_clock().unwrap();
+    }
+    fs::write(lab.b_dir.join("a.txt"), b"BBB").unwrap();
+    fs::write(lab.b_dir.join("c.txt"), b"CCC").unwrap();
+    let synced = b.sync(Some("docs")).unwrap();
+    let (pull, push) = &synced[0];
+    assert!(pull.error.is_none(), "{pull:?}");
+    assert!(pull.conflicts >= 1, "{pull:?}");
+    assert!(
+        !pull.files_unavailable.is_empty(),
+        "the missing conflict copy should be reported, not abort the pull: {pull:?}"
+    );
+    assert_eq!(fs::read(lab.b_dir.join("a.txt")).unwrap(), b"BBB");
+    assert_eq!(fs::read(lab.b_dir.join("d.txt")).unwrap(), b"DDD");
+    assert!(
+        push.files_changed >= 1,
+        "local changes were not pushed: {push:?}"
+    );
+
+    let mut a = Engine::open(&lab.a_home, PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    let pulled = a.pull("docs").unwrap();
+    assert!(pulled.error.is_none());
+    assert_eq!(fs::read(lab.a_dir.join("c.txt")).unwrap(), b"CCC");
+    assert_eq!(fs::read(lab.a_dir.join("a.txt")).unwrap(), b"BBB");
+    assert_eq!(fs::read(lab.a_dir.join("d.txt")).unwrap(), b"DDD");
+}
+
+#[test]
+fn a_failed_pull_still_pushes_local_changes() {
+    let lab = lab();
+    fs::write(lab.a_dir.join("base.txt"), b"base").unwrap();
+    let (mut a, mut b) = pair(&lab);
+    a.push("docs").unwrap();
+    b.pull("docs").unwrap();
+    drop(a);
+
+    fs::write(lab.b_dir.join("local-only.txt"), b"from-b").unwrap();
+    b.fail_next_pull_for_tests("storage exploded");
+    let synced = b.sync(Some("docs")).unwrap();
+    let (pull, push) = &synced[0];
+    assert!(
+        pull.error
+            .as_deref()
+            .is_some_and(|e| e.contains("storage exploded")),
+        "{pull:?}"
+    );
+    assert!(
+        push.files_changed >= 1,
+        "push was skipped after the pull failed: {push:?}"
+    );
+    assert!(push.upload_pending.is_none(), "{push:?}");
+
+    let mut a = Engine::open(&lab.a_home, PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.pull("docs").unwrap();
+    assert_eq!(
+        fs::read(lab.a_dir.join("local-only.txt")).unwrap(),
+        b"from-b"
     );
 }
