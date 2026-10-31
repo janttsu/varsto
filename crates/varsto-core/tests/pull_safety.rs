@@ -5,6 +5,7 @@
 mod common;
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -301,4 +302,72 @@ fn a_failed_pull_still_pushes_local_changes() {
         fs::read(lab.a_dir.join("local-only.txt")).unwrap(),
         b"from-b"
     );
+}
+
+/// Puts `mode` back so a temporary directory can be removed.
+struct ResetMode<'a>(&'a Path, u32);
+
+impl Drop for ResetMode<'_> {
+    fn drop(&mut self) {
+        let _ = fs::set_permissions(self.0, fs::Permissions::from_mode(self.1));
+    }
+}
+
+#[test]
+fn an_unreadable_file_or_directory_does_not_stop_sync() {
+    let lab = lab();
+    fs::create_dir_all(lab.a_dir.join("sub")).unwrap();
+    fs::write(lab.a_dir.join("sub/a.txt"), b"aaa").unwrap();
+    fs::write(lab.a_dir.join("sub/b.txt"), b"bbb").unwrap();
+    fs::write(lab.a_dir.join("secret.txt"), b"old").unwrap();
+    fs::write(lab.a_dir.join("visible.txt"), b"v1").unwrap();
+    let (mut a, mut b) = pair(&lab);
+    a.push("docs").unwrap();
+    b.pull("docs").unwrap();
+
+    fs::write(lab.a_dir.join("secret.txt"), b"new secret").unwrap();
+    let secret = lab.a_dir.join("secret.txt");
+    let sub = lab.a_dir.join("sub");
+    let _secret_mode = ResetMode(&secret, 0o644);
+    let _sub_mode = ResetMode(&sub, 0o755);
+    fs::set_permissions(&secret, fs::Permissions::from_mode(0o000)).unwrap();
+    fs::set_permissions(&sub, fs::Permissions::from_mode(0o000)).unwrap();
+    assert!(
+        fs::File::open(&secret).is_err(),
+        "this test needs a file the process cannot read"
+    );
+    assert!(fs::read_dir(&sub).is_err());
+
+    fs::write(lab.a_dir.join("visible.txt"), b"v2").unwrap();
+    let synced = a.sync(Some("docs")).unwrap();
+    let (pull, push) = &synced[0];
+    assert!(pull.error.is_none(), "{pull:?}");
+    assert!(
+        push.files_unreadable >= 2,
+        "unreadable file and directory should be counted: {push:?}"
+    );
+    assert!(
+        push.files_changed >= 1,
+        "the readable edit should still be pushed: {push:?}"
+    );
+
+    let got = b.pull("docs").unwrap();
+    assert_eq!(got.files_deleted, 0, "{got:?}");
+    assert_eq!(fs::read(lab.b_dir.join("visible.txt")).unwrap(), b"v2");
+    // The unreadable file's new bytes were not published, and it was not deleted.
+    assert_eq!(fs::read(lab.b_dir.join("secret.txt")).unwrap(), b"old");
+    // Paths inside the unreadable directory are still there.
+    assert_eq!(fs::read(lab.b_dir.join("sub/a.txt")).unwrap(), b"aaa");
+    assert_eq!(fs::read(lab.b_dir.join("sub/b.txt")).unwrap(), b"bbb");
+
+    fs::set_permissions(&secret, fs::Permissions::from_mode(0o644)).unwrap();
+    fs::set_permissions(&sub, fs::Permissions::from_mode(0o755)).unwrap();
+    let push = a.push("docs").unwrap();
+    assert_eq!(push.files_unreadable, 0, "{push:?}");
+    b.pull("docs").unwrap();
+    assert_eq!(
+        fs::read(lab.b_dir.join("secret.txt")).unwrap(),
+        b"new secret"
+    );
+    assert_eq!(fs::read(lab.b_dir.join("sub/a.txt")).unwrap(), b"aaa");
 }

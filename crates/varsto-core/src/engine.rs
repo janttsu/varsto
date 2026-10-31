@@ -246,8 +246,10 @@ struct FolderState {
     /// used it: their index described plain files in the folder directory.
     #[serde(default)]
     block_cache: bool,
-    /// A backup's source: files the last scan could not read (left out of
-    /// the snapshot and named in it).
+    /// Files and directories the last scan could not read. A backup names
+    /// them in its snapshot; an ordinary folder keeps them (and paths inside
+    /// an unreadable directory) and tries again next time. An empty entry
+    /// means the folder directory itself could not be read.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     unreadable: BTreeSet<String>,
     /// Vault paths written under another local name on this device (the
@@ -339,6 +341,11 @@ pub struct PushReport {
     /// count once).
     #[serde(default)]
     pub files_ignored: u64,
+    /// Files and directories the scan could not read. They are left as they
+    /// were (nothing under an unreadable directory is deleted) and tried
+    /// again next time. A directory counts once.
+    #[serde(default)]
+    pub files_unreadable: u64,
     /// Of the changed files, those whose metadata alone changed (no blocks).
     #[serde(default)]
     pub metadata_changed: u64,
@@ -1269,6 +1276,20 @@ enum PlaceGuard {
 /// synced ignore file.
 fn reserved_name(name: &str) -> bool {
     name.starts_with(".varsto") && name != ignore_rules::IGNORE_FILE
+}
+
+/// `path` is an unreadable entry, or lies inside an unreadable directory.
+/// An empty entry in `unreadable` means the folder directory itself.
+fn unreadable_covers(unreadable: &BTreeSet<String>, path: &str) -> bool {
+    if unreadable.contains("") || unreadable.contains(path) {
+        return true;
+    }
+    unreadable.iter().any(|dir| {
+        !dir.is_empty()
+            && path.len() > dir.len()
+            && path.as_bytes().get(dir.len()) == Some(&b'/')
+            && path.starts_with(dir.as_str())
+    })
 }
 
 fn placeholder_path(disk: &Path) -> PathBuf {
@@ -3587,18 +3608,22 @@ impl Engine {
         while let Some(entry) = walker.next() {
             let entry = match entry {
                 Ok(e) => e,
-                Err(e) if backup => {
-                    if let Some(p) = e
-                        .path()
-                        .and_then(|p| p.strip_prefix(root).ok())
-                        .and_then(util::manifest_path)
-                    {
-                        let p = state.local_names.vault_of(rules, &p);
-                        state.unreadable.insert(p);
+                Err(e) => {
+                    // A directory that cannot be listed (or a file that
+                    // cannot be stated). Skip that subtree; paths already
+                    // indexed under it are not deletions.
+                    let rel = e.path().and_then(|p| p.strip_prefix(root).ok());
+                    match rel.and_then(util::manifest_path) {
+                        Some(p) => {
+                            let p = state.local_names.vault_of(rules, &p);
+                            state.unreadable.insert(p);
+                        }
+                        None => {
+                            state.unreadable.insert(String::new());
+                        }
                     }
                     continue;
                 }
-                Err(e) => return Err(e.into()),
             };
             if entry.depth() == 0 {
                 continue;
@@ -3630,7 +3655,13 @@ impl Engine {
                 continue;
             }
             let path = state.local_names.vault_of(rules, &local);
-            let md = entry.metadata()?;
+            let md = match entry.metadata() {
+                Ok(md) => md,
+                Err(_) => {
+                    state.unreadable.insert(path);
+                    continue;
+                }
+            };
             let mtime = md
                 .modified()
                 .ok()
@@ -3763,25 +3794,30 @@ impl Engine {
             // Changed or new: chunk, hash, (upload).
             let file = match fs::File::open(entry.path()) {
                 Ok(f) => f,
-                Err(_) if backup => {
-                    state.unreadable.insert(path.clone());
+                Err(_) => {
+                    state.unreadable.insert(path);
                     continue;
                 }
-                Err(e) => return Err(e.into()),
             };
             let mut hasher = KeyedHasher::new(&fk.hash);
             let mut chunks = Vec::new();
             let params = self.chunker_for(size, &fk);
             let events_before = self.pending.len();
             let mut read_failed = false;
-            for chunk in Chunker::new(std::io::BufReader::new(file), params)? {
+            let chunker = match Chunker::new(std::io::BufReader::new(file), params) {
+                Ok(c) => c,
+                Err(_) => {
+                    state.unreadable.insert(path);
+                    continue;
+                }
+            };
+            for chunk in chunker {
                 let chunk = match chunk {
                     Ok(c) => c,
-                    Err(_) if backup => {
+                    Err(_) => {
                         read_failed = true;
                         break;
                     }
-                    Err(e) => return Err(e.into()),
                 };
                 hasher.update(&chunk);
                 let chunk_id = ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &chunk));
@@ -3825,6 +3861,8 @@ impl Engine {
                 });
             }
             if read_failed {
+                // Not a version: the blocks read so far are not offered.
+                self.pending.truncate(events_before);
                 state.unreadable.insert(path.clone());
                 continue;
             }
@@ -3932,12 +3970,27 @@ impl Engine {
             })
             .map(|(p, _)| p.clone())
             .filter(|p| !ignore.as_mut().is_some_and(|m| m.is_ignored(p, false)))
+            .filter(|p| !unreadable_covers(&state.unreadable, p))
             .collect();
         self.scan_extra = (ignored, meta_changed);
+        if !state.unreadable.is_empty() {
+            log::warn!(
+                folder = rec.name.as_str();
+                "scan: {} unreadable",
+                state.unreadable.len()
+            );
+        }
         // Index entries of ignored files go; those of kept links stay.
+        // Entries under an unreadable file or directory keep the index
+        // they had, so a later scan can still see what changed.
         for p in &kept {
             if let Some(e) = state.local_index.get(p) {
                 new_index.insert(p.clone(), e.clone());
+            }
+        }
+        for (p, e) in &state.local_index {
+            if unreadable_covers(&state.unreadable, p) {
+                new_index.entry(p.clone()).or_insert_with(|| e.clone());
             }
         }
         if receive_only {
@@ -4099,6 +4152,7 @@ impl Engine {
         };
         report.files_scanned = scanned;
         report.files_changed = changed;
+        report.files_unreadable = state.unreadable.len() as u64;
         (report.files_ignored, report.metadata_changed) = self.scan_extra;
         let folder = members3::bin(&rec.folder_id)?;
         let epoch = self.folder_keys(&rec)?.epoch;
@@ -7832,5 +7886,17 @@ mod index_guard_tests {
         fs::write(&disk, b"xy").unwrap();
         assert!(!disk_matches_index(&disk, Some(&ix)));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unreadable_directory_covers_only_its_children() {
+        let mut unread = BTreeSet::new();
+        unread.insert("sub".to_string());
+        assert!(unreadable_covers(&unread, "sub"));
+        assert!(unreadable_covers(&unread, "sub/a.txt"));
+        assert!(!unreadable_covers(&unread, "sublime"));
+        assert!(!unreadable_covers(&unread, "other/a.txt"));
+        unread.insert(String::new());
+        assert!(unreadable_covers(&unread, "other/a.txt"));
     }
 }
