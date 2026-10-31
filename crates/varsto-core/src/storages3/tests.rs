@@ -1118,6 +1118,7 @@ fn needs(targets: &[&str], rules: Option<Policy>) -> HashMap<FolderBin, DrainNee
             rules,
             targets: targets.iter().map(|s| s.to_string()).collect(),
             referenced: None,
+            state_behind: false,
             replace: false,
         },
     )]
@@ -1148,6 +1149,7 @@ fn a_drain_refuses_while_a_place_is_the_only_live_one_and_copies_packs_whole() {
         &needs(&[], None),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.packs_blocked, 1);
@@ -1162,6 +1164,7 @@ fn a_drain_refuses_while_a_place_is_the_only_live_one_and_copies_packs_whole() {
         &needs(&["s3"], None),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.refusal(), None);
@@ -1226,6 +1229,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&[], Some(two.clone())),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert!(
@@ -1239,6 +1243,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&["b2", "nas"], Some(two)),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.items[0].copy_to, vec!["b2".to_string()]); // nas holds it
@@ -1251,6 +1256,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&["nas"], Some(cloud.clone())),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert!(plan.refusal().unwrap().contains("cloud"), "{plan:?}");
@@ -1261,6 +1267,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&["nas", "b2"], Some(cloud)),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.items[0].copy_to, vec!["b2".to_string()]);
@@ -1280,6 +1287,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&[], None),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.refusal(), None);
@@ -1288,8 +1296,121 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
     let mut n = needs(&[], None);
     n.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
     let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
-    let plan = drain_plan(&env.view, "b2", &tables, &n, &place_name, &[]).unwrap();
+    let plan = drain_plan(&env.view, "b2", &tables, &n, &place_name, &[], &ME).unwrap();
     assert_eq!((plan.packs_to_drop, plan.packs_blocked), (1, 0));
+}
+
+/// Device B's pack, nine blocks, the only copy. This device's file list
+/// does not name them (it can be older than the block map). The drain and
+/// a removal plan must not drop it.
+#[test]
+fn a_drain_does_not_drop_the_only_copy_when_local_state_lags_the_block_map() {
+    let mut env = Env::new();
+    for s in ["nas", "s3"] {
+        env.store(s);
+    }
+    let p = env.publish_pack(&[1000; 9], &["nas"]);
+    assert_eq!(p.members.len(), 9);
+    let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
+
+    // Local state lists nothing and is behind the map. A target takes a
+    // copy; the pack is not dropped first.
+    let mut behind = needs(&["s3"], None);
+    behind.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
+    behind.get_mut(&FOLDER).unwrap().state_behind = true;
+    let plan = drain_plan(&env.view, "nas", &tables, &behind, &place_name, &[], &ME).unwrap();
+    assert_eq!(plan.packs_to_drop, 0, "{plan:?}");
+    assert_eq!(plan.items[0].copy_to, vec!["s3".to_string()], "{plan:?}");
+    assert!(plan.items[0].shortfall.is_none(), "{plan:?}");
+
+    // Nowhere to put that copy: it stays, it is not deleted.
+    let mut stuck = needs(&[], None);
+    stuck.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
+    stuck.get_mut(&FOLDER).unwrap().state_behind = true;
+    let plan = drain_plan(&env.view, "nas", &tables, &stuck, &place_name, &[], &ME).unwrap();
+    assert_eq!(plan.packs_to_drop, 0, "{plan:?}");
+    assert_eq!(plan.packs_blocked, 1, "{plan:?}");
+    assert!(
+        plan.refusal().unwrap().contains("behind the block map")
+            || plan.refusal().unwrap().contains("no other copy"),
+        "{plan:?}"
+    );
+
+    // Caught up, and truly unused, still does not drop the only copy.
+    let mut unused = needs(&[], None);
+    unused.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
+    let plan = drain_plan(&env.view, "nas", &tables, &unused, &place_name, &[], &ME).unwrap();
+    assert_eq!((plan.packs_to_drop, plan.packs_blocked), (0, 1), "{plan:?}");
+    assert!(
+        plan.refusal().unwrap().contains("no other copy"),
+        "{plan:?}"
+    );
+    drop(tables);
+
+    // The same nine blocks also live in another pack on s3. While local
+    // state is behind the map, that place is not a reason to delete nas.
+    // Once local state has caught up, the blocks are unused and the other
+    // place is enough.
+    let data: Vec<Vec<u8>> = p.members.iter().map(|(d, _)| d.clone()).collect();
+    let q = env.pack_of(data);
+    let s3 = env.stores["s3"].clone();
+    env.write(&*s3, &q);
+    let seq = env.publish_map(ME, &[q.written(&["s3"])], Vec::new());
+    env.claim(ME, "s3", &q, seq);
+    let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
+    let mut behind = needs(&[], None);
+    behind.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
+    behind.get_mut(&FOLDER).unwrap().state_behind = true;
+    let plan = drain_plan(&env.view, "nas", &tables, &behind, &place_name, &[], &ME).unwrap();
+    assert_eq!(plan.packs_to_drop, 0, "{plan:?}");
+    assert!(
+        plan.refusal().unwrap().contains("behind the block map"),
+        "{plan:?}"
+    );
+    behind.get_mut(&FOLDER).unwrap().state_behind = false;
+    let plan = drain_plan(&env.view, "nas", &tables, &behind, &place_name, &[], &ME).unwrap();
+    assert_eq!(plan.packs_to_drop, 1, "{plan:?}");
+
+    // The map here has not applied B's record. B's claim that s3 holds
+    // the same pack is not a copy this device has seen, so nas is not
+    // emptied. A replica confirmation, or this device's own check, is.
+    let mut env = Env::new();
+    for s in ["nas", "s3"] {
+        env.store(s);
+    }
+    let q = env.make_pack(&[1000; 9]);
+    env.write(&*env.stores["nas"].clone(), &q);
+    env.write(&*env.stores["s3"].clone(), &q);
+    env.claim(OTHER, "nas", &q, 1);
+    env.claim(OTHER, "s3", &q, 1);
+    let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
+    let plan = drain_plan(
+        &env.view,
+        "nas",
+        &tables,
+        &needs(&["s3"], None),
+        &place_name,
+        &[],
+        &ME,
+    )
+    .unwrap();
+    assert_eq!(plan.packs_to_drop, 0, "{plan:?}");
+    assert_eq!(plan.packs_blocked, 1, "{plan:?}");
+    drop(tables);
+    env.verify(ME, "s3", &q);
+    let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
+    let plan = drain_plan(
+        &env.view,
+        "nas",
+        &tables,
+        &needs(&[], None),
+        &place_name,
+        &[],
+        &ME,
+    )
+    .unwrap();
+    assert_eq!(plan.packs_to_drop, 1, "{plan:?}");
+    assert_eq!(plan.packs_blocked, 0, "{plan:?}");
 }
 
 #[test]
