@@ -111,6 +111,72 @@ pub(crate) fn scope3_in(m: &members3::Members3, device: &Id16, key_id: &str) -> 
     }
 }
 
+/// Push this device's own batches that `backend` does not yet hold, and
+/// move its watermark only through the contiguous prefix actually stored.
+/// A missing batch is filled, not skipped: a watermark past a gap would
+/// leave every other device waiting on the predecessor forever.
+pub(super) fn push_contiguous(
+    ledger: &mut ledger3::LedgerStore,
+    me: &Id16,
+    backend: &dyn Storage,
+    pubkey: &crypto::VerifyingKey,
+) -> Result<u64> {
+    let storage = backend.name();
+    let head = ledger.head(me);
+    let mut prefix = ledger.pushed(storage).min(head.seq);
+    // The newest batch the watermark names is gone (or the storage is new
+    // under a known name): fill again from the first batch still kept here.
+    if prefix > head.dropped && !backend.exists(&ledger3::checkpoint::batch_key(me, prefix))? {
+        prefix = head.dropped;
+    } else {
+        let claimed = prefix;
+        let mut proven = ledger.pushed_prefix(storage).max(head.dropped).min(claimed);
+        let mut seq = proven;
+        while seq < claimed {
+            seq += 1;
+            if !backend.exists(&ledger3::checkpoint::batch_key(me, seq))? {
+                log::debug!(
+                    storage = storage,
+                    missing = seq,
+                    watermark = claimed;
+                    "ledger push fills a gap below the watermark"
+                );
+                break;
+            }
+            proven = seq;
+        }
+        prefix = proven;
+    }
+    let mut advanced = prefix;
+    for seq in advanced + 1..=head.seq {
+        // A hole in the local chain cannot be pushed. Stopping here keeps
+        // the watermark from stepping over it; the next push tries again.
+        let Some(rec) = ledger.get(me, seq)? else {
+            break;
+        };
+        let key = ledger3::checkpoint::batch_key(me, seq);
+        let bytes = rec.encode();
+        if !backend.put_if_absent(&key, &bytes)? {
+            let same = backend
+                .get_bounded(&key, crate::record::MAX_PART_READ)?
+                .is_some_and(|b| b == bytes);
+            if !same {
+                let theirs = backend
+                    .get_bounded(&key, crate::record::MAX_PART_READ)?
+                    .and_then(|b| crate::record::SignedRecord::decode(&b).ok());
+                if theirs.is_some_and(|r| r.verify(pubkey).is_ok()) {
+                    bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", storage, seq);
+                }
+                log::warn!(storage = storage, seq = seq; "ledger: junk under this device's batch name");
+                break;
+            }
+        }
+        advanced = seq;
+    }
+    ledger.set_pushed_prefix(storage, advanced)?;
+    Ok(advanced)
+}
+
 impl Engine {
     /// Folder records of other writers refused by the acceptance rule in
     /// this process (a viewer's manifests, junk under a writer's name).
@@ -633,49 +699,20 @@ impl Engine {
     /// (a copy of this identity restored from an old backup) stops it.
     pub(crate) fn push_own_batches3(&mut self) -> Result<()> {
         let me = self.me3();
-        let head = self.f3.ledger.head(&me);
+        let pubkey = self.keys.signer.public();
         // Transferrers carry the ledger too (F-048).
         for (spec, backend) in self.metadata_storages(false)? {
             // One storage that cannot be reached is left as it is: the
             // batches are sealed here and go there at a later push (`health`).
-            let pushed = (|| -> Result<()> {
-                let mut done = self.f3.ledger.pushed(spec.name()).min(head.seq);
-                // A storage that lost the newest batch it was known to hold (or
-                // a new storage under a known name) is filled from the start.
-                if done > head.dropped
-                    && !backend.exists(&ledger3::checkpoint::batch_key(&me, done))?
-                {
-                    done = 0;
+            let pushed = push_contiguous(&mut self.f3.ledger, &me, backend.as_ref(), &pubkey);
+            if let Err(ref e) = pushed {
+                if format!("{e:#}").contains("ledger fork:") {
+                    self.forked_self = true;
                 }
-                for seq in done.max(head.dropped) + 1..=head.seq {
-                    let Some(rec) = self.f3.ledger.get(&me, seq)? else {
-                        continue;
-                    };
-                    let key = ledger3::checkpoint::batch_key(&me, seq);
-                    let bytes = rec.encode();
-                    if !backend.put_if_absent(&key, &bytes)? {
-                        let same = backend
-                            .get_bounded(&key, crate::record::MAX_PART_READ)?
-                            .is_some_and(|b| b == bytes);
-                        if !same {
-                            let theirs = backend
-                                .get_bounded(&key, crate::record::MAX_PART_READ)?
-                                .and_then(|b| crate::record::SignedRecord::decode(&b).ok());
-                            if theirs.is_some_and(|r| r.verify(&self.keys.signer.public()).is_ok())
-                            {
-                                self.forked_self = true;
-                                bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
-                            }
-                            log::warn!(storage = backend.name(), seq = seq; "ledger: junk under this device's batch name");
-                        }
-                    }
-                }
-                Ok(())
-            })();
+            }
             if self.tolerate(spec.name(), pushed)?.is_none() {
                 continue;
             }
-            self.f3.ledger.set_pushed(spec.name(), head.seq)?;
         }
         Ok(())
     }

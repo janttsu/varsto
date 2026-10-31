@@ -931,6 +931,125 @@ pub(super) mod tests {
         assert!(restored.commit_batch().is_err());
     }
 
+    /// A watermark that names a batch the storage never received must not
+    /// hide the gap. Batch 5 stays off s2, the reader holds head 4, and the
+    /// next push fills 5 instead of starting after the watermark.
+    #[test]
+    fn push_fills_a_batch_the_watermark_skipped() {
+        let (_tmp, lab) = lab("watermark");
+        let mut devs = devices(&lab, 2);
+        let s2 = StorageSpec::LocalDir {
+            name: "s2".into(),
+            path: lab.root.join("s2"),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+            min_free: None,
+        };
+        devs[0].add_storage(s2).unwrap();
+        let folder = FolderId::random();
+        append_synthetic(&mut devs[0], 0, 4, &folder);
+        devs[0].push_own_batches().unwrap();
+        let have = devs[0].own_head3();
+        append_synthetic(&mut devs[0], 0, 2, &folder);
+        let head = devs[0].own_head3();
+        assert_eq!(head, have + 2);
+        let me = devs[0].me3();
+        let dev = hex::encode(me);
+        let home = devs[0].home.clone();
+        let place = |seq: u64, root: &Path| {
+            let name = format!("{seq:016}-0000.rec");
+            let local = home.join("ledger").join(&dev).join(&name);
+            let remote = root.join("ledger").join(&dev).join(&name);
+            fs::create_dir_all(remote.parent().unwrap()).unwrap();
+            fs::copy(&local, &remote).unwrap();
+        };
+        // Both storages are told they hold the newest batch, but the one
+        // before it was never written. The reader follows box and stops
+        // on that gap (batch 6 is pending behind it).
+        let gap = head - 1;
+        place(head, &lab.root.join("s2"));
+        place(head, &lab.root.join("storage"));
+        devs[0].f3.ledger.set_pushed("s2", head).unwrap();
+        devs[0].f3.ledger.set_pushed("box", head).unwrap();
+        let gap_on = |root: &str| {
+            lab.root
+                .join(root)
+                .join("ledger")
+                .join(&dev)
+                .join(format!("{gap:016}-0000.rec"))
+        };
+        assert!(!gap_on("s2").is_file());
+        devs[1].pull_ledger().unwrap();
+        assert_eq!(
+            devs[1].f3.ledger.head(&me).seq,
+            have,
+            "a reader stops at the gap even when a later batch is listed"
+        );
+        devs[0].push_own_batches().unwrap();
+        assert!(gap_on("s2").is_file(), "batch {gap} was pushed to s2");
+        assert!(gap_on("storage").is_file(), "batch {gap} was pushed to box");
+        assert_eq!(devs[0].f3.ledger.pushed("s2"), head);
+        assert_eq!(devs[0].f3.ledger.pushed_prefix("s2"), head);
+        devs[1].pull_ledger().unwrap();
+        assert_eq!(devs[1].f3.ledger.head(&me).seq, head);
+    }
+
+    /// `Sink3::commit` seals one batch for a repair. It must also push every
+    /// earlier own batch that storage does not have, and must not mark those
+    /// as pushed while they are still missing.
+    #[test]
+    fn sink_commit_pushes_the_gap_before_the_new_batch() {
+        use crate::gc3::Commit;
+        let (_tmp, lab) = lab("sink-gap");
+        let mut devs = devices(&lab, 2);
+        let folder = FolderId::random();
+        append_synthetic(&mut devs[0], 0, 4, &folder);
+        devs[0].push_own_batches().unwrap();
+        let have = devs[0].own_head3();
+        append_synthetic(&mut devs[0], 0, 1, &folder);
+        let gap = devs[0].own_head3();
+        assert_eq!(gap, have + 1);
+        let me = {
+            let a = &mut devs[0];
+            let storages = a.metadata_storages(false).unwrap();
+            let (key_id, key) = a.ledger_key3().unwrap();
+            let me = a.me3();
+            let last = a.clock.lamport;
+            let mut sink = super::super::fsck3_ops::Sink3 {
+                ledger: &mut a.f3.ledger,
+                me,
+                key,
+                key_id,
+                signer: &a.keys.signer,
+                storages: &storages,
+                lamports: std::collections::VecDeque::new(),
+                last,
+            };
+            sink.commit(vec![Event3::FolderAdded(
+                crate::ledger3::events::FolderAdded { folder: [9; 16] },
+            )])
+            .unwrap();
+            me
+        };
+        let head = devs[0].own_head3();
+        assert_eq!(head, gap + 1);
+        let dev = hex::encode(me);
+        let on_box = |seq: u64| {
+            lab.root
+                .join("storage/ledger")
+                .join(&dev)
+                .join(format!("{seq:016}-0000.rec"))
+                .is_file()
+        };
+        assert!(on_box(gap), "the unpushed batch was filled");
+        assert!(on_box(head), "the batch just sealed was pushed");
+        assert_eq!(devs[0].f3.ledger.pushed("box"), head);
+        assert_eq!(devs[0].f3.ledger.pushed_prefix("box"), head);
+        devs[1].pull_ledger().unwrap();
+        assert_eq!(devs[1].f3.ledger.head(&me).seq, head);
+    }
+
     pub(crate) fn copy_tree(from: &Path, to: &Path) {
         for e in walkdir::WalkDir::new(from)
             .into_iter()
