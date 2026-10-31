@@ -596,8 +596,10 @@ fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_r
     files.sort();
     assert!(files.len() >= 6);
 
-    // Unneeded: an object nothing references, and a leftover temporary
-    // file of a write that died an hour ago (a fresh one is left alone).
+    // A pack the ledger has not dropped is not unneeded, however old: tidy
+    // must not treat "this device has not seen it" as junk. A leftover
+    // temporary file of a write that died an hour ago is still removed (a
+    // fresh one is left alone).
     let stray_name = hex::encode(varsto_core::crypto::hash(b"stray"));
     let stray = d1
         .join(pool::DATA_DIR)
@@ -658,9 +660,10 @@ fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_r
     let r = a
         .disk_insert("data-01", Default::default(), &mut |_| {})
         .unwrap();
-    assert_eq!(r.tidy.unneeded_removed, 1);
+    assert_eq!(r.tidy.unneeded_removed, 0, "{:?}", r.tidy);
     assert_eq!(r.tidy.temp_removed, 1);
-    assert!(!stray.exists() && !old_tmp.exists() && new_tmp.exists());
+    assert!(stray.exists(), "an unseen pack is not a tombstone");
+    assert!(!old_tmp.exists() && new_tmp.exists());
     assert_eq!(r.verified_objects as usize, stale.len() - 1);
     assert_eq!(r.bad, vec![key_of(&rotten_stale)]);
     assert!(!rotten_stale.exists(), "a bad copy is removed");
@@ -684,8 +687,10 @@ fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_r
     assert_eq!(r.verified_objects, 0);
     assert!(r.fill.objects >= 2, "{:?}", r.fill);
     // The bad copy's block and the new file's blocks went into one new pack.
+    // The unseen pack planted above is still on the disk.
     let now = objects_under(&d1);
-    assert_eq!(now.len(), files.len());
+    assert_eq!(now.len(), files.len() + 1);
+    assert!(now.iter().any(|f| f == &stray));
     assert!(now
         .iter()
         .filter(|f| **f != rotten_fresh)
@@ -716,6 +721,74 @@ fn insert_tidies_from_listings_rehashes_only_stale_copies_and_fills_within_the_r
         )
         .unwrap();
     assert_eq!(r.verified_objects + r.fill.objects, 0);
+}
+
+#[test]
+fn insert_keeps_packs_a_partial_ledger_pull_has_not_seen() {
+    let lab = Lab::new();
+    let home = lab.root.join("a-home");
+    let (mut a, _) = engine(&home, "laptop");
+    a.add_storage(lab.box_spec()).unwrap();
+    a.add_storage(lab.pool_spec("shelf")).unwrap();
+    let d1 = lab.mount("d1", 50 * GIB, 100 * GIB);
+    a.disk_add(&d1, "shelf", "data-01").unwrap();
+
+    let plant = |bytes: &[u8]| {
+        let name = hex::encode(varsto_core::crypto::hash(bytes));
+        let key = varsto_core::packs::pack_key(&name);
+        let path = d1.join(pool::DATA_DIR).join(&key);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, bytes).unwrap();
+        let old = std::time::SystemTime::now()
+            - std::time::Duration::from_secs(varsto_core::gc3::ORPHAN_SECS as u64 + 86_400);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        (key, path)
+    };
+    // Another device's pack, old enough that the grace period is not what
+    // saves it, and not listed in this device's pool index.
+    let (foreign_key, foreign) = plant(b"foreign-pack-bytes");
+    let mut idx = DiskIndex::read(&d1).unwrap();
+    idx.objects
+        .insert(foreign_key, foreign.metadata().unwrap().len());
+    fs::write(DiskIndex::path(&d1), serde_json::to_vec(&idx).unwrap()).unwrap();
+    let (_, unseen) = plant(b"unseen-pack-bytes");
+
+    // The storage answers: the pull is complete, and the ledger still has
+    // no drop for either file.
+    let r = a
+        .disk_insert("data-01", Default::default(), &mut |_| {})
+        .unwrap();
+    assert!(r.ledger_note.is_none(), "{:?}", r.ledger_note);
+    assert_eq!(r.tidy.unneeded_removed, 0, "{:?}", r.tidy);
+    assert!(foreign.exists() && unseen.exists());
+    assert!(
+        r.tidy.adopted >= 1,
+        "the disk index adopts the other device's pack"
+    );
+
+    // A blip: the pull returns success without reading the storage. That
+    // must not be treated as a full ledger.
+    let (_, during_blip) = plant(b"written-during-a-blip");
+    a.set_storage_down_for_tests("box", true);
+    let r = a
+        .disk_insert(
+            "data-01",
+            varsto_core::engine::InsertOptions {
+                verify: false,
+                fill: false,
+            },
+            &mut |_| {},
+        )
+        .unwrap();
+    let note = r.ledger_note.expect("a partial pull is reported");
+    assert!(note.contains("box"), "{note}");
+    assert_eq!(r.tidy.unneeded_removed, 0, "{:?}", r.tidy);
+    assert!(during_blip.exists() && foreign.exists() && unseen.exists());
 }
 
 fn row(e: &mut Engine, label: &str) -> varsto_core::pool::DiskStatus {
