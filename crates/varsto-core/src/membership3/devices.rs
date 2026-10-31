@@ -130,6 +130,11 @@ impl DeviceRecord {
 #[derive(Clone, Debug, Default)]
 pub struct DeviceRegistry {
     pub devices: BTreeMap<Id16, (DeviceRecord, u32)>,
+    /// Sequence cut-offs of removed devices' registry streams, from the
+    /// revocations that removed them (`StreamCut`). Empty until the
+    /// revocations have been read. Not part of the device records.
+    #[doc(hidden)]
+    pub registry_cuts: BTreeMap<Id16, Vec<super::epochs::StreamCut>>,
 }
 
 /// Device records verify themselves; any holder of the registry key may

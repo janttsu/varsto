@@ -2,20 +2,21 @@
 //! Tests of work package 8a (format 3 design, section 12, tests 2, 10, 11
 //! as far as they concern the data model).
 
+use super::epochs::StreamCut;
 use super::store::Writer;
 use super::*;
 use crate::crypto::{SecretKey, SigningKey};
 use crate::kem::DecapsKey;
 use crate::record::envelope::decode_body;
 use crate::record::{
-    Acceptor, DeviceSigner, Junk, KeyId, Kind, RecordBody, RecordMeta, RecordTrust, RecordWriter,
-    Refusal, StreamRef,
+    Acceptor, DeviceSigner, Id16, Junk, KeyId, Kind, RecordBody, RecordMeta, RecordTrust,
+    RecordWriter, Refusal, StreamRef,
 };
 use crate::storage::Storage;
 use anyhow::Result;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 const VAULT: Id16 = [0x5a; 16];
@@ -835,6 +836,7 @@ fn body_parsers_survive_random_bytes() {
             cutoff_seq: 4,
             wipe: true,
             new_epoch: 1,
+            registry_cuts: None,
         },
     );
     fuzz_one(
@@ -1417,6 +1419,7 @@ fn a_removal_that_stops_after_its_epoch_record_is_finished_with_the_key_kept_fir
         k3: [7; 32],
         targets: Vec::new(),
         wipe: false,
+        cuts: None,
     };
     assert_eq!(again.resume_pending(&[other]).unwrap().len(), 1);
 }
@@ -1471,4 +1474,238 @@ fn a_folder_epoch_that_stops_after_its_record_is_finished_from_the_kept_key() {
         !mc.read_my_grants().holds(&f, 1),
         "the removed device did not"
     );
+}
+
+/// In an organization a roster member's vault epoch, revocation and wipe
+/// are not adopted (spec 27). Without the administrator list they would be.
+#[test]
+fn a_non_admin_cannot_revoke_or_wipe() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let ma = device(&st, &a, &keys, "admin");
+    let mut mb = device(&st, &b, &keys, "member");
+    let _mc = device(&st, &c, &keys, "other");
+    mb.refresh().unwrap();
+    let admins = BTreeSet::from([ma.me]);
+    mb.remove_device(&ma.me, 0, true, None)
+        .expect("a modified client can write the epoch");
+    let ma = Membership::open_with_admins(
+        VAULT,
+        &st,
+        &a.sign,
+        &a.kem,
+        keys.clone(),
+        BTreeMap::new(),
+        Some(admins.clone()),
+    )
+    .unwrap();
+    assert!(ma.own_revocation.is_none(), "a member's wipe is ignored");
+    assert!(!ma.is_revoked(&ma.me));
+    assert_eq!(ma.vault_keys.newest_epoch(), 0);
+    let mc = Membership::open_with_admins(
+        VAULT,
+        &st,
+        &c.sign,
+        &c.kem,
+        keys.clone(),
+        BTreeMap::new(),
+        Some(admins),
+    )
+    .unwrap();
+    assert!(!mc.is_revoked(&ma.me));
+    assert_eq!(mc.vault_keys.newest_epoch(), 0);
+    let open = Membership::open(VAULT, &st, &c.sign, &c.kem, keys).unwrap();
+    assert!(
+        open.is_revoked(&ma.me),
+        "the same records count without an organization"
+    );
+    assert_eq!(open.vault_keys.newest_epoch(), 1);
+}
+
+/// A device removed from the vault can remain a participant of a folder
+/// this device could not re-key. The next folder epoch must not hand it
+/// the new key through the stay set.
+#[test]
+fn a_revoked_device_is_not_in_the_next_folder_stay_set() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut mc = device(&st, &c, &keys, "owner");
+    let f = mc.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    mc.approve(&f, &mb.me, Role::Editor).unwrap();
+    ma.refresh().unwrap();
+    let report = ma.remove_device(&mb.me, 0, false, None).unwrap();
+    assert!(report.folders_not_rotated.contains(&f));
+    mc.refresh().unwrap();
+    let start = mc.start_folder_epoch(&f, &[], None).unwrap();
+    assert_eq!(start.epoch, 1);
+    assert!(
+        !start.granted_to.contains(&mb.me),
+        "the revoked device was granted the new key"
+    );
+    let kept = &mc.folder_epochs(&f).applied[&1];
+    assert!(kept.participants.iter().all(|p| p.device != mb.me));
+    mb.refresh().unwrap();
+    assert!(!mb.read_my_grants().holds(&f, 1));
+    assert!(mc.read_my_grants().holds(&f, 1));
+}
+
+/// Junk under the next folder-epoch number must not block a removal, and a
+/// name of sixteen 9s must not overflow the next vault or folder epoch.
+#[test]
+fn junk_epoch_names_do_not_block_removal_or_panic() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut mc = device(&st, &c, &keys, "other");
+    let f = ma.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    ma.approve(&f, &mb.me, Role::Editor).unwrap();
+    ma.approve(&f, &mc.me, Role::Editor).unwrap();
+    let folder = hex::encode(f);
+    s.put_if_absent(
+        &format!("vault/folder-epochs/{folder}/0000000000000001-0000.rec"),
+        b"junk",
+    )
+    .unwrap();
+    s.put_if_absent("vault/epochs/9999999999999999-0000.rec", b"junk")
+        .unwrap();
+    s.put_if_absent(
+        &format!("vault/folder-epochs/{folder}/9999999999999999-0000.rec"),
+        b"junk",
+    )
+    .unwrap();
+    let report = ma
+        .remove_device(&mb.me, 0, false, None)
+        .expect("junk and a huge name do not block the removal");
+    assert_eq!(report.vault_epoch, 1);
+    assert_eq!(report.folder_epochs, vec![(f, 2)]);
+    mc.refresh().unwrap();
+    assert_eq!(mc.vault_keys.newest_epoch(), 1);
+    assert_eq!(mc.folder_epochs(&f).current(), 2);
+    assert_eq!(mc.role(&mb.me, &f, 2), None);
+    assert_eq!(mc.role(&mc.me, &f, 2), Some(Role::Editor));
+    mb.refresh().unwrap();
+    assert!(!mb.read_my_grants().holds(&f, 2));
+}
+
+/// A device removed from the vault can still sign folder records and grants
+/// with the keys it kept. A stamp set before the removal would, on stamp
+/// order alone, deny the owners who removed it. Spec 77.20: those records
+/// do not count past the sequence its streams had at removal.
+#[test]
+fn a_removed_owner_cannot_backdate_a_folder_over() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let f = mb.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    mb.approve(&f, &ma.me, Role::Owner).unwrap();
+    let mut mn = device(&st, &c, &keys, "new");
+    mb.refresh().unwrap();
+    ma.refresh().unwrap();
+    ma.observe_lamport(100);
+    ma.remove_device(&mb.me, 0, false, None).unwrap();
+    mb.issue_grant(&f, 0, &mn.me, Role::Owner)
+        .expect("the removed device still holds the old folder key");
+    let stamp = Stamp {
+        lamport: 50,
+        device: mb.me,
+    };
+    let attack = FolderRecord {
+        id: f,
+        name: "Taken".into(),
+        settings: BTreeMap::new(),
+        stamp,
+        creation: None,
+        participants: vec![Participant {
+            device: mb.me,
+            role: Role::Owner,
+            stamp,
+        }],
+        denied: vec![Denied {
+            device: ma.me,
+            stamp,
+        }],
+        members: vec![],
+        removed: None,
+    };
+    Writer {
+        vault: VAULT,
+        storages: &st,
+        local: None,
+        device: mb.me,
+        key: &b.sign,
+    }
+    .write(
+        &mb.record_keys(),
+        &FolderRegistry::stream(f, mb.me),
+        None,
+        &KeyId::Registry(0),
+        &attack,
+    )
+    .unwrap();
+
+    ma.refresh().unwrap();
+    let folder = ma.registry.get(&f).expect("the folder survives");
+    assert_eq!(folder.name, "Docs");
+    assert_eq!(folder.role(&ma.me), Some(Role::Owner));
+    assert_eq!(folder.role(&mb.me), None, "the removal stands");
+    assert!(ma.refused.get(Kind::Folder) >= 1);
+    mn.refresh().unwrap();
+    assert!(
+        !mn.read_my_grants().holds(&f, 0),
+        "a grant written after the removal does not count"
+    );
+    assert!(mn.refused.get(Kind::Grant) >= 1);
+    assert!(ma.read_my_grants().holds(&f, 0));
+}
+
+#[test]
+fn an_old_revocation_without_registry_cuts_still_decodes() {
+    #[derive(Serialize)]
+    struct Old {
+        device: Id16,
+        name: String,
+        issuer: Id16,
+        cutoff_seq: u64,
+        wipe: bool,
+        new_epoch: u32,
+    }
+    let old = Old {
+        device: [1; 16],
+        name: "n".into(),
+        issuer: [2; 16],
+        cutoff_seq: 4,
+        wipe: false,
+        new_epoch: 1,
+    };
+    let bytes = postcard::to_stdvec(&old).unwrap();
+    let (mut got, rest): (RevocationRecord, &[u8]) = postcard::take_from_bytes(&bytes).unwrap();
+    got.take_tail(rest).unwrap();
+    assert!(got.registry_cuts.is_none());
+    let cut = StreamCut {
+        kind: Kind::Folder.code(),
+        scope: [9; 16],
+        epoch: 0,
+        recipient: [0; 16],
+        seq: 3,
+    };
+    let fresh = RevocationRecord {
+        registry_cuts: Some(vec![cut.clone()]),
+        ..got
+    };
+    let enc = postcard::to_stdvec(&fresh).unwrap();
+    let (mut back, tail): (RevocationRecord, &[u8]) = postcard::take_from_bytes(&enc).unwrap();
+    back.take_tail(tail).unwrap();
+    assert_eq!(back.registry_cuts, Some(vec![cut]));
 }

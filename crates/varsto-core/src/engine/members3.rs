@@ -163,6 +163,18 @@ impl RecordTrust for EngineTrust<'_> {
     fn announcement(&self, device: &Id16, kind: Kind, scope: &Id16, seq: u64) -> Option<Announced> {
         crate::manifest3::announcement(self.view, device, kind, scope, seq)
     }
+    fn seq_allowed(
+        &self,
+        device: &Id16,
+        kind: Kind,
+        scope: &Id16,
+        seq: u64,
+        epoch: Option<u32>,
+        recipient: Option<Id16>,
+    ) -> bool {
+        self.inner
+            .seq_allowed(device, kind, scope, seq, epoch, recipient)
+    }
 }
 
 /// A storage whose reads of membership records (`vault/`) are kept in a
@@ -298,6 +310,19 @@ impl Engine {
     /// This device's id on the wire.
     pub(crate) fn me3(&self) -> Id16 {
         bin(&self.vault.device_id).expect("a device id is 16 bytes")
+    }
+
+    /// Administrators of the current organization manifest, if this vault
+    /// has one. Epochs and revocations from anyone else are not adopted.
+    fn org_admins3(&self) -> Option<BTreeSet<Id16>> {
+        let manifest = self.org.as_ref()?.manifest()?;
+        let mut out = BTreeSet::new();
+        for a in &manifest.admins {
+            if let Ok(id) = bin(&a.device) {
+                out.insert(id);
+            }
+        }
+        Some(out)
     }
 
     /// The vault keys this device holds, by epoch.
@@ -461,6 +486,15 @@ impl Engine {
         };
         let lamport = self.clock.lamport;
         let kept = self.vault_kept3();
+        // Spec 27: revocations are judged against the administrator list.
+        // Read the organization first when a storage is in reach, then
+        // again after a new vault key (below, in `refresh_members`).
+        if reach != Reach::Local && !self.vault.member && self.removal.is_none() {
+            if let Err(e) = self.sync_org() {
+                log::warn!("organization not read before the membership: {e:#}");
+            }
+        }
+        let admins = self.org_admins3();
         let recovered = self.keyring_keys()?;
         let held = self.org_held();
         let pending = membership::load_pending_keys(
@@ -484,22 +518,24 @@ impl Engine {
             };
             let mut offline = reach == Reach::Local;
             let mut m = if offline {
-                Membership::open_with(
+                Membership::open_with_admins(
                     vault,
                     &only_local,
                     &self.keys.signer,
                     kem,
                     self.vault_keys3(),
                     kept,
+                    admins.clone(),
                 )?
             } else {
-                match Membership::open_with(
+                match Membership::open_with_admins(
                     vault,
                     &with_local,
                     &self.keys.signer,
                     kem,
                     self.vault_keys3(),
                     kept.clone(),
+                    admins.clone(),
                 ) {
                     // A storage that does not answer reads as empty (the
                     // tee); when none answered, nothing came from the
@@ -529,13 +565,14 @@ impl Engine {
                             "the storages could not be read ({e:#}); working from this device's copy of the membership, changes wait to upload"
                         );
                         offline = true;
-                        Membership::open_with(
+                        Membership::open_with_admins(
                             vault,
                             &only_local,
                             &self.keys.signer,
                             kem,
                             self.vault_keys3(),
                             kept,
+                            admins.clone(),
                         )?
                     }
                     Err(e) => return Err(e),
@@ -676,13 +713,14 @@ impl Engine {
             let Some(kem) = self.epochs.kem.as_ref() else {
                 return Ok(());
             };
-            let m = Membership::open_with(
+            let m = Membership::open_with_admins(
                 vault,
                 &refs,
                 &self.keys.signer,
                 kem,
                 self.vault_keys3(),
                 self.vault_kept3(),
+                self.org_admins3(),
             )?;
             (Members3::of(&m), m.vault_keys.clone())
         };

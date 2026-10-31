@@ -445,6 +445,32 @@ fn the_root_key_appoints_and_dismisses_admins() {
     assert!(a.revoke_device("b", false).is_err());
 }
 
+/// A roster member's modified client can write a vault epoch and a
+/// revocation. Readers adopt neither, and an administrator is not wiped
+/// (spec 27).
+#[test]
+fn a_member_cannot_revoke_or_wipe_an_admin() {
+    let lab = Lab::new();
+    let (mut a, mut b, mut c, _) = three_devices(&lab);
+    a.org_create("Acme", "alice").unwrap();
+    b.sync(None).unwrap();
+    c.sync(None).unwrap();
+    let forged = b.revoke_unchecked("hq", 0).unwrap();
+    assert_eq!(forged.key_epoch, 1);
+    c.sync(None).unwrap();
+    assert_eq!(c.key_epoch(), 0, "the member's epoch is not adopted");
+    assert!(
+        !c.devices_list().iter().any(|d| d.name == "hq" && d.revoked),
+        "the administrator stays"
+    );
+    a.sync(None).unwrap();
+    assert!(
+        a.removal().is_none(),
+        "the administrator is not removed or wiped"
+    );
+    assert_eq!(a.key_epoch(), 0);
+}
+
 #[test]
 fn junk_epoch_objects_are_skipped() {
     let lab = Lab::new();

@@ -4,7 +4,7 @@
 
 use super::devices::{DeviceRecord, DeviceRegistry};
 use super::epochs::{
-    self, FolderEpochRecord, FolderEpochs, RemovalReport, Removed, RevocationRecord,
+    self, FolderEpochRecord, FolderEpochs, RemovalReport, Removed, RevocationRecord, StreamCut,
     VaultEpochRecord,
 };
 use super::escrow::{EscrowRecord, MissingEscrow, RecoveryKey};
@@ -43,6 +43,13 @@ pub enum PendingKey {
         k3: [u8; 32],
         targets: Vec<(Id16, u64)>,
         wipe: bool,
+        /// Registry-stream cut-offs captured when the removal started, so
+        /// finishing the epoch later does not widen them. A list, not a
+        /// map: this key is stored as JSON, which cannot key a map with a
+        /// device id. `None` on a key kept by a build that did not record
+        /// them.
+        #[serde(default)]
+        cuts: Option<Vec<(Id16, Vec<StreamCut>)>>,
     },
     /// A folder epoch of `start_folder_epoch`: K9 and the folder's K11.
     Folder {
@@ -126,8 +133,12 @@ pub struct Membership<'a> {
     /// `grant_missing_vault_keys` seals it once they are allowed).
     pub hold_grants: BTreeSet<Id16>,
     /// Vault epoch numbers that hold a record signed by a device of the
-    /// vault.
+    /// vault (in an organization, by an administrator).
     vault_signed: BTreeSet<u32>,
+    /// Administrators, when this vault is an organization. `None` for a
+    /// vault without one: any full device may issue an epoch. Epochs,
+    /// revocations and wipes from anyone else are not adopted (spec 27).
+    admins: Option<BTreeSet<Id16>>,
     lamport: u64,
     /// Where records are written (`write_through`): the storages (`None`:
     /// `storages`) and this device's own copy.
@@ -159,6 +170,20 @@ impl<'a> Membership<'a> {
         vault_keys: VaultKeys,
         vault_kept: BTreeMap<u32, Id16>,
     ) -> Result<Membership<'a>> {
+        Self::open_with_admins(vault, storages, sign, kem, vault_keys, vault_kept, None)
+    }
+
+    /// `open_with`, and in an organization only epochs and revocations from
+    /// `admins` are adopted. `None` is a vault without an organization.
+    pub fn open_with_admins(
+        vault: Id16,
+        storages: &'a [&'a dyn Storage],
+        sign: &'a SigningKey,
+        kem: &'a DecapsKey,
+        vault_keys: VaultKeys,
+        vault_kept: BTreeMap<u32, Id16>,
+        admins: Option<BTreeSet<Id16>>,
+    ) -> Result<Membership<'a>> {
         let mut m = Membership {
             vault,
             storages,
@@ -181,6 +206,7 @@ impl<'a> Membership<'a> {
             strongrooms: BTreeMap::new(),
             hold_grants: BTreeSet::new(),
             vault_signed: BTreeSet::new(),
+            admins,
             lamport: 0,
             remotes: None,
             local: None,
@@ -491,7 +517,11 @@ impl<'a> Membership<'a> {
                         .range(o.record.previous_epoch + 1..o.record.epoch)
                         .any(|_| true)
             });
-            if agrees && keeps_me && as_kept {
+            // In an organization only an administrator's epoch is adopted.
+            let by_admin = opened
+                .iter()
+                .all(|o| self.issuer_may_epoch(&o.record.issuer));
+            if agrees && keeps_me && as_kept && by_admin {
                 for (e, k) in keys.keys {
                     self.vault_keys.keys.entry(e).or_insert(k);
                 }
@@ -525,6 +555,14 @@ impl<'a> Membership<'a> {
                     "the signature of vault epoch {} does not verify",
                     o.record.epoch
                 );
+            }
+            // A key already held (adopted when its issuer was an
+            // administrator, or written here) keeps backing its revocation.
+            // A new epoch from anyone else does not.
+            if !self.issuer_may_epoch(&o.record.issuer)
+                && !self.vault_keys.keys.contains_key(&o.record.epoch)
+            {
+                continue;
             }
             backing.insert(o.record.epoch, (o.record.issuer, o.record.revoked.clone()));
         }
@@ -573,6 +611,7 @@ impl<'a> Membership<'a> {
                         .is_some_and(|l| l.iter().any(|n| n.device == r.issuer));
                 if r.issuer != self.me
                     && !self.revoked.contains(&r.issuer)
+                    && self.issuer_may_epoch(&r.issuer)
                     && (backed || above)
                     && self.own_revocation.is_none()
                 {
@@ -585,6 +624,12 @@ impl<'a> Membership<'a> {
             }
             self.revoked.insert(r.device);
             self.revocations.entry(r.device).or_insert(r);
+        }
+        self.devices.registry_cuts.clear();
+        for (d, r) in &self.revocations {
+            if let Some(c) = &r.registry_cuts {
+                self.devices.registry_cuts.insert(*d, c.clone());
+            }
         }
         Ok(())
     }
@@ -602,19 +647,31 @@ impl<'a> Membership<'a> {
             &|d| devices.signing_key(d),
         )?;
         self.vault_forks.clear();
-        self.vault_signed = found
-            .keys()
-            .filter_map(|s| u32::try_from(*s).ok())
-            .collect();
+        self.vault_signed.clear();
         for (seq, list) in found {
+            let list: Vec<_> = list
+                .into_iter()
+                .filter(|n| self.issuer_may_epoch(&n.device))
+                .collect();
+            if list.is_empty() {
+                continue;
+            }
+            let Ok(e) = u32::try_from(seq) else {
+                continue;
+            };
+            self.vault_signed.insert(e);
             if list.len() > 1 {
-                if let Ok(e) = u32::try_from(seq) {
-                    self.vault_forks
-                        .insert(e, list.iter().map(|n| n.device).collect());
-                }
+                self.vault_forks
+                    .insert(e, list.iter().map(|n| n.device).collect());
             }
         }
         Ok(())
+    }
+
+    /// Whether `issuer` may start a vault epoch or a revocation. Any full
+    /// device, outside an organization.
+    fn issuer_may_epoch(&self, issuer: &Id16) -> bool {
+        self.admins.as_ref().is_none_or(|a| a.contains(issuer))
     }
 
     /// Vault epoch numbers with two records and no choice made.
@@ -624,6 +681,15 @@ impl<'a> Membership<'a> {
             .filter(|e| !self.vault_kept.contains_key(e))
             .copied()
             .collect()
+    }
+
+    /// `e` is the next epoch after `current` when no signed record sits
+    /// strictly between them. Junk names are not in `envs`.
+    fn next_signed_epoch(envs: &BTreeMap<u64, Vec<store::Numbered>>, current: u32, e: u32) -> bool {
+        e > current
+            && !envs
+                .keys()
+                .any(|s| u32::try_from(*s).is_ok_and(|n| n > current && n < e))
     }
 
     /// Whether `d` may grant (and start epochs) in `folder` at `epoch`.
@@ -731,8 +797,9 @@ impl<'a> Membership<'a> {
                     continue;
                 }
                 ep.seen.insert(e, owners.iter().map(|n| n.device).collect());
-                if stopped || e != ep.current() + 1 {
-                    stopped = true;
+                // A number with no signed record is not an epoch (junk under
+                // the name). The next signed record is the next epoch.
+                if stopped {
                     continue;
                 }
                 let chosen: Vec<&&store::Numbered> = match kept.get(&e) {
@@ -776,9 +843,10 @@ impl<'a> Membership<'a> {
                             .as_ref()
                             .and_then(|k| k.epochs.get(&e))
                             .is_some_and(|held| held.0 == b.k9)
-                } else if e == ep.current() + 1 {
+                } else if Self::next_signed_epoch(&envs, ep.current(), e) {
                     // The epoch record is not applied yet: the grant's key
-                    // must open the one record of an owner under e.
+                    // must open the one record of an owner under e. The
+                    // number may skip names that hold no signed record.
                     let issuer_ok = Self::owner_at(&st, &ep, &b.issuer, e - 1)
                         || ep.seen.get(&e).is_some_and(|s| s.contains(&b.issuer));
                     let one = envs.get(&u64::from(e)).and_then(|c| {
@@ -1585,10 +1653,25 @@ impl<'a> Membership<'a> {
         let stay: Vec<Participant> = st
             .participants()
             .into_iter()
-            .filter(|p| !gone.contains(&p.device) && !ep.removed_at(&p.device, current))
+            .filter(|p| {
+                !gone.contains(&p.device)
+                    && !self.revoked.contains(&p.device)
+                    && !ep.removed_at(&p.device, current)
+            })
             .collect();
         let me = self.me;
-        let e = current + 1;
+        let prefix = FolderEpochRecord::stream(*folder, [0u8; 16])
+            .prefix()
+            .unwrap_or_default();
+        // Junk under the next number (anyone with the storage credentials
+        // can write it) is skipped, not waited for. A seq that does not
+        // fit in an epoch does not count, so it cannot block the removal
+        // or overflow the next number.
+        let listed = epochs::highest_listed(self.storages, &prefix, Kind::ShareEpoch)?;
+        let e = listed
+            .max(current)
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("no folder epoch number is left"))?;
         let k9 = SecretKey::random();
         let body = FolderEpochRecord {
             folder: *folder,
@@ -1770,8 +1853,12 @@ impl<'a> Membership<'a> {
         }
         // Junk under the next number (anyone with the storage's credentials
         // can write it) is skipped, not waited for: readers take only a
-        // signed record of a device of the vault there.
-        let new = listed.max(old) + 1;
+        // signed record of a device of the vault there. `listed` never
+        // includes a seq that has no successor.
+        let new = listed
+            .max(old)
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("no vault epoch number is left"))?;
         let k3 = SecretKey::random();
         let record = VaultEpochRecord {
             epoch: new,
@@ -1783,11 +1870,16 @@ impl<'a> Membership<'a> {
         };
         // Keys first: K3 is kept on this device before the epoch record
         // leaves it, so an epoch whose record landed always has a holder.
+        let mut cuts: Vec<(Id16, Vec<StreamCut>)> = Vec::new();
+        for target in &gone {
+            cuts.push((*target, self.signed_stream_cuts(*target)?));
+        }
         let pending_key = PendingKey::Vault {
             epoch: new,
             k3: k3.0,
             targets: targets.to_vec(),
             wipe,
+            cuts: Some(cuts.clone()),
         };
         self.keep(&pending_key, true)?;
         let written = {
@@ -1827,7 +1919,13 @@ impl<'a> Membership<'a> {
             sent.push(self.me);
         }
         for (target, cutoff_seq) in targets {
-            self.write_revocation(*target, *cutoff_seq, wipe, new)?;
+            self.write_revocation(
+                *target,
+                *cutoff_seq,
+                wipe,
+                new,
+                Some(Self::cuts_for(&cuts, target)),
+            )?;
         }
         for m in grant_to.into_iter().filter(|m| *m != self.me) {
             self.write_vault_grant(new, &k3, m)?;
@@ -1905,12 +2003,81 @@ impl<'a> Membership<'a> {
         Ok(())
     }
 
+    fn cuts_for<'b>(cuts: &'b [(Id16, Vec<StreamCut>)], target: &Id16) -> &'b [StreamCut] {
+        cuts.iter()
+            .find(|(d, _)| d == target)
+            .map(|(_, c)| c.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Highest signed seq of each `folder`, `grant` and `escrow` stream of
+    /// `device` (junk under the name does not count). Captured at removal
+    /// so a record the device writes afterwards is past the cut-off.
+    fn signed_stream_cuts(&self, device: Id16) -> Result<Vec<StreamCut>> {
+        let Some(pk) = self.devices.signing_key(&device) else {
+            return Ok(Vec::new());
+        };
+        let mut best: BTreeMap<(u8, Id16, u32, Id16), u64> = BTreeMap::new();
+        for storage in self.storages {
+            for prefix in ["vault/folders/", "vault/grants/", "vault/escrow/"] {
+                for name in storage.list(prefix)? {
+                    let Some(n) = RecordName::parse(&name) else {
+                        continue;
+                    };
+                    if n.device != Some(device) {
+                        continue;
+                    }
+                    if !matches!(n.kind, Kind::Folder | Kind::Grant | Kind::Escrow) {
+                        continue;
+                    }
+                    if n.kind == Kind::Grant && n.scope == VAULT_SCOPE {
+                        continue;
+                    }
+                    let Ok(Some(bytes)) = storage.get_bounded(&name, crate::record::MAX_PART_READ)
+                    else {
+                        continue;
+                    };
+                    let Ok(env) = SignedRecord::decode(&bytes) else {
+                        continue;
+                    };
+                    if env.device != device
+                        || env.vault != self.vault
+                        || env.seq != n.seq
+                        || env.kind != n.kind.code()
+                        || env.verify(&pk).is_err()
+                    {
+                        continue;
+                    }
+                    let key = (
+                        n.kind.code(),
+                        n.scope,
+                        n.epoch.unwrap_or(0),
+                        n.recipient.unwrap_or([0u8; 16]),
+                    );
+                    let slot = best.entry(key).or_insert(0);
+                    *slot = (*slot).max(n.seq);
+                }
+            }
+        }
+        Ok(best
+            .into_iter()
+            .map(|((kind, scope, epoch, recipient), seq)| StreamCut {
+                kind,
+                scope,
+                epoch,
+                recipient,
+                seq,
+            })
+            .collect())
+    }
+
     fn write_revocation(
         &self,
         target: Id16,
         cutoff_seq: u64,
         wipe: bool,
         epoch: u32,
+        cuts: Option<&[StreamCut]>,
     ) -> Result<()> {
         let rev = RevocationRecord {
             device: target,
@@ -1919,6 +2086,7 @@ impl<'a> Membership<'a> {
             cutoff_seq,
             wipe,
             new_epoch: epoch,
+            registry_cuts: cuts.map(|c| c.to_vec()),
         };
         self.writer().write(
             &self.ring(),
@@ -1946,7 +2114,8 @@ impl<'a> Membership<'a> {
                     k3,
                     targets,
                     wipe,
-                } => self.resume_vault_epoch(*epoch, &SecretKey(*k3), targets, *wipe)?,
+                    cuts,
+                } => self.resume_vault_epoch(*epoch, &SecretKey(*k3), targets, *wipe, cuts)?,
                 PendingKey::Folder {
                     folder,
                     epoch,
@@ -1967,6 +2136,7 @@ impl<'a> Membership<'a> {
         k3: &SecretKey,
         targets: &[(Id16, u64)],
         wipe: bool,
+        cuts: &Option<Vec<(Id16, Vec<StreamCut>)>>,
     ) -> Result<bool> {
         let held = self.vault_keys.keys.get(&epoch).map(|k| k.0 == k3.0);
         if held == Some(false) {
@@ -2015,7 +2185,8 @@ impl<'a> Membership<'a> {
         }
         for (target, cutoff) in targets {
             if !self.revocations.contains_key(target) && self.devices.get(target).is_some() {
-                self.write_revocation(*target, *cutoff, wipe, epoch)?;
+                let mine = cuts.as_ref().map(|list| Self::cuts_for(list, target));
+                self.write_revocation(*target, *cutoff, wipe, epoch, mine)?;
             }
         }
         self.grant_missing_vault_keys()?;
@@ -2116,6 +2287,7 @@ impl<'a> Membership<'a> {
         for p in &rec.participants {
             if p.device == self.me
                 || have.contains(&p.device)
+                || self.revoked.contains(&p.device)
                 || self.devices.kem_key(&p.device).is_none()
             {
                 continue;

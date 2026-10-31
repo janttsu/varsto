@@ -393,6 +393,7 @@ impl MemberView {
             folders: None,
             members: None,
         };
+        let mut blocked = false;
         for (seq, cands) in &envs {
             let Ok(e) = u32::try_from(*seq) else { continue };
             if e == 0 {
@@ -406,7 +407,9 @@ impl MemberView {
                 continue;
             }
             ep.seen.insert(e, owners.iter().map(|n| n.device).collect());
-            if e != ep.current() + 1 {
+            // No signed record between epochs is junk, not a missing epoch.
+            // A signed epoch this device cannot open yet stops the ones above.
+            if blocked {
                 continue;
             }
             let Some(k9) = self
@@ -415,6 +418,7 @@ impl MemberView {
                 .and_then(|k| k.epochs.get(&e))
                 .cloned()
             else {
+                blocked = true;
                 continue;
             };
             let mut ring = KeyRing::vault_only(me, &empty);
@@ -435,6 +439,8 @@ impl MemberView {
             }
             if let Some(r) = found {
                 ep.applied.insert(e, r);
+            } else {
+                blocked = true;
             }
         }
         let newest_key = self

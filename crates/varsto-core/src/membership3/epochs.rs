@@ -197,8 +197,26 @@ impl RecordBody for VaultEpochRecord {
     }
 }
 
-/// The body of a revocation.
+/// One registry stream of a removed device (`folder`, `grant` or `escrow`):
+/// records with a higher seq than `seq` do not count. A stream that is not
+/// listed had nothing at removal, so none of its records count. Lamport
+/// stamps can be backdated; the seq of a stream cannot.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamCut {
+    pub kind: u8,
+    pub scope: Id16,
+    pub epoch: u32,
+    pub recipient: Id16,
+    /// Highest seq of this stream that still counts.
+    pub seq: u64,
+}
+
+/// The body of a revocation.
+///
+/// `registry_cuts` is serialized after the fields a revocation always had.
+/// Decoding reads those first and takes the cut-off from whatever bytes
+/// remain, so a revocation written before the field still opens (`None`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RevocationRecord {
     pub device: Id16,
     pub name: String,
@@ -208,9 +226,52 @@ pub struct RevocationRecord {
     pub wipe: bool,
     /// The vault epoch this revocation started (it backs the revocation).
     pub new_epoch: u32,
+    /// Per-stream sequence cut-off of the removed device's `folder`,
+    /// `grant` and `escrow` records (spec 77.20: after removal those
+    /// records do not count). `None` on a revocation written before the
+    /// field existed.
+    pub registry_cuts: Option<Vec<StreamCut>>,
+}
+
+#[derive(Deserialize)]
+struct RevocationHead {
+    device: Id16,
+    name: String,
+    issuer: Id16,
+    cutoff_seq: u64,
+    wipe: bool,
+    new_epoch: u32,
+}
+
+impl<'de> Deserialize<'de> for RevocationRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let h = RevocationHead::deserialize(deserializer)?;
+        Ok(RevocationRecord {
+            device: h.device,
+            name: h.name,
+            issuer: h.issuer,
+            cutoff_seq: h.cutoff_seq,
+            wipe: h.wipe,
+            new_epoch: h.new_epoch,
+            registry_cuts: None,
+        })
+    }
 }
 
 impl RecordBody for RevocationRecord {
+    fn take_tail(&mut self, tail: &[u8]) -> Result<(), String> {
+        if tail.is_empty() {
+            return Ok(());
+        }
+        let (cuts, rest): (Option<Vec<StreamCut>>, &[u8]) =
+            postcard::take_from_bytes(tail).map_err(|e| e.to_string())?;
+        if !rest.is_empty() {
+            return Err(format!("{} bytes after the body", rest.len()));
+        }
+        self.registry_cuts = cuts;
+        Ok(())
+    }
+
     fn check(&self, meta: &RecordMeta) -> Result<(), String> {
         if self.device != meta.scope || self.issuer != meta.device {
             return Err("device or issuer differ from the record's name".into());
@@ -348,18 +409,32 @@ pub(crate) fn walk_vault_chain(
     Ok((VaultKeys { keys }, opened))
 }
 
-/// The highest vault epoch number any object on the storages is named
-/// with (0: none).
-pub(crate) fn highest_number(storages: &[&dyn Storage]) -> Result<u32> {
-    let mut top = 0;
+/// The highest epoch number any object under `prefix` is named with (0:
+/// none). A seq that does not fit in an epoch, or that has no successor
+/// (`u32::MAX`), is skipped: a name of sixteen 9s is a valid record name
+/// and must not become the next number.
+pub(crate) fn highest_listed(storages: &[&dyn Storage], prefix: &str, kind: Kind) -> Result<u32> {
+    let mut top = 0u32;
     for s in storages {
-        for name in s.list("vault/epochs/")? {
-            if let Some(n) = crate::record::RecordName::parse_as(Kind::Epoch, &name) {
-                top = top.max(u32::try_from(n.seq).unwrap_or(u32::MAX));
+        for name in s.list(prefix)? {
+            let Some(n) = crate::record::RecordName::parse_as(kind, &name) else {
+                continue;
+            };
+            let Ok(e) = u32::try_from(n.seq) else {
+                continue;
+            };
+            if e < u32::MAX {
+                top = top.max(e);
             }
         }
     }
     Ok(top)
+}
+
+/// The highest vault epoch number any object on the storages is named
+/// with (0: none).
+pub(crate) fn highest_number(storages: &[&dyn Storage]) -> Result<u32> {
+    highest_listed(storages, "vault/epochs/", Kind::Epoch)
 }
 
 /// The vault epoch a vault key belongs to: the highest number on the
