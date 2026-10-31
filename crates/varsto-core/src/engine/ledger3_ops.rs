@@ -40,6 +40,11 @@ pub(crate) struct Core3 {
     /// Folder records (manifests, maps, trash) refused in this process,
     /// by kind.
     pub records_refused: std::sync::Mutex<crate::record::RecordsRefused>,
+    /// Set by the last `pull_ledger3` that returned `Ok`. `None` when that
+    /// pull read every hot metadata storage and the membership. `Some` names
+    /// what it did not read: a storage that was skipped is not "the ledger
+    /// is current", even though the pull itself succeeded.
+    pub pull_gap: Option<String>,
 }
 
 pub(crate) type MapTable3 = crate::blockmap::MapTable;
@@ -59,6 +64,7 @@ impl Core3 {
             pending: Vec::new(),
             replicas: BTreeMap::new(),
             records_refused: Default::default(),
+            pull_gap: Some("not pulled".into()),
         })
     }
 }
@@ -682,13 +688,20 @@ impl Engine {
 
     /// Pull the membership and every known device's new batches from every
     /// hot metadata storage. Returns the devices found forked.
+    ///
+    /// `Ok` does not mean every storage was read. A storage that does not
+    /// answer is skipped (`tolerate`) and named in [`Core3::pull_gap`]; a
+    /// caller that deletes from the ledger view has to treat that as a
+    /// partial pull.
     pub(crate) fn pull_ledger3(&mut self) -> Result<Vec<DeviceId>> {
         // With no storage reachable the peers still give their batches
         // (the head exchange below), on the membership known here.
+        let mut members_gap = false;
         if let Err(e) = self.refresh_members() {
             if !is_network_error(&e) {
                 return Err(e);
             }
+            members_gap = true;
             log::warn!("membership not read, no storage answered: {e:#}");
         }
         // Replicas the vault enrolled, and other devices' names for this
@@ -722,6 +735,17 @@ impl Engine {
         }
         let mut forks = BTreeSet::new();
         let (mut malformed, mut refused) = (0u64, 0u64);
+        // Hot metadata storages this pull is supposed to read. One already
+        // marked down is not opened (`metadata_storages`), so it stays here.
+        let drained = self.drained_storages();
+        let mut unread: BTreeSet<String> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| !s.is_data_only() && !s.is_cold() && !drained.contains(s.name()))
+            .map(|s| s.name().to_string())
+            .collect();
+        let no_metadata_storage = unread.is_empty();
         let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
         // What each storage's listing showed, for the rollback judge: the
         // storage's own newest batch, never the head held here (that may
@@ -844,6 +868,9 @@ impl Engine {
                 Ok(())
             })();
             let reachable = self.tolerate(spec.name(), pulled)?.is_some();
+            if reachable {
+                unread.remove(spec.name());
+            }
             let id = if reachable {
                 let id = super::verify::storage_identity(backend.as_ref()).ok();
                 if let Some(id) = &id {
@@ -883,6 +910,19 @@ impl Engine {
             Err(e) => log::debug!("rollback check failed: {e:#}"),
         }
         self.watch_freshness(&view, malformed, refused);
+        let mut gap: Vec<String> = Vec::new();
+        if members_gap {
+            gap.push("membership".into());
+        }
+        if no_metadata_storage {
+            gap.push("no metadata storage".into());
+        }
+        gap.extend(unread);
+        self.f3.pull_gap = if gap.is_empty() {
+            None
+        } else {
+            Some(gap.join(", "))
+        };
         Ok(forks.into_iter().collect())
     }
 

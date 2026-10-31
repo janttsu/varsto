@@ -75,8 +75,9 @@ pub struct DiskInsertReport {
     pub bad: Vec<String>,
     pub missing: Vec<String>,
     pub fill: FillOutcome,
-    /// The ledger could not be brought up to date first (offline): files
-    /// the disk holds that this device does not know were kept, not removed.
+    /// The ledger was not fully read before tidy (the pull failed, or it
+    /// returned success without reading every hot metadata storage). Packs
+    /// the ledger has merely not seen were kept, not removed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ledger_note: Option<String>,
     pub group_copies: u32,
@@ -507,13 +508,15 @@ impl Engine {
     }
 
     /// The insert routine for a disk that was just attached: (1) tidy from
-    /// listings alone (queued deletions, leftovers, files nothing references
-    /// any more), (2) re-hash every copy whose last check is older than the
+    /// listings alone (queued deletions, leftovers, packs the ledger has
+    /// dropped), (2) re-hash every copy whose last check is older than the
     /// pool's `verify_after_days`, (3) fill with what the pool lacks while
     /// the reserve allows, (4) write the disk's index and sync. The ledger
-    /// is pulled first when the storages answer, so a file another device
-    /// just wrote is not mistaken for an unneeded one; offline, files the
-    /// ledger does not know are kept.
+    /// is pulled first. A pack file is removed only when that pull read
+    /// every hot metadata storage, the ledger dropped the pack from the
+    /// pool, the disk's own index does not list it, and the file is past
+    /// the grace period. A pull that returns `Ok` after skipping a storage
+    /// is not that pull: files the ledger has merely not seen are kept.
     pub fn disk_insert(
         &mut self,
         label: &str,
@@ -541,20 +544,28 @@ impl Engine {
             0,
             crate::activity::Unit::Items,
         );
-        let ledger_note = self
-            .pull_ledger()
-            .err()
-            .map(|e| format!("the ledger could not be brought up to date ({e:#})"));
+        // `Ok` from the pull is not "every storage was read": a skipped
+        // storage leaves `pull_gap` set, and tidy must not delete from that
+        // view.
+        let ledger_note = match self.pull_ledger() {
+            Err(e) => Some(format!(
+                "the ledger could not be brought up to date ({e:#})"
+            )),
+            Ok(_) => self
+                .f3
+                .pull_gap
+                .as_ref()
+                .map(|gap| format!("the ledger pull did not read every storage ({gap})")),
+        };
         let view = self.view3()?;
         progress(&DiskProgress {
             phase: "tidy",
             ..Default::default()
         });
         task.step("tidy", 0, crate::activity::Unit::Items);
-        let offline = ledger_note.is_some();
-        // What the disk may keep follows the ledger: a pack no live claim on
-        // the pool names is junk (offline: kept unless the ledger dropped it).
-        let (tidy, lost) = crate::storages3::tidy_disk_packs(&pool, &disk.id, &view, !offline)?;
+        let ledger_complete = ledger_note.is_none();
+        let (tidy, lost) =
+            crate::storages3::tidy_disk_packs(&pool, &disk.id, &view, ledger_complete)?;
         self.f3.pending.extend(lost);
         let mut report = DiskInsertReport {
             pool: spec.name().to_string(),
