@@ -47,6 +47,66 @@ impl Default for LedgerPolicy {
 /// Events recorded but not yet sealed into a batch, kept across restarts.
 const DEFERRED_FILE: &str = "ledger/pending.json";
 
+/// Format-3 events of the next batch (`Engine::f3.pending`). Written before
+/// manifest state that would make a later sync skip the announcement.
+const PENDING3_FILE: &str = "ledger/pending3.json";
+
+/// Format-3 events waiting on disk for the next batch. A file that does not
+/// parse is set aside; `lost` is then true.
+pub(super) fn load_pending3(home: &Path) -> (Vec<crate::ledger3::events::Event>, bool) {
+    let path = home.join(PENDING3_FILE);
+    if !path.exists() {
+        return (Vec::new(), false);
+    }
+    let raw: Vec<crate::ledger3::events::RawEvent> = match util::read_json(&path) {
+        Ok(v) => v,
+        Err(_) => {
+            let _ = ledger::set_aside(&path);
+            return (Vec::new(), true);
+        }
+    };
+    let mut out = Vec::with_capacity(raw.len());
+    for ev in raw {
+        match ev.decode() {
+            crate::ledger3::events::Decoded::Event(e) => out.push(e),
+            _ => {
+                let _ = ledger::set_aside(&path);
+                return (Vec::new(), true);
+            }
+        }
+    }
+    (out, false)
+}
+
+/// Replace `ledger/pending3.json` with `events` (remove it when empty).
+pub(super) fn write_pending3(home: &Path, events: &[crate::ledger3::events::Event]) -> Result<()> {
+    let path = home.join(PENDING3_FILE);
+    if events.is_empty() {
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        return Ok(());
+    }
+    let raw: Vec<crate::ledger3::events::RawEvent> = events.iter().map(|e| e.to_raw()).collect();
+    util::write_json(&path, &raw)
+}
+
+/// Every event of `pending` occurs in `batch`, in order.
+fn raw_covers(
+    batch: &[crate::ledger3::events::RawEvent],
+    pending: &[crate::ledger3::events::RawEvent],
+) -> bool {
+    let mut i = 0;
+    for ev in batch {
+        if i < pending.len() && ev == &pending[i] {
+            i += 1;
+        }
+    }
+    i == pending.len()
+}
+
 /// The events waiting for the next batch, and whether the file holding
 /// them could not be read (it is then moved aside and its events are lost:
 /// `docs/spec/alpha-0-format.md` section 38 says which come back).
@@ -205,9 +265,57 @@ impl Engine {
     pub(super) fn defer_events(&mut self) -> Result<()> {
         if self.pending.is_empty() {
             self.clear_deferred();
-            return Ok(());
+        } else {
+            util::write_json(&self.home.join(DEFERRED_FILE), &self.pending)?;
         }
-        util::write_json(&self.home.join(DEFERRED_FILE), &self.pending)
+        self.persist_pending3()
+    }
+
+    /// Write format-3 events that are not in a batch yet.
+    pub(super) fn persist_pending3(&self) -> Result<()> {
+        write_pending3(&self.home, &self.f3.pending)
+    }
+
+    /// Whether every `events` entry is already in this device's newest
+    /// sealed batches (a crash after the seal and before the file was removed).
+    pub(super) fn pending3_already_sealed(&self, events: &[crate::ledger3::events::Event]) -> bool {
+        if events.is_empty() {
+            return false;
+        }
+        let me = self.me3();
+        let head = self.f3.ledger.head(&me);
+        if head.seq == 0 {
+            return false;
+        }
+        let Ok(vault) = members3::bin(&self.vault.vault_id) else {
+            return false;
+        };
+        let pk = self.keys.signer.public();
+        let mut pending: Vec<crate::ledger3::events::RawEvent> =
+            events.iter().map(|e| e.to_raw()).collect();
+        let mut seq = head.seq;
+        while !pending.is_empty() && seq > head.dropped {
+            let Ok(Some(rec)) = self.f3.ledger.get(&me, seq) else {
+                return false;
+            };
+            let Some(key) = self.key_for3(&rec.key_id) else {
+                return false;
+            };
+            let Ok(Some(batch)) = crate::ledger3::store::check_batch(&rec, &vault, &pk, Some(&key))
+            else {
+                return false;
+            };
+            if raw_covers(&batch.events, &pending) {
+                return true;
+            }
+            if !batch.events.is_empty() && pending.ends_with(&batch.events) {
+                pending.truncate(pending.len() - batch.events.len());
+                seq -= 1;
+                continue;
+            }
+            return false;
+        }
+        pending.is_empty()
     }
 
     pub(super) fn clear_deferred(&self) {
@@ -1048,6 +1156,73 @@ pub(super) mod tests {
         assert_eq!(devs[0].f3.ledger.pushed_prefix("box"), head);
         devs[1].pull_ledger().unwrap();
         assert_eq!(devs[1].f3.ledger.head(&me).seq, head);
+    }
+
+    /// A crash after the manifest record is written and its state saved,
+    /// but before the batch is sealed, used to drop the announcement. The
+    /// next sync then saw nothing to publish. The announcement is on disk
+    /// first, and the next sync seals it; the other device gets the new file.
+    #[test]
+    fn manifest_announcement_survives_a_crash_before_the_batch() {
+        let (_tmp, lab) = lab("manifest-crash");
+        let mut devs = devices(&lab, 2);
+        devs[0].chunker = ChunkerParams::SMALL;
+        devs[1].chunker = ChunkerParams::SMALL;
+        folder_with_files(&mut devs[0], &lab.root, "docs", &[("a.txt", b"alpha")]);
+        devs[0].sync(None).unwrap();
+        let req = devs[1].f3_folder_request("docs", "editor").unwrap();
+        devs[0]
+            .f3_approve("docs", "dev1", None, Some(&req.fingerprint))
+            .unwrap();
+        devs[1].pull_ledger().unwrap();
+        devs[1]
+            .attach_folder("docs", &lab.root.join("b-docs"), true)
+            .unwrap();
+        devs[1].sync(None).unwrap();
+        fs::write(lab.root.join("docs/a.txt"), b"alpha 2").unwrap();
+        let head = {
+            let a = &mut devs[0];
+            let before = a.own_head3();
+            let (rec, root) = a.resolve_for_write("docs").unwrap();
+            let mut state = a.load_state(&rec.folder_id).unwrap();
+            a.scan(&rec, &root, &mut state).unwrap();
+            let folder = crate::record::id16(&rec.folder_id).unwrap();
+            let epoch = a.folder_keys(&rec).unwrap().epoch;
+            let mut report = PushReport::default();
+            let written = a.upload_missing(&rec, &root, &state, &mut report).unwrap();
+            let view = a.view3().unwrap();
+            a.publish_map3(&folder, epoch, &written, &view).unwrap();
+            let seq = a.publish_manifest(&folder, epoch, &state).unwrap();
+            assert!(seq.is_some(), "the new manifest was written");
+            assert!(
+                a.home.join("ledger/pending3.json").is_file(),
+                "the announcement is on disk before the batch"
+            );
+            assert_eq!(a.own_head3(), before, "not sealed yet");
+            before
+        };
+        let a_home = devs[0].home.clone();
+        let b_home = devs[1].home.clone();
+        drop(devs);
+        let mut a = Engine::open(&a_home, PASS).unwrap();
+        assert!(
+            !a.f3.pending.is_empty(),
+            "a restart still has the unsealed announcement"
+        );
+        assert_eq!(a.own_head3(), head);
+        a.sync(Some("docs")).unwrap();
+        assert!(
+            a.own_head3() > head,
+            "the next sync seals the announcement instead of skipping it"
+        );
+        assert!(a.f3.pending.is_empty());
+        assert!(!a.home.join("ledger/pending3.json").exists());
+        drop(a);
+        let mut b = Engine::open(&b_home, PASS).unwrap();
+        b.sync(Some("docs")).unwrap();
+        b.fetch_file("docs", "a.txt").unwrap();
+        let got = fs::read(lab.root.join("b-docs/a.txt")).unwrap();
+        assert_eq!(got, b"alpha 2");
     }
 
     pub(crate) fn copy_tree(from: &Path, to: &Path) {

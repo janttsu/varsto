@@ -443,6 +443,7 @@ impl Engine {
             self.pending.clear();
             self.f3.pending.clear();
             self.clear_deferred();
+            let _ = ledger_upkeep::write_pending3(&self.home, &[]);
             return self.ensure_active().map(|_| None);
         }
         if self.cycle.is_some() {
@@ -456,81 +457,108 @@ impl Engine {
             // is signed until a rebuild ran (the events stay pending).
             self.ensure_ledger_writable()?;
         }
-        events.append(&mut self.f3.pending);
+        // On disk before the seal, so a crash while signing retries these
+        // events instead of dropping them. Restored if the seal fails.
+        let pending_f3 = std::mem::take(&mut self.f3.pending);
+        if let Err(e) = ledger_upkeep::write_pending3(&self.home, &pending_f3) {
+            self.f3.pending = pending_f3;
+            return Err(e);
+        }
+        events.extend(pending_f3.iter().cloned());
         self.pending.clear();
         self.clear_deferred();
-        if self.forked_self && !events.is_empty() {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
-        // Folders shared with other people: the folder's events go into a
-        // folder-scoped batch under its share-ledger key, which the members
-        // read (they hold no vault key); the first time this device sees a
-        // folder shared, it announces there again what it published of it
-        // before (its packs and its records), so a member that joins later
-        // finds them. A member device writes folder-scoped batches only.
-        let mut groups: BTreeMap<Id16, Vec<Event3>> = BTreeMap::new();
-        let view = if self.vault.member || !self.shared_folders().is_empty() {
-            self.view3().ok()
-        } else {
-            None
-        };
-        for ev in events {
-            let f = self.batch_folder(&ev, view.as_ref());
-            groups.entry(f).or_default().push(ev);
-        }
-        let announced = self.reannounce(&mut groups, view.as_ref())?;
-        if groups.values().all(|g| g.is_empty()) {
-            return Ok(None);
-        }
-        let me = self.me3();
-        let seen = self.f3.ledger.vault_seen(&me);
-        let n: usize = groups.values().map(|g| g.len()).sum();
-        let mut last = None;
-        for (folder, evs) in groups {
-            if evs.is_empty() {
-                continue;
+        let outcome = (|| -> Result<Option<u64>> {
+            if self.forked_self && !events.is_empty() {
+                bail!("this device's ledger is forked; it must be re-enrolled as a new device");
             }
-            let (key_id, key) = if folder == ledger3::NO_FOLDER {
-                if self.vault.member {
-                    bail!("a member device writes only for its shared folder");
-                }
-                self.ledger_key3()?
+            // Folders shared with other people: the folder's events go into a
+            // folder-scoped batch under its share-ledger key, which the members
+            // read (they hold no vault key); the first time this device sees a
+            // folder shared, it announces there again what it published of it
+            // before (its packs and its records), so a member that joins later
+            // finds them. A member device writes folder-scoped batches only.
+            let mut groups: BTreeMap<Id16, Vec<Event3>> = BTreeMap::new();
+            let view = if self.vault.member || !self.shared_folders().is_empty() {
+                self.view3().ok()
             } else {
-                self.share_ledger_key(&folder)?
+                None
             };
-            let raw: Vec<_> = evs.iter().map(Event3::to_raw).collect();
-            // One batch per action (and folder), more only past the size limits.
-            for group in ledger3::events::split_events(raw) {
-                let lamport = self.tick()?;
-                let rec = self.f3.ledger.append_own(
-                    &me,
-                    group,
-                    seen.clone(),
-                    lamport,
-                    &key,
-                    &key_id,
-                    folder,
-                    &self.keys.signer,
-                )?;
-                last = Some(rec.seq);
+            for ev in events {
+                let f = self.batch_folder(&ev, view.as_ref());
+                groups.entry(f).or_default().push(ev);
+            }
+            let announced = self.reannounce(&mut groups, view.as_ref())?;
+            if groups.values().all(|g| g.is_empty()) {
+                return Ok(None);
+            }
+            let me = self.me3();
+            let seen = self.f3.ledger.vault_seen(&me);
+            let n: usize = groups.values().map(|g| g.len()).sum();
+            let mut last = None;
+            for (folder, evs) in groups {
+                if evs.is_empty() {
+                    continue;
+                }
+                let (key_id, key) = if folder == ledger3::NO_FOLDER {
+                    if self.vault.member {
+                        bail!("a member device writes only for its shared folder");
+                    }
+                    self.ledger_key3()?
+                } else {
+                    self.share_ledger_key(&folder)?
+                };
+                let raw: Vec<_> = evs.iter().map(Event3::to_raw).collect();
+                // One batch per action (and folder), more only past the size limits.
+                for group in ledger3::events::split_events(raw) {
+                    let lamport = self.tick()?;
+                    let rec = self.f3.ledger.append_own(
+                        &me,
+                        group,
+                        seen.clone(),
+                        lamport,
+                        &key,
+                        &key_id,
+                        folder,
+                        &self.keys.signer,
+                    )?;
+                    last = Some(rec.seq);
+                }
+            }
+            log::debug!(events = n, seq = last.unwrap_or(0); "ledger batch sealed");
+            if !announced.is_empty() {
+                let mut done = self.announced3();
+                done.extend(announced.iter().map(hex::encode));
+                util::write_json(&self.home.join("state").join(ANNOUNCED_FILE), &done)?;
+            }
+            // The batch is sealed and kept here: a storage that does not answer
+            // gets it with the next push, so an action done offline stands. A
+            // fork of this device's ledger stays an error.
+            if let Err(e) = self.push_own_batches3() {
+                if self.forked_self {
+                    return Err(e);
+                }
+                log::warn!("ledger batch kept on this device, not pushed yet: {e:#}");
+            }
+            Ok(last)
+        })();
+        match outcome {
+            Ok(seq) => {
+                // Sealed events stay in the batch. Anything queued during
+                // the seal (there is normally nothing) is what remains.
+                if self.f3.pending.is_empty() {
+                    let _ = ledger_upkeep::write_pending3(&self.home, &[]);
+                } else if let Err(e) = self.persist_pending3() {
+                    log::warn!("ledger events waiting for the next batch were not saved: {e:#}");
+                }
+                Ok(seq)
+            }
+            Err(e) => {
+                let mut back = pending_f3;
+                back.append(&mut self.f3.pending);
+                self.f3.pending = back;
+                Err(e)
             }
         }
-        log::debug!(events = n, seq = last.unwrap_or(0); "ledger batch sealed");
-        if !announced.is_empty() {
-            let mut done = self.announced3();
-            done.extend(announced.iter().map(hex::encode));
-            util::write_json(&self.home.join("state").join(ANNOUNCED_FILE), &done)?;
-        }
-        // The batch is sealed and kept here: a storage that does not answer
-        // gets it with the next push, so an action done offline stands. A
-        // fork of this device's ledger stays an error.
-        if let Err(e) = self.push_own_batches3() {
-            if self.forked_self {
-                return Err(e);
-            }
-            log::warn!("ledger batch kept on this device, not pushed yet: {e:#}");
-        }
-        Ok(last)
     }
 
     /// Tests: what a modified client could sign, one batch of exactly

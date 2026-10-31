@@ -2072,7 +2072,15 @@ impl Engine {
         }
         let (pending, pending_lost) = ledger_upkeep::load_deferred(home);
         engine.pending = pending;
-        engine.ledger_alarm = ledger_recovery::Alarm::at_open(&engine, pending_lost);
+        let (pending3, pending3_lost) = ledger_upkeep::load_pending3(home);
+        if !pending3.is_empty() && engine.pending3_already_sealed(&pending3) {
+            // The batch was sealed and the process died before the file went.
+            let _ = ledger_upkeep::write_pending3(home, &[]);
+        } else {
+            engine.f3.pending = pending3;
+        }
+        engine.ledger_alarm =
+            ledger_recovery::Alarm::at_open(&engine, pending_lost || pending3_lost);
         if engine.ledger_alarm.fork_marked() {
             // A real fork was found earlier: this identity signs nothing more.
             engine.forked_self = true;
