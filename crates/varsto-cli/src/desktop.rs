@@ -5258,6 +5258,10 @@ mod tests {
             "asset response did not start: {}",
             String::from_utf8_lossy(&partial[..n])
         );
+        // Linux shrinks the receive window, so one read cannot hold the
+        // script. macOS uses a normal connect; a full buffer there is the
+        // start of the script, not proof that the dispatch thread is stuck.
+        #[cfg(target_os = "linux")]
         assert!(n < partial.len(), "the whole asset fit in one read");
         std::thread::sleep(Duration::from_millis(200));
         alive("while an asset write is stalled");
