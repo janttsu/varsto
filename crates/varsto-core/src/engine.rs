@@ -748,6 +748,9 @@ pub struct LedgerEntry {
     pub hash: String,
 }
 
+/// Test hook invoked with the destination just before a pull replaces it.
+type ReplaceHook = std::sync::Arc<dyn Fn(&Path) + Send + Sync>;
+
 pub struct Engine {
     /// Peers to try before storages when downloading (set by the service).
     peers: Option<std::sync::Arc<crate::p2p::Peers>>,
@@ -827,7 +830,7 @@ pub struct Engine {
     /// Tests: called with the destination just before a pull replaces or
     /// deletes it (`set_replace_hook`), so an edit during the download can
     /// be simulated.
-    replace_hook: Option<std::sync::Arc<dyn Fn(&Path) + Send + Sync>>,
+    replace_hook: Option<ReplaceHook>,
     /// Tests: the next pull fails with this message after the scan
     /// (`fail_next_pull_for_tests`).
     pull_fault: Option<String>,
@@ -6521,7 +6524,7 @@ impl Engine {
 
     /// Tests: run just before a pull replaces or deletes a file.
     #[doc(hidden)]
-    pub fn set_replace_hook(&mut self, hook: Option<std::sync::Arc<dyn Fn(&Path) + Send + Sync>>) {
+    pub fn set_replace_hook(&mut self, hook: Option<ReplaceHook>) {
         self.replace_hook = hook;
     }
 
