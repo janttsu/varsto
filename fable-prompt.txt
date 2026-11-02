@@ -1,0 +1,37 @@
+Tarkista Varston haara integrate/review-20261031, kärki 8ed2c84b.
+Älä mergeä mainiin. Älä tee releasea. Älä käynnistä dailyä
+publish=true ennen kuin Linux- ja macOS-paketit ovat oikeasti
+artefakteina. Älä commitoi Clauden jättämiä kuvakaappauksia,
+website/public-tiedostoja tai wt-daily-työpuuta. Älä tulosta
+Android-keystoren salasanaa.
+
+Lue handover.md samasta haarasta. Se luettelee fix-haarat ja sen,
+mitä integraatiohaara lisää niiden päälle.
+
+Varmista nämä:
+
+1. Jokainen handover.md:n taulukon haara on GitHubissa ja osoittaa
+   siinä nimettyyn committiin. Integraatiohaara sisältää ne kaikki.
+   main on yhä dae29628.
+
+2. Android-artefakti packages-android ajosta
+   https://github.com/janttsu/varsto/actions/runs/41430736340
+   on release-allekirjoitettu APK, ei debug-build. Tiedostonimi
+   daily-kanavassa saa yhä päättyä android-debug.apk.
+
+3. Linux-dailyä ei ole. Testi
+   crates/varsto-core/tests/share_roles.rs
+   a_viewer_reads_and_its_own_changes_stay_here kaatuu rivillä 158:
+   plan.txt puuttuu toisen synkan jälkeen. Selvitä johtuuko se
+   ENGINE-1:n "älä ylikirjoita skannauksen jälkeen muuttunutta
+   tiedostoa" -säännöstä, korjaa niin että katselijan oma muutos
+   jää sivuun ja jaettu versio palaa, ja aja tuo testi.
+
+4. macOS-sovellusta ei rakennettu. Runneria ei saatu ajossa
+   41430736340. Ledger-testi s2_restores_own_checkpoint_after_pruning
+   on korjattu 8ed2c84b:ssä Linuxilla. Kun Linux-testi on kunnossa,
+   aja daily uudestaan publish=false ja varmista että artefakteissa
+   on Linux-paketti, Android-APK ja macOS-sovellus samasta commitista.
+
+5. Kerro mitä jäi auki. Älä väitä binääriä tehdyksi, jos artefaktia
+   ei ole.
