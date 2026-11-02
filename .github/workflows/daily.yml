@@ -94,6 +94,7 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/ci.yml
+    secrets: inherit
     with:
       ref: ${{ needs.check.outputs.sha }}
 
