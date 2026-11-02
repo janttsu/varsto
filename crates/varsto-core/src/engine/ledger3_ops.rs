@@ -154,11 +154,17 @@ pub(super) fn push_contiguous(
         prefix = proven;
     }
     let mut advanced = prefix;
+    // Batches at or below the drop line were pruned. They are not a hole,
+    // and stopping on them would keep every later batch off the storage.
+    if advanced < head.dropped {
+        advanced = head.dropped;
+    }
     for seq in advanced + 1..=head.seq {
-        // A hole in the local chain cannot be pushed. Stopping here keeps
-        // the watermark from stepping over it; the next push tries again.
+        // A pruned batch or a real hole is not here. Keep going so a later
+        // batch we still hold is stored. The watermark moves only along the
+        // contiguous prefix, so a hole is retried and is not skipped.
         let Some(rec) = ledger.get(me, seq)? else {
-            break;
+            continue;
         };
         let key = ledger3::checkpoint::batch_key(me, seq);
         let bytes = rec.encode();
@@ -177,7 +183,9 @@ pub(super) fn push_contiguous(
                 break;
             }
         }
-        advanced = seq;
+        if seq == advanced + 1 {
+            advanced = seq;
+        }
     }
     ledger.set_pushed_prefix(storage, advanced)?;
     Ok(advanced)
