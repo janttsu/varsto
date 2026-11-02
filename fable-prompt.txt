@@ -1,4 +1,5 @@
-Tarkista Varston haara integrate/review-20261031, kärki 8ed2c84b.
+Tarkista Varston haara integrate/review-20261031.
+Daily-ajon koodi on 8ed2c84b. handover.md on sitä seuraavassa commitissa.
 Älä mergeä mainiin. Älä tee releasea. Älä käynnistä dailyä
 publish=true ennen kuin Linux- ja macOS-paketit ovat oikeasti
 artefakteina. Älä commitoi Clauden jättämiä kuvakaappauksia,

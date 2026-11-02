@@ -1,6 +1,8 @@
 # Varsto handover 2026-11-02
 
-Integraatiohaara on `integrate/review-20261031`, kärki `8ed2c84b`.
+Integraatiohaara on `integrate/review-20261031`.
+Daily-ajo käytti koodicommitia `8ed2c84b`.
+Tämä tiedosto on sitä seuraavassa commitissa.
 Sitä ei ole mergetty `main`-haaraan. Releasea ei ole tehty.
 Julkista rolling-tagia `daily` ei ole päivitetty tästä haarasta:
 daily-ajot käynnistettiin `publish=false`.
@@ -18,7 +20,7 @@ joita ei ole cherry-pickattu takaisin yksittäisiin haaroihin.
 
 | Haara | Kärki | Mitä |
 |---|---|---|
-| `integrate/review-20261031` | `8ed2c84b` | kaikki alla olevat, plus daily-käännöksen korjaukset |
+| `integrate/review-20261031` | `8ed2c84b` ja sen jälkeinen handover | kaikki alla olevat, plus daily-käännöksen korjaukset |
 | `fix/engine-pull-safety` | `3d9bcdcb` | ENGINE-1…3 |
 | `fix/disks-insert-cleanup` | `56fa052f` | disks-1 |
 | `fix/membership-revocation` | `05f8d50e` | membership-1…4 |
