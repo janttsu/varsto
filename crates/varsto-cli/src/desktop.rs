@@ -5288,9 +5288,10 @@ mod tests {
 
     /// A connected socket whose receive window was shrunk before connect,
     /// so a large response cannot hide in the buffer. Plain `connect` on
-    /// other systems, where the stall is only best-effort.
+    /// other systems, where the stall is only best-effort. `SOCK_CLOEXEC`
+    /// and `sockaddr_in` without `sin_len` are Linux; macOS is the other path.
     fn connect_small_window(port: u16) -> std::net::TcpStream {
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
         {
             use std::os::fd::FromRawFd;
             unsafe {
@@ -5326,7 +5327,7 @@ mod tests {
                 std::net::TcpStream::from_raw_fd(fd)
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(not(target_os = "linux"))]
         {
             std::net::TcpStream::connect(("127.0.0.1", port)).unwrap()
         }
