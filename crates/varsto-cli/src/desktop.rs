@@ -2952,6 +2952,46 @@ fn background(input: &Value) -> bool {
         .unwrap_or(false)
 }
 
+/// Says on every folder row how this device stands with the folder's key:
+/// `access` is `member` (the key is held), `none` (not asked), `requested`
+/// (an owner has not answered) or `approved` (answered; the key arrives with
+/// the next sync); `access_words` are the six words the owner compares.
+/// From this device's copy of the records, no network per poll.
+fn add_folder_access(status: &mut Value, engine: &mut Engine) {
+    let keyless: Vec<String> = status["folders"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter(|f| f["has_key"] == json!(false))
+                .filter_map(|f| f["folder_id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let own = match engine.f3_own_access(&keyless) {
+        Ok(list) => list,
+        Err(e) => {
+            log::debug!("folder access not checked: {e:#}");
+            Vec::new()
+        }
+    };
+    let Some(rows) = status["folders"].as_array_mut() else {
+        return;
+    };
+    for f in rows {
+        if f["has_key"] != json!(false) {
+            f["access"] = json!("member");
+            continue;
+        }
+        let found = own
+            .iter()
+            .find(|o| f["folder_id"].as_str() == Some(o.folder_id.as_str()));
+        f["access"] = json!(found.map_or("none", |o| o.access.as_str()));
+        if let Some(o) = found {
+            f["access_words"] = json!(o.fingerprint);
+        }
+    }
+}
+
 fn api_unlocked(
     engine: &mut Engine,
     service: &mut ServiceState,
@@ -2971,6 +3011,7 @@ fn api_unlocked(
                 Ok(_) => {}
                 Err(e) => log::debug!("recovery copies not checked: {e:#}"),
             }
+            add_folder_access(&mut v, engine);
             let waiting = engine.records_waiting3();
             if waiting > 0 {
                 v["records_waiting"] = json!(waiting);
@@ -4761,6 +4802,83 @@ mod tests {
         assert_eq!(of("camera").mode, varsto_core::vault::FolderMode::SendOnly);
         assert!(!of("notes").selective);
         assert_eq!(of("notes").mode, varsto_core::vault::FolderMode::Normal);
+    }
+
+    /// A device that joined with the vault words sees a folder's name and
+    /// holds no key of it: the status row says so, whether it has asked and
+    /// the six words, and the refusal to attach points at the page as well
+    /// as at the command line.
+    #[test]
+    fn status_rows_say_whether_the_folder_key_is_held() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path();
+        let storage = StorageSpec::LocalDir {
+            name: "box".into(),
+            path: t.join("box"),
+            cold: false,
+            carrier: false,
+            place: String::new(),
+            min_free: None,
+        };
+        std::fs::create_dir_all(t.join("box")).unwrap();
+        let pass = "correct horse battery staple";
+        let (mut a, key) = Engine::init(&t.join("a"), "laptop", pass).unwrap();
+        a.add_storage(storage.clone()).unwrap();
+        a.add_folder("camera", &t.join("a-camera")).unwrap();
+        a.sync(None).unwrap();
+        let mut b = Engine::join(&t.join("b"), "phone", pass, &key, storage).unwrap();
+        let mut sb = ServiceState::default();
+        let row = |e: &mut Engine, s: &mut ServiceState| -> Value {
+            let v = api_unlocked(e, s, Method::Get, "/api/status", "", &json!({})).unwrap();
+            let rows = v["folders"].as_array().unwrap();
+            rows.iter().find(|f| f["name"] == "camera").unwrap().clone()
+        };
+
+        // The owner holds the key; the other device sees the name only.
+        let mut sa = ServiceState::default();
+        let own = row(&mut a, &mut sa);
+        assert_eq!(own["has_key"], true);
+        assert_eq!(own["access"], "member");
+        let before = row(&mut b, &mut sb);
+        assert_eq!(before["has_key"], false);
+        assert_eq!(before["access"], "none");
+        let err = attach_request(
+            &mut b,
+            &json!({"name_or_id": "camera", "path": t.join("b-camera"), "plain": true}),
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("holds no key of folder camera"), "{msg}");
+        assert!(msg.contains("varsto folder request camera"), "{msg}");
+        assert!(msg.contains("Request access"), "{msg}");
+
+        // Asking changes the row and keeps the words the owner compares.
+        let asked = f3_call(
+            &mut b,
+            &mut sb,
+            Method::Post,
+            "/api/folder/request",
+            "",
+            json!({"folder": before["folder_id"]}),
+        )
+        .unwrap();
+        let waiting = row(&mut b, &mut sb);
+        assert_eq!(waiting["has_key"], false);
+        assert_eq!(waiting["access"], "requested");
+        assert_eq!(waiting["access_words"], asked["fingerprint"]);
+
+        // After the owner's approval and the next sync the key is held.
+        a.f3_approve(
+            "camera",
+            "phone",
+            None,
+            Some(asked["fingerprint"].as_str().unwrap()),
+        )
+        .unwrap();
+        b.sync(None).unwrap();
+        let after = row(&mut b, &mut sb);
+        assert_eq!(after["has_key"], true);
+        assert_eq!(after["access"], "member");
     }
 
     /// A real server on a free port with a locked (engine-less) state.
