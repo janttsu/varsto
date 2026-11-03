@@ -360,15 +360,12 @@ pub fn new_partuuid() -> String {
 /// filesystem label, $5 owner uid:gid, $6 inode ratio, $7 partition start
 /// (1 MiB) and $8 the `sgdisk` partition type code, both from
 /// `diskformat`, which builds the same commands as a pure list (a test
-/// keeps the two equal). It wipes every signature (partitions first),
+/// keeps the two equal). It
 /// writes a new GPT (with its protective MBR) with one Linux partition
 /// from 1 MiB to the end under the UUID chosen beforehand, waits for udev to
 /// show it and makes an ext4 filesystem owned by the user with no blocks
 /// reserved for root (the pool keeps its own reserve).
 pub const INIT_SCRIPT: &str = r#"set -eu
-echo "step: wipe signatures"
-for p in $(lsblk -nrpo PATH "$1" | tail -n +2); do wipefs -a -q "$p" || true; done
-wipefs -a -q "$1"
 echo "step: new GPT partition table"
 sgdisk -Z "$1" >/dev/null 2>&1 || true
 sgdisk -o "$1" >/dev/null
@@ -553,7 +550,7 @@ pub fn prepare_drive(
     label: &str,
     owner: (u32, u32),
 ) -> Result<InitOutcome> {
-    for tool in ["wipefs", "sgdisk", "mkfs.ext4", "udevadm", "lsblk"] {
+    for tool in ["sgdisk", "mkfs.ext4", "udevadm", "lsblk"] {
         if !r.has(tool) {
             bail!(
                 "{tool} is missing: install {} first",
@@ -1178,14 +1175,7 @@ mod tests {
         let u2 = uuid.clone();
         let mut fake = Fake {
             calls: vec![],
-            programs: vec![
-                "wipefs",
-                "sgdisk",
-                "mkfs.ext4",
-                "udevadm",
-                "lsblk",
-                "pkexec",
-            ],
+            programs: vec!["sgdisk", "mkfs.ext4", "udevadm", "lsblk", "pkexec"],
             uid: 1000,
             answer: Box::new(move |a: &[String]| {
                 if a[0] == "lsblk" {
@@ -1272,7 +1262,7 @@ mod tests {
     fn prepare_refuses_a_path_that_is_not_a_device_before_running_anything() {
         let mut fake = Fake {
             calls: vec![],
-            programs: vec!["wipefs", "sgdisk", "mkfs.ext4", "udevadm", "lsblk", "sudo"],
+            programs: vec!["sgdisk", "mkfs.ext4", "udevadm", "lsblk", "sudo"],
             uid: 1000,
             answer: Box::new(|_| ok("")),
         };
@@ -1286,7 +1276,7 @@ mod tests {
     fn prepare_needs_the_tools_and_reports_a_failed_step() {
         let mut fake = Fake {
             calls: vec![],
-            programs: vec!["wipefs", "mkfs.ext4", "udevadm", "lsblk", "sudo"],
+            programs: vec!["mkfs.ext4", "udevadm", "lsblk", "sudo"],
             uid: 1000,
             answer: Box::new(|_| ok("")),
         };
@@ -1295,7 +1285,7 @@ mod tests {
         assert!(fake.calls.is_empty());
         let mut fake = Fake {
             calls: vec![],
-            programs: vec!["wipefs", "sgdisk", "mkfs.ext4", "udevadm", "lsblk", "sudo"],
+            programs: vec!["sgdisk", "mkfs.ext4", "udevadm", "lsblk", "sudo"],
             uid: 1000,
             answer: Box::new(|_| Output {
                 ok: false,
