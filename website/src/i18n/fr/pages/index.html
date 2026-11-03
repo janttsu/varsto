@@ -35,17 +35,17 @@ description: Varsto : synchronisation, partage et sauvegarde chiffrés de bout 
     <h2 id="teams">Pour les équipes</h2>
     <p>Une organisation ajoute au-dessus d’un coffre la couche dont une entreprise a besoin : des administrateurs approuvent les appareils de personnes nommées après avoir comparé avec elles une empreinte de six mots, retirent une personne avec tous ses appareils en une seule étape (les appareils restants reçoivent de nouvelles clés), définissent ce que les membres peuvent faire seuls, et tiennent un journal de tout cela, signé par leurs appareils et chaîné. La clé racine qui nomme les administrateurs tient en 24 mots sur papier, jamais sur un appareil. Un coffre sans organisation n’en voit rien. <a href="{{L}}features/#organizations">Organisations</a>.</p>
 
-    <h2 id="next">Et ensuite</h2>
-    <p class="note">Intégré à la branche principale, nouveau dans la version 0.0.1-alpha.14 :</p>
+    <h2 id="next">Nouveau dans la version {{RELEASED}}</h2>
+    <p class="note">Le format de stockage 3 et ce qui l’accompagne. Un coffre créé avec la version 0.0.1-alpha.15 ou une version plus ancienne doit être recréé :</p>
     <ul>
-      <li>Une corbeille commune à tout le coffre, restaurable sur chaque appareil, et l’historique des versions des fichiers.</li>
-      <li>Une seconde sauvegarde indépendante avec restic : un appareil conserve un miroir en clair du coffre et restic le sauvegarde dans un dépôt extérieur à vos stockages, restaurable avec restic seul.</li>
-      <li>Des imports depuis des dépôts git-annex, des disques cloud (via rclone) et des dossiers locaux, chaque fichier étant vérifié par son empreinte.</li>
-      <li>Des invitations par code QR et des liens <code>varsto://</code> pour le partage et l’appairage.</li>
-      <li>Le vidage d’un stockage dans la limite d’un budget quotidien, et des quotas de stockage.</li>
-      <li>Une vérification continue de la dégradation silencieuse de chaque copie sur vos stockages et vos disques, avec réparation à partir d’une autre copie.</li>
-      <li>Le mappage de ports du routeur (PCP, NAT-PMP, UPnP) pour le pair à pair.</li>
-      <li>La sécurité des dossiers : une protection contre les suppressions massives, des dossiers en envoi seul ou en réception seule, et des règles d’exclusion.</li>
+      <li>Format de stockage 3 : un registre de paquets plutôt que de blocs, des enregistrements signés, des cartes de blocs par dossier et des manifestes de base plus deltas.</li>
+      <li>Accès aux dossiers par approbation : un appareil entré avec les mots du coffre demande un dossier (<code>varsto folder request</code>), un propriétaire compare six mots sur les deux appareils et approuve.</li>
+      <li>Mots de récupération : un second jeu de 24 mots et une copie de récupération de chaque clé de dossier, pour rouvrir un coffre même si tous les appareils sont perdus.</li>
+      <li>Le service de rendez-vous (<code>https://varsto.net/rv</code> ou le vôtre) : les appareils se trouvent d’un réseau à l’autre, les liens d’appairage <code>rv=</code> fonctionnent et un relais chiffré de bout en bout est le dernier recours. Tout fonctionne sans lui.</li>
+      <li>Travailler hors ligne : rejoindre un coffre sans joindre de stockage, changements de membres gardés sur l’appareil jusqu’à ce qu’un stockage réponde, et un stockage injoignable ne fait plus échouer toute une synchronisation.</li>
+      <li>Une seule page Import, l’import de torrents plus gros que le disque (<code>varsto import torrent</code>) et de chaînes YouTube dans des dossiers (<code>varsto import youtube</code>).</li>
+      <li>Une boîte aux lettres qui porte des blocs d’un disque posé vers un disque de pool ou un stockage absent, et <code>varsto service remember</code> sur les serveurs sans session de bureau.</li>
+      <li>Un APK Android signé pour la publication, que les versions suivantes mettent à jour sur place. La clé de signature est nouvelle : désinstallez d’abord une version debug antérieure.</li>
     </ul>
 
     <h2 id="status">État des lieux, en toute honnêteté</h2>
