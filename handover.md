@@ -1,11 +1,21 @@
-# Varsto handover 2026-11-02
+# Varsto handover 2026-11-03
 
 Integraatiohaara on `integrate/review-20261031`.
-Daily-ajo käytti koodicommitia `8ed2c84b`.
-Tämä tiedosto on sitä seuraavassa commitissa.
 Sitä ei ole mergetty `main`-haaraan. Releasea ei ole tehty.
-Julkista rolling-tagia `daily` ei ole päivitetty tästä haarasta:
-daily-ajot käynnistettiin `publish=false`.
+
+Julkaistu daily on yhä commitista `dae29628`
+(`dae296281a88eff2bccf5473d8b4e2ae13fe9640`).
+Tagi `daily`, julkaisu "Daily build 20261028-dae2962",
+julkaistu 2026-10-28 19:08 UTC.
+2.11.2026 aikataulutettu ajo
+[41429125275](https://github.com/janttsu/varsto/actions/runs/41429125275)
+onnistui 4 minuutissa, koska `main` ei ollut liikkunut:
+build, ipa ja paketointi jäivät väliin. Uutta dailya ei syntynyt.
+
+Katselmushaaran daily-ajot käynnistettiin `publish=false`.
+Ne eivät ole korvanneet tagia `daily`. Viimeisin niistä käytti
+koodicommitia `8ed2c84b`. Tämä tiedosto on sen jälkeisissä
+handover-commiteissa.
 
 Notion-lähde: Laaja koodikatselmus 2026-10-30, sivu
 `409c3713-dc2e-8125-b280-cafc44804c80`, main `dae29628`.
@@ -83,5 +93,6 @@ sisällä näitä korjauksia.
 - Jäsenyyden jäljellä olevat reiät: seq-katon alle jäävä aukko,
   `Membership::join` ilman ylläpitäjälistaa, toisen holvin jäsen
   ei sovella rekisterikattoa. Jo jaettua avainta ei voi perua (spec 21).
-- iOS-simulaattori ja iOS-ipa epäonnistuivat samassa ajossa runner-jonon
-  takia. Niitä ei pyydetty tähän tarkistukseen.
+- iOS-simulaattori peruuntui samassa ajossa, koska runneria ei saatu.
+  Allekirjoittamaton ipa sen sijaan valmistui: artefakti
+  `Varsto-ios-unsigned`, noin 13 Mt. Sitä ei pyydetty tähän tarkistukseen.
