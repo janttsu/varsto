@@ -1,6 +1,6 @@
 ---
 title: Alpha.16: storage format 3, folder access by approval and a rendezvous service
-date: 2026-11-03
+date: 2026-11-04
 summary: A new storage format with a pack-level ledger, signed records and recovery words, so existing vaults must be recreated; folders are opened to a device by an owner's approval; devices find each other through an optional rendezvous service; joining and membership changes work offline; and imports from torrents and YouTube.
 ---
 Alpha.16 changes the storage format again. That is the main thing to know before updating: vaults made by alpha.15 or earlier cannot be opened by this version and have to be recreated. The rest of the release is a long list of changes in how devices join, find each other and cope with a bad network, a new Import page, and a large set of fixes and hardening from a review of the new format.
