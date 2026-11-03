@@ -4717,6 +4717,35 @@ impl Engine {
             // again; a merge that resolves must not leave it to be written
             // over a local edit the next scan has already recorded.
             state.pending_remote.remove(&path);
+            // A copy queued to bring back the shared version of a file this
+            // device no longer holds (a read-only folder's guard moved the
+            // edit aside) has the version this device already records, so
+            // the merge would keep the "local" state and the file would
+            // stay missing. Fetch it; the placing guard still refuses to
+            // write over anything that appeared at the path since.
+            let restore = !remote.deleted
+                && !self.mount_is_encrypted(&rec.folder_id)
+                && !state.local_index.contains_key(&path)
+                && state
+                    .files
+                    .get(&path)
+                    .is_some_and(|l| !l.deleted && l.version == remote.version);
+            if restore {
+                if let Err(e) = self.apply_remote(
+                    &rec,
+                    &fk,
+                    &root,
+                    &mut state,
+                    remote.clone(),
+                    &storages,
+                    &mut report,
+                ) {
+                    log::warn!("{path} was not restored: {e}");
+                    report.files_unavailable.push(format!("{path}: {e}"));
+                    state.pending_remote.entry(path).or_insert(remote);
+                }
+                continue;
+            }
             self.merge_or_defer(
                 &rec,
                 &fk,
