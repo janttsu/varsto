@@ -122,31 +122,26 @@ description: What Varsto does: a signed ledger that counts every copy, your own 
       <div>
         <p>The background service starts at login (a systemd user unit on Linux, a launch agent on macOS, the tray app on Windows) and is set up by the first command once a vault exists. It watches your folders and syncs changes within seconds, with a periodic catch-up for changes made elsewhere; there are no sync, refresh or check buttons to press. The same small binary provides the command line and the local interface, served only to your computer. Updates are looked for automatically and offered only when a newer version exists; installing one checks the release signature and the GitHub checksums, and the macOS app replaces itself from the signed disk image. <code>varsto transfers --watch</code> shows the uploads, downloads and peer traffic running now.</p>
         <p>Every device can keep a folder in selective mode: the full tree is visible as placeholders, a file is downloaded when you ask for it, and <em>Free up space</em> turns it back into a placeholder once it is safely stored elsewhere. Placeholders are never mistaken for deletions. Right-click <em>Download</em> and <em>Free up space</em> work in Finder, Explorer and the common Linux file managers, and double-clicking a placeholder opens the file; native placeholders (File Provider, Cloud Files) come later. Thumbnails are generated once, encrypted under the folder key and shared with your other devices, so a phone shows previews of pictures it never downloaded.</p>
-        <p class="note">Android runs the same encrypted core; the iOS shell builds and runs in the Simulator only. The Android alpha is a sideloadable APK with a compact file list (a long press selects files to download or free). A folder kept encrypted on the phone holds only encrypted blocks there, the same ones your storages hold; the app shows pictures, video (with seeking), audio and text from such folders in its own viewer, decrypted in memory and never written to the phone, while PDFs and other files open in another app, which receives a decrypted copy that Varsto removes when it locks or restarts. Camera upload sends new photos and videos to a folder in YYYY/MM subfolders, optionally only on Wi-Fi or while charging. iOS has neither yet and has not run on a real device.</p>
+        <p class="note">Android runs the same encrypted core; the iOS shell builds and runs in the Simulator only. The Android alpha is a sideloadable release-signed APK (an earlier debug APK has to be uninstalled first, which removes that device's copy of the vault) with a compact file list (a long press selects files to download or free). A folder kept encrypted on the phone holds only encrypted blocks there, the same ones your storages hold; the app shows pictures, video (with seeking), audio and text from such folders in its own viewer, decrypted in memory and never written to the phone, while PDFs and other files open in another app, which receives a decrypted copy that Varsto removes when it locks or restarts. Camera upload sends new photos and videos to a folder in YYYY/MM subfolders, optionally only on Wi-Fi or while charging. iOS has neither yet and has not run on a real device.</p>
       </div>
     </section>
 
-    <h2 id="next">After {{RELEASED}}</h2>
-    <p class="note">Built on the main branch new in 0.0.1-alpha.14. The <a href="../docs/alpha-0-format.html">storage format</a> describes each of them in full.</p>
+    <h2 id="next">New in {{RELEASED}}</h2>
+    <p class="note">Storage format 3 and what comes with it. The <a href="../docs/alpha-0-format.html">storage format</a> describes each of them in full. Vaults made by 0.0.1-alpha.15 or earlier must be recreated.</p>
     <ul>
-      <li>A vault-wide trash: a deleted file keeps its last version, restorable on any device for the trash days.</li>
-      <li>Version history of files, with the days of history you choose.</li>
-      <li>A second, independent backup with restic into a repository outside your storages, restorable with restic alone.</li>
-      <li>Imports from git-annex repositories (disk by disk, naming the disk to insert next), from cloud drives through rclone, and from local directories, every file checked against its hash.</li>
-      <li>A rolling bit-rot scrub of every copy on your storages and attached disks and of the synced files on the device, with repair from another copy.</li>
-      <li>QR invitations and <code>varsto://</code> links for sharing and pairing.</li>
-      <li>Draining a storage within a daily budget, and storage quotas.</li>
-      <li>Router port mapping (PCP, NAT-PMP, UPnP) for peer-to-peer.</li>
-      <li>Folder safety: a folder marker, a mass-deletion guard, send-only and receive-only folders.</li>
-      <li>Ignore rules (<code>.varstoignore</code>, shared or device-local).</li>
-      <li>File metadata: permissions, symbolic links, extended attributes and ownership.</li>
-      <li>Preparing whole drives for disk pools, fetch plans and the next disk to dock; live activity between devices; redacted local debug logs (encryption at rest later).</li>
+      <li>Storage format 3: a ledger of packs instead of blocks, signed records, folder block maps and base-plus-delta manifests.</li>
+      <li>Folder access by approval: a device that joined with the vault words asks for a folder (<code>varsto folder request</code>), an owner compares six words on both devices and approves it.</li>
+      <li>Recovery words: a second set of 24 words and a recovery copy of every folder key, so a vault can be reopened when every device is lost.</li>
+      <li>The rendezvous service (<code>https://varsto.net/rv</code> or your own): peers find each other across networks, <code>rv=</code> pairing links work, and an end-to-end encrypted relay is the last route. Everything works without it.</li>
+      <li>Working offline: joining by pairing without reaching a storage, membership changes kept on the device until a storage answers, and one unreachable storage no longer fails a whole sync.</li>
+      <li>One Import page, torrent imports for torrents larger than the disk (<code>varsto import torrent</code>) and YouTube channels into folders (<code>varsto import youtube</code>).</li>
+      <li>A mailbox that carries blocks from a docked disk to a pool disk or storage that is away, and <code>varsto service remember</code> on servers without a desktop session.</li>
+      <li>A release-signed Android APK that later releases update in place. It has a new signing key: uninstall an earlier debug build first.</li>
     </ul>
     <h2>Also in the design</h2>
     <ul>
       <li>Per-device storage credentials, rotated at the provider when a device is removed.</li>
       <li>Re-encrypting existing data after a device is removed.</li>
-      <li>Incremental manifests.</li>
       <li>DHT peer discovery.</li>
       <li>Proof-of-storage challenges.</li>
       <li>Erasure coding across storages.</li>

@@ -13,7 +13,11 @@
 //! Folder records, folder epochs, grants and escrow pass step (3) for any
 //! device of the vault: whether their writer was an owner is decided on
 //! the body (the folder record replay, the epoch the grant names), where
-//! the epoch and the entries' stamps are known.
+//! the epoch and the entries' stamps are known. A device removed from the
+//! vault is cut off by sequence, not by stamp: its `folder`, `grant` and
+//! `escrow` records count only through the seq each stream had at removal
+//! (`DeviceRegistry::registry_cuts`, spec 77.20). A later record, whatever
+//! stamp it carries, is refused.
 
 use super::devices::DeviceRegistry;
 use super::folders::FolderRegistry;
@@ -179,6 +183,43 @@ impl RecordTrust for Trust<'_> {
                 _ => !revoked,
             },
             _ => !revoked && section9_allows(WriterClass::FullVault, kind),
+        }
+    }
+
+    fn seq_allowed(
+        &self,
+        device: &Id16,
+        kind: Kind,
+        scope: &Id16,
+        seq: u64,
+        epoch: Option<u32>,
+        recipient: Option<Id16>,
+    ) -> bool {
+        if !self.revoked.contains(device) {
+            return true;
+        }
+        // Vault grants are already refused above. Folder epochs are named
+        // by the epoch number, not by a per-device stream.
+        if !matches!(kind, Kind::Folder | Kind::Grant | Kind::Escrow) {
+            return true;
+        }
+        if kind == Kind::Grant && *scope == VAULT_SCOPE {
+            return true;
+        }
+        // A revocation that predates the cut-off field carries none.
+        let Some(cuts) = self.devices.registry_cuts.get(device) else {
+            return true;
+        };
+        let epoch = epoch.unwrap_or(0);
+        let recipient = recipient.unwrap_or([0u8; 16]);
+        match cuts.iter().find(|c| {
+            c.kind == kind.code()
+                && c.scope == *scope
+                && c.epoch == epoch
+                && c.recipient == recipient
+        }) {
+            Some(c) => seq <= c.seq,
+            None => false,
         }
     }
 }

@@ -681,6 +681,108 @@ fn a_connection_that_never_finishes_its_handshake_is_closed_at_the_deadline() {
 }
 
 #[test]
+fn a_trickle_of_bytes_does_not_stretch_the_handshake_deadline() {
+    use std::io::{Read, Write};
+    let (a, b) = (Dev::new(1), Dev::new(2));
+    let srv = tls_server(&a, responder_for(&a, &[&b]));
+    let mut sock = std::net::TcpStream::connect(srv.addr).unwrap();
+    sock.set_nodelay(true).unwrap();
+    sock.set_nonblocking(true).unwrap();
+    // A handshake record header whose length is not filled: each new byte
+    // is progress, so rustls `complete_io` stays in its loop. The deadline
+    // has to be checked there, not only when that call returns.
+    sock.write_all(&[0x16, 0x03, 0x01, 0x20, 0x00]).unwrap();
+    let started = std::time::Instant::now();
+    let mut buf = [0u8; 8];
+    let limit = tls::HANDSHAKE_DEADLINE + Duration::from_secs(3);
+    loop {
+        let _ = sock.write(&[0]);
+        match sock.read(&mut buf) {
+            Ok(0) => break,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(_) => break,
+            Ok(_) => {}
+        }
+        assert!(
+            started.elapsed() < limit,
+            "still open after {:?}",
+            started.elapsed()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed > Duration::from_secs(4),
+        "closed too soon ({elapsed:?}); the record should stay unfinished"
+    );
+    assert!(elapsed < limit, "closed after {elapsed:?}");
+    let (s, _) = Client::new(b.device(), b.tls.clone())
+        .tcp_get(
+            srv.addr,
+            &a.tls.sha256,
+            &a.device(),
+            "/p2p/info",
+            Duration::from_secs(3),
+        )
+        .unwrap();
+    assert_eq!(s, 200);
+}
+
+#[test]
+fn one_address_cannot_hold_every_connection_before_the_handshake() {
+    let (a, b) = (Dev::new(1), Dev::new(2));
+    let srv = tls_server(&a, responder_for(&a, &[&b]));
+    let held: Vec<_> = (0..p2p::MAX_UNAUTH_PER_IP)
+        .map(|_| std::net::TcpStream::connect(srv.addr).unwrap())
+        .collect();
+    // The accept loop reserves a slot per connection; wait until it has.
+    std::thread::sleep(Duration::from_millis(500));
+    let client = Client::new(b.device(), b.tls.clone());
+    let started = std::time::Instant::now();
+    let refused = client.tcp_get(
+        srv.addr,
+        &a.tls.sha256,
+        &a.device(),
+        "/p2p/info",
+        Duration::from_secs(3),
+    );
+    assert!(
+        refused.is_err(),
+        "an address at the cap is still served before it authenticates"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the extra connection was held {:?}",
+        started.elapsed()
+    );
+    drop(held);
+    // The slots free when those handshakes end (the peer hung up).
+    let until = std::time::Instant::now() + Duration::from_secs(3);
+    let mut served = None;
+    while std::time::Instant::now() < until {
+        match client.tcp_get(
+            srv.addr,
+            &a.tls.sha256,
+            &a.device(),
+            "/p2p/info",
+            Duration::from_secs(3),
+        ) {
+            Ok(v) => {
+                served = Some(v);
+                break;
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
+    let (s, _) = served.expect("a directory device is served once a slot is free");
+    assert_eq!(s, 200);
+}
+
+#[test]
 fn a_token_of_another_tls_connection_is_refused() {
     let (a, b) = (Dev::new(1), Dev::new(2));
     let srv = tls_server(&a, responder_for(&a, &[&b]));

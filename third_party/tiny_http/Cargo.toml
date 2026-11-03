@@ -1,0 +1,24 @@
+# Vendored from tiny_http 0.12.0 (MIT OR Apache-2.0) so accepted sockets
+# can be given a read and a write timeout. tiny_http does not set one, and
+# a timeout on the listening socket makes `accept` fail.
+[package]
+name = "tiny_http"
+version = "0.12.0"
+edition = "2018"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Low level HTTP server library"
+
+[dependencies]
+ascii = "1.0"
+chunked_transfer = "1"
+httpdate = "1.0.2"
+log = "0.4.4"
+
+# Declared so the upstream `cfg`s type-check. Not implemented in this copy:
+# the local API does not speak TLS.
+[features]
+default = []
+ssl = ["ssl-openssl"]
+ssl-openssl = []
+ssl-rustls = []

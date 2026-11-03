@@ -146,10 +146,19 @@ TXT
 done
 
 # Android APK, if the app has been built (apps/android/build.sh).
-apk="$root/apps/android/app/build/outputs/apk/debug/app-debug.apk"
-if [ -f "$apk" ]; then
-  echo "== Android APK"
-  cp "$apk" "$out/varsto-$version-android-debug.apk"
+# Publish the release APK. The debug-named copy is the same bytes: the daily
+# list's stable name still ends in android-debug.apk.
+rel=""
+for f in "$root/apps/android/app/build/outputs/apk/release"/*.apk; do
+  [ -f "$f" ] || continue
+  case "$f" in *-unsigned.apk) ;; *) rel="$f" ;; esac
+done
+if [ -n "$rel" ]; then
+  echo "== Android APK (release)"
+  cp "$rel" "$out/varsto-$version-android.apk"
+  cp "$rel" "$out/varsto-$version-android-debug.apk"
+elif [ -f "$root/apps/android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+  echo "== Android debug APK present; not publishing it (a release build needs the VARSTO_ANDROID_* signing variables)" >&2
 fi
 
 "$root/website/assemble-release.sh" "$out"

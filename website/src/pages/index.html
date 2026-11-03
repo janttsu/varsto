@@ -35,17 +35,17 @@ description: Varsto: end-to-end encrypted sync, sharing and backup on storage yo
     <h2 id="teams">For teams</h2>
     <p>An organization adds the layer a company needs on top of a vault: administrators approve devices for named people after comparing a six-word fingerprint with them, remove a person with every device of theirs in one step (the remaining devices get new keys), set what members may do on their own, and keep a log of it that is signed by their devices and chained. The root key that appoints administrators is 24 words on paper, never on a device. A vault without an organization sees none of it. <a href="features/#organizations">Organizations</a>.</p>
 
-    <h2 id="next">What is next</h2>
-    <p class="note">Built on the main branch new in 0.0.1-alpha.14:</p>
+    <h2 id="next">New in {{RELEASED}}</h2>
+    <p class="note">Storage format 3 and what comes with it. Vaults made by 0.0.1-alpha.15 or earlier must be recreated:</p>
     <ul>
-      <li>A vault-wide trash restorable on every device, and version history of files.</li>
-      <li>A second, independent backup with restic: one device keeps a plain mirror of the vault and restic backs it up into a repository outside your storages, restorable with restic alone.</li>
-      <li>Imports from git-annex repositories, cloud drives (through rclone) and local directories, every file checked against its hash.</li>
-      <li>QR invitations and <code>varsto://</code> links for sharing and pairing.</li>
-      <li>Draining a storage within a daily budget, and storage quotas.</li>
-      <li>A rolling bit-rot scrub of every copy on your storages and disks, with repair from another copy.</li>
-      <li>Router port mapping (PCP, NAT-PMP, UPnP) for peer-to-peer.</li>
-      <li>Folder safety: a mass-deletion guard, send-only and receive-only folders, and ignore rules.</li>
+      <li>Storage format 3: a ledger of packs instead of blocks, signed records, folder block maps and base-plus-delta manifests.</li>
+      <li>Folder access by approval: a device that joined with the vault words asks for a folder (<code>varsto folder request</code>), an owner compares six words on both devices and approves it.</li>
+      <li>Recovery words: a second set of 24 words and a recovery copy of every folder key, so a vault can be reopened when every device is lost.</li>
+      <li>The rendezvous service (<code>https://varsto.net/rv</code> or your own): peers find each other across networks, <code>rv=</code> pairing links work, and an end-to-end encrypted relay is the last route. Everything works without it.</li>
+      <li>Working offline: joining by pairing without reaching a storage, membership changes kept on the device until a storage answers, and one unreachable storage no longer fails a whole sync.</li>
+      <li>One Import page, torrent imports for torrents larger than the disk (<code>varsto import torrent</code>) and YouTube channels into folders (<code>varsto import youtube</code>).</li>
+      <li>A mailbox that carries blocks from a docked disk to a pool disk or storage that is away, and <code>varsto service remember</code> on servers without a desktop session.</li>
+      <li>A release-signed Android APK that later releases update in place. It has a new signing key: uninstall an earlier debug build first.</li>
     </ul>
 
     <h2 id="status">Honest status</h2>

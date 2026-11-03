@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
 # Runs on a fresh Ubuntu build instance: installs a JDK, the Android SDK
-# (platform 35, build-tools 34 and 35, NDK 27) and Rust, then builds the debug APK.
+# (platform 35, build-tools 34 and 35, NDK 27) and Rust, then builds the APK.
+# With the four VARSTO_ANDROID_* variables set, build.sh produces a release
+# APK; otherwise a debug APK, which this script does not publish.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -28,6 +30,17 @@ df -h / | tail -1
 free -m | head -2
 apps/android/build.sh 2>&1 | grep -vE "^(\s*Compiling|\s*Downloading|\s*Downloaded|\s*Updating|\s*Locking)" | tail -80
 mkdir -p dist/android
-cp apps/android/app/build/outputs/apk/debug/app-debug.apk "dist/android/varsto-$version-android-debug.apk"
+rel=""
+for f in apps/android/app/build/outputs/apk/release/*.apk; do
+  [ -f "$f" ] || continue
+  case "$f" in *-unsigned.apk) ;; *) rel="$f" ;; esac
+done
+if [ -n "$rel" ]; then
+  cp "$rel" "dist/android/varsto-$version-android.apk"
+  cp "$rel" "dist/android/varsto-$version-android-debug.apk"
+else
+  echo "no signed release APK; not publishing the debug build" >&2
+  exit 1
+fi
 (cd dist/android && sha256sum ./*.apk > SHA256SUMS)
 ls -la dist/android/

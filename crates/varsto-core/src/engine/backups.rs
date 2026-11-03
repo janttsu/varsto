@@ -639,7 +639,7 @@ impl Engine {
             incomplete = self.incomplete_files(&rec, &state)?;
         }
         let mut skipped: BTreeSet<String> = incomplete;
-        skipped.extend(state.unreadable.iter().cloned());
+        skipped.extend(state.unreadable.iter().filter(|p| !p.is_empty()).cloned());
 
         // 3. The snapshot itself, written once to every storage.
         let mut current: BTreeMap<String, FileEntry> = BTreeMap::new();

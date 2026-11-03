@@ -476,7 +476,7 @@ fn a_pool_disk_lists_packs_from_the_ledger_and_tidies_unknown_ones() {
         })],
     );
     // Files another device put on the disk: P5 the ledger names (adopted),
-    // P3 no claim names (removed).
+    // P3 no claim names (kept: not seen is not a drop).
     let (p3, p5) = (env.make_pack(&[900]), env.make_pack(&[900]));
     env.claim(OTHER, "shelf", &p5, 1);
     for p in [&p3, &p5] {
@@ -485,19 +485,57 @@ fn a_pool_disk_lists_packs_from_the_ledger_and_tidies_unknown_ones() {
         fs::write(path, &p.bytes).unwrap();
     }
 
-    // Only a pack a live claim names is referenced; with a ledger that
-    // could not be brought up to date, only a pack it dropped is not.
-    let name = |p: &TestPack| hex_id(&p.id);
-    let strict = pack_referenced(&env.view, "shelf", true);
-    assert!(strict(&name(&p1)) && strict(&name(&p5)) && strict(&name(&p4)));
-    assert!(!strict(&name(&p2)) && !strict(&name(&p3)) && !strict("not hex"));
-    let lenient = pack_referenced(&env.view, "shelf", false);
-    assert!(lenient(&name(&p3)) && !lenient(&name(&p2)));
+    // A pack the ledger has not seen is kept. Only a dropped pack, past the
+    // grace period, goes, and only when the pull read every storage. The
+    // disk's own index protects a pack it lists.
+    let facts = |held, dropped, indexed, age| StrayPackFacts {
+        ledger_complete: true,
+        held,
+        dropped,
+        in_disk_index: indexed,
+        age_secs: Some(age),
+        grace_secs: CLEANUP_GRACE_SECS,
+    };
+    let old = CLEANUP_GRACE_SECS;
+    assert_eq!(
+        stray_pack_action(facts(true, false, false, old)),
+        StrayPack::Adopt
+    );
+    assert_eq!(
+        stray_pack_action(facts(false, false, false, old)),
+        StrayPack::Keep,
+        "not seen is not a tombstone"
+    );
+    assert_eq!(
+        stray_pack_action(facts(false, true, false, old - 1)),
+        StrayPack::Keep,
+        "inside the grace period"
+    );
+    assert_eq!(
+        stray_pack_action(facts(false, true, false, old)),
+        StrayPack::Delete
+    );
+    assert_eq!(
+        stray_pack_action(facts(false, true, true, old)),
+        StrayPack::Adopt,
+        "the disk index protects a dropped pack"
+    );
+    let mut partial = facts(false, true, false, old);
+    partial.ledger_complete = false;
+    partial.age_secs = None;
+    assert_eq!(
+        stray_pack_action(partial),
+        StrayPack::Keep,
+        "a partial pull deletes nothing"
+    );
 
     let (tidy, events) = tidy_disk_packs(&pool, &disk.id, &env.view, true).unwrap();
-    assert_eq!((tidy.unneeded_removed, tidy.adopted), (1, 1), "{tidy:?}");
+    assert_eq!((tidy.unneeded_removed, tidy.adopted), (0, 1), "{tidy:?}");
     assert!(events.is_empty());
-    assert!(!a.join(DATA_DIR).join(pack_key(&hex_id(&p3.id))).exists());
+    assert!(
+        a.join(DATA_DIR).join(pack_key(&hex_id(&p3.id))).exists(),
+        "a pack the ledger has not seen stays"
+    );
     assert!(a.join(DATA_DIR).join(pack_key(&hex_id(&p5.id))).exists());
 
     // The "next disk to dock" counting works on pack copies.
@@ -536,6 +574,80 @@ fn a_pool_disk_lists_packs_from_the_ledger_and_tidies_unknown_ones() {
         storage: "shelf".into(),
         pack: p1.id
     })));
+}
+
+#[test]
+fn tidy_removes_only_a_dropped_pack_past_the_grace_period() {
+    let mut env = Env::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let mounts = tmp.path().join("mounts");
+    let a = mounts.join("a");
+    fs::create_dir_all(&a).unwrap();
+    fake_space(&a);
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let pool = PoolStorage::open(&pool_spec("shelf", &mounts, 1), &home, identity()).unwrap();
+    let disk = pool.add_disk_at(&a, "A", "").unwrap();
+
+    let plant = |env: &mut Env, drop_it: bool| {
+        let p = env.make_pack(&[900]);
+        if drop_it {
+            env.claim(ME, "shelf", &p, 1);
+            env.apply(
+                ME,
+                vec![Event::PackDropped(PackOn {
+                    storage: "shelf".into(),
+                    pack: p.id,
+                })],
+            );
+        }
+        let path = a.join(DATA_DIR).join(pack_key(&hex_id(&p.id)));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, &p.bytes).unwrap();
+        (p, path)
+    };
+    let backdate = |path: &Path| {
+        let t = std::time::SystemTime::now()
+            - std::time::Duration::from_secs((CLEANUP_GRACE_SECS as u64) + 86_400);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    };
+
+    let (_, dropped_old) = plant(&mut env, true);
+    let (_, dropped_fresh) = plant(&mut env, true);
+    let (indexed, indexed_path) = plant(&mut env, true);
+    let (_, unseen) = plant(&mut env, false);
+    backdate(&dropped_old);
+    backdate(&indexed_path);
+    backdate(&unseen);
+    let mut idx = crate::pool::DiskIndex::read(&a).unwrap();
+    idx.objects
+        .insert(pack_key(&hex_id(&indexed.id)), indexed.bytes.len() as u64);
+    fs::write(
+        crate::pool::DiskIndex::path(&a),
+        serde_json::to_vec(&idx).unwrap(),
+    )
+    .unwrap();
+
+    // A pull that did not read every storage deletes nothing, even a drop.
+    let (partial, _) = tidy_disk_packs(&pool, &disk.id, &env.view, false).unwrap();
+    assert_eq!(partial.unneeded_removed, 0, "{partial:?}");
+    assert_eq!(partial.adopted, 1, "the disk index is adopted, not deleted");
+    assert!(dropped_old.exists() && dropped_fresh.exists() && unseen.exists());
+
+    let (tidy, _) = tidy_disk_packs(&pool, &disk.id, &env.view, true).unwrap();
+    assert_eq!(tidy.unneeded_removed, 1, "{tidy:?}");
+    assert!(
+        !dropped_old.exists(),
+        "a dropped pack past the grace period goes"
+    );
+    assert!(dropped_fresh.exists(), "grace period");
+    assert!(indexed_path.exists(), "disk index");
+    assert!(unseen.exists(), "not seen is not dropped");
 }
 
 #[test]
@@ -1006,6 +1118,7 @@ fn needs(targets: &[&str], rules: Option<Policy>) -> HashMap<FolderBin, DrainNee
             rules,
             targets: targets.iter().map(|s| s.to_string()).collect(),
             referenced: None,
+            state_behind: false,
             replace: false,
         },
     )]
@@ -1036,6 +1149,7 @@ fn a_drain_refuses_while_a_place_is_the_only_live_one_and_copies_packs_whole() {
         &needs(&[], None),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.packs_blocked, 1);
@@ -1050,6 +1164,7 @@ fn a_drain_refuses_while_a_place_is_the_only_live_one_and_copies_packs_whole() {
         &needs(&["s3"], None),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.refusal(), None);
@@ -1114,6 +1229,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&[], Some(two.clone())),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert!(
@@ -1127,6 +1243,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&["b2", "nas"], Some(two)),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.items[0].copy_to, vec!["b2".to_string()]); // nas holds it
@@ -1139,6 +1256,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&["nas"], Some(cloud.clone())),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert!(plan.refusal().unwrap().contains("cloud"), "{plan:?}");
@@ -1149,6 +1267,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&["nas", "b2"], Some(cloud)),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.items[0].copy_to, vec!["b2".to_string()]);
@@ -1168,6 +1287,7 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
         &needs(&[], None),
         &place_name,
         &[],
+        &ME,
     )
     .unwrap();
     assert_eq!(plan.refusal(), None);
@@ -1176,8 +1296,121 @@ fn a_drain_counts_the_copy_rules_by_the_places_a_block_keeps() {
     let mut n = needs(&[], None);
     n.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
     let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
-    let plan = drain_plan(&env.view, "b2", &tables, &n, &place_name, &[]).unwrap();
+    let plan = drain_plan(&env.view, "b2", &tables, &n, &place_name, &[], &ME).unwrap();
     assert_eq!((plan.packs_to_drop, plan.packs_blocked), (1, 0));
+}
+
+/// Device B's pack, nine blocks, the only copy. This device's file list
+/// does not name them (it can be older than the block map). The drain and
+/// a removal plan must not drop it.
+#[test]
+fn a_drain_does_not_drop_the_only_copy_when_local_state_lags_the_block_map() {
+    let mut env = Env::new();
+    for s in ["nas", "s3"] {
+        env.store(s);
+    }
+    let p = env.publish_pack(&[1000; 9], &["nas"]);
+    assert_eq!(p.members.len(), 9);
+    let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
+
+    // Local state lists nothing and is behind the map. A target takes a
+    // copy; the pack is not dropped first.
+    let mut behind = needs(&["s3"], None);
+    behind.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
+    behind.get_mut(&FOLDER).unwrap().state_behind = true;
+    let plan = drain_plan(&env.view, "nas", &tables, &behind, &place_name, &[], &ME).unwrap();
+    assert_eq!(plan.packs_to_drop, 0, "{plan:?}");
+    assert_eq!(plan.items[0].copy_to, vec!["s3".to_string()], "{plan:?}");
+    assert!(plan.items[0].shortfall.is_none(), "{plan:?}");
+
+    // Nowhere to put that copy: it stays, it is not deleted.
+    let mut stuck = needs(&[], None);
+    stuck.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
+    stuck.get_mut(&FOLDER).unwrap().state_behind = true;
+    let plan = drain_plan(&env.view, "nas", &tables, &stuck, &place_name, &[], &ME).unwrap();
+    assert_eq!(plan.packs_to_drop, 0, "{plan:?}");
+    assert_eq!(plan.packs_blocked, 1, "{plan:?}");
+    assert!(
+        plan.refusal().unwrap().contains("behind the block map")
+            || plan.refusal().unwrap().contains("no other copy"),
+        "{plan:?}"
+    );
+
+    // Caught up, and truly unused, still does not drop the only copy.
+    let mut unused = needs(&[], None);
+    unused.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
+    let plan = drain_plan(&env.view, "nas", &tables, &unused, &place_name, &[], &ME).unwrap();
+    assert_eq!((plan.packs_to_drop, plan.packs_blocked), (0, 1), "{plan:?}");
+    assert!(
+        plan.refusal().unwrap().contains("no other copy"),
+        "{plan:?}"
+    );
+    drop(tables);
+
+    // The same nine blocks also live in another pack on s3. While local
+    // state is behind the map, that place is not a reason to delete nas.
+    // Once local state has caught up, the blocks are unused and the other
+    // place is enough.
+    let data: Vec<Vec<u8>> = p.members.iter().map(|(d, _)| d.clone()).collect();
+    let q = env.pack_of(data);
+    let s3 = env.stores["s3"].clone();
+    env.write(&*s3, &q);
+    let seq = env.publish_map(ME, &[q.written(&["s3"])], Vec::new());
+    env.claim(ME, "s3", &q, seq);
+    let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
+    let mut behind = needs(&[], None);
+    behind.get_mut(&FOLDER).unwrap().referenced = Some(HashSet::new());
+    behind.get_mut(&FOLDER).unwrap().state_behind = true;
+    let plan = drain_plan(&env.view, "nas", &tables, &behind, &place_name, &[], &ME).unwrap();
+    assert_eq!(plan.packs_to_drop, 0, "{plan:?}");
+    assert!(
+        plan.refusal().unwrap().contains("behind the block map"),
+        "{plan:?}"
+    );
+    behind.get_mut(&FOLDER).unwrap().state_behind = false;
+    let plan = drain_plan(&env.view, "nas", &tables, &behind, &place_name, &[], &ME).unwrap();
+    assert_eq!(plan.packs_to_drop, 1, "{plan:?}");
+
+    // The map here has not applied B's record. B's claim that s3 holds
+    // the same pack is not a copy this device has seen, so nas is not
+    // emptied. A replica confirmation, or this device's own check, is.
+    let mut env = Env::new();
+    for s in ["nas", "s3"] {
+        env.store(s);
+    }
+    let q = env.make_pack(&[1000; 9]);
+    env.write(&*env.stores["nas"].clone(), &q);
+    env.write(&*env.stores["s3"].clone(), &q);
+    env.claim(OTHER, "nas", &q, 1);
+    env.claim(OTHER, "s3", &q, 1);
+    let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
+    let plan = drain_plan(
+        &env.view,
+        "nas",
+        &tables,
+        &needs(&["s3"], None),
+        &place_name,
+        &[],
+        &ME,
+    )
+    .unwrap();
+    assert_eq!(plan.packs_to_drop, 0, "{plan:?}");
+    assert_eq!(plan.packs_blocked, 1, "{plan:?}");
+    drop(tables);
+    env.verify(ME, "s3", &q);
+    let tables: HashMap<FolderBin, &MapTable> = [(FOLDER, &env.table)].into();
+    let plan = drain_plan(
+        &env.view,
+        "nas",
+        &tables,
+        &needs(&[], None),
+        &place_name,
+        &[],
+        &ME,
+    )
+    .unwrap();
+    assert_eq!(plan.packs_to_drop, 1, "{plan:?}");
+    assert_eq!(plan.packs_blocked, 0, "{plan:?}");
 }
 
 #[test]

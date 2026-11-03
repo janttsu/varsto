@@ -144,6 +144,11 @@
     n.dataset.kind = kind;
     n.textContent = kind === "down" ? "Reconnecting to the Varsto service\u2026" : kind === "busy" ? "The service is busy: showing what it last reported" : "";
   }
+  // The engine's "holds no key" error names a command line; the page says it
+  // plainly and alertBox offers Request access (see offerAccess).
+  var NO_KEY_ENGINE = /this device holds no key of folder (.+?)(?:: ask for it|$)/;
+  var NO_KEY_PAGE = /^This device holds no key of folder (.+)$/;
+  function noKeyMessage(m) { var x = NO_KEY_ENGINE.exec(m); return x ? "This device holds no key of folder " + x[1] : m; }
   function apiCall(method, path, body, b, loud) {
     if (b) { markBusy(b, true); }
     if (loud) { workBar(true); }
@@ -159,7 +164,7 @@
           var j = null; try { j = t ? JSON.parse(t) : {}; } catch (x) { j = null; }
           // 503 with "busy": a sync has the engine and nothing was kept for this address.
           connState(stale || (r.status === 503 && j && j.busy) ? "busy" : "ok");
-          if (!r.ok) { var err = new Error((j && j.error) || ("The Varsto service answered " + r.status + " to " + what)); err.body = j; throw err; }
+          if (!r.ok) { var err = new Error(noKeyMessage((j && j.error) || ("The Varsto service answered " + r.status + " to " + what))); err.body = j; throw err; }
           if (j === null) { throw new Error("The Varsto service sent an unreadable answer to " + what); }
           // The answer as sent: a list or summary that did not change is
           // not drawn again (see loadFiles, refreshStatus).
@@ -354,7 +359,11 @@
       else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
     }
   });
-  function alertBox(msg, title) { return dialog({ title: title || "Varsto", text: msg, cancel: false }); }
+  function alertBox(msg, title) {
+    var nk = NO_KEY_PAGE.exec(msg || "");
+    if (nk) { return offerAccess(folderByName(nk[1]) || { name: nk[1] }); }
+    return dialog({ title: title || "Varsto", text: msg, cancel: false });
+  }
   function confirmBox(msg, o) { o = o || {}; return dialog({ title: o.title || "Are you sure?", text: msg, ok: o.ok || "OK", danger: !!o.danger }).then(function (r) { return !!r; }); }
 
   // Block maps: one square per block of encrypted data. The colour says where
@@ -1462,6 +1471,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (f.path && f.plain === false) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", "encrypted here")); }
         if (f.path && f.mode && f.mode !== "normal") { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("grey", f.mode)); }
         if (f.path && f.paused) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(pill("bad", "paused")); }
+        var nk = keyless(f);
+        if (nk) { nameCell.appendChild(document.createTextNode(" ")); nameCell.appendChild(accessPill(f)); }
         var sub = el("span", "sub", f.path || "Not attached on this device"); if (f.path) { sub.title = f.path; } nameCell.appendChild(sub);
         nameCell.appendChild(miniMap(f));
         tr.appendChild(nameCell);
@@ -1471,12 +1482,13 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var pc = document.createElement("td"); pc.dataset.policyFor = f.name; pc.appendChild(pill("grey", f.policy ? "Unchecked" : "No policy")); if (f.policy) { var pt = el("span", "policy-text", f.policy); pt.title = f.policy; pc.appendChild(pt); } tr.appendChild(pc);
         var act = document.createElement("td");
         var menu = rowMenu(act, "folder:" + f.name);
-        if (!s.member) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Token" : "Share"; sh.onclick = function () { shareFolder(f); }; menu.appendChild(sh); }
-        if (!s.member) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { openPolicy(f); }; act.appendChild(pb); }
+        if (nk) { act.appendChild(accessButton(f)); }
+        if (!s.member && !nk) { var sh = document.createElement("button"); sh.className = "secondary"; sh.textContent = f.shared ? "Token" : "Share"; sh.onclick = function () { shareFolder(f); }; menu.appendChild(sh); }
+        if (!s.member && !nk) { var pb = document.createElement("button"); pb.className = "secondary"; pb.textContent = "Policy"; pb.onclick = function () { openPolicy(f); }; act.appendChild(pb); }
         if (f.path) { var ssb = document.createElement("button"); ssb.className = "secondary"; ssb.textContent = "Sync settings…"; ssb.title = "Mode on this device and the deletion guard"; ssb.onclick = function () { folderSettings(f); }; menu.appendChild(ssb); }
         if (!s.member) { var rmb = document.createElement("button"); rmb.className = "secondary"; rmb.textContent = "Remove"; rmb.onclick = function () { removeFolder(f); }; menu.appendChild(rmb); }
         if (f.strongroom && f.strongroom !== "locked") { var lk = document.createElement("button"); lk.className = "secondary"; lk.textContent = "Lock"; lk.onclick = function () { api("POST", "/api/strongroom/lock", { folder: f.name }).then(function () { log("locked " + f.name); return refreshStatus(); }).catch(function (e) { alertBox(e.message); }); }; menu.appendChild(lk); }
-        if (!s.member && f.path && !f.strongroom && !f.shared) { var cv = document.createElement("button"); cv.className = "secondary"; cv.textContent = "Convert to Strongroom…"; cv.onclick = function () { convertStrongroom(f); }; menu.appendChild(cv); }
+        if (!s.member && !nk && f.path && !f.strongroom && !f.shared) { var cv = document.createElement("button"); cv.className = "secondary"; cv.textContent = "Convert to Strongroom…"; cv.onclick = function () { convertStrongroom(f); }; menu.appendChild(cv); }
         if (f.path) { var mf = document.createElement("button"); mf.className = "secondary"; mf.textContent = "Free space\u2026"; mf.title = "Free space kept on this folder's disk: " + (f.min_free_text || "5 %"); mf.onclick = function () { editMinFree("folder", f.name, f.min_free); }; menu.appendChild(mf); }
         if (f.strongroom) { var ks = document.createElement("button"); ks.className = "secondary"; ks.textContent = "Security keys…"; ks.title = "Enrolled security keys; add a backup key"; ks.onclick = function () { strongroomKeys(f); }; menu.appendChild(ks); }
         if (f.strongroom === "locked") { var note = document.createElement("span"); note.className = "muted"; note.textContent = "unlock with: varsto strongroom unlock " + f.name; act.appendChild(note); }
@@ -1488,7 +1500,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         // Sidebar tree under Files.
         var li = el("li"); var tbtn = el("button", "tree-item" + (f.path ? "" : " detached")); tbtn.type = "button"; tbtn.dataset.folder = f.name; tbtn.title = displayPath(f.path) || "Not attached on this device";
         tbtn.appendChild(icon("folders")); tbtn.appendChild(el("span", "tree-name", f.name));
-        if (!f.path) { var dot = el("i", "tree-dot"); dot.title = "Not attached on this device"; tbtn.appendChild(dot); }
+        if (!f.path) { var dot = el("i", "tree-dot"); dot.title = nk ? "No access to this folder yet" : "Not attached on this device"; tbtn.appendChild(dot); }
         tbtn.onclick = function () { if (f.path) { openFolder(f.name); } else { offerAttach(f); } };
         li.appendChild(tbtn); tree.appendChild(li);
 
@@ -1496,8 +1508,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (!f.path) {
           detached++;
           var ali = el("li"); var aic = el("span", "li-icon"); aic.appendChild(icon("folders")); ali.appendChild(aic);
-          var abody = el("div", "li-body"); abody.appendChild(el("div", "li-title", f.name)); abody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes))); ali.appendChild(abody);
-          var aa = el("div", "li-actions"); var ab = el("button", "", "Attach"); ab.type = "button"; ab.onclick = function () { attachFolder(f.name, ""); }; aa.appendChild(ab); ali.appendChild(aa);
+          var abody = el("div", "li-body"); var atitle = el("div", "li-title", f.name); if (nk) { atitle.appendChild(accessPill(f)); } abody.appendChild(atitle); abody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes))); ali.appendChild(abody);
+          var aa = el("div", "li-actions"); var ab; if (nk) { ab = accessButton(f); } else { ab = el("button", "", "Attach"); ab.type = "button"; ab.onclick = function () { attachFolder(f.name, ""); }; } aa.appendChild(ab); ali.appendChild(aa);
           al.appendChild(ali);
         }
 
@@ -1523,7 +1535,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var pbody = el("div", "li-body"); var ptitle = el("div", "li-title", f.name); ptitle.appendChild(pill("grey", f.policy ? "Unchecked" : "No policy")); pbody.appendChild(ptitle);
         pbody.appendChild(el("div", "li-sub", f.policy || "No rule set. Files are still written to every storage; a policy adds a minimum that Varsto watches for you."));
         pli.appendChild(pbody);
-        if (!s.member) { var pa = el("div", "li-actions"); var pe = el("button", "secondary", f.policy ? "Edit policy" : "Set policy"); pe.type = "button"; pe.onclick = function () { editPolicy(f); }; pa.appendChild(pe); var pw = el("button", "secondary", "Placement"); pw.type = "button"; pw.title = "Which storages this folder is written to"; pw.onclick = function () { editPlacement(f.name); }; pa.appendChild(pw); pli.appendChild(pa); }
+        if (!s.member && !nk) { var pa = el("div", "li-actions"); var pe = el("button", "secondary", f.policy ? "Edit policy" : "Set policy"); pe.type = "button"; pe.onclick = function () { editPolicy(f); }; pa.appendChild(pe); var pw = el("button", "secondary", "Placement"); pw.type = "button"; pw.title = "Which storages this folder is written to"; pw.onclick = function () { editPlacement(f.name); }; pa.appendChild(pw); pli.appendChild(pa); }
         pl.appendChild(pli);
       });
       renderFolderList(s);
@@ -1633,6 +1645,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (f.path && f.mode && f.mode !== "normal") { title.appendChild(pill("grey", f.mode)); }
       if (f.path && f.paused) { title.appendChild(pill("bad", "paused")); }
       if (!f.path) { title.appendChild(pill("grey", "not on this device")); }
+      if (keyless(f)) { title.appendChild(accessPill(f)); }
       body.appendChild(title);
       body.appendChild(el("span", "fc-sub", f.files + " file" + (f.files === 1 ? "" : "s") + " · " + fmtBytes(f.bytes)));
       body.appendChild(miniMap(f)); b.appendChild(body);
@@ -5499,7 +5512,43 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       options: [["full", "Full sync: download and keep every file"], ["selective", "Selective sync: placeholders, files only when opened or pinned"]],
       hint: "With selective sync this device keeps no files, but it still passes new files of the other devices on to the storages it has." };
   }
+  // Storage format 3: a device that joined with the vault words sees a
+  // folder's name but holds no key of it until an owner approves a request.
+  // The status row says so (`has_key`) and where the request stands
+  // (`access`: none, requested, approved; `access_words`: the six words).
+  function keyless(f) { return !!f && f.has_key === false; }
+  function accessState(f) { return f.access === "requested" || f.access === "approved" ? f.access : "none"; }
+  function accessPill(f) {
+    var a = accessState(f);
+    return pill(a === "none" ? "grey" : "accent", a === "none" ? "no access" : a === "requested" ? "access requested" : "access approved");
+  }
+  function accessButton(f) {
+    var a = accessState(f);
+    var b = el("button", a === "none" ? "" : "secondary", a === "none" ? "Request access" : a === "requested" ? "Show the six words" : "Sync now");
+    b.type = "button";
+    b.onclick = function () { if (a === "none") { requestAccess(f); } else { showAccess(f); } };
+    return b;
+  }
+  function showAccess(f) {
+    if (accessState(f) === "approved") {
+      return dialog({ title: "Access approved", text: "An owner approved this device. The key of the folder arrives with the next sync.", facts: [["Folder", f.name]], ok: "Sync now", cancel: "Close" }).then(function (r) { if (r) { runSync(); } });
+    }
+    return dialog({ title: "Access requested", text: "Read these six words to an owner of the folder, in person or by phone. The owner compares them with the words on their screen and approves the request. The folder opens here after the next sync.", facts: [["Folder", f.name]], code: f.access_words || "", ok: "Check now", cancel: "Close" }).then(function (r) { if (r) { runSync(); } });
+  }
+  function offerAccess(f) {
+    if (accessState(f) !== "none") { return showAccess(f); }
+    return dialog({ title: "Request access to this folder?", text: "This device sees the name of the folder but holds no key to open it. Ask an owner for access: you get six words to read out, the owner compares them with the words on their screen and approves on a device that has the folder.", facts: [["Folder", f.name]], ok: "Request access" }).then(function (r) { if (r) { return requestAccess(f); } });
+  }
+  function requestAccess(f) {
+    busy(true);
+    return api("POST", "/api/folder/request", { folder: f.folder_id || f.name }).then(function (r) {
+      log("asked for access to " + f.name);
+      busy(false);
+      return refreshStatus().then(function () { return showAccess({ name: f.name, access: "requested", access_words: r.fingerprint }); });
+    }, function (e) { busy(false); return alertBox(e.message); });
+  }
   function offerAttach(f) {
+    if (keyless(f)) { return offerAccess(f); }
     if (isMobile()) {
       dialog({ title: "Add " + f.name + " to this phone?", text: "This folder is on your other devices. It syncs here under the same name.", fields: [keepField()], ok: "Encrypted on this phone", extra: "Plain files" }).then(function (r) {
         if (!r) { return; }
@@ -5522,6 +5571,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     });
   }
   function attachFolder(nameOrId, path, plain, how) {
+    var known = folderByName(nameOrId);
+    if (keyless(known)) { return offerAccess(known); }
     var form = $("attachfolder");
     var d = { name_or_id: nameOrId, selective: how && how.selective !== undefined ? how.selective : form.querySelector("input[name=selective]").checked };
     if (how && how.mode && how.mode !== "normal") { d.mode = how.mode; }

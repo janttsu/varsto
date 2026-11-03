@@ -244,7 +244,12 @@ impl Engine {
     /// What every folder's blocks need for a drain of `name` (the storages
     /// the packs may go to, the copy rules, the blocks something still
     /// uses), and the folders' block map tables.
-    fn drain_inputs(&self, candidates: &[&StorageSpec], replace: bool) -> Result<DrainInputs> {
+    fn drain_inputs(
+        &self,
+        candidates: &[&StorageSpec],
+        replace: bool,
+        view: &crate::ledger3::LedgerView,
+    ) -> Result<DrainInputs> {
         let mut needs = HashMap::new();
         let mut tables = HashMap::new();
         for rec in self.keyring.folders.values() {
@@ -264,6 +269,7 @@ impl Engine {
                         rules: None,
                         targets: all,
                         referenced: Some(HashSet::new()),
+                        state_behind: false,
                         replace: false,
                     },
                 );
@@ -292,35 +298,107 @@ impl Engine {
                     .any(|s| s.name() == n.as_str() && s.is_cold())
             });
             // Blocks of current files, of the trash and of the snapshots
-            // this device has seen; a folder never synced here: all count.
-            let mut referenced: Option<HashSet<crate::ledger3::ObjectBin>> = None;
+            // this device has seen. Other writers' manifests count too:
+            // the folder state on disk can be older than the block map.
+            // Nothing known here: every live block counts.
+            let me = self.me3();
+            let mut refs: HashSet<crate::ledger3::ObjectBin> = HashSet::new();
+            let mut known = false;
+            let manifests = self.load_manifests(&folder);
             if rec.is_backup() {
-                let known = self.backup_blocks_known(&rec.folder_id);
-                if !known.is_empty() {
-                    referenced = Some(
-                        known
+                let blocks = self.backup_blocks_known(&rec.folder_id);
+                if !blocks.is_empty() {
+                    known = true;
+                    refs.extend(
+                        blocks
                             .into_iter()
-                            .filter_map(|(_, o)| crate::storages3::object_bin(&o).ok())
-                            .collect(),
+                            .filter_map(|(_, o)| crate::storages3::object_bin(&o).ok()),
                     );
                 }
-            } else if let Ok(state) = self.load_state(&rec.folder_id) {
-                if !state.files.is_empty() {
-                    let mut refs: HashSet<crate::ledger3::ObjectBin> = HashSet::new();
-                    for f in state.files.values().filter(|f| !f.deleted) {
-                        for c in &f.chunks {
-                            if let Ok(o) = crate::storages3::object_bin(&c.object) {
-                                refs.insert(o);
+            } else {
+                let state = self.load_state(&rec.folder_id).ok();
+                let have_state = state
+                    .as_ref()
+                    .is_some_and(|s| !s.files.is_empty() || !s.pending_remote.is_empty());
+                for (d, v) in &manifests.views {
+                    // This device's folder state is newer than its own
+                    // manifest when a pull applied changes no push has
+                    // published yet.
+                    if *d == me && have_state {
+                        continue;
+                    }
+                    if v.files.values().any(|f| !f.deleted) {
+                        known = true;
+                    }
+                    refs.extend(v.files.values().flat_map(|f| f.objects().copied()));
+                }
+                if let Some(state) = state {
+                    if have_state {
+                        known = true;
+                        for f in state
+                            .files
+                            .values()
+                            .chain(state.pending_remote.values())
+                            .filter(|f| !f.deleted)
+                        {
+                            for c in &f.chunks {
+                                if let Ok(o) = crate::storages3::object_bin(&c.object) {
+                                    refs.insert(o);
+                                }
                             }
                         }
                     }
-                    for c in self.trash_chunks(&rec.folder_id) {
+                }
+                let trash = self.trash_chunks(&rec.folder_id);
+                if !trash.is_empty() {
+                    known = true;
+                    for c in trash {
                         if let Ok(o) = crate::storages3::object_bin(&c.object) {
                             refs.insert(o);
                         }
                     }
-                    referenced = Some(refs);
                 }
+            }
+            let referenced = known.then_some(refs);
+            // Announced manifests, trash or map records this device has
+            // not applied: local state is behind the block map.
+            let mut state_behind = false;
+            if let Some(t) = tables.get(&folder) {
+                let guard = t.read().unwrap_or_else(|e| e.into_inner());
+                let trash_at: HashMap<crate::record::Id16, u64> =
+                    self.trash_applied(&rec.folder_id).into_iter().collect();
+                for s in guard.streams() {
+                    if !rec.is_backup()
+                        && crate::gc3::stream_behind(
+                            view,
+                            crate::record::Kind::Manifest,
+                            &folder,
+                            &s.device,
+                            manifests.applied(&s.device),
+                        )
+                    {
+                        state_behind = true;
+                    }
+                    if crate::gc3::stream_behind(
+                        view,
+                        crate::record::Kind::Trash,
+                        &folder,
+                        &s.device,
+                        trash_at.get(&s.device).copied().unwrap_or(0),
+                    ) {
+                        state_behind = true;
+                    }
+                    if crate::gc3::stream_behind(
+                        view,
+                        crate::record::Kind::BlockMap,
+                        &folder,
+                        &s.device,
+                        s.applied,
+                    ) {
+                        state_behind = true;
+                    }
+                }
+                drop(guard);
             }
             needs.insert(
                 folder,
@@ -329,6 +407,7 @@ impl Engine {
                     rules,
                     targets,
                     referenced,
+                    state_behind,
                     replace,
                 },
             );
@@ -378,7 +457,7 @@ impl Engine {
                 .map(|s| s.place())
                 .unwrap_or_else(|| "other".to_string())
         };
-        let (needs, tables) = self.drain_inputs(&candidates, replace)?;
+        let (needs, tables) = self.drain_inputs(&candidates, replace, &view)?;
         let guards: Vec<(
             crate::ledger3::FolderBin,
             std::sync::RwLockReadGuard<'_, crate::blockmap::MapTable>,
@@ -389,8 +468,9 @@ impl Engine {
         let refs: HashMap<crate::ledger3::FolderBin, &crate::blockmap::MapTable> =
             guards.iter().map(|(f, g)| (*f, &**g)).collect();
         let fallback: Vec<String> = candidates.iter().map(|s| s.name().to_string()).collect();
+        let me = self.me3();
         let mut packs =
-            crate::storages3::drain_plan(&view, name, &refs, &needs, &place_of, &fallback)?;
+            crate::storages3::drain_plan(&view, name, &refs, &needs, &place_of, &fallback, &me)?;
         let price = self.storage_price(name);
         let now = util::now_utc();
         let mut plan = DrainPlan {

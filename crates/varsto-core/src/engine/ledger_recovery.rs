@@ -1123,6 +1123,7 @@ impl Engine {
         let n = events.len() as u64;
         events.append(&mut self.f3.pending);
         self.f3.pending = events;
+        self.persist_pending3()?;
         report.events_requeued = n;
         Ok(n)
     }

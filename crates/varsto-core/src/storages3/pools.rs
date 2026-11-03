@@ -2,8 +2,11 @@
 //! Disk pools on packs (design sections 4 and 13; spec sections 19, 34, 40
 //! and 59 of `alpha-0-format.md`). A pool holds `packs/<xx>/<pack id>` files
 //! on removable disks; which packs a pool should keep is known from the
-//! ledger: each `pack_stored` names the pack and its class, and a pack no
-//! live claim names is junk. The pool's own bookkeeping
+//! ledger: each `pack_stored` names the pack and its class. Insert tidy
+//! removes a pack file only when the ledger has dropped it from the pool,
+//! and only after a grace period, when the pull read every hot metadata
+//! storage and the disk's own index does not list it. A pack the ledger
+//! has merely not seen stays. The pool's own bookkeeping
 //! ([`crate::pool::PoolStorage`]) is unchanged; this module is the pack
 //! side of the engine's questions to it.
 
@@ -15,30 +18,68 @@ use super::copies::DiskCopy;
 use crate::ledger3::events::{class_bytes, Event, PackOn};
 use crate::ledger3::{LedgerView, PackId};
 use crate::packs::{pack_key, pack_of_key};
-use crate::pool::{BookInput, PoolStorage, TidyOutcome, VerifyOutcome};
+use crate::pool::{BookInput, DiskIndex, PoolStorage, StrayAction, TidyOutcome, VerifyOutcome};
 use crate::storage::Storage;
+
+/// How long a pack file must have sat on the disk before insert tidy may
+/// delete it. The same window as an orphan pack ([`crate::gc3::ORPHAN_SECS`]):
+/// a file another device has just written is not removed on this insert.
+pub const CLEANUP_GRACE_SECS: i64 = crate::gc3::ORPHAN_SECS;
+
+/// What insert tidy does with one pack file the pool index does not already
+/// place on the disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrayPack {
+    /// Leave the bytes; do not record the file.
+    Keep,
+    /// Record the file on this disk.
+    Adopt,
+    /// Delete the file.
+    Delete,
+}
+
+/// Facts for [`stray_pack_action`]. A pure decision: no I/O.
+#[derive(Clone, Copy, Debug)]
+pub struct StrayPackFacts {
+    /// The pull listed every hot metadata storage. A failed or partial pull
+    /// is not complete, even when `pull_ledger` returned `Ok`.
+    pub ledger_complete: bool,
+    /// The ledger shows the pack held on this pool.
+    pub held: bool,
+    /// The ledger shows the pack dropped from this pool (a tombstone), and
+    /// not stored there again since.
+    pub dropped: bool,
+    /// The disk's own `index.json` lists this key.
+    pub in_disk_index: bool,
+    /// Seconds since the file's mtime. `None`: unknown, still inside the
+    /// grace period.
+    pub age_secs: Option<i64>,
+    pub grace_secs: i64,
+}
+
+/// Whether insert tidy may remove a pack file it does not already track.
+///
+/// A live claim, or a key the disk's own index lists, is adopted (the index
+/// is the other device's record of what it wrote). Anything else is kept
+/// unless every one of these holds: the pull read every hot metadata
+/// storage, the ledger dropped the pack from this pool, and the file is at
+/// least `grace_secs` old. A pack the ledger has merely not seen is never
+/// deleted.
+pub fn stray_pack_action(f: StrayPackFacts) -> StrayPack {
+    if f.held || f.in_disk_index {
+        return StrayPack::Adopt;
+    }
+    let aged = f.age_secs.is_some_and(|age| age >= f.grace_secs);
+    if f.ledger_complete && f.dropped && aged {
+        return StrayPack::Delete;
+    }
+    StrayPack::Keep
+}
 
 fn pack_id(hex_id: &str) -> Option<PackId> {
     let mut id = [0u8; 32];
     hex::decode_to_slice(hex_id, &mut id).ok()?;
     Some(id)
-}
-
-/// The pool's question "does the vault still need this file" for packs:
-/// the object name (a pack id in hex) is a pack the ledger shows held on
-/// `storage`. With `ledger_current` false (the ledger could not be brought
-/// up to date first) a pack is kept unless the ledger says it was dropped
-/// from `storage`: files this device does not know yet are not removed.
-pub fn pack_referenced<'a>(
-    view: &'a LedgerView,
-    storage: &'a str,
-    ledger_current: bool,
-) -> impl Fn(&str) -> bool + 'a {
-    move |name| match pack_id(name) {
-        None => false,
-        Some(id) if ledger_current => view.is_held(&id, storage),
-        Some(id) => !view.dropped_from(&id, storage),
-    }
 }
 
 /// Packs the pool no longer holds on any disk after `keys` were forgotten
@@ -60,17 +101,45 @@ fn lost_events(pool: &PoolStorage, view: &LedgerView, keys: &[String]) -> Vec<Ev
 
 /// The first phase of a disk insert: listings only. Applies the queued
 /// deletions, removes temporary files, forgets packs the disk lost or
-/// holds at the wrong size, and removes the packs no live claim names.
-/// Returns what it did and the `pack_dropped` events for packs that the
-/// pool no longer holds on any disk.
+/// holds at the wrong size, and removes a pack file only when
+/// [`stray_pack_action`] says so. `ledger_complete` is true only when the
+/// pull read every hot metadata storage; a failed or partial pull (which
+/// still returns `Ok`) passes false and skips that removal. Returns what
+/// it did and the `pack_dropped` events for packs that the pool no longer
+/// holds on any disk.
 pub fn tidy_disk_packs(
     pool: &PoolStorage,
     disk_id: &str,
     view: &LedgerView,
-    ledger_current: bool,
+    ledger_complete: bool,
 ) -> Result<(TidyOutcome, Vec<Event>)> {
-    let keep = pack_referenced(view, pool.name(), ledger_current);
-    let out = pool.tidy_disk(disk_id, &keep)?;
+    let storage = pool.name().to_string();
+    let indexed: HashSet<String> = pool
+        .mount_of(disk_id)
+        .and_then(|m| DiskIndex::read(&m))
+        .map(|idx| idx.objects.keys().cloned().collect())
+        .unwrap_or_default();
+    let now = crate::util::now_utc();
+    let stray = |key: &str, mtime: Option<i64>| {
+        let name = key.rsplit('/').next().unwrap_or(key);
+        let id = pack_id(name);
+        let action = stray_pack_action(StrayPackFacts {
+            ledger_complete,
+            held: id.as_ref().is_some_and(|id| view.is_held(id, &storage)),
+            dropped: id
+                .as_ref()
+                .is_some_and(|id| view.dropped_from(id, &storage)),
+            in_disk_index: indexed.contains(key),
+            age_secs: mtime.map(|t| now.saturating_sub(t)),
+            grace_secs: CLEANUP_GRACE_SECS,
+        });
+        match action {
+            StrayPack::Keep => StrayAction::Keep,
+            StrayPack::Adopt => StrayAction::Adopt,
+            StrayPack::Delete => StrayAction::Delete,
+        }
+    };
+    let out = pool.tidy_disk(disk_id, &stray)?;
     let gone: Vec<String> = out.missing.iter().chain(&out.bad).cloned().collect();
     let events = lost_events(pool, view, &gone);
     Ok((out, events))

@@ -35,17 +35,17 @@ description: Varsto: päästä päähän salattu synkronointi, jakaminen ja varm
     <h2 id="teams">Tiimeille</h2>
     <p>Organisaatio lisää holvin päälle kerroksen, jota yritys tarvitsee: ylläpitäjät hyväksyvät laitteita nimetyille henkilöille verrattuaan heidän kanssaan kuuden sanan sormenjälkeä, poistavat henkilön kaikkine laitteineen yhdellä toimenpiteellä (jäljelle jäävät laitteet saavat uudet avaimet), määrittävät, mitä jäsenet saavat tehdä omin päin, ja pitävät tästä lokia, jonka heidän laitteensa allekirjoittavat ja ketjuttavat. Ylläpitäjät nimittävä juuriavain on 24 sanaa paperilla, ei koskaan laitteella. Holvi ilman organisaatiota ei näe tästä mitään. <a href="{{L}}features/#organizations">Organisaatiot</a>.</p>
 
-    <h2 id="next">Mitä seuraavaksi</h2>
-    <p class="note">Rakennettu päähaaraan version 0.0.1-alpha.13 jälkeen, ei vielä julkaisussa (new in 0.0.1-alpha.14):</p>
+    <h2 id="next">Uutta versiossa {{RELEASED}}</h2>
+    <p class="note">Tallennusmuoto 3 ja sen mukana tulevat asiat. Versiolla 0.0.1-alpha.15 tai vanhemmalla tehty holvi on luotava uudelleen:</p>
     <ul>
-      <li>Koko holvin yhteinen roskakori, josta voi palauttaa millä tahansa laitteella, sekä tiedostojen versiohistoria.</li>
-      <li>Toinen, riippumaton varmuuskopio resticillä: yksi laite pitää holvista selväkielistä peilikopiota, jonka restic varmuuskopioi tallennuspaikkojesi ulkopuoliseen repositorioon, palautettavissa pelkällä resticillä.</li>
-      <li>Tuonti git-annex-repositorioista, pilvilevyiltä (rclonen kautta) ja paikallisista hakemistoista, jokainen tiedosto tiivistettään vasten tarkistettuna.</li>
-      <li>QR-kutsut ja <code>varsto://</code>-linkit jakamiseen ja laitteiden liittämiseen.</li>
-      <li>Tallennuspaikan tyhjennys päiväkohtaisen kiintiön puitteissa sekä tallennuspaikkojen kiintiöt.</li>
-      <li>Jatkuva bittimätätarkistus jokaiselle kopiolle tallennuspaikoissasi ja levyilläsi, korjaus toisesta kopiosta.</li>
-      <li>Reitittimen porttiohjaus (PCP, NAT-PMP, UPnP) vertaisyhteyksille.</li>
-      <li>Kansioiden turvatoimet: suojaus massapoistoilta, vain lähettävät ja vain vastaanottavat kansiot sekä ohitussäännöt.</li>
+      <li>Tallennusmuoto 3: pakettitason kirjanpito lohkojen sijaan, allekirjoitetut tietueet, kansioiden lohkokartat ja perus- ja delta-manifestit.</li>
+      <li>Kansiot hyväksynnällä: holviin sanoilla liittynyt laite pyytää kansiota (<code>varsto folder request</code>), omistaja vertaa kuutta sanaa molemmilla laitteilla ja hyväksyy.</li>
+      <li>Palautussanat: toinen 24 sanan sarja ja jokaisen kansioavaimen palautuskopio, jotta holvin voi avata uudelleen, vaikka kaikki laitteet olisivat kadonneet.</li>
+      <li>Rendezvous-palvelu (<code>https://varsto.net/rv</code> tai oma): laitteet löytävät toisensa verkkojen yli, <code>rv=</code>-liittämislinkit toimivat ja päästä päähän salattu välitys on viimeinen reitti. Kaikki toimii ilman sitä.</li>
+      <li>Työskentely ilman verkkoa: liittyminen ilman yhteyttä tallennuspaikkaan, jäsenyysmuutokset säilyvät laitteella, kunnes tallennuspaikka vastaa, eikä yksi tavoittamaton tallennuspaikka kaada koko synkronointia.</li>
+      <li>Yksi Tuonti-sivu, torrent-tuonti levyä suuremmille torrenteille (<code>varsto import torrent</code>) ja YouTube-kanavat kansioihin (<code>varsto import youtube</code>).</li>
+      <li>Postilaatikko, joka kuljettaa lohkoja telakoidulta levyltä poissa olevalle levyvaraston levylle tai tallennuspaikalle, sekä <code>varsto service remember</code> palvelimilla ilman työpöytäistuntoa.</li>
+      <li>Julkaisuallekirjoitettu Android-APK, jonka päälle seuraavat versiot päivittyvät. Allekirjoitusavain on uusi: poista aiempi debug-versio ensin.</li>
     </ul>
 
     <h2 id="status">Rehellinen tilannekuva</h2>

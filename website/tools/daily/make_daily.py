@@ -50,6 +50,8 @@ from pathlib import Path
 # (key, file name ending of the input file, stable name)
 PLATFORMS = [
     ("linux-x86_64", "-linux-x86_64.tar.gz", "varsto-daily-linux-x86_64.tar.gz"),
+    # Stable name still says debug: renaming it would break the signed daily list.
+    # The bytes are the release APK. CI also copies that APK to this ending.
     ("android", "-android-debug.apk", "varsto-daily-android-debug.apk"),
     ("windows-setup", "-windows-setup.exe", "varsto-daily-windows-setup.exe"),
     ("macos", "-macos-apple-silicon.dmg", "varsto-daily-macos-apple-silicon.dmg"),

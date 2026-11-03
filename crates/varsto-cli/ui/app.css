@@ -420,7 +420,7 @@ ul.list .li-icon { width: 36px; height: 36px; border-radius: 10px; background: v
 ul.list .li-body { flex: 1 1 240px; min-width: 0; }
 ul.list .li-title { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 ul.list .li-sub { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-ul.list .li-actions { display: flex; gap: 8px; flex: none; margin-left: auto; }
+ul.list .li-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; max-width: 100%; margin-left: auto; }
 ul.list li.sub-row { display: block; border-top: 0; padding: 0 0 8px 48px; }
 ul.list li.sub-row.hidden { display: none; }
 ul.list.sub-list li { padding: 8px 0; }
@@ -671,6 +671,12 @@ body[data-mobile="1"] .service-actions { width: 100%; justify-content: flex-star
 body[data-mobile="1"] .form-grid { grid-template-columns: 1fr; }
 body[data-mobile="1"] .card form button, body[data-mobile="1"] form.card button, body[data-mobile="1"] .actions button, body[data-mobile="1"] .service-actions button, body[data-mobile="1"] .fd-actions a.button { width: 100%; height: 44px; }
 body[data-mobile="1"] .actions { flex-direction: column; align-items: stretch; }
+/* A phone is 360 to 412 px wide: a label wraps inside its button instead of
+   pushing the button past the edge, and a row of buttons breaks into lines
+   (the base rules keep buttons on one line: white-space: nowrap). */
+body[data-mobile="1"] button, body[data-mobile="1"] a.button { white-space: normal; min-width: 0; max-width: 100%; line-height: 1.2; }
+body[data-mobile="1"] .prot { white-space: normal; flex: 0 1 auto; min-width: 0; max-width: 100%; line-height: 1.25; border-radius: 14px; }
+body[data-mobile="1"] .toolbar, body[data-mobile="1"] .service-actions, body[data-mobile="1"] .helpnext-actions, body[data-mobile="1"] .fd-analysis-actions, body[data-mobile="1"] .selbar, body[data-mobile="1"] .modal-actions { flex-wrap: wrap; }
 body[data-mobile="1"] .card-head { flex-direction: column; align-items: stretch; }
 body[data-mobile="1"] .toolbar { gap: 8px; }
 body[data-mobile="1"] .files-toolbar button { flex: 1 1 calc(50% - 4px); height: 40px; }
@@ -728,9 +734,9 @@ body[data-mobile="1"] tbody tr:hover td, body[data-mobile="1"] tbody tr.selected
 body[data-mobile="1"] td { display: inline-block; border: 0; padding: 0; font-size: 13px; }
 body[data-mobile="1"] td:first-child { width: 100%; font-size: 14px; }
 body[data-mobile="1"] td.num::before, body[data-mobile="1"] td[data-label]::before { content: attr(data-label) " "; color: var(--muted); font-weight: 400; }
-body[data-mobile="1"] td:last-child { width: 100%; text-align: left; display: flex; gap: 8px; margin-top: 8px; }
+body[data-mobile="1"] td:last-child { width: 100%; text-align: left; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; white-space: normal; }
 body[data-mobile="1"] td:last-child button, body[data-mobile="1"] td:last-child a.button { flex: 1 1 auto; height: 40px; margin: 0; }
-body[data-mobile="1"] #folders td:last-child button { flex: 1 1 30%; }
+body[data-mobile="1"] #folders td:last-child button { flex: 1 1 auto; }
 body[data-mobile="1"] #folders td .policy-text { display: inline; margin-left: 6px; }
 body[data-mobile="1"] #files td:nth-child(3), body[data-mobile="1"] #files td:nth-child(4) { font-size: 12.5px; }
 body[data-mobile="1"] .empty-state { padding: 32px 8px 24px; }

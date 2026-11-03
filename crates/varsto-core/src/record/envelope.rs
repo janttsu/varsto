@@ -3,6 +3,7 @@
 //! signature, body sealing and opening, parts, and the writer.
 
 use super::accept::Junk;
+use super::accept::RecordBody;
 use super::kinds::{KeyId, Kind, StreamRef, MAX_KEY_ID};
 use super::pad;
 use super::{Id16, FORMAT};
@@ -314,15 +315,12 @@ impl SignedRecord {
 }
 
 /// Decompress the joined parts of a record and decode its body struct.
-pub fn decode_body<T: for<'de> Deserialize<'de>>(compressed: &[u8]) -> Result<T, Junk> {
+pub fn decode_body<T: RecordBody>(compressed: &[u8]) -> Result<T, Junk> {
     decode_body_limited(compressed, MAX_DECODED_BODY)
 }
 
 /// `decode_body` with a smaller limit on the decompressed size.
-pub fn decode_body_limited<T: for<'de> Deserialize<'de>>(
-    compressed: &[u8],
-    limit: u64,
-) -> Result<T, Junk> {
+pub fn decode_body_limited<T: RecordBody>(compressed: &[u8], limit: u64) -> Result<T, Junk> {
     let limit = limit.min(MAX_DECODED_BODY);
     let mut dec = zstd::stream::read::Decoder::new(compressed)
         .map_err(|e| Junk::BadBody(format!("zstd: {e}")))?;
@@ -334,14 +332,9 @@ pub fn decode_body_limited<T: for<'de> Deserialize<'de>>(
     if plain.len() as u64 > limit {
         return Err(Junk::BadBody("body larger than a record may be".into()));
     }
-    let (body, tail): (T, &[u8]) =
+    let (mut body, tail): (T, &[u8]) =
         postcard::take_from_bytes(&plain).map_err(|e| Junk::BadBody(e.to_string()))?;
-    if !tail.is_empty() {
-        return Err(Junk::BadBody(format!(
-            "{} bytes after the body",
-            tail.len()
-        )));
-    }
+    body.take_tail(tail).map_err(Junk::BadBody)?;
     Ok(body)
 }
 

@@ -8,6 +8,9 @@
 //! later entries count only when their writer was an owner just before the
 //! entry's stamp. Participants and denied entries merge per device by the
 //! largest (Lamport, device) stamp, so two owners editing at once converge.
+//! A stamp can be backdated. Records a device wrote after it was removed
+//! from the vault never reach this replay: acceptance stops them at the
+//! sequence cut-off (`trust`, spec 77.20).
 
 use super::epochs::FolderEpochs;
 use super::{store, Role, Stamp, MAX_NAME, MAX_PARTICIPANTS};

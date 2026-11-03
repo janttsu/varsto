@@ -2,12 +2,13 @@
 title: Downloads
 nav: Downloads
 output: downloads/index.html
-description: Download the Varsto alpha for Linux, macOS, Windows and Android, or the source, and verify the checksums.
+description: Download the Varsto alpha for Linux, macOS, Windows, Android and iOS (unsigned), or the source, and verify the checksums.
 ---
     <h1>Downloads</h1>
     <p class="note">See the <a href="../screenshots/">screenshots</a> for what the alpha looks like.</p>
     <p class="note">Want the newest development build? The <a href="../daily/">daily builds</a> are unsigned and not for production data.</p>
     <p class="lead">One package per platform with the background service, the interface and the same command line inside; on Linux and macOS the service starts at login (a systemd user unit or a launch agent), on Windows the tray app runs it. On Linux and Windows the interface opens in your browser; on macOS the native app has its own window. Alpha: use it with test data only and keep your own backups.</p>
+    <p class="note"><strong>Android.</strong> The APK is signed for release under a new key, so later releases install over it as an update. An earlier debug APK (alpha.15 or an older daily build) cannot be updated to it: uninstall the old app first, which removes that device's copy of the vault, so make sure the vault has another device or a storage, then install the new APK. The iOS <code>.ipa</code> is unsigned and is meant for AltStore, SideStore or Sideloadly.</p>
     {{DOWNLOADS}}
     <h2>Install and verify</h2>
     <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS

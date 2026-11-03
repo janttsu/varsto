@@ -25,8 +25,13 @@ on:
         required: false
         default: ""
 
+# Read by default. contents: write is only on the jobs that attach a draft
+# release (v* tags) or publish the screenshots-latest pre-release. Build,
+# test and lint jobs set contents: read again so a caller that passes a
+# write ceiling (daily.yml) cannot widen them. They do not get a token
+# that can push.
 permissions:
-  contents: write
+  contents: read
 
 # github.workflow is the caller's name in a called workflow, so a daily run
 # and a push run of the same commit do not queue behind each other.
@@ -46,11 +51,14 @@ jobs:
   linux:
     name: Linux (tests, packages, screenshots)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl, x86_64-pc-windows-gnu
@@ -197,6 +205,8 @@ jobs:
     needs: linux
     runs-on: windows-2025
     timeout-minutes: 30
+    permissions:
+      contents: read
     defaults:
       run:
         shell: pwsh
@@ -204,6 +214,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: windows-programs
@@ -228,6 +239,8 @@ jobs:
     needs: linux
     runs-on: windows-2025
     timeout-minutes: 30
+    permissions:
+      contents: read
     defaults:
       run:
         shell: pwsh
@@ -235,6 +248,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: windows-programs
@@ -268,10 +282,13 @@ jobs:
   android:
     name: Android (APK, emulator, screenshots)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -281,12 +298,38 @@ jobs:
           targets: aarch64-linux-android, x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
       - name: Build the APK
+        env:
+          VARSTO_ANDROID_KEYSTORE: ${{ secrets.VARSTO_ANDROID_KEYSTORE }}
+          VARSTO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.VARSTO_ANDROID_KEYSTORE_PASSWORD }}
+          VARSTO_ANDROID_KEY_ALIAS: ${{ secrets.VARSTO_ANDROID_KEY_ALIAS }}
+          VARSTO_ANDROID_KEY_PASSWORD: ${{ secrets.VARSTO_ANDROID_KEY_PASSWORD }}
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"; ls "$ANDROID_HOME/ndk" "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
           version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
           apps/android/build.sh 2>&1 | tee build.log
-          mkdir -p dist/android
-          cp apps/android/app/build/outputs/apk/debug/app-debug.apk "dist/android/varsto-$version-android-debug.apk"
+          mkdir -p dist/android dist/emulator
+          shopt -s nullglob
+          signed=()
+          for f in apps/android/app/build/outputs/apk/release/*.apk; do
+            case "$f" in *-unsigned.apk) ;; *) signed+=("$f") ;; esac
+          done
+          if [ "${#signed[@]}" -eq 1 ]; then
+            cp "${signed[0]}" "dist/android/varsto-$version-android.apk"
+            # Same release bytes under the name daily-assemble.py already globs.
+            # The stable daily object stays varsto-daily-android-debug.apk:
+            # renaming it would break the signed daily list.
+            cp "${signed[0]}" "dist/android/varsto-$version-android-debug.apk"
+            # Screenshots use adb run-as, which Android allows only for a debuggable app.
+            if [ ! -f apps/android/app/build/outputs/apk/debug/app-debug.apk ]; then
+              ( cd apps/android && ./gradlew --no-daemon -q assembleDebug )
+            fi
+          elif [ -f apps/android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "no signed release APK; the debug APK is for the emulator only and is not published" >&2
+          else
+            echo "no APK was built" >&2
+            exit 1
+          fi
+          cp apps/android/app/build/outputs/apk/debug/app-debug.apk dist/emulator/app-debug.apk
       - name: Enable KVM for the emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -305,11 +348,25 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: scripts/screenshots/android.sh dist/android/varsto-*-android-debug.apk dist/shots
+          script: scripts/screenshots/android.sh dist/emulator/app-debug.apk dist/shots
       - name: Output to the job summary
         if: failure()
         run: |
           [ -f build.log ] && { echo '## build.log (last 150 lines)'; echo '```'; tail -n 150 build.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Refuse a debug APK as the published package
+        run: |
+          shopt -s nullglob
+          apks=(dist/android/*.apk)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "no release APK in dist/android. Set GitHub secrets VARSTO_ANDROID_KEYSTORE, VARSTO_ANDROID_KEYSTORE_PASSWORD, VARSTO_ANDROID_KEY_ALIAS and VARSTO_ANDROID_KEY_PASSWORD. Not uploading app-debug.apk." >&2
+            exit 1
+          fi
+          for f in "${apks[@]}"; do
+            case "$f" in
+              *app-debug.apk|*-unsigned.apk) echo "refusing $f" >&2; exit 1 ;;
+            esac
+          done
+          ls -l "${apks[@]}"
       - uses: actions/upload-artifact@v4
         with:
           name: packages-android
@@ -325,10 +382,13 @@ jobs:
   macos:
     name: macOS app (Apple Silicon)
     runs-on: macos-15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
@@ -429,10 +489,13 @@ jobs:
   ios:
     name: iOS app (Simulator)
     runs-on: macos-15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios, aarch64-apple-ios-sim
@@ -463,11 +526,14 @@ jobs:
     name: Download set (and draft release on tags)
     needs: [linux, windows-installer, android, macos]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: art
@@ -483,24 +549,41 @@ jobs:
           name: downloads
           path: dist/downloads
           if-no-files-found: error
+
+  release:
+    name: Draft release assets
+    needs: downloads
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: downloads
+          path: dist/downloads
       - name: Attach to the draft release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="$GITHUB_REF_NAME"
+          mapfile -t files < <(find dist/downloads -type f | sort)
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::no release files in the downloads artifact"; exit 1; }
           gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft --prerelease --title "$tag" --generate-notes
-          gh release upload "$tag" dist/downloads/* --clobber
+          gh release upload "$tag" "${files[@]}" --clobber
 
   screenshots:
     name: Screenshots for the website
     needs: [linux, windows, android, macos, ios]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: art
@@ -526,8 +609,20 @@ jobs:
           name: screenshots
           path: dist/screenshots
           if-no-files-found: error
+
+  screenshots-publish:
+    name: Publish screenshots for the website
+    needs: screenshots
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: screenshots
+          path: dist/screenshots
       - name: Publish for the website (rolling pre-release screenshots-latest)
-        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -40,6 +40,11 @@ pub(crate) struct Core3 {
     /// Folder records (manifests, maps, trash) refused in this process,
     /// by kind.
     pub records_refused: std::sync::Mutex<crate::record::RecordsRefused>,
+    /// Set by the last `pull_ledger3` that returned `Ok`. `None` when that
+    /// pull read every hot metadata storage and the membership. `Some` names
+    /// what it did not read: a storage that was skipped is not "the ledger
+    /// is current", even though the pull itself succeeded.
+    pub pull_gap: Option<String>,
 }
 
 pub(crate) type MapTable3 = crate::blockmap::MapTable;
@@ -59,6 +64,7 @@ impl Core3 {
             pending: Vec::new(),
             replicas: BTreeMap::new(),
             records_refused: Default::default(),
+            pull_gap: Some("not pulled".into()),
         })
     }
 }
@@ -109,6 +115,80 @@ pub(crate) fn scope3_in(m: &members3::Members3, device: &Id16, key_id: &str) -> 
         // Replicas: `Engine::scope3` (it knows the enrolled ones).
         _ => None,
     }
+}
+
+/// Push this device's own batches that `backend` does not yet hold, and
+/// move its watermark only through the contiguous prefix actually stored.
+/// A missing batch is filled, not skipped: a watermark past a gap would
+/// leave every other device waiting on the predecessor forever.
+pub(super) fn push_contiguous(
+    ledger: &mut ledger3::LedgerStore,
+    me: &Id16,
+    backend: &dyn Storage,
+    pubkey: &crypto::VerifyingKey,
+) -> Result<u64> {
+    let storage = backend.name();
+    let head = ledger.head(me);
+    let mut prefix = ledger.pushed(storage).min(head.seq);
+    // The newest batch the watermark names is gone (or the storage is new
+    // under a known name): fill again from the first batch still kept here.
+    if prefix > head.dropped && !backend.exists(&ledger3::checkpoint::batch_key(me, prefix))? {
+        prefix = head.dropped;
+    } else {
+        let claimed = prefix;
+        let mut proven = ledger.pushed_prefix(storage).max(head.dropped).min(claimed);
+        let mut seq = proven;
+        while seq < claimed {
+            seq += 1;
+            if !backend.exists(&ledger3::checkpoint::batch_key(me, seq))? {
+                log::debug!(
+                    storage = storage,
+                    missing = seq,
+                    watermark = claimed;
+                    "ledger push fills a gap below the watermark"
+                );
+                break;
+            }
+            proven = seq;
+        }
+        prefix = proven;
+    }
+    let mut advanced = prefix;
+    // Batches at or below the drop line were pruned. They are not a hole,
+    // and stopping on them would keep every later batch off the storage.
+    if advanced < head.dropped {
+        advanced = head.dropped;
+    }
+    for seq in advanced + 1..=head.seq {
+        // A pruned batch or a real hole is not here. Keep going so a later
+        // batch we still hold is stored. The watermark moves only along the
+        // contiguous prefix, so a hole is retried and is not skipped.
+        let Some(rec) = ledger.get(me, seq)? else {
+            continue;
+        };
+        let key = ledger3::checkpoint::batch_key(me, seq);
+        let bytes = rec.encode();
+        if !backend.put_if_absent(&key, &bytes)? {
+            let same = backend
+                .get_bounded(&key, crate::record::MAX_PART_READ)?
+                .is_some_and(|b| b == bytes);
+            if !same {
+                let theirs = backend
+                    .get_bounded(&key, crate::record::MAX_PART_READ)?
+                    .and_then(|b| crate::record::SignedRecord::decode(&b).ok());
+                if theirs.is_some_and(|r| r.verify(pubkey).is_ok()) {
+                    bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", storage, seq);
+                }
+                log::warn!(storage = storage, seq = seq; "ledger: junk under this device's batch name");
+                break;
+            }
+        }
+        if seq == advanced + 1 {
+            advanced = seq;
+        }
+    }
+    ledger.set_pushed_prefix(storage, advanced)?;
+    Ok(advanced)
 }
 
 impl Engine {
@@ -377,6 +457,7 @@ impl Engine {
             self.pending.clear();
             self.f3.pending.clear();
             self.clear_deferred();
+            let _ = ledger_upkeep::write_pending3(&self.home, &[]);
             return self.ensure_active().map(|_| None);
         }
         if self.cycle.is_some() {
@@ -390,81 +471,108 @@ impl Engine {
             // is signed until a rebuild ran (the events stay pending).
             self.ensure_ledger_writable()?;
         }
-        events.append(&mut self.f3.pending);
+        // On disk before the seal, so a crash while signing retries these
+        // events instead of dropping them. Restored if the seal fails.
+        let pending_f3 = std::mem::take(&mut self.f3.pending);
+        if let Err(e) = ledger_upkeep::write_pending3(&self.home, &pending_f3) {
+            self.f3.pending = pending_f3;
+            return Err(e);
+        }
+        events.extend(pending_f3.iter().cloned());
         self.pending.clear();
         self.clear_deferred();
-        if self.forked_self && !events.is_empty() {
-            bail!("this device's ledger is forked; it must be re-enrolled as a new device");
-        }
-        // Folders shared with other people: the folder's events go into a
-        // folder-scoped batch under its share-ledger key, which the members
-        // read (they hold no vault key); the first time this device sees a
-        // folder shared, it announces there again what it published of it
-        // before (its packs and its records), so a member that joins later
-        // finds them. A member device writes folder-scoped batches only.
-        let mut groups: BTreeMap<Id16, Vec<Event3>> = BTreeMap::new();
-        let view = if self.vault.member || !self.shared_folders().is_empty() {
-            self.view3().ok()
-        } else {
-            None
-        };
-        for ev in events {
-            let f = self.batch_folder(&ev, view.as_ref());
-            groups.entry(f).or_default().push(ev);
-        }
-        let announced = self.reannounce(&mut groups, view.as_ref())?;
-        if groups.values().all(|g| g.is_empty()) {
-            return Ok(None);
-        }
-        let me = self.me3();
-        let seen = self.f3.ledger.vault_seen(&me);
-        let n: usize = groups.values().map(|g| g.len()).sum();
-        let mut last = None;
-        for (folder, evs) in groups {
-            if evs.is_empty() {
-                continue;
+        let outcome = (|| -> Result<Option<u64>> {
+            if self.forked_self && !events.is_empty() {
+                bail!("this device's ledger is forked; it must be re-enrolled as a new device");
             }
-            let (key_id, key) = if folder == ledger3::NO_FOLDER {
-                if self.vault.member {
-                    bail!("a member device writes only for its shared folder");
-                }
-                self.ledger_key3()?
+            // Folders shared with other people: the folder's events go into a
+            // folder-scoped batch under its share-ledger key, which the members
+            // read (they hold no vault key); the first time this device sees a
+            // folder shared, it announces there again what it published of it
+            // before (its packs and its records), so a member that joins later
+            // finds them. A member device writes folder-scoped batches only.
+            let mut groups: BTreeMap<Id16, Vec<Event3>> = BTreeMap::new();
+            let view = if self.vault.member || !self.shared_folders().is_empty() {
+                self.view3().ok()
             } else {
-                self.share_ledger_key(&folder)?
+                None
             };
-            let raw: Vec<_> = evs.iter().map(Event3::to_raw).collect();
-            // One batch per action (and folder), more only past the size limits.
-            for group in ledger3::events::split_events(raw) {
-                let lamport = self.tick()?;
-                let rec = self.f3.ledger.append_own(
-                    &me,
-                    group,
-                    seen.clone(),
-                    lamport,
-                    &key,
-                    &key_id,
-                    folder,
-                    &self.keys.signer,
-                )?;
-                last = Some(rec.seq);
+            for ev in events {
+                let f = self.batch_folder(&ev, view.as_ref());
+                groups.entry(f).or_default().push(ev);
+            }
+            let announced = self.reannounce(&mut groups, view.as_ref())?;
+            if groups.values().all(|g| g.is_empty()) {
+                return Ok(None);
+            }
+            let me = self.me3();
+            let seen = self.f3.ledger.vault_seen(&me);
+            let n: usize = groups.values().map(|g| g.len()).sum();
+            let mut last = None;
+            for (folder, evs) in groups {
+                if evs.is_empty() {
+                    continue;
+                }
+                let (key_id, key) = if folder == ledger3::NO_FOLDER {
+                    if self.vault.member {
+                        bail!("a member device writes only for its shared folder");
+                    }
+                    self.ledger_key3()?
+                } else {
+                    self.share_ledger_key(&folder)?
+                };
+                let raw: Vec<_> = evs.iter().map(Event3::to_raw).collect();
+                // One batch per action (and folder), more only past the size limits.
+                for group in ledger3::events::split_events(raw) {
+                    let lamport = self.tick()?;
+                    let rec = self.f3.ledger.append_own(
+                        &me,
+                        group,
+                        seen.clone(),
+                        lamport,
+                        &key,
+                        &key_id,
+                        folder,
+                        &self.keys.signer,
+                    )?;
+                    last = Some(rec.seq);
+                }
+            }
+            log::debug!(events = n, seq = last.unwrap_or(0); "ledger batch sealed");
+            if !announced.is_empty() {
+                let mut done = self.announced3();
+                done.extend(announced.iter().map(hex::encode));
+                util::write_json(&self.home.join("state").join(ANNOUNCED_FILE), &done)?;
+            }
+            // The batch is sealed and kept here: a storage that does not answer
+            // gets it with the next push, so an action done offline stands. A
+            // fork of this device's ledger stays an error.
+            if let Err(e) = self.push_own_batches3() {
+                if self.forked_self {
+                    return Err(e);
+                }
+                log::warn!("ledger batch kept on this device, not pushed yet: {e:#}");
+            }
+            Ok(last)
+        })();
+        match outcome {
+            Ok(seq) => {
+                // Sealed events stay in the batch. Anything queued during
+                // the seal (there is normally nothing) is what remains.
+                if self.f3.pending.is_empty() {
+                    let _ = ledger_upkeep::write_pending3(&self.home, &[]);
+                } else if let Err(e) = self.persist_pending3() {
+                    log::warn!("ledger events waiting for the next batch were not saved: {e:#}");
+                }
+                Ok(seq)
+            }
+            Err(e) => {
+                let mut back = pending_f3;
+                back.append(&mut self.f3.pending);
+                self.f3.pending = back;
+                Err(e)
             }
         }
-        log::debug!(events = n, seq = last.unwrap_or(0); "ledger batch sealed");
-        if !announced.is_empty() {
-            let mut done = self.announced3();
-            done.extend(announced.iter().map(hex::encode));
-            util::write_json(&self.home.join("state").join(ANNOUNCED_FILE), &done)?;
-        }
-        // The batch is sealed and kept here: a storage that does not answer
-        // gets it with the next push, so an action done offline stands. A
-        // fork of this device's ledger stays an error.
-        if let Err(e) = self.push_own_batches3() {
-            if self.forked_self {
-                return Err(e);
-            }
-            log::warn!("ledger batch kept on this device, not pushed yet: {e:#}");
-        }
-        Ok(last)
     }
 
     /// Tests: what a modified client could sign, one batch of exactly
@@ -633,62 +741,40 @@ impl Engine {
     /// (a copy of this identity restored from an old backup) stops it.
     pub(crate) fn push_own_batches3(&mut self) -> Result<()> {
         let me = self.me3();
-        let head = self.f3.ledger.head(&me);
+        let pubkey = self.keys.signer.public();
         // Transferrers carry the ledger too (F-048).
         for (spec, backend) in self.metadata_storages(false)? {
             // One storage that cannot be reached is left as it is: the
             // batches are sealed here and go there at a later push (`health`).
-            let pushed = (|| -> Result<()> {
-                let mut done = self.f3.ledger.pushed(spec.name()).min(head.seq);
-                // A storage that lost the newest batch it was known to hold (or
-                // a new storage under a known name) is filled from the start.
-                if done > head.dropped
-                    && !backend.exists(&ledger3::checkpoint::batch_key(&me, done))?
-                {
-                    done = 0;
+            let pushed = push_contiguous(&mut self.f3.ledger, &me, backend.as_ref(), &pubkey);
+            if let Err(ref e) = pushed {
+                if format!("{e:#}").contains("ledger fork:") {
+                    self.forked_self = true;
                 }
-                for seq in done.max(head.dropped) + 1..=head.seq {
-                    let Some(rec) = self.f3.ledger.get(&me, seq)? else {
-                        continue;
-                    };
-                    let key = ledger3::checkpoint::batch_key(&me, seq);
-                    let bytes = rec.encode();
-                    if !backend.put_if_absent(&key, &bytes)? {
-                        let same = backend
-                            .get_bounded(&key, crate::record::MAX_PART_READ)?
-                            .is_some_and(|b| b == bytes);
-                        if !same {
-                            let theirs = backend
-                                .get_bounded(&key, crate::record::MAX_PART_READ)?
-                                .and_then(|b| crate::record::SignedRecord::decode(&b).ok());
-                            if theirs.is_some_and(|r| r.verify(&self.keys.signer.public()).is_ok())
-                            {
-                                self.forked_self = true;
-                                bail!("ledger fork: storage {} already holds a different batch {} of this device (restored from an old copy?)", backend.name(), seq);
-                            }
-                            log::warn!(storage = backend.name(), seq = seq; "ledger: junk under this device's batch name");
-                        }
-                    }
-                }
-                Ok(())
-            })();
+            }
             if self.tolerate(spec.name(), pushed)?.is_none() {
                 continue;
             }
-            self.f3.ledger.set_pushed(spec.name(), head.seq)?;
         }
         Ok(())
     }
 
     /// Pull the membership and every known device's new batches from every
     /// hot metadata storage. Returns the devices found forked.
+    ///
+    /// `Ok` does not mean every storage was read. A storage that does not
+    /// answer is skipped (`tolerate`) and named in [`Core3::pull_gap`]; a
+    /// caller that deletes from the ledger view has to treat that as a
+    /// partial pull.
     pub(crate) fn pull_ledger3(&mut self) -> Result<Vec<DeviceId>> {
         // With no storage reachable the peers still give their batches
         // (the head exchange below), on the membership known here.
+        let mut members_gap = false;
         if let Err(e) = self.refresh_members() {
             if !is_network_error(&e) {
                 return Err(e);
             }
+            members_gap = true;
             log::warn!("membership not read, no storage answered: {e:#}");
         }
         // Replicas the vault enrolled, and other devices' names for this
@@ -722,6 +808,17 @@ impl Engine {
         }
         let mut forks = BTreeSet::new();
         let (mut malformed, mut refused) = (0u64, 0u64);
+        // Hot metadata storages this pull is supposed to read. One already
+        // marked down is not opened (`metadata_storages`), so it stays here.
+        let drained = self.drained_storages();
+        let mut unread: BTreeSet<String> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| !s.is_data_only() && !s.is_cold() && !drained.contains(s.name()))
+            .map(|s| s.name().to_string())
+            .collect();
+        let no_metadata_storage = unread.is_empty();
         let limit = self.clock.lamport.saturating_add(Self::CLOCK_LEAP);
         // What each storage's listing showed, for the rollback judge: the
         // storage's own newest batch, never the head held here (that may
@@ -844,6 +941,9 @@ impl Engine {
                 Ok(())
             })();
             let reachable = self.tolerate(spec.name(), pulled)?.is_some();
+            if reachable {
+                unread.remove(spec.name());
+            }
             let id = if reachable {
                 let id = super::verify::storage_identity(backend.as_ref()).ok();
                 if let Some(id) = &id {
@@ -883,6 +983,19 @@ impl Engine {
             Err(e) => log::debug!("rollback check failed: {e:#}"),
         }
         self.watch_freshness(&view, malformed, refused);
+        let mut gap: Vec<String> = Vec::new();
+        if members_gap {
+            gap.push("membership".into());
+        }
+        if no_metadata_storage {
+            gap.push("no metadata storage".into());
+        }
+        gap.extend(unread);
+        self.f3.pull_gap = if gap.is_empty() {
+            None
+        } else {
+            Some(gap.join(", "))
+        };
         Ok(forks.into_iter().collect())
     }
 

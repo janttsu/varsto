@@ -46,7 +46,7 @@ impl Commit for Sink3<'_> {
         let lamport = self.tick();
         let seen = self.ledger.vault_seen(&self.me);
         let raw = events.iter().map(Event3::to_raw).collect();
-        let rec = self.ledger.append_own(
+        self.ledger.append_own(
             &self.me,
             raw,
             seen,
@@ -56,15 +56,14 @@ impl Commit for Sink3<'_> {
             ledger3::NO_FOLDER,
             self.signer,
         )?;
+        let pubkey = self.signer.public();
         for (spec, backend) in self.storages {
             if spec.is_carrier() || spec.is_data_only() {
                 continue;
             }
-            backend.put_if_absent(
-                &ledger3::checkpoint::batch_key(&self.me, rec.seq),
-                &rec.encode(),
-            )?;
-            self.ledger.set_pushed(spec.name(), rec.seq)?;
+            // The new batch is not the only one this storage may lack: a
+            // watermark that jumped to it would hide every gap below it.
+            super::ledger3_ops::push_contiguous(self.ledger, &self.me, backend.as_ref(), &pubkey)?;
         }
         Ok(())
     }

@@ -261,9 +261,11 @@ fn listener(addr: SocketAddr) -> Result<std::net::TcpListener> {
 /// peer keeps open between requests (keep-alive); producing objects (read,
 /// compress, encrypt) is limited to `serve_threads()` at a time. A
 /// connection idle for `CONN_IDLE` is closed, and at most `MAX_CONNS` are
-/// open at once. (tiny_http's connection pool queued a new connection behind
-/// long-lived ones, so a kept-alive peer could wait for a connection that
-/// was never served.)
+/// open at once. A connection that has not finished the TLS handshake also
+/// counts toward `MAX_UNAUTH_PER_IP` for its address, so one address cannot
+/// hold every slot before it authenticates. (tiny_http's connection pool
+/// queued a new connection behind long-lived ones, so a kept-alive peer
+/// could wait for a connection that was never served.)
 pub struct Server {
     listener: std::net::TcpListener,
     pub addr: SocketAddr,
@@ -295,6 +297,13 @@ const MAX_HEAD: usize = 32 * 1024;
 const HEAD_DEADLINE: Duration = Duration::from_secs(5);
 /// Connections of one address that sit with an unfinished request head.
 const MAX_HEADS_PER_IP: usize = 8;
+/// Connections of one address that have not finished the TLS handshake.
+/// One device opens at most the fetch window (32) of fresh sessions at
+/// once, and a second device behind the same address may do the same; the
+/// place is freed when the handshake finishes, so an authenticated
+/// connection does not count. The next one past this is closed at once,
+/// and one address cannot take every slot of `MAX_CONNS`.
+const MAX_UNAUTH_PER_IP: usize = 64;
 
 /// Connections per address that hold a request head that has begun but not
 /// ended: an address over the limit has the next one closed at once. A
@@ -330,6 +339,45 @@ impl PerIp {
 impl Drop for HeadSlot {
     fn drop(&mut self) {
         let mut m = self.owner.heads.lock().unwrap();
+        if let Some(n) = m.get_mut(&self.ip) {
+            *n -= 1;
+            if *n == 0 {
+                m.remove(&self.ip);
+            }
+        }
+    }
+}
+
+/// Connections per address still in the TLS handshake. Same accounting as
+/// [`PerIp`], for the time before the peer is authenticated.
+#[derive(Default)]
+struct Unauth {
+    n: Mutex<std::collections::HashMap<IpAddr, usize>>,
+}
+
+struct UnauthSlot {
+    owner: Arc<Unauth>,
+    ip: IpAddr,
+}
+
+impl Unauth {
+    fn enter(self: &Arc<Self>, ip: IpAddr) -> Option<UnauthSlot> {
+        let mut m = self.n.lock().unwrap();
+        let n = m.entry(ip).or_insert(0);
+        if *n >= MAX_UNAUTH_PER_IP {
+            return None;
+        }
+        *n += 1;
+        Some(UnauthSlot {
+            owner: self.clone(),
+            ip,
+        })
+    }
+}
+
+impl Drop for UnauthSlot {
+    fn drop(&mut self) {
+        let mut m = self.owner.n.lock().unwrap();
         if let Some(n) = m.get_mut(&self.ip) {
             *n -= 1;
             if *n == 0 {
@@ -400,6 +448,7 @@ impl Server {
         });
         let open = Arc::new(AtomicUsize::new(0));
         let heads = Arc::new(PerIp::default());
+        let unauth = Arc::new(Unauth::default());
         if self.listener.set_nonblocking(true).is_err() {
             return;
         }
@@ -418,6 +467,12 @@ impl Server {
             if open.load(Ordering::Relaxed) >= MAX_CONNS {
                 continue; // dropped: closed at once
             }
+            // Held only until the handshake finishes (the closure drops it
+            // before serving). Over the cap the socket is dropped here, so
+            // the address cannot fill the listener before it authenticates.
+            let Some(handshake) = unauth.enter(remote.ip()) else {
+                continue;
+            };
             open.fetch_add(1, Ordering::Relaxed);
             let (snapshot, stop, slots, conns, traffic, heads) = (
                 snapshot.clone(),
@@ -442,7 +497,8 @@ impl Server {
                     if prepare_socket(&sock).is_err() {
                         return;
                     }
-                    let _ = tls.serve(sock, remote, |stream, handler| {
+                    let _ = tls.serve(sock, remote, move |stream, handler| {
+                        drop(handshake);
                         serve_connection(
                             stream, remote, &snapshot, &stop, &slots, &traffic, &heads, handler,
                             false,
@@ -2008,6 +2064,25 @@ mod tests {
         assert!(heads.enter("192.0.2.8".parse().unwrap()).is_some());
         drop(held);
         assert!(heads.enter(ip).is_some(), "slots are given back");
+    }
+
+    #[test]
+    fn unauthenticated_connections_are_limited_per_address() {
+        let slots = Arc::new(Unauth::default());
+        let ip: IpAddr = "192.0.2.7".parse().unwrap();
+        let held: Vec<_> = (0..MAX_UNAUTH_PER_IP)
+            .map(|_| slots.enter(ip).unwrap())
+            .collect();
+        assert!(
+            slots.enter(ip).is_none(),
+            "one more unauthenticated connection is refused"
+        );
+        assert!(slots.enter("192.0.2.8".parse().unwrap()).is_some());
+        drop(held);
+        assert!(
+            slots.enter(ip).is_some(),
+            "a finished handshake gives the slot back"
+        );
     }
 
     #[test]

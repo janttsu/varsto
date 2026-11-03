@@ -69,7 +69,7 @@ pub use moves::{
     Sources,
 };
 pub use pools::{
-    book_sets, check_disk_packs, disk_check_events, group_rule_met, pack_referenced,
-    pool_pack_copies, tidy_disk_packs, BookSets,
+    book_sets, check_disk_packs, disk_check_events, group_rule_met, pool_pack_copies,
+    stray_pack_action, tidy_disk_packs, BookSets, StrayPack, StrayPackFacts, CLEANUP_GRACE_SECS,
 };
 pub use replica::{check_replica_events, replicate, ReplicaReport, ReplicaRound};

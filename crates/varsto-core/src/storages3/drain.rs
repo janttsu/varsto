@@ -8,8 +8,13 @@
 //! was there), and a block is never left without a copy. Missing copies are
 //! whole copies of the pack onto the folder's other storages
 //! ([`super::moves::run_drain`] writes and checks them), and only then is
-//! the pack dropped. A pack whose needs cannot be met elsewhere is a
-//! refusal: the drain stays unfinished and says what is missing.
+//! the pack dropped. A block the local file state does not list is not
+//! unused: that state can be older than the block map, and so can the map
+//! be older than the writer's map record. Such a pack is dropped only when
+//! another readable copy is known (a copy this device has seen on another
+//! storage, or a confirmed replica). A pack whose needs cannot be met
+//! elsewhere is a refusal: the drain stays unfinished and says what is
+//! missing.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -18,7 +23,7 @@ use anyhow::Result;
 use super::moves::members_of_packs;
 use crate::blockmap::MapTable;
 use crate::ledger3::events::class_bytes;
-use crate::ledger3::{FolderBin, LedgerView, ObjectBin, PackId};
+use crate::ledger3::{DeviceBin, FolderBin, LedgerView, ObjectBin, PackId};
 use crate::policy::{place_phrase, Policy};
 
 /// What a storage holds, counted from the ledger: whole packs (padding
@@ -52,6 +57,11 @@ pub struct DrainNeeds {
     /// Blocks current files and known snapshots use; `None`: unknown, all
     /// live blocks count.
     pub referenced: Option<HashSet<ObjectBin>>,
+    /// Files, trash or snapshots here are older than the block map, or the
+    /// map here is older than a record the ledger has announced. Blocks
+    /// `referenced` omits are not unused, and a pack is not deleted on
+    /// that basis.
+    pub state_behind: bool,
     /// Keep the number of copies where a target can take one: a pack whose
     /// blocks keep their rules without this storage is still copied to the
     /// first target that lacks it (a drain moves data; a removal only keeps
@@ -142,6 +152,111 @@ pub fn shortfall(
     None
 }
 
+/// A live block that local state does not list may be dropped only when
+/// another readable copy is known and local state is not behind the block
+/// map. `seen_elsewhere`: this device's block map shows a live place on
+/// another storage. `confirmed_replica`: a replica verified a pack that
+/// holds the block.
+pub fn unreferenced_may_drop(
+    state_behind: bool,
+    seen_elsewhere: bool,
+    confirmed_replica: bool,
+) -> bool {
+    !state_behind && (seen_elsewhere || confirmed_replica)
+}
+
+/// A pack the local block map does not explain (no live members, a gap in
+/// them, or the writer's map record newer than the table) may be dropped
+/// only when this device has claimed or verified it on another storage, or
+/// a replica has confirmed it.
+pub fn unexplained_may_drop(seen_elsewhere: bool, confirmed_replica: bool) -> bool {
+    seen_elsewhere || confirmed_replica
+}
+
+/// The writer's map record that lists `pack` is in `table` (a claim that
+/// names no record has nothing to catch up with).
+fn map_caught_up(view: &LedgerView, pack: &PackId, table: &MapTable) -> bool {
+    let Some(rec) = view.pack(pack) else {
+        return false;
+    };
+    if rec.map_seq == 0 {
+        return true;
+    }
+    let Some(writer) = view.pack_writer(pack) else {
+        return false;
+    };
+    table
+        .marker(&writer)
+        .is_some_and(|m| m.applied >= rec.map_seq)
+}
+
+/// Live members follow one another from offset 0. A gap is a member the
+/// table does not list.
+fn members_cover(rows: &[super::moves::PackMember]) -> bool {
+    if rows.is_empty() {
+        return false;
+    }
+    let mut rows: Vec<_> = rows.iter().collect();
+    rows.sort_by_key(|r| r.place.offset);
+    let mut at = 0u64;
+    for r in rows {
+        if u64::from(r.place.offset) != at {
+            return false;
+        }
+        at += u64::from(r.place.len);
+    }
+    true
+}
+
+/// Other storages where this device has claimed or verified `pack`, and
+/// replica storages that confirmed it.
+fn pack_copies_seen(
+    view: &LedgerView,
+    pack: &PackId,
+    storage: &str,
+    me: &DeviceBin,
+) -> (Vec<String>, bool) {
+    let mut seen = Vec::new();
+    let mut replica = false;
+    for c in view.copies(pack) {
+        if c.storage == storage {
+            continue;
+        }
+        let confirmed = c.storage.starts_with("replica:") && c.independently_verified;
+        if confirmed {
+            replica = true;
+            seen.push(c.storage);
+        } else if c.verified_by.contains(me) || c.claimed_by.contains(me) {
+            seen.push(c.storage);
+        }
+    }
+    (seen, replica)
+}
+
+/// A replica storage in `names` verified a pack that holds `object`.
+fn replica_confirmed(
+    view: &LedgerView,
+    table: &MapTable,
+    object: &ObjectBin,
+    names: &[(String, String)],
+) -> bool {
+    let replicas: Vec<&str> = names
+        .iter()
+        .filter(|(s, _)| s.starts_with("replica:"))
+        .map(|(s, _)| s.as_str())
+        .collect();
+    if replicas.is_empty() {
+        return false;
+    }
+    view.block_places(object, table).into_iter().any(|p| {
+        p.storages.iter().any(|s| replicas.contains(&s.as_str()))
+            && view
+                .copies(&p.place.pack)
+                .into_iter()
+                .any(|c| c.storage.starts_with("replica:") && c.independently_verified)
+    })
+}
+
 /// The rules capped at what the copies met before.
 fn capped(rules: &Policy, before: &[(String, String)]) -> Policy {
     Policy {
@@ -162,7 +277,9 @@ fn capped(rules: &Policy, before: &[(String, String)]) -> Policy {
 /// (folder to table), `needs` what each folder's blocks need, `place_of`
 /// the place of a storage, `fallback_targets` where packs of no known
 /// folder may be copied. Packs of a folder with no map here are treated as
-/// packs of no folder: they need one other copy at least.
+/// packs of no folder: they need one other copy this device has seen, or
+/// a confirmed replica. `me` is this device: its own claims and
+/// verifications are the copies it has seen.
 pub fn drain_plan(
     view: &LedgerView,
     storage: &str,
@@ -170,6 +287,7 @@ pub fn drain_plan(
     needs: &HashMap<FolderBin, DrainNeeds>,
     place_of: &dyn Fn(&str) -> String,
     fallback_targets: &[String],
+    me: &DeviceBin,
 ) -> Result<DrainPlan> {
     let mut plan = DrainPlan {
         storage: storage.to_string(),
@@ -211,42 +329,72 @@ pub fn drain_plan(
         };
         let need = folder.and_then(|f| needs.get(&f));
         let name = need.map(|n| n.name.as_str()).unwrap_or("the vault");
+        let state_behind = need.is_some_and(|n| n.state_behind);
+        let referenced = need.and_then(|n| n.referenced.as_ref());
         // The copies each needed block keeps without this storage.
         let mut afters: Vec<BlockSides> = Vec::new();
-        match (folder, members.get(&pack)) {
-            (Some(f), Some(live)) => {
-                let table = tables[&f];
-                for m in live.iter().filter(|m| {
-                    need.and_then(|n| n.referenced.as_ref())
-                        .is_none_or(|r| r.contains(&m.object))
-                }) {
-                    let before: Vec<(String, String)> = view
-                        .block_copies(&m.object, table)
-                        .into_iter()
-                        .map(|s| {
-                            let p = place_of(&s);
-                            (s, p)
-                        })
-                        .collect();
-                    let after: Vec<(String, String)> = before
-                        .iter()
-                        .filter(|(s, _)| s != storage)
-                        .cloned()
-                        .collect();
-                    afters.push((before, after));
-                }
-            }
-            _ => {
-                // No members known: the pack as a whole is one block.
-                let before: Vec<(String, String)> =
-                    holders.iter().map(|s| (s.clone(), place_of(s))).collect();
-                let after = before
+        let rows = members.get(&pack);
+        let explained = folder.is_some_and(|f| {
+            map_caught_up(view, &pack, tables[&f]) && rows.is_some_and(|r| members_cover(r))
+        });
+        if let (true, Some(f), Some(live)) = (explained, folder, rows) {
+            let table = tables[&f];
+            for m in live {
+                let before: Vec<(String, String)> = view
+                    .block_copies(&m.object, table)
+                    .into_iter()
+                    .map(|s| {
+                        let p = place_of(&s);
+                        (s, p)
+                    })
+                    .collect();
+                let after: Vec<(String, String)> = before
                     .iter()
                     .filter(|(s, _)| s != storage)
                     .cloned()
                     .collect();
+                // Not listed by local state. That state can be older than
+                // the map: omitting the block is not a reason to drop the
+                // pack unless another readable copy is already known.
+                let listed = referenced.is_none_or(|r| r.contains(&m.object));
+                if !listed {
+                    let seen = after.iter().any(|(s, _)| !s.starts_with("replica:"));
+                    let replica = replica_confirmed(view, table, &m.object, &after);
+                    if unreferenced_may_drop(state_behind, seen, replica) {
+                        continue;
+                    }
+                }
                 afters.push((before, after));
             }
+        } else {
+            // The map does not explain the pack. A claim this device has
+            // not seen is not a copy that lets the bytes go; a confirmed
+            // replica is.
+            // Only copies this device has claimed or verified, and
+            // confirmed replicas. Anything else is not a copy that lets
+            // the bytes go; the pack stays, or is copied first.
+            let (seen, replica) = pack_copies_seen(view, &pack, storage, me);
+            let mut names = vec![storage.to_string()];
+            if unexplained_may_drop(!seen.is_empty(), replica) {
+                for s in &seen {
+                    if s != storage && !names.contains(s) {
+                        names.push(s.clone());
+                    }
+                }
+            }
+            let before: Vec<(String, String)> = names
+                .into_iter()
+                .map(|s| {
+                    let p = place_of(&s);
+                    (s, p)
+                })
+                .collect();
+            let after = before
+                .iter()
+                .filter(|(s, _)| s != storage)
+                .cloned()
+                .collect();
+            afters.push((before, after));
         }
         item.needed_blocks = if folder.is_some() {
             afters.len() as u64
@@ -254,7 +402,8 @@ pub fn drain_plan(
             0
         };
         if folder.is_some() && afters.is_empty() {
-            // Nothing uses the pack: it only has to be dropped.
+            // Every live block is unused and another readable copy is
+            // known. The pack only has to be dropped.
             plan.items.push(item);
             plan.packs_to_drop += 1;
             continue;
@@ -296,6 +445,18 @@ pub fn drain_plan(
                 item.copy_to.push(t.clone());
             }
         }
+        // Behind the block map: do not delete on the strength of places
+        // the local state has not caught up with. A copy this device has
+        // claimed or verified elsewhere, or a confirmed replica, may go;
+        // so may a pack this run copies first (that copy is read back).
+        if state_behind && why.is_none() && item.copy_to.is_empty() {
+            let (seen, replica) = pack_copies_seen(view, &pack, storage, me);
+            if !unexplained_may_drop(!seen.is_empty(), replica) {
+                why = Some(format!(
+                    "local state of {name} is behind the block map: a pack is not deleted until this device has caught up, or a copy it has seen (or a confirmed replica) holds it"
+                ));
+            }
+        }
         item.shortfall = why;
         match &item.shortfall {
             Some(w) => {
@@ -314,4 +475,26 @@ pub fn drain_plan(
     plan.items
         .sort_by_key(|i| (!i.copy_to.is_empty(), i.shortfall.is_some(), i.pack));
     Ok(plan)
+}
+
+#[cfg(test)]
+mod verdict_tests {
+    use super::{unexplained_may_drop, unreferenced_may_drop};
+
+    #[test]
+    fn an_unreferenced_block_is_not_dropped_without_a_copy_or_while_behind() {
+        assert!(!unreferenced_may_drop(false, false, false));
+        assert!(unreferenced_may_drop(false, true, false));
+        assert!(unreferenced_may_drop(false, false, true));
+        // Local state is behind the block map: do not delete on the
+        // strength of a block it does not list, even when a place exists.
+        assert!(!unreferenced_may_drop(true, true, true));
+    }
+
+    #[test]
+    fn an_unexplained_pack_needs_a_seen_copy_or_a_confirmed_replica() {
+        assert!(!unexplained_may_drop(false, false));
+        assert!(unexplained_may_drop(true, false));
+        assert!(unexplained_may_drop(false, true));
+    }
 }

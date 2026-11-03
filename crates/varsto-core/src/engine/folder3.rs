@@ -346,6 +346,8 @@ impl Engine {
                 p.events
             };
         self.f3.pending.extend(events);
+        // With the manifest that follows: a crash must still find these.
+        self.persist_pending3()?;
         Ok(())
     }
 
@@ -450,7 +452,10 @@ impl Engine {
             created_utc: now,
             files: writer.published.clone(),
         });
-        self.save_manifests(&manifests)?;
+        // The announcement has to be durable before the manifest state says
+        // this record is published. The other way round, a crash leaves the
+        // record unannounced and every later sync skips it (the files
+        // already match), so other devices wait on the delta forever.
         self.f3.pending.push(Event3::RecordPublished(Announcement {
             kind: a.kind,
             scope: a.scope,
@@ -460,6 +465,8 @@ impl Engine {
             body_hash: a.body_hash,
             size: a.size,
         }));
+        self.persist_pending3()?;
+        self.save_manifests(&manifests)?;
         Ok(Some(a.seq))
     }
 }

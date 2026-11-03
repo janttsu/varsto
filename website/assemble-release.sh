@@ -33,7 +33,7 @@ NOTES = [
     (f"varsto-{v}-x86_64-apple-darwin.tar.gz", "macOS (Intel) command line", "service + browser interface; cross-compiled, unsigned"),
     (f"Varsto-{v}-macos-apple-silicon-lite.zip", "macOS app (Apple Silicon), lite", "background service + browser interface, no menu-bar icon; unsigned, cross-compiled, not yet tested on a Mac"),
     (f"Varsto-{v}-macos-intel-lite.zip", "macOS app (Intel), lite", "background service + browser interface, no menu-bar icon; unsigned, cross-compiled, not yet tested on a Mac"),
-    (f"varsto-{v}-android-debug.apk", "Android (arm64, x86_64)", "debug-signed APK for sideloading; foreground service + in-app interface; tested in the emulator by the build pipeline"),
+    (f"varsto-{v}-android.apk", "Android (arm64, x86_64)", "release-signed APK for sideloading; not debuggable; foreground service + in-app interface"),
     (f"varsto-{v}-source.tar.gz", "Source", "git archive of the release"),
 ]
 m = {"_version": v}
@@ -46,7 +46,15 @@ for name, platform, note in NOTES:
 if f"Varsto-{v}-macos.dmg" in m:
     for k in [k for k in m if k.endswith("-lite.zip")]:
         del m[k]; names.remove(k)
-other = sorted(p.name for p in out.iterdir() if p.is_file() and (p.name.startswith(f"varsto-{v}-") or p.name.startswith(f"Varsto-{v}-")) and p.name not in names)
+# Older artifacts, and the copy kept so the daily list's stable name still matches.
+legacy_apk = f"varsto-{v}-android-debug.apk"
+if f"varsto-{v}-android.apk" not in m and (out / legacy_apk).is_file():
+    m[legacy_apk] = {"platform": "Android (arm64, x86_64)", "note": "release-signed APK for sideloading; not debuggable; foreground service + in-app interface"}
+    names.append(legacy_apk)
+skip = set(names)
+if f"varsto-{v}-android.apk" in m:
+    skip.add(legacy_apk)
+other = sorted(p.name for p in out.iterdir() if p.is_file() and (p.name.startswith(f"varsto-{v}-") or p.name.startswith(f"Varsto-{v}-")) and p.name not in skip)
 if other:
     print("not in the manifest (unknown kind):", ", ".join(other))
 (out / "manifest.json").write_text(json.dumps(m, indent=2) + "\n")

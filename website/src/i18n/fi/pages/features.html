@@ -122,31 +122,26 @@ description: Mitä Varsto tekee: allekirjoitettu kirjanpito, joka laskee jokaise
       <div>
         <p>Taustapalvelu käynnistyy kirjautuessa (Linuxissa systemd-käyttäjäyksikkönä, macOS:ssä launch agentina, Windowsissa ilmoitusalueen sovelluksena), ja ensimmäinen komento ottaa sen käyttöön heti kun holvi on olemassa. Se seuraa kansioitasi ja synkronoi muutokset sekunneissa, ja muualla tehdyt muutokset se hakee säännöllisin väliajoin; synkronointi-, päivitys- tai tarkistuspainikkeita ei ole. Sama pieni ohjelma tarjoaa komentorivin ja paikallisen käyttöliittymän, joka näkyy vain omalle tietokoneellesi. Päivityksiä haetaan automaattisesti, ja niitä tarjotaan vain, kun uudempi versio on olemassa; asennus tarkistaa julkaisun allekirjoituksen ja GitHubin tarkistussummat, ja macOS-sovellus korvaa itsensä allekirjoitetusta levykuvasta. <code>varsto transfers --watch</code> näyttää parhaillaan käynnissä olevat lähetykset, lataukset ja vertaisliikenteen.</p>
         <p>Jokainen laite voi pitää kansiota valikoivassa tilassa: koko hakemistopuu näkyy paikkamerkkeinä, tiedosto ladataan, kun pyydät sitä, ja <em>Vapauta tilaa</em> muuttaa sen takaisin paikkamerkiksi, kun se on turvallisesti tallessa muualla. Paikkamerkkiä ei koskaan tulkita poistoksi. Hiiren oikean painikkeen <em>Lataa</em> ja <em>Vapauta tilaa</em> toimivat Finderissa, Explorerissa ja yleisimmissä Linuxin tiedostonhallintaohjelmissa, ja paikkamerkin kaksoisnapsautus avaa tiedoston; natiivit paikkamerkit (File Provider, Cloud Files) tulevat myöhemmin. Esikatselukuvat luodaan kerran, salataan kansioavaimella ja jaetaan muille laitteillesi, joten puhelin näyttää esikatselut kuvista, joita se ei ole koskaan ladannut.</p>
-        <p class="note">Androidissa toimii sama salattu ydin; iOS-kuori käännetään ja ajetaan vain Simulatorissa. Androidin alfa on sivuladattava APK, jossa on tiivis tiedostoluettelo (pitkä painallus valitsee ladattavat tai vapautettavat tiedostot). Puhelimella salattuna pidetty kansio sisältää puhelimessa vain salattuja lohkoja, samoja kuin tallennuspaikkasi; sovellus näyttää tällaisten kansioiden kuvat, videot (kelauksen kera), äänen ja tekstin omassa katseluohjelmassaan, muistissa purettuina eikä koskaan puhelimeen kirjoitettuina, kun taas PDF:t ja muut tiedostot avautuvat toisessa sovelluksessa, joka saa puretun kopion, jonka Varsto poistaa lukittuessaan tai käynnistyessään uudelleen. Kameralähetys lähettää uudet kuvat ja videot kansioon YYYY/MM-alikansioihin, halutessasi vain Wi-Fi-yhteydellä tai latauksen aikana. iOS:ssä kumpaakaan ei vielä ole, eikä sitä ole ajettu oikealla laitteella.</p>
+        <p class="note">Androidissa toimii sama salattu ydin; iOS-kuori käännetään ja ajetaan vain Simulatorissa. Androidin alfa on sivuladattava julkaisuallekirjoitettu APK (aiempi debug-APK on poistettava ensin, mikä poistaa laitteen holvikopion), jossa on tiivis tiedostoluettelo (pitkä painallus valitsee ladattavat tai vapautettavat tiedostot). Puhelimella salattuna pidetty kansio sisältää puhelimessa vain salattuja lohkoja, samoja kuin tallennuspaikkasi; sovellus näyttää tällaisten kansioiden kuvat, videot (kelauksen kera), äänen ja tekstin omassa katseluohjelmassaan, muistissa purettuina eikä koskaan puhelimeen kirjoitettuina, kun taas PDF:t ja muut tiedostot avautuvat toisessa sovelluksessa, joka saa puretun kopion, jonka Varsto poistaa lukittuessaan tai käynnistyessään uudelleen. Kameralähetys lähettää uudet kuvat ja videot kansioon YYYY/MM-alikansioihin, halutessasi vain Wi-Fi-yhteydellä tai latauksen aikana. iOS:ssä kumpaakaan ei vielä ole, eikä sitä ole ajettu oikealla laitteella.</p>
       </div>
     </section>
 
-    <h2 id="next">Version {{RELEASED}} jälkeen</h2>
-    <p class="note">Rakennettu päähaaraan version 0.0.1-alpha.13 jälkeen, ei vielä julkaisussa (new in 0.0.1-alpha.14). <a href="{{P}}docs/alpha-0-format.html">Tallennusmuodon määrittely</a> (englanniksi) kuvaa jokaisen kokonaan.</p>
+    <h2 id="next">Uutta versiossa {{RELEASED}}</h2>
+    <p class="note">Tallennusmuoto 3 ja sen mukana tulevat asiat. <a href="{{P}}docs/alpha-0-format.html">Tallennusmuodon määrittely</a> (englanniksi) kuvaa jokaisen kokonaan. Versiolla 0.0.1-alpha.15 tai vanhemmalla tehty holvi on luotava uudelleen.</p>
     <ul>
-      <li>Koko holvin yhteinen roskakori: poistettu tiedosto säilyttää viimeisimmän versionsa, ja sen voi palauttaa millä tahansa laitteella roskakoripäivien ajan.</li>
-      <li>Tiedostojen versiohistoria valitsemallesi päivämäärälle.</li>
-      <li>Toinen, riippumaton varmuuskopio resticillä tallennuspaikkojesi ulkopuoliseen repositorioon, palautettavissa pelkällä resticillä.</li>
-      <li>Tuonti git-annex-repositorioista (levy kerrallaan, seuraavaksi kytkettävä levy nimettynä), pilvilevyiltä rclonen kautta ja paikallisista hakemistoista, jokainen tiedosto tiivistettään vasten tarkistettuna.</li>
-      <li>Jatkuva bittimätätarkistus jokaiselle kopiolle tallennuspaikoissasi ja kytketyillä levyilläsi sekä laitteen synkronoiduille tiedostoille, korjaus toisesta kopiosta.</li>
-      <li>QR-kutsut ja <code>varsto://</code>-linkit jakamiseen ja laitteiden liittämiseen.</li>
-      <li>Tallennuspaikan tyhjennys päiväkohtaisen kiintiön puitteissa sekä tallennuspaikkojen kiintiöt.</li>
-      <li>Reitittimen porttiohjaus (PCP, NAT-PMP, UPnP) vertaisyhteyksille.</li>
-      <li>Kansioiden turvatoimet: kansion merkintätiedosto, suojaus massapoistoilta, vain lähettävät ja vain vastaanottavat kansiot.</li>
-      <li>Ohitussäännöt (<code>.varstoignore</code>, jaettuna tai laitekohtaisesti).</li>
-      <li>Tiedostojen metatiedot: käyttöoikeudet, symboliset linkit, laajennetut attribuutit ja omistajuus.</li>
-      <li>Kokonaisten asemien valmistelu levyvarastoihin, hakusuunnitelmat ja seuraavaksi kytkettävä levy; reaaliaikainen toiminta laitteiden välillä; sensuroidut paikalliset vianetsintälokit (salaus levyllä myöhemmin).</li>
+      <li>Tallennusmuoto 3: pakettitason kirjanpito lohkojen sijaan, allekirjoitetut tietueet, kansioiden lohkokartat ja perus- ja delta-manifestit.</li>
+      <li>Kansiot hyväksynnällä: holviin sanoilla liittynyt laite pyytää kansiota (<code>varsto folder request</code>), omistaja vertaa kuutta sanaa molemmilla laitteilla ja hyväksyy.</li>
+      <li>Palautussanat: toinen 24 sanan sarja ja jokaisen kansioavaimen palautuskopio, jotta holvin voi avata uudelleen, vaikka kaikki laitteet olisivat kadonneet.</li>
+      <li>Rendezvous-palvelu (<code>https://varsto.net/rv</code> tai oma): laitteet löytävät toisensa verkkojen yli, <code>rv=</code>-liittämislinkit toimivat ja päästä päähän salattu välitys on viimeinen reitti. Kaikki toimii ilman sitä.</li>
+      <li>Työskentely ilman verkkoa: liittyminen ilman yhteyttä tallennuspaikkaan, jäsenyysmuutokset säilyvät laitteella, kunnes tallennuspaikka vastaa, eikä yksi tavoittamaton tallennuspaikka kaada koko synkronointia.</li>
+      <li>Yksi Tuonti-sivu, torrent-tuonti levyä suuremmille torrenteille (<code>varsto import torrent</code>) ja YouTube-kanavat kansioihin (<code>varsto import youtube</code>).</li>
+      <li>Postilaatikko, joka kuljettaa lohkoja telakoidulta levyltä poissa olevalle levyvaraston levylle tai tallennuspaikalle, sekä <code>varsto service remember</code> palvelimilla ilman työpöytäistuntoa.</li>
+      <li>Julkaisuallekirjoitettu Android-APK, jonka päälle seuraavat versiot päivittyvät. Allekirjoitusavain on uusi: poista aiempi debug-versio ensin.</li>
     </ul>
     <h2>Suunnitelmissa myös</h2>
     <ul>
       <li>Laitekohtaiset tallennuspaikkatunnukset, jotka vaihdetaan palveluntarjoajalla, kun laite poistetaan.</li>
       <li>Olemassa olevan datan salaaminen uudelleen laitteen poiston jälkeen.</li>
-      <li>Inkrementaaliset manifestit.</li>
       <li>Vertaisten haku DHT:llä.</li>
       <li>Tallennuksen todistavat haasteet (proof-of-storage).</li>
       <li>Virheenkorjaava koodaus (erasure coding) tallennuspaikkojen yli.</li>

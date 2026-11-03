@@ -35,6 +35,18 @@ pub struct FolderRequest {
     pub fingerprint: String,
 }
 
+/// Where this device stands with a folder it holds no key of (the answer
+/// of [`Engine::f3_own_access`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct OwnAccess {
+    pub folder_id: String,
+    /// `none` (nothing asked yet), `requested` (an owner has not answered)
+    /// or `approved` (an owner answered; the key arrives with the next sync).
+    pub access: String,
+    /// The six words an owner compares with this device before approving.
+    pub fingerprint: String,
+}
+
 /// One participant of a folder.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FolderMember {
@@ -284,6 +296,43 @@ impl Engine {
                 fingerprint: crate::membership3::fingerprint(&me.sign_pub, &me.kem_pub),
             })
         })
+    }
+
+    /// For each of `folders` (ids), whether this device has asked for it and
+    /// whether an owner answered, from this device's copy of the records
+    /// without the network (`status` asks on every poll). A device that
+    /// never took part in format 3 gets nothing.
+    pub fn f3_own_access(&mut self, folders: &[String]) -> Result<Vec<OwnAccess>> {
+        if folders.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(v) = self.with_membership(Reach::Local, false, |m| {
+            let me = m.devices.get(&m.me).cloned().expect("enrolled");
+            let words = crate::membership3::fingerprint(&me.sign_pub, &me.kem_pub);
+            let mut out = Vec::new();
+            for f in folders {
+                let Ok(id) = find_folder(m, f) else { continue };
+                let participant = m.registry.get(&id).and_then(|s| s.role(&m.me)).is_some();
+                let asked = !participant && m.list_requests(&id)?.iter().any(|r| r.device == m.me);
+                out.push(OwnAccess {
+                    folder_id: hex::encode(id),
+                    access: if participant {
+                        "approved"
+                    } else if asked {
+                        "requested"
+                    } else {
+                        "none"
+                    }
+                    .to_string(),
+                    fingerprint: words.clone(),
+                });
+            }
+            Ok(out)
+        })?
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(v)
     }
 
     /// This device's own fingerprint: the six words an owner compares.

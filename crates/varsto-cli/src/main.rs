@@ -1202,7 +1202,8 @@ enum ServiceCmd {
     Forget,
     /// Show whether the service is running and what it did last.
     Status,
-    /// Ask the running service to quit.
+    /// Stop the background service. On Linux, stop the systemd user unit;
+    /// otherwise ask the running process to quit.
     Stop,
 }
 
@@ -4407,13 +4408,18 @@ fn run(cli: &Cli) -> Result<()> {
                     );
                 }
                 format!(
-                    "{}: scanned {}, changed {}, uploaded {} chunks ({} bytes), manifest {:?}",
+                    "{}: scanned {}, changed {}, uploaded {} chunks ({} bytes), manifest {:?}{}",
                     r.folder,
                     r.files_scanned,
                     r.files_changed,
                     r.chunks_uploaded,
                     r.bytes_uploaded,
-                    r.manifest_seq
+                    r.manifest_seq,
+                    if r.files_unreadable > 0 {
+                        format!(", {} unreadable", r.files_unreadable)
+                    } else {
+                        String::new()
+                    }
                 )
             })?;
         }
@@ -4764,17 +4770,13 @@ fn run(cli: &Cli) -> Result<()> {
                     std::process::exit(1);
                 }
             },
-            ServiceCmd::Stop => match service::read_service_file(&home) {
-                Some(f) => {
-                    service::http_post(
-                        &format!("http://127.0.0.1:{}/api/quit", f.port),
-                        &f.token,
-                        "{}",
-                    )?;
+            ServiceCmd::Stop => {
+                if service::stop(&home)? {
                     println!("stop requested");
+                } else {
+                    println!("not running");
                 }
-                None => println!("not running"),
-            },
+            }
         },
         Cmd::Install { interval } => {
             service::set_opted_out(&home, false);

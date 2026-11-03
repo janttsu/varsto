@@ -39,5 +39,5 @@ tempfile.workspace = true
 [dev-dependencies]
 image.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"

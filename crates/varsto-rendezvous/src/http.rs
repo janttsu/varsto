@@ -8,19 +8,21 @@ use crate::limits::{Buckets, Class, RateLimit};
 use crate::proto::{
     self, DeleteSlot, ErrorAnswer, ErrorCode, Health, Info, Lookup, PutSlot, ToClient, Token,
 };
-use crate::registry::Registry;
+use crate::registry::{LookupEncoder, Registry};
 use crate::relay::{Caps, RelayTable, Side, SpliceLimits, TagBytes, Throttle};
 use crate::udp::Observed;
 use crate::Config;
 use anyhow::{Context, Result};
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
+use futures_util::stream;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -433,8 +435,28 @@ async fn lookup(
     if !shared.limiter.allow_tag(Class::Lookup, &l.tag.0, now) {
         return refuse(&shared, ErrorCode::RateLimited);
     }
-    let a = shared.registry.lock().unwrap().lookup(&l.tag.0, unix_now());
-    json(&a)
+    // The snap shares the registry's blobs. The JSON is written as the
+    // socket takes it, one small chunk at a time, so this request does not
+    // allocate the whole answer (a full tag is about 11 MiB).
+    let snap = shared
+        .registry
+        .lock()
+        .unwrap()
+        .lookup_snap(&l.tag.0, unix_now());
+    let enc = LookupEncoder::from_snap(snap);
+    let stream = stream::unfold(enc, |mut enc| async move {
+        enc.next_chunk()
+            .map(|bytes| (Ok::<Bytes, Infallible>(Bytes::from(bytes)), enc))
+    });
+    (
+        StatusCode::OK,
+        [
+            ("content-type", "application/json"),
+            ("cache-control", "no-store"),
+        ],
+        Body::from_stream(stream),
+    )
+        .into_response()
 }
 
 // ---------------------------------------------------------------------------

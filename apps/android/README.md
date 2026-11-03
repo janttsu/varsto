@@ -6,8 +6,18 @@ the executable native library directory), and the activity shows the local
 interface in a WebView over loopback with the session token.
 
 Build: `apps/android/build.sh` (Android SDK with platform 35, build-tools 35,
-NDK 27 and a JDK 17 or newer). The result is a debug-signed APK for sideloading
-(`adb install`). Each folder is either "encrypted on this phone" (only its
+NDK 27 and a JDK 17 or newer). Set `VARSTO_ANDROID_KEYSTORE`,
+`VARSTO_ANDROID_KEYSTORE_PASSWORD`, `VARSTO_ANDROID_KEY_ALIAS` and
+`VARSTO_ANDROID_KEY_PASSWORD` to build a release APK signed with that key
+(not debuggable). The keystore variable is a path, or the keystore file in
+base64. If any of the four is missing, the release build fails instead of
+using the debug keystore. With none of them set, the script builds a debug
+APK for local use and the emulator; do not publish it. A debug APK is signed
+with a new debug key every time, so an update cannot install over the
+previous one (uninstalling wipes the vault). The version name is the
+workspace Cargo.toml version. For `0.0.1-alpha.N` the version code is `N`
+when `N` is an integer greater than 13 (that code already shipped); any other
+version fails configuration. Each folder is either "encrypted on this phone" (only its
 encrypted blocks are kept, in the app's private space; selective sync chooses
 which files, as in any folder) or "plain files on this phone" under Internal
 storage/Varsto, which needs all files access (asked for when that mode is

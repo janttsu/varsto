@@ -175,3 +175,64 @@ fn rate_limits_answer_429() {
     );
     h.stop();
 }
+
+#[test]
+fn a_large_lookup_comes_back_in_bounded_chunks() {
+    let (_url, _udp, h) = Server::spawn_for_tests();
+    let addr = h.http;
+    let a = agent();
+    let k = SigningKey::from_bytes(&[4; 32]);
+    let blob = vec![0xab; proto::MAX_BLOB];
+    let p = PutSlot::sign(
+        Kind::Peer,
+        [0x44; 16],
+        [1; 16],
+        &k,
+        now(),
+        3600,
+        blob.clone(),
+    );
+    assert_eq!(post(&a, &format!("http://{addr}/v1/put"), &p).0, 200);
+
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let req = serde_json::to_vec(&Lookup::new([0x44; 16])).unwrap();
+    let head = format!(
+        "POST /v1/lookup HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        req.len()
+    );
+    s.write_all(head.as_bytes()).unwrap();
+    s.write_all(&req).unwrap();
+    let mut raw = Vec::new();
+    s.read_to_end(&mut raw).unwrap();
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = std::str::from_utf8(&raw[..split]).unwrap();
+    assert!(head.lines().next().unwrap().contains(" 200 "), "{head}");
+    assert!(
+        head.to_ascii_lowercase().contains("chunked"),
+        "lookup was buffered whole: {head}"
+    );
+    let mut body = &raw[split + 4..];
+    let mut joined = Vec::new();
+    let mut chunks = 0usize;
+    let cap = varsto_rendezvous::registry::LOOKUP_JSON_CHUNK;
+    while !body.is_empty() {
+        let rel = body.windows(2).position(|w| w == b"\r\n").unwrap();
+        let line = std::str::from_utf8(&body[..rel]).unwrap();
+        let n = usize::from_str_radix(line.split(';').next().unwrap().trim(), 16).unwrap();
+        body = &body[rel + 2..];
+        if n == 0 {
+            break;
+        }
+        assert!(n <= cap, "chunk of {n} bytes exceeds {cap}");
+        joined.extend_from_slice(&body[..n]);
+        body = &body[n + 2..];
+        chunks += 1;
+    }
+    assert!(chunks > 1, "a max blob was sent as one piece");
+    let l: LookupAnswer = serde_json::from_slice(&joined).unwrap();
+    assert_eq!(l.slots.len(), 1);
+    assert_eq!(l.slots[0].blob.0, blob);
+    h.stop();
+}

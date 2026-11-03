@@ -709,6 +709,20 @@ pub struct VerifyOutcome {
     pub verified_keys: Vec<String>,
 }
 
+/// What `tidy_disk` may do with a file the pool index does not place on
+/// this disk. The caller decides (`storages3::stray_pack_action`): a pack
+/// the ledger has not seen is kept, and only a pack the ledger dropped is
+/// removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrayAction {
+    /// Leave the bytes where they are and do not record the file.
+    Keep,
+    /// Record the file on this disk. Its first check is due at once.
+    Adopt,
+    /// Delete the file.
+    Delete,
+}
+
 /// Result of `tidy_disk` (listings only, nothing read).
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct TidyOutcome {
@@ -1458,12 +1472,14 @@ impl PoolStorage {
     /// First phase of the insert routine, from listings alone (no object is
     /// read): check the marker, apply the queued deletions, remove leftover
     /// temporary files of interrupted writes, forget copies the disk lost or
-    /// holds at the wrong size, adopt files the vault still references
-    /// (`referenced(object name)`) and remove the ones nothing needs.
+    /// holds at the wrong size, then ask `stray(key, modified_utc)` what to
+    /// do with a file the pool index does not place here. `modified_utc` is
+    /// the file's mtime in UTC seconds, or `None` when it could not be read
+    /// (treated by the caller as still inside the grace period).
     pub fn tidy_disk(
         &self,
         disk_id: &str,
-        referenced: &dyn Fn(&str) -> bool,
+        stray: &dyn Fn(&str, Option<i64>) -> StrayAction,
     ) -> Result<TidyOutcome> {
         let mut st = self.state.lock().unwrap();
         let attached = self.attached(&mut st);
@@ -1475,9 +1491,9 @@ impl PoolStorage {
         }
         let mut out = TidyOutcome::default();
         (out.pending_removed, out.pending_bytes) = self.apply_pending(&mut st, disk_id, &mount)?;
-        // What the disk holds: key -> size, from the directory listing.
+        // What the disk holds: key -> (size, mtime UTC seconds).
         let data = mount.join(DATA_DIR);
-        let mut present: BTreeMap<String, u64> = BTreeMap::new();
+        let mut present: BTreeMap<String, (u64, Option<i64>)> = BTreeMap::new();
         for chunks in BLOCK_DIRS
             .iter()
             .map(|d| data.join(d))
@@ -1507,7 +1523,15 @@ impl PoolStorage {
                     continue;
                 };
                 let Some(key) = rel.to_str() else { continue };
-                present.insert(key.replace(std::path::MAIN_SEPARATOR, "/"), md.len());
+                let mtime = md.modified().ok().and_then(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|d| d.as_secs().min(i64::MAX as u64) as i64)
+                });
+                present.insert(
+                    key.replace(std::path::MAIN_SEPARATOR, "/"),
+                    (md.len(), mtime),
+                );
             }
         }
         let held: Vec<(String, u64)> = st
@@ -1519,7 +1543,7 @@ impl PoolStorage {
             .collect();
         for (key, size) in held {
             match present.remove(&key) {
-                Some(s) if s == size => {}
+                Some((s, _)) if s == size => {}
                 found => {
                     if found.is_some() {
                         let _ = fs::remove_file(Self::data_path(&mount, &key)?);
@@ -1535,22 +1559,34 @@ impl PoolStorage {
                 }
             }
         }
-        // Files the index does not place on this disk.
-        for (key, size) in present {
-            let wanted = object_name_of(&key).is_some_and(referenced);
-            if wanted {
-                let e = st
-                    .index
-                    .objects
-                    .entry(key)
-                    .or_insert_with(|| ObjectEntry::new(disk_id, size));
-                if !e.held_by(disk_id) {
-                    e.extra.push(disk_id.to_string());
+        // Files the pool index does not place on this disk. A name that is
+        // not an object name is leftover junk; an object name is decided by
+        // the caller (the ledger, the disk's own index and the grace period).
+        for (key, (size, mtime)) in present {
+            let action = if object_name_of(&key).is_some() {
+                stray(&key, mtime)
+            } else {
+                StrayAction::Delete
+            };
+            match action {
+                StrayAction::Adopt => {
+                    let e = st
+                        .index
+                        .objects
+                        .entry(key)
+                        .or_insert_with(|| ObjectEntry::new(disk_id, size));
+                    if !e.held_by(disk_id) {
+                        e.extra.push(disk_id.to_string());
+                    }
+                    out.adopted += 1;
                 }
-                out.adopted += 1;
-            } else if fs::remove_file(Self::data_path(&mount, &key)?).is_ok() {
-                out.unneeded_removed += 1;
-                out.unneeded_bytes += size;
+                StrayAction::Keep => {}
+                StrayAction::Delete => {
+                    if fs::remove_file(Self::data_path(&mount, &key)?).is_ok() {
+                        out.unneeded_removed += 1;
+                        out.unneeded_bytes += size;
+                    }
+                }
             }
         }
         let used: u64 = st

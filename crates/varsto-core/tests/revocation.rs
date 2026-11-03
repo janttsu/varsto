@@ -155,6 +155,7 @@ fn forge_revocation(
         cutoff_seq: 0,
         wipe: true,
         new_epoch: 1,
+        registry_cuts: None,
     };
     let signer = DeviceSigner {
         device: issuer,
