@@ -55,7 +55,7 @@ varsto transfers --watch                   # uploads, downloads and peer traffic
 
 # on another device that can reach the same storage:
 varsto --home ~/.varsto-desk join --name desk --storage-path /mnt/box   # asks for the vault key (hex or the 24 vault words); --recovery-words also opens every folder that has a recovery copy
-varsto --home ~/.varsto-desk folder request docs        # no content yet: ask the owners; prints six words to compare
+varsto --home ~/.varsto-desk folder request docs        # no content yet: ask the owners; prints six words to compare (the Files page of the app does the same with Request access, which a phone needs: it has no command line)
 varsto --home ~/.varsto-laptop sync && varsto --home ~/.varsto-laptop folder approve docs desk   # on an owner device: shows the same six words, asks "Do the six words match?"
 varsto --home ~/.varsto-desk sync                        # reads the grant
 varsto --home ~/.varsto-desk folder attach docs ~/synced

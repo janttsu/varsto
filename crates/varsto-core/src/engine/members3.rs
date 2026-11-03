@@ -1125,7 +1125,7 @@ impl Engine {
     pub(crate) fn folder_keys3(&self, rec: &FolderRecord) -> Result<FolderKeys> {
         if rec.key_hex.is_empty() && rec.epoch_keys.is_empty() {
             bail!(
-                "this device holds no key of folder {}: ask for it with `varsto folder request {}` and approve it on a device that has the folder",
+                "this device holds no key of folder {}: ask for it with `varsto folder request {}` or with Request access on the Files page, and approve it on a device that has the folder",
                 rec.name,
                 rec.name
             );

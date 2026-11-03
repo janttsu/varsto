@@ -226,6 +226,7 @@
       if (f.strongroom) { n.appendChild(pill("grey", "Strongroom")); }
       if (f.paused) { n.appendChild(pill("bad", "paused")); }
       if (!f.path) { n.appendChild(pill("grey", "not on this device")); }
+      if (f.has_key === false) { n.appendChild(pill(f.access === "requested" || f.access === "approved" ? "accent" : "grey", f.access === "requested" ? "access requested" : f.access === "approved" ? "access approved" : "no access")); }
       tr.appendChild(n);
       var m = el("td"); if (f.path) { m.appendChild(pill(f.mode && f.mode !== "normal" ? "accent" : "grey", MODE[f.mode || "normal"] || f.mode)); } else { m.textContent = "–"; } tr.appendChild(m);
       tr.appendChild(el("td", "num", fmtBytes(f.bytes)));

@@ -1937,7 +1937,19 @@
   "Not reachable now; everything else keeps working.": "Ei tavoitettavissa nyt; kaikki muu toimii edelleen.",
   "Not connected yet.": "Ei yhteyttä vielä.",
   "Connected.": "Yhdistetty.",
-  "via rendezvous": "kohtaamispalvelun kautta"
+  "via rendezvous": "kohtaamispalvelun kautta",
+  "no access": "ei käyttöoikeutta",
+  "access requested": "käyttöoikeutta pyydetty",
+  "access approved": "käyttöoikeus hyväksytty",
+  "Request access": "Pyydä käyttöoikeutta",
+  "Show the six words": "Näytä kuusi sanaa",
+  "Access requested": "Käyttöoikeutta pyydetty",
+  "Access approved": "Käyttöoikeus hyväksytty",
+  "Request access to this folder?": "Pyydetäänkö käyttöoikeutta tähän kansioon?",
+  "No access to this folder yet": "Kansioon ei ole vielä käyttöoikeutta",
+  "This device sees the name of the folder but holds no key to open it. Ask an owner for access: you get six words to read out, the owner compares them with the words on their screen and approves on a device that has the folder.": "Tämä laite näkee kansion nimen mutta sillä ei ole avainta, jolla kansion saisi auki. Pyydä omistajalta käyttöoikeutta: saat kuusi sanaa luettavaksi ääneen, omistaja vertaa niitä näytöllään oleviin sanoihin ja hyväksyy pyynnön laitteella, jolla kansio on.",
+  "Read these six words to an owner of the folder, in person or by phone. The owner compares them with the words on their screen and approves the request. The folder opens here after the next sync.": "Lue nämä kuusi sanaa kansion omistajalle kasvokkain tai puhelimessa. Omistaja vertaa niitä näytöllään oleviin sanoihin ja hyväksyy pyynnön. Kansio aukeaa tällä laitteella seuraavan synkronoinnin jälkeen.",
+  "An owner approved this device. The key of the folder arrives with the next sync.": "Omistaja on hyväksynyt tämän laitteen. Kansion avain tulee seuraavassa synkronoinnissa."
  },
  "patterns": [
   [
@@ -2751,6 +2763,10 @@
   [
    "^Last problem: (.+)$",
    "Viimeisin ongelma: $1"
+  ],
+  [
+   "^This device holds no key of folder (.+)$",
+   "Tällä laitteella ei ole kansion $1 avainta"
   ]
  ],
  "parts": [

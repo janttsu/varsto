@@ -603,7 +603,8 @@ impl Engine {
         }
         let table = self.folder_table(rec)?.ok_or_else(|| {
             anyhow!(
-                "this device holds no key of folder {}: ask for it with `varsto folder request`",
+                "this device holds no key of folder {}: ask for it with `varsto folder request {}` or with Request access on the Files page, and approve it on a device that has the folder",
+                rec.name,
                 rec.name
             )
         })?;

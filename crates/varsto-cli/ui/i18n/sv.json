@@ -1937,7 +1937,19 @@
   "Not reachable now; everything else keeps working.": "Kan inte nås just nu; allt annat fungerar fortfarande.",
   "Not connected yet.": "Ännu inte ansluten.",
   "Connected.": "Ansluten.",
-  "via rendezvous": "via mötestjänsten"
+  "via rendezvous": "via mötestjänsten",
+  "no access": "ingen åtkomst",
+  "access requested": "åtkomst begärd",
+  "access approved": "åtkomst godkänd",
+  "Request access": "Begär åtkomst",
+  "Show the six words": "Visa de sex orden",
+  "Access requested": "Åtkomst begärd",
+  "Access approved": "Åtkomst godkänd",
+  "Request access to this folder?": "Begära åtkomst till den här mappen?",
+  "No access to this folder yet": "Ingen åtkomst till mappen ännu",
+  "This device sees the name of the folder but holds no key to open it. Ask an owner for access: you get six words to read out, the owner compares them with the words on their screen and approves on a device that has the folder.": "Den här enheten ser mappens namn men har ingen nyckel för att öppna den. Be en ägare om åtkomst: du får sex ord att läsa upp, ägaren jämför dem med orden på sin skärm och godkänner på en enhet som har mappen.",
+  "Read these six words to an owner of the folder, in person or by phone. The owner compares them with the words on their screen and approves the request. The folder opens here after the next sync.": "Läs upp de här sex orden för en ägare av mappen, personligen eller i telefon. Ägaren jämför dem med orden på sin skärm och godkänner begäran. Mappen öppnas här efter nästa synkronisering.",
+  "An owner approved this device. The key of the folder arrives with the next sync.": "En ägare har godkänt den här enheten. Mappens nyckel kommer med nästa synkronisering."
  },
  "patterns": [
   [
@@ -2751,6 +2763,10 @@
   [
    "^Last problem: (.+)$",
    "Senaste problem: $1"
+  ],
+  [
+   "^This device holds no key of folder (.+)$",
+   "Den här enheten har ingen nyckel till mappen $1"
   ]
  ],
  "parts": [

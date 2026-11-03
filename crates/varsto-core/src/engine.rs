@@ -152,7 +152,7 @@ pub use membership::{
 };
 pub use membership3_ops::{
     parse_role as parse_folder_role, FolderMember, FolderMembers, FolderRemoval, FolderRequest,
-    MissingRecoveryCopy,
+    MissingRecoveryCopy, OwnAccess,
 };
 pub use notes::{
     check_analysis, AnalysisHit, FileAnalysis, NotesExchangeReport, ANALYSIS_MAX_BYTES,
@@ -458,6 +458,10 @@ pub struct FolderStatus {
     pub folder_id: String,
     pub name: String,
     pub path: Option<PathBuf>,
+    /// Whether this device holds a key of the folder (format 3: a device
+    /// that joined with the vault words sees the folder's name and holds
+    /// no key until an owner approves its request).
+    pub has_key: bool,
     pub files: u64,
     pub bytes: u64,
     /// Newest modification time of a current file (UTC seconds), if any.
@@ -7267,10 +7271,9 @@ impl Engine {
                 .filter(|s| s.is_carrier())
                 .map(|s| s.name())
                 .collect();
+            let has_key = !rec.key_hex.is_empty() || !rec.epoch_keys.is_empty();
             let table = match members3::bin(&rec.folder_id) {
-                Ok(f) if !rec.key_hex.is_empty() || !rec.epoch_keys.is_empty() => {
-                    Some(self.table3(&f)?)
-                }
+                Ok(f) if has_key => Some(self.table3(&f)?),
                 _ => None,
             };
             let mut without = 0u64;
@@ -7331,6 +7334,7 @@ impl Engine {
                 folder_id: rec.folder_id.to_string(),
                 name: rec.name.clone(),
                 path: mount.clone(),
+                has_key,
                 files,
                 bytes,
                 last_change_utc: state
