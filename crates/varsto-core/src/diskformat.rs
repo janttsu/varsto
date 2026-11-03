@@ -164,14 +164,14 @@ pub fn sgdisk_partition(spec: &Spec, partuuid: &str) -> Vec<String> {
     ]
 }
 
-/// Linux: the commands, in order, that make the layout. `partitions` are
-/// the existing partitions of the drive (wiped first, so no old filesystem
-/// signature can be found later); `partuuid` is chosen by the caller so the
+/// Linux: the commands, in order, that make the layout. `partitions` (the
+/// existing partitions of the drive) is unused: `sgdisk -Z` and `mkfs.ext4 -F`
+/// replace the old table and filesystem; `partuuid` is chosen by the caller so the
 /// new partition can be found again; `owner` is `uid:gid` of the user.
 /// Only ext4 is made on Linux (pools need POSIX semantics and `e2fsck`).
 pub fn linux_commands(
     spec: &Spec,
-    partitions: &[String],
+    _partitions: &[String],
     partuuid: &str,
     owner: &str,
     inode_ratio: u64,
@@ -184,10 +184,6 @@ pub fn linux_commands(
         );
     }
     let mut out = Vec::new();
-    for p in partitions {
-        out.push(argv(&["wipefs", "-a", "-q", p]));
-    }
-    out.push(argv(&["wipefs", "-a", "-q", &spec.device]));
     out.push(argv(&["sgdisk", "-Z", &spec.device]));
     // A new GPT with its protective MBR.
     out.push(argv(&["sgdisk", "-o", &spec.device]));
@@ -313,9 +309,6 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                "wipefs -a -q /dev/sdb1".to_string(),
-                "wipefs -a -q /dev/sdb2".to_string(),
-                "wipefs -a -q /dev/sdb".to_string(),
                 "sgdisk -Z /dev/sdb".to_string(),
                 "sgdisk -o /dev/sdb".to_string(),
                 format!("sgdisk -n 1:1M:0 -t 1:8300 -u 1:{UUID} -c 1:varsto-Blue 4TB /dev/sdb"),

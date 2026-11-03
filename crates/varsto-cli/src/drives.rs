@@ -226,8 +226,9 @@ pub fn init(
     eprintln!(
         "preparing {real} as \"{label}\" of pool {pool} ({})",
         match how.first().map(String::as_str) {
-            Some("sudo") => "running wipefs, sgdisk and mkfs.ext4 through sudo",
-            Some("pkexec") => "sudo is missing: running wipefs, sgdisk and mkfs.ext4 through pkexec (one password prompt)",
+            Some("sudo") => "running sgdisk and mkfs.ext4 through sudo",
+            Some("pkexec") =>
+                "sudo is missing: running sgdisk and mkfs.ext4 through pkexec (one password prompt)",
             _ => "running as root",
         }
     );
