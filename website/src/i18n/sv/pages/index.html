@@ -35,17 +35,17 @@ description: Varsto: end-to-end-krypterad synkronisering, delning och säkerhets
     <h2 id="teams">För team</h2>
     <p>En organisation lägger till det lager som ett företag behöver ovanpå ett valv: administratörer godkänner enheter för namngivna personer efter att ha jämfört ett fingeravtryck på sex ord med dem, tar bort en person med alla hens enheter i ett steg (de kvarvarande enheterna får nya nycklar), bestämmer vad medlemmar får göra på egen hand och för en logg över allt detta som signeras av deras enheter och kedjas. Rotnyckeln som utser administratörer är 24 ord på papper, aldrig på en enhet. Ett valv utan organisation påverkas inte av något av detta. <a href="{{L}}features/#organizations">Organisationer</a>.</p>
 
-    <h2 id="next">Vad som kommer härnäst</h2>
-    <p class="note">Byggt på huvudgrenen efter 0.0.1-alpha.13, ännu inte i någon release (new in 0.0.1-alpha.14):</p>
+    <h2 id="next">Nytt i {{RELEASED}}</h2>
+    <p class="note">Lagringsformat 3 och det som följer med. Valv som skapats med 0.0.1-alpha.15 eller äldre måste skapas på nytt:</p>
     <ul>
-      <li>En papperskorg för hela valvet, återställbar på varje enhet, och versionshistorik för filer.</li>
-      <li>En andra, oberoende säkerhetskopia med restic: en enhet håller en okrypterad spegel av valvet och restic säkerhetskopierar den till ett repository utanför dina lagringsplatser, återställbar med enbart restic.</li>
-      <li>Import från git-annex-repositoryn, molndiskar (via rclone) och lokala kataloger, varje fil kontrollerad mot sin hash.</li>
-      <li>QR-inbjudningar och <code>varsto://</code>-länkar för delning och parkoppling.</li>
-      <li>Tömning av en lagringsplats inom en daglig budget, och lagringskvoter.</li>
-      <li>En rullande kontroll av bitröta för varje kopia på dina lagringsplatser och diskar, med reparation från en annan kopia.</li>
-      <li>Portmappning i routern (PCP, NAT-PMP, UPnP) för peer-to-peer.</li>
-      <li>Mappsäkerhet: ett skydd mot massradering, mappar som bara skickar eller bara tar emot, och ignoreringsregler.</li>
+      <li>Lagringsformat 3: en liggare över paket i stället för block, signerade poster, blockkartor per mapp och bas- plus deltamanifest.</li>
+      <li>Mappåtkomst genom godkännande: en enhet som anslutit med valvets ord ber om en mapp (<code>varsto folder request</code>), en ägare jämför sex ord på båda enheterna och godkänner.</li>
+      <li>Återställningsord: en andra uppsättning på 24 ord och en återställningskopia av varje mappnyckel, så att ett valv kan öppnas igen även om alla enheter är förlorade.</li>
+      <li>Rendezvous-tjänsten (<code>https://varsto.net/rv</code> eller din egen): enheter hittar varandra över nätverk, parkopplingslänkar med <code>rv=</code> fungerar och ett änd-till-änd-krypterat relä är sista vägen. Allt fungerar utan den.</li>
+      <li>Arbete utan nät: anslutning utan kontakt med någon lagringsplats, medlemsändringar som ligger kvar på enheten tills en lagringsplats svarar, och en onåbar lagringsplats får inte längre en hel synkronisering att misslyckas.</li>
+      <li>En importsida, torrent-import för torrenter som är större än disken (<code>varsto import torrent</code>) och YouTube-kanaler till mappar (<code>varsto import youtube</code>).</li>
+      <li>En brevlåda som för block från en dockad disk till en disk i en diskpool eller en lagringsplats som är borta, och <code>varsto service remember</code> på servrar utan skrivbordssession.</li>
+      <li>En releasesignerad Android-APK som senare versioner uppdaterar på plats. Signeringsnyckeln är ny: avinstallera en tidigare debug-version först.</li>
     </ul>
 
     <h2 id="status">Ärlig status</h2>

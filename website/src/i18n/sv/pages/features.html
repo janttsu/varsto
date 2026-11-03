@@ -122,31 +122,26 @@ description: Vad Varsto gör: en signerad liggare som räknar varje kopia, din e
       <div>
         <p>Bakgrundstjänsten startar vid inloggning (en systemd-användarenhet på Linux, en launch agent på macOS, appen i aktivitetsfältet på Windows) och konfigureras av det första kommandot när ett valv finns. Den bevakar dina mappar och synkroniserar ändringar inom några sekunder, med en regelbunden avstämning för ändringar som gjorts på annat håll; det finns inga knappar för synkronisering, uppdatering eller kontroll att trycka på. Samma lilla binärfil ger både kommandoraden och det lokala gränssnittet, som bara visas för din egen dator. Uppdateringar söks automatiskt och erbjuds bara när en nyare version finns; vid installationen kontrolleras releasesignaturen och kontrollsummorna på GitHub, och macOS-appen ersätter sig själv från den signerade diskavbildningen. <code>varsto transfers --watch</code> visar de uppladdningar, nedladdningar och den peer-trafik som pågår just nu.</p>
         <p>Varje enhet kan ha en mapp i selektivt läge: hela trädet syns som platshållare, en fil laddas ned när du ber om den och <em>Frigör utrymme</em> gör den till en platshållare igen när den är säkert lagrad någon annanstans. Platshållare tolkas aldrig som raderingar. Högerklick på <em>Ladda ned</em> och <em>Frigör utrymme</em> fungerar i Finder, Explorer och de vanliga filhanterarna för Linux, och ett dubbelklick på en platshållare öppnar filen; inbyggda platshållare (File Provider, Cloud Files) kommer senare. Miniatyrbilder skapas en gång, krypteras under mappnyckeln och delas med dina andra enheter, så en telefon visar förhandsvisningar av bilder den aldrig har laddat ned.</p>
-        <p class="note">Android kör samma krypterade kärna; iOS-skalet byggs och körs enbart i simulatorn. Android-alfan är en APK för sidladdning med en kompakt fillista (ett långt tryck markerar filer att ladda ned eller frigöra). En mapp som hålls krypterad på telefonen innehåller där bara krypterade block, samma som dina lagringsplatser har; appen visar bilder, video (med spolning), ljud och text från sådana mappar i sin egen visare, dekrypterade i minnet och aldrig skrivna till telefonen, medan PDF:er och andra filer öppnas i en annan app, som får en dekrypterad kopia som Varsto tar bort när den låses eller startas om. Kamerauppladdning skickar nya foton och videor till en mapp i undermappar av formen YYYY/MM, valfritt bara via Wi-Fi eller under laddning. iOS har ännu ingetdera och har inte körts på en riktig enhet.</p>
+        <p class="note">Android kör samma krypterade kärna; iOS-skalet byggs och körs enbart i simulatorn. Android-alfan är en releasesignerad APK för sidladdning (en tidigare debug-APK måste avinstalleras först, vilket tar bort enhetens kopia av valvet) med en kompakt fillista (ett långt tryck markerar filer att ladda ned eller frigöra). En mapp som hålls krypterad på telefonen innehåller där bara krypterade block, samma som dina lagringsplatser har; appen visar bilder, video (med spolning), ljud och text från sådana mappar i sin egen visare, dekrypterade i minnet och aldrig skrivna till telefonen, medan PDF:er och andra filer öppnas i en annan app, som får en dekrypterad kopia som Varsto tar bort när den låses eller startas om. Kamerauppladdning skickar nya foton och videor till en mapp i undermappar av formen YYYY/MM, valfritt bara via Wi-Fi eller under laddning. iOS har ännu ingetdera och har inte körts på en riktig enhet.</p>
       </div>
     </section>
 
-    <h2 id="next">Efter {{RELEASED}}</h2>
-    <p class="note">Byggt på huvudgrenen efter 0.0.1-alpha.13, ännu inte i någon release. <a href="{{P}}docs/alpha-0-format.html">Lagringsformatet</a> (en) beskriver var och en av dem i sin helhet.</p>
+    <h2 id="next">Nytt i {{RELEASED}}</h2>
+    <p class="note">Lagringsformat 3 och det som följer med. <a href="{{P}}docs/alpha-0-format.html">Lagringsformatet</a> (en) beskriver var och en av dem i sin helhet. Valv som skapats med 0.0.1-alpha.15 eller äldre måste skapas på nytt.</p>
     <ul>
-      <li>En papperskorg för hela valvet: en raderad fil behåller sin senaste version, återställbar på vilken enhet som helst under papperskorgsdagarna.</li>
-      <li>Versionshistorik för filer, med det antal dagars historik du väljer.</li>
-      <li>En andra, oberoende säkerhetskopia med restic till ett repository utanför dina lagringsplatser, återställbar med enbart restic.</li>
-      <li>Import från git-annex-repositoryn (disk för disk, med besked om vilken disk som ska sättas i härnäst), från molndiskar via rclone och från lokala kataloger, varje fil kontrollerad mot sin hash.</li>
-      <li>En rullande kontroll av bitröta för varje kopia på dina lagringsplatser och anslutna diskar och för de synkroniserade filerna på enheten, med reparation från en annan kopia.</li>
-      <li>QR-inbjudningar och <code>varsto://</code>-länkar för delning och parkoppling.</li>
-      <li>Tömning av en lagringsplats inom en daglig budget, och lagringskvoter.</li>
-      <li>Portmappning i routern (PCP, NAT-PMP, UPnP) för peer-to-peer.</li>
-      <li>Mappsäkerhet: en mappmarkör, ett skydd mot massradering, mappar som bara skickar eller bara tar emot.</li>
-      <li>Ignoreringsregler (<code>.varstoignore</code>, delade eller lokala för enheten).</li>
-      <li>Filmetadata: rättigheter, symboliska länkar, utökade attribut och ägarskap.</li>
-      <li>Förberedelse av hela diskar för diskpooler, hämtningsplaner och nästa disk att docka; direktaktivitet mellan enheter; maskerade lokala felsökningsloggar (kryptering i vila senare).</li>
+      <li>Lagringsformat 3: en liggare över paket i stället för block, signerade poster, blockkartor per mapp och bas- plus deltamanifest.</li>
+      <li>Mappåtkomst genom godkännande: en enhet som anslutit med valvets ord ber om en mapp (<code>varsto folder request</code>), en ägare jämför sex ord på båda enheterna och godkänner.</li>
+      <li>Återställningsord: en andra uppsättning på 24 ord och en återställningskopia av varje mappnyckel, så att ett valv kan öppnas igen även om alla enheter är förlorade.</li>
+      <li>Rendezvous-tjänsten (<code>https://varsto.net/rv</code> eller din egen): enheter hittar varandra över nätverk, parkopplingslänkar med <code>rv=</code> fungerar och ett änd-till-änd-krypterat relä är sista vägen. Allt fungerar utan den.</li>
+      <li>Arbete utan nät: anslutning utan kontakt med någon lagringsplats, medlemsändringar som ligger kvar på enheten tills en lagringsplats svarar, och en onåbar lagringsplats får inte längre en hel synkronisering att misslyckas.</li>
+      <li>En importsida, torrent-import för torrenter som är större än disken (<code>varsto import torrent</code>) och YouTube-kanaler till mappar (<code>varsto import youtube</code>).</li>
+      <li>En brevlåda som för block från en dockad disk till en disk i en diskpool eller en lagringsplats som är borta, och <code>varsto service remember</code> på servrar utan skrivbordssession.</li>
+      <li>En releasesignerad Android-APK som senare versioner uppdaterar på plats. Signeringsnyckeln är ny: avinstallera en tidigare debug-version först.</li>
     </ul>
     <h2>Också med i designen</h2>
     <ul>
       <li>Inloggningsuppgifter till lagringen per enhet, som roteras hos leverantören när en enhet tas bort.</li>
       <li>Omkryptering av befintliga data efter att en enhet har tagits bort.</li>
-      <li>Inkrementella manifest.</li>
       <li>Peer-upptäckt via DHT.</li>
       <li>Utmaningar för bevis på lagring.</li>
       <li>Erasure coding över lagringsplatser.</li>
