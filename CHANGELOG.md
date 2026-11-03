@@ -16,6 +16,8 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+## [0.0.1-alpha.16] - 2026-11-03
+
 Spec sections 72 to 83. Storage format 3: vaults of alpha.15 and earlier are not read and must be recreated; every device must run alpha.16 (alpha.15 refuses a format 3 vault with a message). This is still an alpha: not for production data. The Android package is now release-signed under a new key, so an installed debug build (alpha.15 or an older daily) must be uninstalled before the new APK is installed.
 
 ### Changed
@@ -587,6 +589,7 @@ make the core idea real (spec 1 to 9).
 - `fsck --verify` re-hashes every referenced object and reports claims the
   storage cannot back.
 
+[0.0.1-alpha.16]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.16
 [0.0.1-alpha.15]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.15
 [0.0.1-alpha.14]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.14
 [0.0.1-alpha.13]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.13
