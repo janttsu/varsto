@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.16: storage format 3, folder access by approval and a rendezvous service: Varsto</title>
+<meta name="description" content="A new storage format with a pack-level ledger, signed records and recovery words, so existing vaults must be recreated; folders are opened to a device by an owner&#x27;s approval; devices find each other through an optional rendezvous service; joining and membership changes work offline; and imports from torrents and YouTube.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.16: storage format 3, folder access by approval and a rendezvous service: Varsto">
+<meta property="og:description" content="A new storage format with a pack-level ledger, signed records and recovery words, so existing vaults must be recreated; folders are opened to a device by an owner&#x27;s approval; devices find each other through an optional rendezvous service; joining and membership changes work offline; and imports from torrents and YouTube.">
+<meta property="og:url" content="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.16: storage format 3, folder access by approval and a rendezvous service","description":"A new storage format with a pack-level ledger, signed records and recovery words, so existing vaults must be recreated; folders are opened to a device by an owner's approval; devices find each other through an optional rendezvous service; joining and membership changes work offline; and imports from torrents and YouTube.","datePublished":"2026-11-04","url":"https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html","inLanguage":"en","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=e9308487f1">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.16: storage format 3, folder access by approval and a rendezvous service</h1><p class="note"><time datetime="2026-11-04">2026-11-04</time></p>
+<p>Alpha.16 changes the storage format again. That is the main thing to know before updating: vaults made by alpha.15 or earlier cannot be opened by this version and have to be recreated. The rest of the release is a long list of changes in how devices join, find each other and cope with a bad network, a new Import page, and a large set of fixes and hardening from a review of the new format.</p>
+<h2 id="recreating-a-vault">Recreating a vault</h2>
+<p>There is no migration. Alpha.16 refuses an older vault when it opens it or when a device joins through its storage, and the message says what to do. Alpha.15 refuses a format 3 vault in the same way, so the two versions cannot share a vault in either direction. Every device of a vault must run alpha.16. Keep your files where they are, then:</p>
+<ol type="1">
+<li>Keep the alpha.15 binary around if you may need to read the old vault.</li>
+<li><code>varsto reset --yes</code> on the device, then <code>varsto init</code>. It prints a kit with two sets of words: the vault words and, new in format 3, the recovery words. Store both.</li>
+<li>Add the storages again, add the folders (the recovery words are asked for here) and sync.</li>
+</ol>
+<h2 id="android-uninstall-the-old-apk-first">Android: uninstall the old APK first</h2>
+<p>The Android package is now a release-signed APK (<code>varsto-&lt;version&gt;-android.apk</code>), not a debug build, so a later release installs over it as an update. It is signed with a new key. An installation of an earlier debug APK (alpha.15, or an older daily build) cannot be updated to it: Android refuses the update. Uninstall the old app first and then install the new one. Uninstalling removes that device's copy of the vault, so make sure the vault has another device or a storage before you do. The daily Android download stays a debug build under the name <code>varsto-daily-android-debug.apk</code>.</p>
+<h2 id="storage-format-3">Storage format 3</h2>
+<p>Format 3 is described in section 77 of the spec and in the format 3 design document. What it changes for a user:</p>
+<ul>
+<li>The ledger no longer lists every block. It claims packs of a few fixed sizes (256 KiB to 64 MiB, padded), so a storage sees size classes and not how many blocks or files there are.</li>
+<li>Every published object other than a pack is a signed record that names the key it is sealed with. Manifests, trash lists and snapshots are a base plus small deltas, and each folder keeps a signed block map per writing device.</li>
+<li>A folder key reaches a device only as a grant that an owner approved. A device that joins with the vault words sees folder names and holds no content; it asks with <code>varsto folder request</code>, an owner compares six words shown on both devices and approves with <code>varsto folder approve</code> (also <code>requests</code>, <code>deny</code>, <code>members</code>, <code>role</code>). The background service never approves. The interface has a Folder access card on the Files page.</li>
+<li>Every folder key epoch has a recovery copy under the recovery words. <code>varsto folder add</code> makes it, <code>varsto recovery escrow</code> writes a missing one later, and <code>varsto status</code> warns until then. <code>varsto join --recovery-words</code> opens every folder that has a recovery copy.</li>
+<li>Peers talk TLS only, with tokens bound to the connection, and compare ledger heads, so a storage that withholds or rolls back batches is noticed and the Help page and a notification say so.</li>
+<li>Removing a device now sticks: a revoked device is not granted the next folder key, and its records stop counting at the removal.</li>
+</ul>
+<h2 id="finding-each-other-the-rendezvous-service">Finding each other: the rendezvous service</h2>
+<p>Devices can find each other across networks through an optional rendezvous service, by default <code>https://varsto.net/rv</code>. A device leaves its sealed peer record there, reads the vault's records, learns its own public address and, when no address answers, reaches a peer through a coordinated hole punch or, as the last route, an end-to-end encrypted relay (shown as <code>relayed via rendezvous</code>). A joining device that finds nothing on its network can look up an offer by code or link and pair through the relay. The service sees tags, IP addresses and byte counts, never vault identity or content. <code>varsto p2p rendezvous set &lt;url&gt; | on | --off | status</code> or the Peers page changes it, and the server can be self-hosted (<code>varsto-rendezvous</code>, a static Linux binary in the daily build; the default UDP port is 3334). Everything also works without it.</p>
+<h2 id="a-bad-network-and-working-offline">A bad network and working offline</h2>
+<ul>
+<li>One storage that cannot be reached no longer fails a whole sync. It is marked down for the run and rests between runs, and the other storages carry on; what it missed is copied there later.</li>
+<li>S3 and rclone calls have time limits that fit the size of the transfer, retries and resumable multipart uploads, so a slow link costs seconds, not minutes.</li>
+<li>Peer-to-peer works without any storage, from a saved peer directory, so LAN sync works with no internet.</li>
+<li>Joining by pairing no longer needs a storage to answer, and membership changes (adding a folder, approving, changing a role, sharing) are kept on the device first and sent when a storage answers. <code>varsto status</code> says "N changes waiting to upload".</li>
+<li>Local actions (imports, the Trash page, thumbnails, file writes) finish while a storage is down and report "upload pending".</li>
+<li>The interface, tray, command line and MCP no longer freeze while a sync waits on a dead link.</li>
+</ul>
+<h2 id="imports">Imports</h2>
+<ul>
+<li>One Import page for every source (a folder or disk, a git-annex repository, a cloud drive through rclone, a torrent, YouTube), with a list of the imports in progress.</li>
+<li><code>varsto import torrent</code> imports torrents larger than the disk in batches that keep a free-space reserve; a file leaves the download disk only once its blocks are on a storage and the folder's policy holds.</li>
+<li><code>varsto import youtube</code> archives channels, playlists and videos into folders with yt-dlp, with polite defaults and a free-space reserve.</li>
+</ul>
+<h2 id="disks-and-servers">Disks and servers</h2>
+<ul>
+<li><code>varsto mailbox</code> stages blocks from a docked disk for a pool disk or storage that is away, in a durable, hash-checked outbox, so a block only on disk A reaches disk B when B is docked.</li>
+<li><code>varsto service remember</code> works without a desktop session (over SSH, on servers) through <code>systemd-creds</code> or the kernel keyring; <code>varsto service forget</code> removes it.</li>
+<li><code>varsto service stop</code> now stays stopped, and a self-update still restarts the service.</li>
+</ul>
+<h2 id="fixes-and-hardening">Fixes and hardening</h2>
+<ul>
+<li>Pull no longer overwrites a file edited after the scan, and one bad file no longer stops a folder's pull or push. An unreadable file or directory is counted instead of making files under it look deleted.</li>
+<li>Membership: removal of a device holds for later joiners and for folders that were not re-keyed, and only an administrator's epoch, revocation or wipe is adopted.</li>
+<li>Drain, storage removal and the tidy after a disk insert keep any pack that may be the only copy. Repair, push after a missing batch and attach after detach are corrected.</li>
+<li>S3 range reads no longer make <code>fsck</code> call every pack short.</li>
+<li>The visualization shows a loading note or an empty-vault note instead of the example scene, and thumbnails show in the page.</li>
+<li>TLS handshakes have a deadline that holds, and an address can hold at most 64 unfinished ones. A stalled local client can no longer freeze the local API. The rendezvous server has a rate limit per request class and bounded memory for lookups. Dependency advisories reported by <code>cargo audit</code> are patched.</li>
+<li>The GitHub workflows run with read-only permissions except where they publish.</li>
+</ul>
+<h2 id="compatibility">Compatibility</h2>
+<p>Every device of a vault must run alpha.16. Alpha.15 cannot read an alpha.16 vault and alpha.16 cannot read an alpha.15 vault. Update all devices together and recreate the vault as described above. This is still an alpha: not for production data. The full list is in the changelog.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

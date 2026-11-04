@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Mobile testing guide</h1>
-<p class="note">From <code>docs/testing/mobile.md</code> in the repository, rendered 2026-10-16. These documents describe the main branch; the released version is 0.0.1-alpha.15. Sections marked 'after 0.0.1-alpha.15' are not in a release yet.</p>
+<p class="note">From <code>docs/testing/mobile.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <p>A guide for people who have not tested mobile apps before. Facts below come from public documentation and articles gathered in 2026; check the linked vendors' current pages before relying on limits, prices or quotas.</p>
 <h2 id="short-answer">Short answer</h2>
 <ul>
@@ -141,7 +141,7 @@
 <li><strong>Emulator.</strong> Install the Android command-line tools, create an Android Virtual Device (x86_64 image) and start it with hardware acceleration. Headless example: <code>emulator -avd &lt;name&gt; -no-window -no-audio -gpu swiftshader_indirect</code>, then <code>adb wait-for-device</code>. This is scriptable, so an AI agent or CI job can run it.</li>
 <li><strong>KVM inside a VM.</strong> The emulator needs KVM. On bare metal this works. Inside a virtual machine, nested virtualisation must be enabled on the host (check with <code>kvm-ok</code>). If nested virtualisation is not available, run the emulator on the host, or use Redroid (Android in a container on the host kernel, no <code>/dev/kvm</code>) for logic tests.</li>
 <li><strong>UI tests.</strong> Use the Android test frameworks (Espresso / UI Automator / Compose tests) or a cross-platform tool such as Maestro (YAML flows that run on Android and iOS). Appium is the heavier alternative.</li>
-<li><strong>Real phone.</strong> Enable developer options and USB debugging, then <code>adb install app.apk</code>. No store account is needed for this.</li>
+<li><strong>Real phone.</strong> Enable developer options and USB debugging, then <code>adb install varsto-&lt;version&gt;-android.apk</code> (the release APK; the daily build is <code>varsto-daily-android-debug.apk</code>). The release APK is signed with a different key than a debug build, so a debug build already on the phone has to be uninstalled first (<code>adb uninstall</code>), which removes that device's copy of the vault; keep the vault on another device or a storage. No store account is needed for this.</li>
 <li><strong>Pre-release distribution.</strong> Google Play <em>internal testing</em> (up to 100 testers, available within minutes, no full review) or Firebase App Distribution. Note: a new personal Play developer account may need a closed test with 12 testers for 14 days before production release; verify the current rule in Play Console help.</li>
 </ol>
 <h2 id="ios-how-to-test-step-by-step">iOS: how to test, step by step</h2>
