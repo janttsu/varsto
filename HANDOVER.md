@@ -31,6 +31,7 @@ English only, no personal data, no secrets.
 
 ## Open
 
+- File-list thumbnails on Android (busy engine answered 404, list gave up): fix on branch worktree-agent-afe048943e4c22c1b, not compiled or tested yet.
 - Membership (from the review, not fixed): a gap that stays below the
   sequence cap, `Membership::join` without an administrator list, a member of
   another vault does not apply the roster cap, and a folder key already shared

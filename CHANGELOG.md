@@ -16,6 +16,13 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Fixed
+
+- Thumbnails in the file list show on phones again: the service answers "busy"
+  (503, with Retry-After) instead of "no thumbnail" when the engine is busy
+  and the page retries; two requests at a time, a memory-only cache for
+  re-rendered lists, no lazy-loading attribute.
+
 ## [0.0.1-alpha.16] - 2026-11-04
 
 Spec sections 72 to 83. Storage format 3: vaults of alpha.15 and earlier are not read and must be recreated; every device must run alpha.16 (alpha.15 refuses a format 3 vault with a message). This is still an alpha: not for production data. The Android package is now release-signed under a new key, so an installed debug build (alpha.15 or an older daily) must be uninstalled before the new APK is installed.
