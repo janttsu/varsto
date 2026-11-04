@@ -49,11 +49,12 @@
     if (hit) { job.img.src = hit; thumbDone(); return; }
     fetch(job.url, { headers: { "X-Varsto-Token": token } }).then(function (r) {
       if (r.ok) {
+        // A body that breaks off is retried like a network error: the slot is freed either way.
         return r.blob().then(function (b) {
           var u = URL.createObjectURL(b); thumbKeep(job.url, u);
           if (job.img.isConnected) { job.img.src = u; }
           thumbDone();
-        });
+        }, function () { thumbRetry(job, 2000); });
       }
       if (r.status === 503) {
         var ra = parseInt(r.headers.get("Retry-After"), 10);
