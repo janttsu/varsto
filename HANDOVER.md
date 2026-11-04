@@ -59,7 +59,7 @@ English only, no personal data, no secrets.
 
 ## How things are done
 
-- Releases and the daily channel: [RELEASING.md](RELEASING.md). CI builds
+- Building every platform, the CI workflows, the Scaleway fallback, screenshots, the daily channel and the website: [BUILDING.md](BUILDING.md). Releases and signing: [RELEASING.md](RELEASING.md). CI builds
   every platform on GitHub-hosted runners (Linux about 1 h 45 min, macOS about
   1 h 10 min); the maintainer signs offline. The daily workflow signs in CI
   with the repository secret `VARSTO_DAILY_KEY`; the Android release signing
@@ -68,10 +68,14 @@ English only, no personal data, no secrets.
   printed or committed.
 - Local builds go to `/mnt/ssd/varsto-lab/cargo-target-<branch>` with
   `-j 2`; the root disk is nearly full. Prefer CI for anything heavier than a
-  unit test.
+  unit test. The packaging scripts read `<repo>/target`, so for them link
+  `target` to that directory instead of setting `CARGO_TARGET_DIR`
+  (BUILDING.md, "A layout for build outputs").
 - Commits: the maintainer's noreply identity, `TZ=UTC`, no attribution
   trailers of any kind. Pull requests against `main`; never a direct push,
   never a force push. Everything in the repository is in English and holds no
   personal data (the demo vault is invented).
 - Tests: [TESTING.md](TESTING.md). The lab (`scripts/test/lab`) must cover
-  every scenario before a release, not only the changed areas.
+  every scenario before a release, not only the changed areas; the
+  step-by-step runbook is [docs/testing/lab.md](docs/testing/lab.md).
+  Benchmarks and real-NAT tests: [docs/testing/benchmarks.md](docs/testing/benchmarks.md).

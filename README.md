@@ -141,12 +141,13 @@ Test data only. Keep your own backups.
 
 | Path | Purpose |
 |---|---|
-| `crates/` | Rust workspace: `varsto-core` (library), `varsto-cli` (the `varsto` binary: CLI, service, tray, desktop interface), `varsto-ffi` (C ABI for mobile) |
+| `crates/` | Rust workspace: `varsto-core` (library), `varsto-cli` (the `varsto` binary: CLI, service, tray, desktop interface), `varsto-ffi` (C ABI for iOS), `varsto-window` (the Windows window), `varsto-rendezvous` (the optional meeting-point service) |
 | `apps/` | `macos` (menu-bar app, Swift), `android` (foreground service + WebView), `ios` (SwiftUI shell, build on a Mac) |
-| `docs/` | Architecture, specifications, testing guides |
+| `docs/` | Architecture, specifications, testing guides ([lab runbook](docs/testing/lab.md), [benchmarks](docs/testing/benchmarks.md)) |
 | `tests/` | Test matrix and shared test assets |
-| `scripts/test/` | Scripts used by the testing instructions |
-| `website/` | Static project website (template) |
+| `scripts/` | `test/` (test scripts and the VM lab), `cloud-build/` (Scaleway fallback builds), `screenshots/`, `bench/` and `nat-test/` (measurements), signing helpers; see [BUILDING.md](BUILDING.md) |
+| `installer/`, `ops/` | The Windows installer; scripts for the web server (screenshot and daily-channel sync) |
+| `website/` | The static project website, its build and deploy scripts |
 | `brand/` | Product name and brand settings in one place |
 
 ## Licence
@@ -158,3 +159,6 @@ Varsto is **source-available, not open source**. It is licensed under the [PolyF
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
 - [TESTING.md](TESTING.md)
+- [BUILDING.md](BUILDING.md) (every platform, CI, screenshots, daily channel, website)
+- [RELEASING.md](RELEASING.md)
+- [HANDOVER.md](HANDOVER.md) (current state)
