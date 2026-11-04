@@ -61,7 +61,8 @@
 <li><strong>Language:</strong> everything in this repository is written in English: code comments, identifiers, commit messages, issues, pull requests and documentation.</li>
 <li><strong>No personal data.</strong> Never commit real personal data, real file names, real device or server names, credentials, keys or addresses. Test fixtures must be invented and generic (for example <code>IMG_0001.jpg</code>, <code>laptop</code>, <code>usb-a</code>, <code>cloud</code>).</li>
 <li><strong>No secrets.</strong> Do not commit credentials, tokens, private keys or recovery phrases.</li>
-<li><strong>Tests.</strong> New behaviour needs tests. See <a href="testing.html">TESTING.md</a>.</li>
+<li><strong>Tests.</strong> New behaviour needs tests. See <a href="testing.html">TESTING.md</a> (the multi-device VM lab: <a href="lab-runbook.html">docs/testing/lab.md</a>).</li>
+<li><strong>Builds.</strong> How to build every platform locally, what CI builds and which workflow runs when: <a href="building.html">BUILDING.md</a>. CI runs on pushes to <code>main</code>, on tags and on pull requests; a branch without a pull request starts nothing.</li>
 <li><strong>Security first.</strong> Do not implement your own cryptographic primitives. Use reviewed libraries and document every choice.</li>
 <li><strong>Logging.</strong> Never log secrets, keys, file names or paths in clear text. Use the sanctioned logging macros and the secret wrapper types; see <a href="logging.html">docs/architecture/logging.md</a>.</li>
 <li><strong>One name in one place.</strong> The product name lives in <code>brand/brand.toml</code>; do not hard-code it where it can be avoided, because the working name may change.</li>
