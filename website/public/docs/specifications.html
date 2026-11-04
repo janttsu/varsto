@@ -54,8 +54,8 @@
   <div class="wrap">
 <article class="prose">
 <h1>Specification status</h1>
-<p class="note">From <code>docs/spec/README.md</code> in the repository, rendered 2026-10-16. These documents describe the main branch; the released version is 0.0.1-alpha.15. Sections marked 'after 0.0.1-alpha.15' are not in a release yet.</p>
-<p>Status of the documents that will define formats and protocols. Sections 32 to 60 of alpha-0-format.md are new in 0.0.1-alpha.14 and sections 62 to 71 new in 0.0.1-alpha.15. Most of what exists is described in <a href="alpha-0-format.html">alpha-0-format.md</a>, section by section; anything marked <strong>not started</strong> has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.</p>
+<p class="note">From <code>docs/spec/README.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p>Status of the documents that will define formats and protocols. Sections 32 to 60 of alpha-0-format.md are new in 0.0.1-alpha.14 and sections 62 to 71 new in 0.0.1-alpha.15; sections 72 to 77 follow alpha.15 (section 77 describes storage format 3, not yet enabled). Most of what exists is described in <a href="alpha-0-format.html">alpha-0-format.md</a>, section by section; anything marked <strong>not started</strong> has no implementation. They are intended to be open so that implementations remain interoperable and data stays recoverable.</p>
 <table>
 <thead>
 <tr>
@@ -152,9 +152,22 @@
 <td>Change history of files (<code>varsto changes</code>)</td>
 <td>released in 0.0.1-alpha.14: <a href="alpha-0-format.html">alpha-0-format.md</a> section 57</td>
 </tr>
+<tr>
+<td>Working offline (storage health, S3 and rclone timeouts, the service without network I/O under its lock, local actions; peers from the saved directory; membership outbox)</td>
+<td>on main and in the daily builds (format 3), not in a release yet: <a href="alpha-0-format.html">alpha-0-format.md</a> section 79, with 77.8 and 77.6</td>
+</tr>
+<tr>
+<td>Torrents through a local transmission daemon (<code>varsto import torrent</code>)</td>
+<td>on main and in the daily builds (format 3), not in a release yet: <a href="alpha-0-format.html">alpha-0-format.md</a> section 81</td>
+</tr>
+<tr>
+<td>YouTube channels through yt-dlp (<code>varsto import youtube</code>)</td>
+<td>on main and in the daily builds (format 3), not in a release yet: <a href="alpha-0-format.html">alpha-0-format.md</a> section 82</td>
+</tr>
 </tbody>
 </table>
 <p>Storage format version history (which releases read which formats): see <a href="format-versions.html">format-versions.md</a>.</p>
+<p>Storage format 3 (built behind the <code>format3</code> cargo feature, not enabled): pack-level ledger, folder block maps, signed records, folder key grants with recovery escrow, base + delta manifests and padded packs of fixed size classes. It ships only when <code>FORMAT_VERSION</code> becomes 3. Text: <a href="alpha-0-format.html">alpha-0-format.md</a> section 77 (with sections 75 and 76 for peers and membership); binding design: <a href="./">format-3-design.md</a>.</p>
 <p>Failure model (what fails and what does not): see <a href="failure-model.html">../failure-model.md</a>.</p>
 
 </article>

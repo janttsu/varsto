@@ -565,6 +565,8 @@ jobs:
       - name: Attach to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job: gh needs the repository by name.
+          GH_REPO: ${{ github.repository }}
         run: |
           tag="$GITHUB_REF_NAME"
           mapfile -t files < <(find dist/downloads -type f | sort)
@@ -625,6 +627,8 @@ jobs:
       - name: Publish for the website (rolling pre-release screenshots-latest)
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job: gh needs the repository by name.
+          GH_REPO: ${{ github.repository }}
         run: |
           tar -C dist/screenshots -czf screenshots.tar.gz .
           gh release view screenshots-latest >/dev/null 2>&1 || gh release create screenshots-latest --prerelease --latest=false \

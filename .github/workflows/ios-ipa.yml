@@ -133,6 +133,8 @@ jobs:
       - name: Attach to a release
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job: gh needs the repository by name.
+          GH_REPO: ${{ github.repository }}
         run: |
           tag="${TAG_INPUT:-$GITHUB_REF_NAME}"
           mapfile -t files < <(find dist/ios-ipa -type f -name '*.ipa' | sort)

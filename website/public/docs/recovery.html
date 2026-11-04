@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Recovery package</h1>
-<p class="note">From <code>docs/recovery.md</code> in the repository, rendered 2026-10-16. These documents describe the main branch; the released version is 0.0.1-alpha.15. Sections marked 'after 0.0.1-alpha.15' are not in a release yet.</p>
+<p class="note">From <code>docs/recovery.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <p>Your devices hold the keys to your vault. If one of them is lost, another one adds a new device with a pairing code and nothing else is needed. This page is about the other case: <strong>every device is lost at once</strong>, in a fire, a burglary or a flood. Then you restore from what you kept somewhere else: the <em>recovery package</em>.</p>
 <p>Varsto makes a checklist of that package for your vault, with the restore steps for a new computer:</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> recovery guide                                   <span class="co"># text in the terminal</span></span>
@@ -73,9 +73,9 @@
 </thead>
 <tbody>
 <tr>
-<td><strong>Recovery kit</strong>: the vault key as 24 words (<code>varsto recovery kit</code>), or three shares of which any two rebuild it (<code>--shares</code>).</td>
-<td>It is the only thing that opens the vault. There is no account, no reset and no copy anywhere else.</td>
-<td>Nobody can read the vault, including the makers of Varsto.</td>
+<td><strong>Recovery kit</strong>: two sets of 24 words. The <strong>vault words</strong> are the vault key (<code>varsto recovery kit</code>, or with <code>--shares</code> three shares of which any two rebuild it). The <strong>recovery words</strong> (<code>varsto recovery kit --recovery-words</code>) open the recovery copy of every folder's key.</td>
+<td>The vault words open the vault's bookkeeping (device and folder names, where the packs are) and no file content. With the recovery words as well, every folder that has a recovery copy opens on a new device. There is no account, no reset and no copy anywhere else.</td>
+<td>Without the vault words nobody can read the vault, including the makers of Varsto. Without the recovery words a new device sees folder names only, until another of your devices approves it for each folder.</td>
 </tr>
 <tr>
 <td><strong>Storage credentials</strong>: for each S3 bucket the endpoint, bucket and region (in the guide) plus the access key ID and secret key (keep them yourself); the login to the provider account.</td>
@@ -129,12 +129,12 @@
 <ol type="1">
 <li>Install Varsto from the download page and check the download with <code>varsto verify-release</code>.</li>
 <li>If you kept shares, rebuild the words: <code>varsto recovery combine --check &lt;key check&gt;</code> (it asks for two shares, one <code>&lt;index&gt;: &lt;words&gt;</code> per line, or reads them from standard input or <code>--file</code>) (the key check is printed on the kit; with it a share from another kit or a copying mistake is caught).</li>
-<li>Join through a bucket or a directory that holds the vault: <code>varsto join --storage-path ... </code> (or the <code>--s3-*</code> options); it asks for the 24 words without echo. <code>VARSTO_VAULT_KEY</code> or <code>--key-file</code> supply them in scripts; they are never taken from the command line.</li>
+<li>Join through a bucket or a directory that holds the vault: <code>varsto join --recovery-words --storage-path ... </code> (or the <code>--s3-*</code> options); it asks for the 24 vault words and then the 24 recovery words without echo. <code>VARSTO_VAULT_KEY</code> or <code>--key-file</code> supply the vault words and <code>VARSTO_RECOVERY_WORDS</code> the recovery words in scripts; they are never taken from the command line. A folder that has no recovery copy cannot be restored this way: <code>varsto status</code> warns while a folder lacks one (<code>varsto recovery escrow</code> writes it).</li>
 <li>Add the other storages under the same names (<code>varsto storage add-s3</code>, <code>add-rclone</code>, <code>add-local</code>, <code>add-pool</code>).</li>
 <li>Connect the pool disks one at a time (<code>varsto disk insert</code> on Linux).</li>
 <li>Attach the folders (<code>varsto folder attach &lt;folder&gt; &lt;directory&gt;</code>), unlock Strongroom folders with a security key, restore backups (<code>varsto backup restore</code>).</li>
 <li>Files whose blocks are only on cold storage need a confirmed read (<code>varsto repair --from-cold</code> or <code>varsto move ... --confirm-cold-read</code>); archive classes need a restore request at the provider first.</li>
-<li>Remove the lost devices (<code>varsto device revoke</code>), print a new recovery kit and make the guide again.</li>
+<li>Remove the lost devices (<code>varsto device revoke</code>, which also gives every folder they held a new key), print a new recovery kit (the vault words change; the recovery words do not) and make the guide again.</li>
 </ol>
 <p>The limits are those of the <a href="failure-model.html">failure model</a>: if the recovery words and every share are lost, nothing can restore access.</p>
 
