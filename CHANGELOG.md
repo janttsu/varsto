@@ -16,6 +16,10 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Fixed
+
+- Pausing the background service now stops peer-to-peer as well: the listener, the LAN beacon, the rendezvous, the relay and the router mapping stop until the service is resumed, so a paused phone sends and receives nothing for Varsto. Before, only syncing stopped and peer traffic went on. A pause set by the user also survives a restart of the service (`<home>/service-paused`), as a phone stops and starts the service often; the short pause that `varsto disk` and import commands take for their duration is not saved.
+
 ## [0.0.1-alpha.16] - 2026-11-04
 
 Spec sections 72 to 83. Storage format 3: vaults of alpha.15 and earlier are not read and must be recreated; every device must run alpha.16 (alpha.15 refuses a format 3 vault with a message). This is still an alpha: not for production data. The Android package is now release-signed under a new key, so an installed debug build (alpha.15 or an older daily) must be uninstalled before the new APK is installed.
