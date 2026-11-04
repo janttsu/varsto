@@ -16,6 +16,10 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Added
+
+- Push notifications to your phone through ntfy, Pushover or Telegram ([docs/notifications.md](docs/notifications.md)). Add a channel in Settings (a guide for each service, a test message, a choice of what it receives, an option to leave folder, storage and device names out) or with `varsto notify`. Alerts (storage problems, low space, fewer copies than a policy asks, damaged data, failed or overdue backups, requests waiting for you) are on by default; finished backups, new files and a daily summary are opt-in. The channels are a device-local file with the tokens (`notify.json`, mode 0600, never synced). Messages are not end-to-end encrypted on their way through the service. Failed sends wait in an outbox and are retried, also after a restart; repeats are dropped for six hours and a channel gets at most 20 an hour. The settings work while the vault is locked.
+
 ## [0.0.1-alpha.16] - 2026-11-04
 
 Spec sections 72 to 83. Storage format 3: vaults of alpha.15 and earlier are not read and must be recreated; every device must run alpha.16 (alpha.15 refuses a format 3 vault with a message). This is still an alpha: not for production data. The Android package is now release-signed under a new key, so an installed debug build (alpha.15 or an older daily) must be uninstalled before the new APK is installed.
