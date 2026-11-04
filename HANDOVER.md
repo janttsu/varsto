@@ -31,6 +31,7 @@ English only, no personal data, no secrets.
 
 ## Open
 
+- The default-policy fix (no "violated" without a disk pool or directory storage, "your own disks" wording, reason line and wrapping in the "Is it safe?" card, no key epoch on the Repairs row) is on branch `worktree-agent-ab4dcaec18679a5f0`, not compiled or tested yet (the maintainer asked not to build); build and test it before merging.
 - Membership (from the review, not fixed): a gap that stays below the
   sequence cap, `Membership::join` without an administrator list, a member of
   another vault does not apply the roster cap, and a folder key already shared
