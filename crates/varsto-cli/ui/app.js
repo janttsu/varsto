@@ -66,7 +66,12 @@
     var head = document.createElement("div"); head.className = "activity-text";
     if (m) { var b = document.createElement("strong"); b.textContent = m[1]; head.appendChild(b); head.appendChild(document.createTextNode(" " + m[2])); } else { head.textContent = msg; }
     var time = document.createElement("time"); time.className = "activity-time"; var now = new Date(); time.dateTime = now.toISOString(); time.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    body.appendChild(head); li.appendChild(dot); li.appendChild(body); li.appendChild(time);
+    body.appendChild(head);
+    // A "holds no key" line in the activity log had no way to ask for the
+    // folder. The same button as on the folder row does that.
+    var nk = NO_KEY_PAGE.exec(noKeyMessage(msg));
+    if (nk) { body.appendChild(accessButton(folderByName(nk[1]) || { name: nk[1] })); }
+    li.appendChild(dot); li.appendChild(body); li.appendChild(time);
     logEl.insertBefore(li, logEl.firstChild);
     while (logEl.children.length > 200) { logEl.removeChild(logEl.lastChild); }
   }
