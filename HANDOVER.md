@@ -4,9 +4,12 @@ State of the project for whoever (or whatever) picks it up next. Keep this
 file current in every pull request that changes the state it describes.
 English only, no personal data, no secrets.
 
-## State on 2026-11-04
+## State on 2026-11-06
 
-- `main` is `64346c5f` = tag `v0.0.1-alpha.16` (PR #107). Release
+- The repository is <https://github.com/janttsu/varsto>. The old Bitbucket
+  repository holds only a commit that points here; do not push to it.
+- `main` is `46adda31` (PR #108: `GH_REPO` for the publishing jobs and this
+  file) on top of tag `v0.0.1-alpha.16` = `64346c5f` (PR #107). Release
   0.0.1-alpha.16 is published on GitHub and at <https://varsto.net/downloads/>
   with `SHA256SUMS` signed by the release key; the daily channel carries
   build `20261103-64346c5` of the same commit for every platform (Linux,
@@ -28,6 +31,38 @@ English only, no personal data, no secrets.
 - The code review of 2026-10-30 (15 areas, 19 HIGH findings, none critical)
   is documented outside the repository; its fixes are the `fix/*` branches
   merged through `integrate/review-20261031` into PR #107.
+
+## Waiting for a build and a pull request
+
+Pushed to GitHub, based on `main` = `46adda31`, never compiled or tested
+(the maintainer asked to hold the builds). Open a pull request for each, let
+CI build every platform, fix what breaks, then merge. Each one adds its own
+line under `## Unreleased` in CHANGELOG.md, so the later merges have small
+text conflicts there and in this file.
+
+- `fix/default-policy-own-disks` (`ed14001d`): a folder on the default
+  policy in a vault without a disk pool or directory storage shows a warning
+  ("no own disk") with the reason under the bar, instead of "violated".
+- `fix/list-thumbnails` (`bf17d84a`): small thumbnails in the file list on
+  phones. `/api/thumb` answers 503 with `Retry-After` while the engine is
+  busy (404 only when there is no thumbnail); the list loads two at a time,
+  retries with backoff and keeps a memory cache.
+- `feat/notify-channels` (`14a095d0`): push notifications through ntfy (also
+  self-hosted), Pushover and a Telegram bot: `varsto_core::notify`, the
+  Notifications card in Settings with a guided setup per service, `varsto
+  notify …`, [docs/notifications.md](docs/notifications.md). About 4 000 new
+  lines; the external APIs have not been called for real.
+- `fix/pause-stops-p2p` (`d60aac69`): pausing the service stops peer-to-peer
+  too, and the user's pause survives a restart (`<home>/service-paused`).
+  Check on a phone that Varsto traffic stops, and whether pairing needs
+  peer-to-peer while paused.
+- `docs/build-and-lab` (this branch): BUILDING.md, the lab runbook, the
+  benchmarks guide and fixes of stale references. Documentation only.
+
+Older experiments, pushed so they are not lost, written before storage
+format 3 and not merged: `dht-discovery` (`40a84ae0`, peers through the
+Mainline DHT) and `ios-camera-viewer` (`f6736178`, iOS camera upload and a
+native viewer). They need rework on top of `main` before any merge.
 
 ## Open
 
