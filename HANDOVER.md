@@ -17,9 +17,10 @@ English only, no personal data, no secrets.
   `20261104-46adda3` of `46adda31` for every platform (Linux, Windows
   setup, macOS, Android, iOS `.ipa`, rendezvous binary). The Android
   object is still named `varsto-daily-android-debug.apk`; the bytes are
-  the release build. A rebuild of the same commit was started on
-  2026-11-06 (Actions run 42208674730) and is not the published daily
-  until that run succeeds. `Cargo.toml` is `0.0.1-alpha.16`.
+  the release build. That commit was rebuilt on 2026-11-06 (Actions run
+  42208674730) and published as daily `20261106-46adda3`. The site serves
+  it at <https://varsto.net/daily/>, and the screenshots of that run are
+  on the website. `Cargo.toml` is `0.0.1-alpha.16`.
 - What alpha.16 contains: [CHANGELOG.md](CHANGELOG.md) section
   `[0.0.1-alpha.16]` and the blog post under `website/src/posts/`. In short:
   storage format 3 (vaults of alpha.15 and earlier must be recreated), folder
