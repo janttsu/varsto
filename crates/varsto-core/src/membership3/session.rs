@@ -249,11 +249,50 @@ impl<'a> Membership<'a> {
         kem: &'a DecapsKey,
         k3: SecretKey,
     ) -> Result<Membership<'a>> {
+        Self::join_with(vault, storages, sign, kem, k3, None)
+    }
+
+    /// `join` for a vault that may have an organization. Epochs and
+    /// revocations are adopted only from the administrators named by the
+    /// manifest on `storages`. A vault with no manifest is unchanged:
+    /// every full device may still write them. A joining device has no
+    /// administrator list of its own, so without this a roster member's
+    /// revocation would open the vault.
+    pub fn join_in_vault(
+        vault: Id16,
+        vault_id: &crate::ids::VaultId,
+        storages: &'a [&'a dyn Storage],
+        sign: &'a SigningKey,
+        kem: &'a DecapsKey,
+        k3: SecretKey,
+    ) -> Result<Membership<'a>> {
+        let top = epochs::epoch_of_key(storages, vault, &k3)?;
+        let (keys, _) = epochs::walk_vault_chain(storages, vault, top, k3.clone())?;
+        let admins = crate::org::admins_for_join(storages, vault_id, &keys.keys)?;
+        Self::join_with(vault, storages, sign, kem, k3, admins)
+    }
+
+    fn join_with(
+        vault: Id16,
+        storages: &'a [&'a dyn Storage],
+        sign: &'a SigningKey,
+        kem: &'a DecapsKey,
+        k3: SecretKey,
+        admins: Option<BTreeSet<Id16>>,
+    ) -> Result<Membership<'a>> {
         let top = epochs::epoch_of_key(storages, vault, &k3)?;
         let (keys, _) = epochs::walk_vault_chain(storages, vault, top, k3)?;
-        let m = Membership::open(vault, storages, sign, kem, keys)?;
-        // A newer vault epoch signed by a device of the vault means the key
-        // is from before a removal; junk under a higher number does not.
+        let m = Membership::open_with_admins(
+            vault,
+            storages,
+            sign,
+            kem,
+            keys,
+            BTreeMap::new(),
+            admins,
+        )?;
+        // A newer vault epoch signed by a device that may write one means
+        // the key is from before a removal; junk under a higher number does not.
         if m.vault_signed.iter().any(|e| *e > top) {
             bail!("this vault key is out of date: a device was removed since (the keys changed then). Use the current vault key: pair from one of your devices, or print a new recovery kit there");
         }
