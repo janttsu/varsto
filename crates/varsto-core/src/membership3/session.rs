@@ -551,10 +551,12 @@ impl<'a> Membership<'a> {
                 self.vault_kept
                     .get(&o.record.epoch)
                     .is_none_or(|k| *k == o.record.issuer)
-                    && !self
-                        .vault_signed
-                        .range(o.record.previous_epoch + 1..o.record.epoch)
-                        .any(|_| true)
+                    && o.record
+                        .previous_epoch
+                        .checked_add(1)
+                        .is_none_or(|start| {
+                            !self.vault_signed.range(start..o.record.epoch).any(|_| true)
+                        })
             });
             // In an organization only an administrator's epoch is adopted.
             let by_admin = opened
