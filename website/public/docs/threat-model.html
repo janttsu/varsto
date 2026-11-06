@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Threat model (design stage): Varsto</title>
-<meta name="description" content="Varsto documentation: Threat model (design stage)">
+<meta name="description" content="What the Varsto design is meant to resist, what each party can see, and where the design stops. A design-stage note.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/docs/threat-model.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Threat model (design stage): Varsto">
-<meta property="og:description" content="Varsto documentation: Threat model (design stage)">
+<meta property="og:description" content="What the Varsto design is meant to resist, what each party can see, and where the design stops. A design-stage note.">
 <meta property="og:url" content="https://varsto.net/docs/threat-model.html">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Threat model (design stage)</h1>
-<p class="note">From <code>docs/architecture/threat-model.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>docs/architecture/threat-model.md</code> in the repository, rendered 2026-11-06. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <blockquote>
 <p><strong>Design-stage model, written before the code.</strong> This document describes what the design intends to protect, against whom, and where it deliberately stops. Much of it is now implemented as 0.0.1-alpha.13; the per-row status notes and <a href="alpha-0-format.html">docs/spec/alpha-0-format.md</a> record what is built. Nothing has been audited, so every statement remains a design goal that tests and an independent review must still confirm. Open points are marked <strong>TBD</strong> and point to the open questions in the project plan.</p>
 </blockquote>

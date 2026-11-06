@@ -29,7 +29,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Aller au contenu</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
 </div>
 <header class="site">
@@ -60,7 +60,7 @@
     <h1>Varsto, restic et BorgBackup</h1>
     <p class="lead">restic et BorgBackup (borg) sont des programmes de sauvegarde : ils prennent des instantanés de répertoires dans un dépôt chiffré et dédupliqué et les restaurent plus tard. Ce ne sont pas des outils de synchronisation et ils ne cherchent pas à l’être. Varsto fait à la fois de la synchronisation et ses propres sauvegardes, et son miroir restic permet à restic de sauvegarder un coffre indépendamment de Varsto.</p>
 
-    <h2>Comment fonctionnent restic et borg</h2>
+    <h2>restic vs Borg</h2>
     <p><strong>restic</strong> est un exécutable unique qui fonctionne sans serveur. <code>restic backup</code> prend un instantané d’un répertoire dans un dépôt, en ne transférant que les parties de fichiers qui ont changé ; <code>restic snapshots</code> les liste, <code>restic restore</code> en restaure un, et <code>restic check</code> vérifie le dépôt. Les dépôts peuvent se trouver sur un disque local ou sur de nombreux types de stockage, auto-hébergés ou en ligne, et tout ce qu’ils contiennent est chiffré. <strong>borg</strong> est lui aussi un programme de sauvegarde avec déduplication : les fichiers sont découpés en morceaux et un morceau déjà présent dans le dépôt n’est pas stocké de nouveau, les données sont chiffrées sur le client (AES-256 avec HMAC-SHA256) et éventuellement compressées, les dépôts se trouvent sur des disques locaux ou sur n’importe quel hôte joignable par SSH, et les archives peuvent être montées comme un système de fichiers pour les parcourir et les restaurer. Ni l’un ni l’autre ne garde vos appareils alignés : une sauvegarde s’exécute au moment que vous choisissez, depuis une machine, vers un dépôt, et les fichiers de la machine restent tels qu’ils étaient.</p>
 
     <h2>Côte à côte</h2>

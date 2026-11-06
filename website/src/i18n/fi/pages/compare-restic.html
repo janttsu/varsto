@@ -8,7 +8,7 @@ description: Käytätkö resticiä tai BorgBackupia salattuihin varmuuskopioihin
     <h1>Varsto, restic ja BorgBackup</h1>
     <p class="lead">restic ja BorgBackup (borg) ovat varmuuskopio-ohjelmia: ne ottavat hakemistoista versioita salattuun, deduplikoituun varastoon ja palauttavat ne myöhemmin. Ne eivät ole synkronointityökaluja eivätkä yritä olla. Varsto tekee sekä synkronoinnin että omat varmuuskopionsa, ja sen restic-peili antaa resticin varmuuskopioida holvin Varstosta riippumatta.</p>
 
-    <h2>Miten restic ja borg toimivat</h2>
+    <h2>restic vs Borg</h2>
     <p><strong>restic</strong> on yksi suoritettava tiedosto, joka toimii ilman palvelinta. <code>restic backup</code> ottaa hakemistosta version varastoon siirtäen vain tiedostojen muuttuneet osat; <code>restic snapshots</code> listaa versiot, <code>restic restore</code> palauttaa yhden ja <code>restic check</code> tarkistaa varaston. Varasto voi olla paikallisella levyllä tai monenlaisissa tallennuspaikoissa, itse ylläpidetyissä ja verkkopalveluissa, ja kaikki siinä oleva on salattua. <strong>borg</strong> on niin ikään deduplikoiva varmuuskopio-ohjelma: tiedostot pilkotaan paloihin, ja varastossa jo olevaa palaa ei tallenneta uudestaan, tiedot salataan asiakaspäässä (AES-256 ja HMAC-SHA256) ja halutessa pakataan, varasto on paikallisella levyllä tai millä tahansa SSH:n yli tavoitettavalla koneella, ja arkistot voi liittää tiedostojärjestelmäksi selailua ja palautusta varten. Kumpikaan ei pidä laitteitasi tahdissa: varmuuskopio ajetaan valitsemaasi aikaan yhdeltä koneelta yhteen varastoon, ja koneen tiedostot jäävät sellaisiksi kuin olivat.</p>
 
     <h2>Rinnakkain</h2>

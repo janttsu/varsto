@@ -71,6 +71,45 @@ DOCS = [
     ("docs/testing/mobile.md", "mobile-testing", "Mobile testing guide", "Project"),
 ]
 
+# Search snippets. The generic "Varsto documentation: <title>" text was what
+# Google showed for these pages. Each description says what the page is.
+# mobile-testing is kept for people who have the link and left out of the
+# index: it was matching unrelated testing queries.
+DOC_DESCRIPTIONS = {
+    "quick-start": "Install the Varsto alpha on Linux, macOS, Windows or Android and create a vault on storage you already have. The first command is varsto init. Source and issues are on GitHub.",
+    "alpha-0-format": "The Varsto storage format and sync model: encrypted blocks in packs, the signed ledger, and what a storage is allowed to see.",
+    "format-versions": "Which storage format each Varsto release uses, and which older vaults that release can still open.",
+    "key-hierarchy": "Draft of how Varsto derives and seals keys, from the vault key to folder keys and device keys.",
+    "ledger-signing-notes": "Design notes on how a Varsto device signs its ledger batches, including the hybrid signatures.",
+    "specifications": "Which parts of the Varsto specification are written, which are implemented, and which are still only a design.",
+    "threat-model": "What the Varsto design is meant to resist, what each party can see, and where the design stops. A design-stage note.",
+    "security-principles": "The security rules the Varsto design follows: encryption on the device, no account, and no weaker fast mode.",
+    "logging": "What Varsto writes to its logs, and the rule that secrets, keys and file names stay out of them.",
+    "recovery": "The recovery kit for a Varsto vault: the words and shares to keep off the devices, and how a new device is restored.",
+    "failure-model": "What the Varsto design is meant to survive, and the failures it does not claim to survive.",
+    "fido2-platform-support": "FIDO2 hmac-secret and WebAuthn PRF on Windows, macOS, Linux, Android and iOS: which APIs expose them, and which points are not verified. Research for Varsto Strongroom.",
+    "security-policy": "How to report a security problem in Varsto, and what the project does with the report.",
+    "testing": "How Varsto is tested: the Rust tests, the virtual-machine lab of 59 scenarios, and what a release is expected to run.",
+    "contributing": "How to build Varsto from the GitHub repository, run the tests and send a change. Issues and pull requests are welcome.",
+    "trademark": "Draft rules for using the Varsto name and mark.",
+    "provider-price-data": "How the published storage-provider prices used by Varsto are collected and checked.",
+    "mobile-testing": "How the Varsto Android and iOS shells are exercised on emulators and devices. Internal testing notes.",
+    "licence": "Varsto is source-available under the PolyForm Shield License 1.0.0. It is not an OSI open-source licence.",
+    "index": "Guides, the storage-format specification and the security notes for Varsto, rendered from the GitHub repository. The contributing guide says how to send a change.",
+}
+NOINDEX_DOCS = {"mobile-testing"}
+
+
+def nosnippet_warnings(text: str) -> str:
+    """The alpha warning stays on the page for people. Search engines are
+    asked not to quote it (the data-nosnippet attribute)."""
+    def tag(m: re.Match) -> str:
+        inner = m.group(2)
+        if re.search(r"production data|data loss|dataförlust|perte de données|hävittää dataa", inner, re.I):
+            return f"<{m.group(1)} data-nosnippet>{inner}</{m.group(1)}>"
+        return m.group(0)
+    return re.sub(r"<(blockquote|p)>(.*?)</\1>", tag, text, flags=re.S)
+
 
 def front_matter(text: str) -> tuple[dict, str]:
     meta: dict[str, str] = {}
@@ -168,7 +207,7 @@ def home_structured_data(lang: str, url: str, description: str) -> str:
              "inLanguage": [code for code, _ in LANGS]},
             {"@type": "SoftwareApplication", "name": BRAND, "url": url, "description": description,
              "applicationCategory": "UtilitiesApplication", "applicationSubCategory": "File synchronisation and backup",
-             "operatingSystem": "Linux, Windows, macOS, Android", "softwareVersion": version,
+             "operatingSystem": "Linux, Windows, macOS, Android, iOS", "softwareVersion": version,
              "downloadUrl": f"{SITE_URL}/downloads/", "screenshot": f"{SITE_URL}/assets/img/screenshots/desktop-files-light.png",
              "offers": {"@type": "Offer", "price": "0", "priceCurrency": "EUR"}, "isAccessibleForFree": True},
             {"@type": "SoftwareSourceCode", "name": f"{BRAND} source code", "codeRepository": REPO,
@@ -180,7 +219,7 @@ def home_structured_data(lang: str, url: str, description: str) -> str:
 
 
 def page(title: str, description: str, body: str, nav: str, depth: int, lang: str = "en", rel: str = "",
-         extra_head: str = "") -> str:
+         extra_head: str = "", robots: str = "") -> str:
     """`depth`: directory levels below the site root; `rel`: the page's path
     relative to its language root (for the switcher, the canonical address and
     the hreflang links), e.g. "features/index.html"; `extra_head`: page-specific
@@ -219,8 +258,12 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
         f'      <a href="{nav_href(href)}"{" aria-current=\"page\"" if name == nav else ""}{" rel=\"noopener\"" if href.startswith("http") else ""}>{labels.get(name, name)}</a>' for name, href in NAV
     )
     footer = "\n".join(f"    <span>{line.format(p=p)}</span>" for line in footer_lines)
+    robots_meta = f'<meta name="robots" content="{html.escape(robots)}">\n' if robots else ""
     is_home = nav == "Project" and rel in ("", "index.html")
-    if is_home:
+    if is_home and lang == "fi":
+        # "Varsto" alone is also a Finnish company. The title says this is the app.
+        full_title = "Varsto-sovellus: salattu synkronointi ja varmuuskopio omaan tallennustilaan"
+    elif is_home:
         full_title = f"{BRAND}: {TAGLINE[lang]}"
     else:
         full_title = title if BRAND in title else f"{title}: {BRAND}"
@@ -249,7 +292,7 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(full_title)}</title>
 <meta name="description" content="{html.escape(description)}">
-<meta name="color-scheme" content="light dark">
+{robots_meta}<meta name="color-scheme" content="light dark">
 <link rel="icon" href="{p}favicon.svg" type="image/svg+xml">
 {social}{alternates_html}
 {extra_head}<link rel="alternate" type="application/rss+xml" title="{BRAND} blog" href="{p}blog/feed.xml">
@@ -258,7 +301,7 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
 </head>
 <body>
 <a class="skip" href="#main">{SKIP_I18N[lang]}</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap">{alpha}</div>
 </div>
 <header class="site">
@@ -326,7 +369,7 @@ PLATFORMS = [
     ("Android", "android", lambda n: n.endswith("-android.apk") or n.endswith("-android-debug.apk"), [],
      "Release-signed APK for sideloading: allow the install when the phone asks. Not a debug build, so an update replaces the previous install. Runs the same core as a foreground service."),
     ("iOS", "ios", lambda n: n.endswith("-ios-unsigned.ipa"), [],
-     "Unsigned .ipa for iPhone and iPad: it does not install by itself. Sideload it with AltStore, SideStore or Sideloadly (they sign it with your own Apple ID; see docs/ios-build.md). Built by CI on a Mac runner; not yet run on a real device."),
+     "Unsigned .ipa for iPhone and iPad. It does not install by itself: AltStore, SideStore or Sideloadly sign it with your own Apple ID. A Sideloadly error about signing, an Apple ID limit, an expired install or an untrusted developer comes from that tool or from Apple, not from a broken package. Built by CI on a Mac runner; not yet run on a real device."),
     ("Source", "source", lambda n: n.endswith("-source.tar.gz"), [],
      "Git archive of the tagged release. Build with a stable Rust toolchain: cargo build --release."),
 ]
@@ -683,15 +726,17 @@ def build_docs() -> dict[str, str]:
             if lines and lines[0].startswith("# "):
                 lines = lines[1:]
             body = rewrite_links(pandoc("\n".join(lines)), slug_by_name)
+        body = nosnippet_warnings(body)
         body = (f"<article class=\"prose\">\n<h1>{html.escape(title)}</h1>\n<p class=\"note\">From <code>{html.escape(path)}</code> in the repository, rendered {datetime.now(timezone.utc).date()}. "
                 f"These documents describe the main branch; the released version is {RELEASED_VERSION}. Sections marked 'after {RELEASED_VERSION}' are not in a release yet.</p>\n{body}\n</article>")
         (OUT / "docs").mkdir(parents=True, exist_ok=True)
-        (OUT / "docs" / f"{slug}.html").write_text(page(title, f"{BRAND} documentation: {title}", body, "Docs", 1, rel=f"docs/{slug}.html"))
+        robots = "noindex, follow" if slug in NOINDEX_DOCS else ""
+        (OUT / "docs" / f"{slug}.html").write_text(page(title, DOC_DESCRIPTIONS.get(slug, title), body, "Docs", 1, rel=f"docs/{slug}.html", robots=robots))
         groups.setdefault(group, []).append((slug, title))
     # Licence page from the plain-text LICENSE.
     licence = (ROOT / "LICENSE").read_text()
     body = f"<article class=\"prose\"><h1>Licence</h1><p class=\"note\">PolyForm Shield License 1.0.0, verbatim from <code>LICENSE</code>.</p><pre class=\"licence\">{html.escape(licence)}</pre></article>"
-    (OUT / "docs" / "licence.html").write_text(page("Licence", f"{BRAND} licence", body, "Docs", 1, rel="docs/licence.html"))
+    (OUT / "docs" / "licence.html").write_text(page("Licence", DOC_DESCRIPTIONS["licence"], body, "Docs", 1, rel="docs/licence.html"))
     groups.setdefault("Project", []).append(("licence", "Licence (PolyForm Shield 1.0.0)"))
     # Index.
     sections = []
@@ -703,10 +748,10 @@ def build_docs() -> dict[str, str]:
         sections.append(f"    <h2>{group}</h2>\n    <ul class=\"doclist\">\n{lis}\n    </ul>")
     body = (
         "    <h1>Docs</h1>\n"
-        "    <p class=\"lead\">The documents below are rendered from the repository. They describe what the current alpha does and what the full design intends; every design document says which parts exist.</p>\n"
+        "    <p class=\"lead\">The documents below are rendered from the repository. They describe what the current alpha does and what the full design intends; every design document says which parts exist. The source and the issue tracker are on <a href=\"https://github.com/janttsu/varsto\" rel=\"noopener\">GitHub</a>. <a href=\"contributing.html\">How to build Varsto and send a change</a>.</p>\n"
         + "\n".join(sections)
     )
-    (OUT / "docs" / "index.html").write_text(page("Docs", f"{BRAND} documentation", body, "Docs", 1, rel="docs/index.html"))
+    (OUT / "docs" / "index.html").write_text(page("Docs", DOC_DESCRIPTIONS["index"], body, "Docs", 1, rel="docs/index.html"))
     return slug_by_name
 
 
@@ -835,7 +880,7 @@ def build_sitemap() -> None:
         if rel == "404.html" or rel.startswith("downloads/"):
             continue
         text = f.read_text(errors="ignore")
-        if 'http-equiv="refresh"' in text:
+        if 'http-equiv="refresh"' in text or re.search(r'<meta name="robots" content="[^"]*noindex', text):
             continue
         loc = rel.removesuffix("index.html")
         pages.append((loc, f.stat().st_mtime))

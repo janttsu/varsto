@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Logging architecture: Varsto</title>
-<meta name="description" content="Varsto documentation: Logging architecture">
+<meta name="description" content="What Varsto writes to its logs, and the rule that secrets, keys and file names stay out of them.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/docs/logging.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Logging architecture: Varsto">
-<meta property="og:description" content="Varsto documentation: Logging architecture">
+<meta property="og:description" content="What Varsto writes to its logs, and the rule that secrets, keys and file names stay out of them.">
 <meta property="og:url" content="https://varsto.net/docs/logging.html">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Logging architecture</h1>
-<p class="note">From <code>docs/architecture/logging.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>docs/architecture/logging.md</code> in the repository, rendered 2026-11-06. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <p>Status: implemented; section 45 of <a href="alpha-0-format.html">the specification</a> records what is built.</p>
 <p>Every Varsto program (background service, CLI, tray, desktop app, MCP server, mobile library, app shells) keeps a <strong>local debug log, on by default at level <code>debug</code></strong>, so that a problem can be investigated after the fact on the device where it happened. The log is for the owner of the device: it stays on that device and is never uploaded. Logging must never weaken the security model: the things that protect the data never appear in it.</p>
 <h2 id="where">Where</h2>
