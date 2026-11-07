@@ -1,5 +1,7 @@
 # FIDO2 hmac-secret and WebAuthn PRF: platform support
 
+Varsto's [Strongroom](https://varsto.net/features/#strongroom) folders wrap a folder key with a secret that a FIDO2 security key produces after a touch (CTAP2 hmac-secret, called PRF on the web). The table below is what published sources say about that on Windows, macOS, Linux, Android and iOS, and which points are not verified. The source of Varsto is a Rust workspace on [GitHub](https://github.com/janttsu/varsto); the [contributing guide](https://varsto.net/docs/contributing.html) says how to build it and send a change.
+
 > **Research note, design stage.** This document records what the cited sources say about using a FIDO2 security key to derive secrets (CTAP2 `hmac-secret`, exposed to web and platform APIs as the WebAuthn `prf` extension) from a native application. It is not a decision. No hardware was tested for this note. Anything the sources did not state is marked "not verified".
 >
 > All sources were read on **2026-10-08** (UTC). Source numbers in tables refer to the list at the end.

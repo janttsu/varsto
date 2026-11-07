@@ -31,7 +31,7 @@ file only when all of this holds at the moment of removal:
    transferrer disk), and one copy of each block was read back intact.
 4. The folder's durability policy is met for those blocks right now. A
    folder without a policy of its own has the default one: a copy in
-   external storage, one on your own devices or disks, and every block
+   external storage, one on your own disks, and every block
    checked by another of your devices within 30 days.
 
 Files that do not qualify yet stay, with the reason:

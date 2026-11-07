@@ -84,7 +84,7 @@ varsto --home ~/.varsto-laptop p2p rendezvous status   # the optional meeting-po
 
 # a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3.
 # A folder without its own policy uses the default: 1 copy on any storage, 1 in external storage,
-# 1 on your own devices or disks, verified by another device within 30 days.
+# 1 on your own disks (a directory storage or a disk pool), verified by another device within 30 days.
 varsto --home ~/.varsto-laptop policy set docs --min-copies 2 --place cloud=2 --place home=1 --verified-within-days 30
 varsto --home ~/.varsto-laptop policy check
 
@@ -142,12 +142,13 @@ Test data only. Keep your own backups.
 
 | Path | Purpose |
 |---|---|
-| `crates/` | Rust workspace: `varsto-core` (library), `varsto-cli` (the `varsto` binary: CLI, service, tray, desktop interface), `varsto-ffi` (C ABI for mobile) |
+| `crates/` | Rust workspace: `varsto-core` (library), `varsto-cli` (the `varsto` binary: CLI, service, tray, desktop interface), `varsto-ffi` (C ABI for iOS), `varsto-window` (the Windows window), `varsto-rendezvous` (the optional meeting-point service) |
 | `apps/` | `macos` (menu-bar app, Swift), `android` (foreground service + WebView), `ios` (SwiftUI shell, build on a Mac) |
-| `docs/` | Architecture, specifications, testing guides |
+| `docs/` | Architecture, specifications, testing guides ([lab runbook](docs/testing/lab.md), [benchmarks](docs/testing/benchmarks.md)) |
 | `tests/` | Test matrix and shared test assets |
-| `scripts/test/` | Scripts used by the testing instructions |
-| `website/` | Static project website (template) |
+| `scripts/` | `test/` (test scripts and the VM lab), `cloud-build/` (Scaleway fallback builds), `screenshots/`, `bench/` and `nat-test/` (measurements), signing helpers; see [BUILDING.md](BUILDING.md) |
+| `installer/`, `ops/` | The Windows installer; scripts for the web server (screenshot and daily-channel sync) |
+| `website/` | The static project website, its build and deploy scripts |
 | `brand/` | Product name and brand settings in one place |
 
 ## Licence
@@ -159,3 +160,6 @@ Varsto is **source-available, not open source**. It is licensed under the [PolyF
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
 - [TESTING.md](TESTING.md)
+- [BUILDING.md](BUILDING.md) (every platform, CI, screenshots, daily channel, website)
+- [RELEASING.md](RELEASING.md)
+- [HANDOVER.md](HANDOVER.md) (current state)

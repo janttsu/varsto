@@ -2107,6 +2107,27 @@ pub fn push_only(cat: Category, title: &str, body: &str) {
     varsto_core::notify::notifier().push(varsto_core::notify::Message::new(cat, title, body));
 }
 
+/// The pause of the service outlives a restart: a phone stops and starts
+/// the service often, and a pause that ended by itself would start syncing
+/// and peer-to-peer again without the user knowing.
+const PAUSE_FILE: &str = "service-paused";
+
+pub fn paused_saved(home: &std::path::Path) -> bool {
+    home.join(PAUSE_FILE).exists()
+}
+
+pub fn save_paused(home: &std::path::Path, paused: bool) -> std::io::Result<()> {
+    let path = home.join(PAUSE_FILE);
+    if paused {
+        std::fs::write(path, "paused\n")
+    } else {
+        match std::fs::remove_file(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
+}
+
 /// Best-effort desktop notification; silent where no notifier exists.
 ///
 /// The message also goes to the push channels the user set up (ntfy,
@@ -2371,6 +2392,7 @@ pub fn run(opts: Options) -> Result<()> {
             interval_secs: opts.interval_secs.max(15),
             sync_requested: true,
             folders_changed: true,
+            paused: paused_saved(&opts.home),
             ..Default::default()
         },
         pair: None,
@@ -2546,15 +2568,22 @@ pub fn run(opts: Options) -> Result<()> {
         }
         // Turned off while running: stop serving and fetching from peers.
         if p2p.is_some() {
-            let (wanted, mapping) = {
+            // Pausing the service stops peer-to-peer too: no listener, no LAN
+            // beacon, no rendezvous, relay or router mapping, so a paused
+            // phone sends and receives nothing for Varsto. It starts again
+            // when the pause ends.
+            let (wanted, mapping, paused) = {
                 let st = desktop::lock_idle(&state);
-                st.engine
+                let paused = st.service.paused;
+                let (enabled, mapping) = st
+                    .engine
                     .as_ref()
                     .map(|e| {
                         let c = e.p2p_config();
                         (c.enabled, c.port_mapping)
                     })
-                    .unwrap_or((true, true))
+                    .unwrap_or((true, true));
+                (enabled && !paused, mapping, paused)
             };
             if let Some(p) = &p2p {
                 p.set_port_mapping(mapping);
@@ -2572,7 +2601,11 @@ pub fn run(opts: Options) -> Result<()> {
                 st.service.p2p_listen = None;
                 st.service.p2p_portmap = varsto_core::p2p::portmap::PortMapStatus::off();
                 varsto_core::activity::global().set_peers(None, None);
-                log::info!("p2p stopped (turned off)");
+                if paused {
+                    log::info!("p2p stopped (service paused)");
+                } else {
+                    log::info!("p2p stopped (turned off)");
+                }
             }
         }
         if p2p.is_none() {
@@ -2587,10 +2620,12 @@ pub fn run(opts: Options) -> Result<()> {
         if p2p.is_none() && Instant::now() >= p2p_retry_at {
             let wanted = {
                 let st = desktop::lock_idle(&state);
-                st.engine
-                    .as_ref()
-                    .map(|e| e.p2p_config().enabled)
-                    .unwrap_or(false)
+                !st.service.paused
+                    && st
+                        .engine
+                        .as_ref()
+                        .map(|e| e.p2p_config().enabled)
+                        .unwrap_or(false)
             };
             if wanted {
                 p2p = P2p::start(&state);
@@ -3740,6 +3775,19 @@ WantedBy=default.target
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pause survives a restart of the service and ends only when the
+    /// user resumes; resuming twice is no error.
+    #[test]
+    fn the_pause_outlives_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!paused_saved(dir.path()));
+        save_paused(dir.path(), true).unwrap();
+        assert!(paused_saved(dir.path()));
+        save_paused(dir.path(), false).unwrap();
+        assert!(!paused_saved(dir.path()));
+        save_paused(dir.path(), false).unwrap();
+    }
 
     /// The background service never answers a folder request (design
     /// section 6, S-020): no call that approves, denies, grants, changes a
