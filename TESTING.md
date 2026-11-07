@@ -25,7 +25,22 @@ Varsto is tested in layers. The goal is that cheaper AI systems and scripts can 
 9. Mobile tests: see [docs/testing/mobile.md](docs/testing/mobile.md). Devices: [docs/testing/devices.md](docs/testing/devices.md).
 10. Manual tests on Windows, macOS, Android and iOS: see [docs/testing/manual](docs/testing/manual).
 
-The matrix is defined in [tests/matrix.yaml](tests/matrix.yaml).
+The matrix is defined in [tests/matrix.yaml](tests/matrix.yaml). That file is the original plan (a draft from the repository's first commit), not a description of what runs today. What is implemented, as of 0.0.1-alpha.16:
+
+| Level | Status |
+|---|---|
+| 1 Unit and property tests | Implemented: `cargo test --workspace` (run by CI on Linux and macOS). |
+| 2 Integration with storage back ends | Partly: local folder, rclone remotes and an S3 server (`rclone serve s3`, started by `remote_storages.rs` and `s3_reads.rs` and by the lab). MinIO, an SFTP server and an S3 server that emulates storage classes and restore delays are not set up as test fixtures in this repository. |
+| 3 Deterministic simulation with fault injection | No separate simulation harness. Faults are covered by in-process tests and by lab scenarios (`crash-during-push`, `blackholed-network`, `storage-outage-and-recovery`, `clock-two-days-ahead`, `clock-two-days-behind`). |
+| 4 Multi-device scenarios in virtual networks | Implemented: the VM lab, 59 scenarios. The scenario names in `tests/matrix.yaml` (`lan-only-sync`, `nat-types`, ...) are not the lab's names; the lab's list is `scenarios.py --list`. |
+| 5 Removable disks | Implemented as lab scenarios (`disk-pool-hotplug`, `disk-init`, `disk-fetch-plan`, `staged-move-to-pool`, `mailbox-offline-disk`, `scrub`) and core tests (`disk_pool.rs`, `mailbox.rs`, ...). `disk-pool-hotplug` attaches and detaches virtual disks on a running VM. Unplug during a write, a full disk and a cloned disk are not covered by a named lab scenario (not checked in the core tests). |
+| 6 Upgrade, soak, performance | Partly: `upgrade-from-alpha-15` (there is no upgrade path from format 2; it checks the refusal) and the scale scenarios in the lab; measurements with [docs/testing/benchmarks.md](docs/testing/benchmarks.md). I found no soak test. |
+| 7 CLI contract tests | Partly: `crates/varsto-cli/tests` run the built binary with `--json`. I found no JSON schema check. |
+| 8 Security | Partly: `cargo audit` and `cargo deny check` in CI. Fuzzing, secret scanning and a reproducible-build comparison are not set up. |
+| 9 Mobile | CI runs the Android APK in an emulator and the iOS app in the Simulator, with screenshots; see [docs/testing/mobile.md](docs/testing/mobile.md). |
+| 10 Manual | Checklists exist in [docs/testing/manual](docs/testing/manual); the results of real-device runs are not recorded in the repository. |
+
+The distribution list in `tests/matrix.yaml` is also a plan: only `debian-stable` on x86_64 has an image in `scripts/test`, and the lab uses Debian 13.
 
 The rendezvous service ([docs/rendezvous.md](docs/rendezvous.md)) is tested in three places. `crates/varsto-rendezvous/tests` runs the server in process (`Server::spawn_for_tests`) against the core client. The core's integration tests (next to `tests/nat.rs`) run two engines in one process against that server: record publish, fetch and merge, observed address, punch coordination, relayed fetch, relayed pairing, and "service unreachable: LAN and storages still work". The interface side is covered by the translation test (`interface_translations_cover_the_page`, every new string in fi and sv), the API shape test for `/api/p2p` (`rendezvous` and the `rendezvous_on` / `rendezvous_url` settings) and `node --check crates/varsto-cli/ui/app.js`. The screenshot fixtures (`scripts/screenshots/example_data.py`) show the rendezvous card and a peer `relayed via rendezvous` with the invented address `https://rv.example.org`. Lab scenarios run the service on the lab host with the two devices behind two NAT networks; any scenario that must work without it runs with the service off.
 
@@ -62,6 +77,19 @@ These scripts have only the `smoke` suite and the `debian-stable` (x86_64) image
 
 ### VM lab (`scripts/test/lab`)
 
+The step-by-step runbook is [docs/testing/lab.md](docs/testing/lab.md): host prerequisites, every `lab.py` command and `scenarios.py` option, the full run from nothing, results, cleanup and troubleshooting. **A release needs every scenario**, not only the ones for changed areas. This section is the summary.
+
+Quick start:
+
+```bash
+python3 scripts/test/lab/lab.py up && python3 scripts/test/lab/lab.py build
+python3 scripts/test/lab/lab.py services && python3 scripts/test/lab/lab.py install-bin
+python3 scripts/test/lab/scenarios.py            # all scenarios; exit code = number that failed
+python3 scripts/test/lab/lab.py services-stop && python3 scripts/test/lab/lab.py down
+```
+
+(The rendezvous scenarios also need a host build of `varsto-rendezvous` in `<lab dir>/bin/`; see the runbook.)
+
 `scripts/test/lab/lab.py up` builds a small internet on one Linux host with libvirt: a WAN in a documentation range with an S3 server (`rclone serve s3`) and STUN, a home network behind a cone NAT router, an office network behind a symmetric NAT router, and a public device. `lab.py build` compiles a static binary in a build VM, `install-bin` puts it on every device, and `scenarios.py` plays 59 scenarios (`SCENARIOS` in `scripts/test/lab/scenarios.py`; `scenarios.py --list` prints them and `--check` is a self-check that needs no VM) against them, on storage format 3: setup and pairing (six words on both sides), sync and conflicts, selective sync, repair of damaged and missing packs, policies, Strongrooms, organizations and removal, revocation, the approval of joining devices (request, six words, approve, deny, viewer, a service that never approves), recovery escrow (recovery words, a lost owner replaced), removing a participant from a folder and a device from the vault, peer-to-peer on the LAN, through cone and symmetric NAT and during a slow upload, sharing, disk pools and the mailbox for an unplugged disk, no upgrade from the released alpha.15 (its vault is refused with a message to recreate it; a vault of the new format is refused by alpha.15; the way forward works), storage outage, a black-holed network, a crash during a push, clock skew, scale (20 000 files and 1 GiB, and many files in packs of every size class), garbage collection that waits for acknowledgements, a rolled-back ledger on a storage (the rollback warning), backups (restored on another device after an approval, a snapshot expired after the clock moves on), live activity, the bit-rot check, whole drives for disk pools (`disk init`, the fetch plan), restic, and forwarding (a selective device carries a phone's blocks from the phone to a storage) with the live board, pairing with a wrong address, and ledger loss (a device whose ledger directory was deleted restored from the bucket; the ledger lost from the bucket and both devices rebuilt by the service), torrents and YouTube channels through a spool directory (fake transmission and yt-dlp), and working offline (one of two storages black-holed during a sync and healed afterwards, a home LAN without internet that fetches from a peer of the saved directory, a pairing whose new device cannot reach the storage, a folder approval made offline and uploaded later), and the rendezvous service on the lab host (`lab.py services` starts `<dir>/bin/varsto-rendezvous`, a host build of `-p varsto-rendezvous`; every other scenario runs with `VARSTO_RENDEZVOUS=off`): both NATs observed, the symmetric NAT reached without a peer relay, the relay when the office router drops UDP, pairing across networks by code and by link (`rv=`, `rvu=`), and the server stopped. `lab.py release` builds the Linux, Windows and Android release packages in the build VM.
 
 #### Lab logs
@@ -71,7 +99,9 @@ These scripts have only the `smoke` suite and the `debian-stable` (x86_64) image
 - The logs contain file and folder names from the generated test data, device names and storage endpoints, but never keys, passphrases or recovery words.
 - `test-results/` is git-ignored, and CI does not upload these logs as artifacts.
 
-The rest of this section describes the `smoke` suite. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.
+### Smoke suite (`provision-vm.sh`, `run-suite.sh`)
+
+This part describes the `smoke` suite, which is separate from the VM lab. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.
 
 ### Prerequisites
 
@@ -103,6 +133,14 @@ Environment variables: `VARSTO_LIBVIRT_URI`, `VARSTO_POOL`, `VARSTO_CACHE_DIR`, 
 ### Result format
 
 `smoke.json` has the fields `suite`, `vm`, `commit`, `result` (`pass` or `fail`), `started_utc`, `finished_utc` and `tests` (a list of `name`, `status`, `seconds`, `message`). `smoke.junit.xml` is standard JUnit XML.
+
+### Other test tools
+
+- Interface tests in Chromium (Playwright; `pip install playwright` and `playwright install chromium`, or `CHROMIUM=/path/to/chromium`): `scripts/test/ui-help.py`, `ui-no-reload.py` (the page does not reload when the service restarts), `viz-first-paint.py` (the visualization page never draws invented content) and `qr-scan-browser.py` (QR scanner with a fake camera). Each takes a varsto binary and a work directory; read the header of the script for the exact arguments.
+- Page rules in plain Node: `node scripts/test/import-ui.test.js` and `node scripts/test/viz-rules.test.js`.
+- `scripts/data/validate-providers.sh [--max-age-days N] [--fail-on-stale]` validates `data/providers/*.json` against its schema and warns about stale prices.
+- Benchmarks and real-NAT tests on rented machines (`scripts/bench`, `scripts/nat-test`): [docs/testing/benchmarks.md](docs/testing/benchmarks.md). They produce numbers, not pass or fail.
+- CI runs the Rust gates, the site-tool tests and the screenshot jobs on every pull request and push to `main`; what each job does is in [BUILDING.md](BUILDING.md).
 
 ## Results and reports
 

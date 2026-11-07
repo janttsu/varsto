@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VM lab runbook: Varsto</title>
+<meta name="description" content="Varsto documentation: VM lab runbook">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/docs/lab-runbook.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="VM lab runbook: Varsto">
+<meta property="og:description" content="Varsto documentation: VM lab runbook">
+<meta property="og:url" content="https://varsto.net/docs/lab-runbook.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/docs/lab-runbook.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/lab-runbook.html">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=e9308487f1">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note">
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>VM lab runbook</h1>
+<p class="note">From <code>docs/testing/lab.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p>The lab is a small internet made of virtual machines on one Linux host. It plays the multi-device scenarios that need real networks: pairing, peer-to-peer through NAT, storage outages, clock skew, scale and more. This page tells how to bring it up, run every scenario, read the results and tear it down, from nothing. It is written from <code>scripts/test/lab/lab.py</code> and <code>scripts/test/lab/scenarios.py</code>; if the two disagree with this page, the scripts are right and this page needs a fix.</p>
+<p>For the other test levels see <a href="testing.html">TESTING.md</a>. For building binaries see <a href="building.html">BUILDING.md</a>.</p>
+<p><strong>A release needs every scenario.</strong> Run the whole list (<code>scenarios.py</code> with no <code>--only</code>) against the exact binary that is to be released, not only the scenarios of the areas that changed. A change in one area breaks others in ways nobody predicts. <a href="./">HANDOVER.md</a> says when the last full run was done.</p>
+<h2 id="what-the-lab-is">What the lab is</h2>
+<p>All libvirt networks are isolated: nothing reaches the real LAN or the internet.</p>
+<table>
+<thead>
+<tr>
+<th>Network</th>
+<th>Range</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vl-wan</code></td>
+<td><code>198.51.100.0/24</code> (documentation range, "the internet")</td>
+<td>The host is <code>.1</code> (S3 on port 9900, STUN on UDP 3478, the rendezvous service on TCP 8790 and UDP 3334). <code>vl-pub</code> is <code>.20</code>. The outside addresses of the two routers are <code>.11</code> and <code>.12</code>.</td>
+</tr>
+<tr>
+<td><code>vl-home</code></td>
+<td><code>10.78.1.0/24</code></td>
+<td>A home LAN behind <code>vl-rhome</code> (<code>.254</code>, a cone NAT: nftables masquerade).</td>
+</tr>
+<tr>
+<td><code>vl-office</code></td>
+<td><code>10.78.2.0/24</code></td>
+<td>An office LAN behind <code>vl-roffice</code> (<code>.254</code>, a symmetric NAT: masquerade with <code>fully-random</code>).</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>VM</th>
+<th>Memory</th>
+<th>Network</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vl-rhome</code></td>
+<td>512 MiB</td>
+<td>home + wan</td>
+<td>cone NAT router</td>
+</tr>
+<tr>
+<td><code>vl-roffice</code></td>
+<td>512 MiB</td>
+<td>office + wan</td>
+<td>symmetric NAT router</td>
+</tr>
+<tr>
+<td><code>vl-pub</code></td>
+<td>1536 MiB</td>
+<td>wan</td>
+<td>a device with a public address; also a second STUN server (<code>.20</code>)</td>
+</tr>
+<tr>
+<td><code>vl-laptop</code></td>
+<td>1536 MiB</td>
+<td>home (<code>.10</code>)</td>
+<td>device</td>
+</tr>
+<tr>
+<td><code>vl-desktop</code></td>
+<td>1536 MiB</td>
+<td>home (<code>.11</code>)</td>
+<td>device</td>
+</tr>
+<tr>
+<td><code>vl-work</code></td>
+<td>1536 MiB</td>
+<td>office (<code>.10</code>)</td>
+<td>device</td>
+</tr>
+<tr>
+<td><code>vl-build</code></td>
+<td>8192 MiB, 8 vCPUs, 40 GB disk</td>
+<td>libvirt <code>default</code> NAT network</td>
+<td>build machine, not part of the test network; created by <code>lab.py build</code></td>
+</tr>
+</tbody>
+</table>
+<p>Every other VM has 2 vCPUs and a 12 GB thin disk. The six lab VMs need about 7 GiB of RAM together, the build VM 8 GiB more. The devices' default route is their router; the host also holds <code>.1</code> on the home and office bridges, for SSH only.</p>
+<p>Every name starts with <code>vl-</code> (VMs, networks, the pool <code>vl-pool</code>). <code>lab.py down</code> touches nothing else.</p>
+<h2 id="host-prerequisites">Host prerequisites</h2>
+<ul>
+<li><p>Linux with libvirt and QEMU/KVM: <code>virsh</code>, <code>qemu-img</code>, <code>/dev/kvm</code>, and UEFI firmware for libvirt (the VMs boot with <code>firmware='efi'</code>).</p></li>
+<li><p>Your user can use <code>qemu:///system</code> without root (member of the <code>libvirt</code> group). Set <code>VARSTO_LIBVIRT_URI</code> to use another URI.</p></li>
+<li><p>The libvirt network <code>default</code> exists and is active. The routers get a temporary NIC on it to install nftables, and the build VM lives on it.</p></li>
+<li><p>Tools: <code>ssh</code>, <code>scp</code>, <code>ssh-keygen</code>, <code>rsync</code>, <code>curl</code>, <code>sha512sum</code>, <code>xorriso</code> (for the cloud-init seed), <code>python3</code>, and <code>rclone</code> (a current one: the host runs <code>rclone serve s3</code>).</p></li>
+<li><p>Free ports on the host's <code>198.51.100.1</code> address once the network exists: TCP 9900, UDP 3478, TCP 8790, UDP 3334.</p></li>
+<li><p>Disk: the lab directory (default <code>/mnt/ssd/varsto-lab</code>, set <code>VARSTO_LAB_DIR</code>) holds the base image, the VM disks, the S3 bucket data and built binaries. The scripts do not state how much space they need. The scale scenarios write 20 000 files and 1 GiB, so keep tens of GB free (an estimate, not a measurement). The build VM's cargo target directory lives inside the VM disk.</p></li>
+<li><p>Internet access on the host the first time (Debian cloud image) and for the build VM (Rust, crates, packages). The device VMs have no internet.</p></li>
+<li><p>A host build of the rendezvous service, copied to <code>&lt;lab dir&gt;/bin/varsto-rendezvous</code> (or elsewhere, with <code>VARSTO_LAB_RENDEZVOUS_BIN</code>). Without it <code>lab.py services</code> still starts, but the rendezvous scenarios fail:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> build <span class="at">--release</span> <span class="at">-p</span> varsto-rendezvous</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /mnt/ssd/varsto-lab/bin</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> target/release/varsto-rendezvous /mnt/ssd/varsto-lab/bin/</span></code></pre></div></li>
+<li><p>Optional: for the <code>restic</code> scenario a static restic binary on the host (<code>VARSTO_LAB_RESTIC</code>, default <code>/usr/bin/restic</code>) is copied to the VM when the VM cannot install one.</p></li>
+<li><p>Optional: the <code>upgrade-from-alpha-15</code> scenario downloads the released alpha.15 Linux package from GitHub on the host (checked against that release's <code>SHA256SUMS</code>). It needs internet on the host.</p></li>
+</ul>
+<h2 id="where-things-live">Where things live</h2>
+<p>All under the lab directory <code>DIR</code> (<code>VARSTO_LAB_DIR</code>, default <code>/mnt/ssd/varsto-lab</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>debian-13-genericcloud-amd64.qcow2</code></td>
+<td>Base image (Debian 13, from <code>cloud.debian.org</code>, SHA-512 checked). A copy in <code>~/.cache/varsto-test/images/</code> is used instead of downloading.</td>
+</tr>
+<tr>
+<td><code>pool/</code></td>
+<td>The libvirt directory pool <code>vl-pool</code>: base volume, per-VM qcow2 disks and seed ISOs.</td>
+</tr>
+<tr>
+<td><code>vms/&lt;vm&gt;/</code></td>
+<td>cloud-init files and the generated <code>domain.xml</code>.</td>
+</tr>
+<tr>
+<td><code>id_ed25519</code> (+ <code>.pub</code>)</td>
+<td>The lab's SSH key, made on first use. The VMs accept only this key.</td>
+</tr>
+<tr>
+<td><code>s3/&lt;bucket&gt;/</code></td>
+<td>The data of the lab S3 server. Scenarios use the bucket <code>vault1</code>.</td>
+</tr>
+<tr>
+<td><code>run/</code></td>
+<td><code>pids.json</code>, <code>s3.log</code>, <code>stun.log</code>, <code>rendezvous.log</code> of the host services.</td>
+</tr>
+<tr>
+<td><code>varsto-musl</code></td>
+<td>The last binary built by <code>lab.py build</code>.</td>
+</tr>
+<tr>
+<td><code>bin/varsto-rendezvous</code></td>
+<td>The rendezvous service binary (you put it there).</td>
+</tr>
+<tr>
+<td><code>release/&lt;version&gt;/</code></td>
+<td>Output of <code>lab.py release</code>.</td>
+</tr>
+<tr>
+<td><code>scenarios.lock</code></td>
+<td>Lock file: only one <code>scenarios.py</code> run at a time.</td>
+</tr>
+</tbody>
+</table>
+<p>In the repository (git-ignored): <code>test-results/lab/results.json</code> and <code>test-results/lab/logs/&lt;scenario&gt;/&lt;vm&gt;/</code>.</p>
+<p>Inside the device VMs: user <code>varsto</code> (passwordless sudo), the binary in <code>/opt/varsto/varsto</code> linked as <code>/usr/local/bin/varsto</code>, test data in <code>~/data</code>, the vault in <code>~/.local/share/varsto</code>.</p>
+<p>Constants in <code>lab.py</code>: S3 endpoint <code>http://198.51.100.1:9900</code> with the fixed lab credentials (<code>vlab-access</code> / <code>vlab-secret-key-123</code>, valid only on the isolated lab network), STUN <code>198.51.100.1:3478</code> and <code>198.51.100.20:3478</code>, rendezvous <code>http://198.51.100.1:8790</code> (plain HTTP; the devices say <code>VARSTO_RENDEZVOUS_PLAIN_HTTP=1</code>).</p>
+<h2 id="environment-variables">Environment variables</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Used by</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VARSTO_LIBVIRT_URI</code></td>
+<td>lab.py</td>
+<td>libvirt URI, default <code>qemu:///system</code></td>
+</tr>
+<tr>
+<td><code>VARSTO_LAB_DIR</code></td>
+<td>lab.py</td>
+<td>lab directory, default <code>/mnt/ssd/varsto-lab</code></td>
+</tr>
+<tr>
+<td><code>VARSTO_LAB_RENDEZVOUS_BIN</code></td>
+<td>lab.py</td>
+<td>path of the rendezvous binary, default <code>&lt;dir&gt;/bin/varsto-rendezvous</code></td>
+</tr>
+<tr>
+<td><code>VARSTO_LOG</code></td>
+<td>scenarios.py</td>
+<td>log level for every <code>varsto</code> run on the VMs, default <code>debug</code> (for example <code>trace</code>)</td>
+</tr>
+<tr>
+<td><code>VARSTO_LAB_RESTIC</code></td>
+<td>scenarios.py</td>
+<td>static restic binary for the <code>restic</code> scenario, default <code>/usr/bin/restic</code></td>
+</tr>
+</tbody>
+</table>
+<p>Scenarios give each <code>varsto</code> run on the VMs <code>VARSTO_PASSPHRASE</code>, <code>VARSTO_NO_INSTALL=1</code>, <code>VARSTO_LOG</code> and <code>VARSTO_S3_SECRET</code>, and <code>VARSTO_RENDEZVOUS=off</code> except in the rendezvous scenarios. Secrets travel in the environment, never on a command line. The lab passphrase and S3 credentials are fixed test values.</p>
+<h2 id="labpy-subcommands"><code>lab.py</code> subcommands</h2>
+<p>Run from the repository root: <code>python3 scripts/test/lab/lab.py &lt;command&gt;</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>up</code></td>
+<td>Creates the pool, downloads the base image, makes the SSH key, defines and starts the three libvirt networks and the six VMs, waits for SSH (300 s each), sets up the nftables rules on the routers (then removes their temporary uplink) and the helpers on the devices, starts the second STUN server on <code>vl-pub</code>, prints <code>status</code>. Idempotent: run it again to start VMs that stopped.</td>
+</tr>
+<tr>
+<td><code>services</code></td>
+<td>Stops any host services of an earlier call, then starts in the background on the host: <code>rclone serve s3</code> on <code>198.51.100.1:9900</code> (data in <code>&lt;dir&gt;/s3</code>, directory cache 5 s), the STUN server on UDP 3478, and the rendezvous service if its binary exists. Prints the pids; they are saved in <code>run/pids.json</code>.</td>
+</tr>
+<tr>
+<td><code>services-stop</code></td>
+<td>Stops those processes. Run it when you are done.</td>
+</tr>
+<tr>
+<td><code>stun-serve [--addr A]</code></td>
+<td>A minimal STUN server in the foreground. Used by <code>services</code> and on <code>vl-pub</code>; you do not run it by hand.</td>
+</tr>
+<tr>
+<td><code>build [repo]</code></td>
+<td>Creates the build VM on first use, installs Rust and musl tools there once, copies the repository (without <code>target</code>, <code>.git</code>, <code>website/public</code>) with rsync, builds <code>cargo build --release --locked -p varsto-cli --features software-key --target x86_64-unknown-linux-musl</code>, and copies the binary to <code>&lt;dir&gt;/varsto-musl</code>. <code>repo</code> defaults to the checkout the script is in. The feature <code>software-key</code> is needed by the <code>strongroom-software-key</code> scenario; a binary built another way must have it.</td>
+</tr>
+<tr>
+<td><code>install-bin [binary]</code></td>
+<td>Copies a binary (default <code>&lt;dir&gt;/varsto-musl</code>) to <code>/opt/varsto/varsto</code> on the four device VMs (<code>vl-pub</code>, <code>vl-laptop</code>, <code>vl-desktop</code>, <code>vl-work</code>) and prints each <code>varsto --version</code>.</td>
+</tr>
+<tr>
+<td><code>install &lt;package.tar.gz&gt;</code></td>
+<td>The same from a release package (<code>varsto-&lt;version&gt;-x86_64-unknown-linux-musl.tar.gz</code>).</td>
+</tr>
+<tr>
+<td><code>release [--repo R]</code></td>
+<td>Runs <code>build</code>, installs mingw-w64, zip and a JDK and the Android SDK 35 / NDK 27 in the build VM once, runs <code>website/build-release.sh</code> for Linux musl and Windows (the cross-compiled programs) and <code>apps/android/build.sh</code> (a debug APK, since no signing secrets exist there), and copies the results to <code>&lt;dir&gt;/release/&lt;version&gt;/</code>. This is a way to get packages without GitHub Actions; the packages are not signed and the Windows installer is not built (Inno Setup needs Windows). See <a href="building.html">BUILDING.md</a>.</td>
+</tr>
+<tr>
+<td><code>ssh &lt;vm&gt; [cmd...]</code></td>
+<td>A shell, or one command, on a VM (<code>lab.py ssh vl-laptop varsto --version</code>).</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>One line per lab VM: state, address, role.</td>
+</tr>
+<tr>
+<td><code>down [--all]</code></td>
+<td>Stops the host services, destroys and undefines the six VMs and deletes their disks, removes the three networks. <code>--all</code> also removes the build VM. Kept: base image, SSH key, S3 directory, built binaries.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="scenariospy-options"><code>scenarios.py</code> options</h2>
+<p><code>python3 scripts/test/lab/scenarios.py [options]</code></p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(none)</td>
+<td>Run all scenarios in order.</td>
+</tr>
+<tr>
+<td><code>--only A,B</code></td>
+<td>Run only the named scenarios (comma separated). They still run in list order, not in the order you typed. An unknown name stops the run.</td>
+</tr>
+<tr>
+<td><code>--binary PATH</code></td>
+<td>Install that binary on all device VMs first (like <code>lab.py install-bin</code>), after the lock is taken.</td>
+</tr>
+<tr>
+<td><code>--list</code></td>
+<td>Print the scenario names in run order and exit. No VM needed.</td>
+</tr>
+<tr>
+<td><code>--check</code></td>
+<td>Self-check: every scenario registered once, the first is <code>reset</code>, the ones that need a docstring have one, the helpers work on a fake bucket. Prints <code>N scenarios, M problems</code>. Exit code 1 on a problem. No VM needed.</td>
+</tr>
+</tbody>
+</table>
+<p>Exit code of a real run: the number of scenarios that did not pass (0 means all passed). Each scenario prints <code>PASS</code>, <code>FAIL</code> (an assertion) or <code>ERROR</code> (a helper gave up or an exception), its seconds and the reason. A second run at the same time is refused ("another scenarios.py run is using the lab").</p>
+<p>The scenario list is <code>scenarios.py --list</code>. The first, <code>reset</code>, deletes the vaults and test data on every device, empties the S3 directory, fixes the VMs' clocks and restarts the host services (<code>services-stop</code>, then <code>services</code>). Later scenarios build on the vault and state the earlier ones made (the same Python process keeps notes between them), so the early ones (<code>reset</code>, <code>init-and-s3-through-nat</code>, <code>pair-over-lan</code>, <code>sync-to-second-device</code>) are a prerequisite of many. The code does not list prerequisites per scenario.</p>
+<h2 id="full-run-from-nothing">Full run, from nothing</h2>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1. Binaries: the lab binary and the rendezvous service</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/lab.py up</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/lab.py build            <span class="co"># in the build VM, installs Rust the first time</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> build <span class="at">--release</span> <span class="at">-p</span> varsto-rendezvous       <span class="co"># on the host</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /mnt/ssd/varsto-lab/bin <span class="kw">&amp;&amp;</span> <span class="fu">cp</span> target/release/varsto-rendezvous /mnt/ssd/varsto-lab/bin/</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="co"># 2. Services and binary on the devices</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/lab.py services</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/lab.py install-bin</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="co"># 3. Self-check, then the whole run (stop at the first sign of a broken lab)</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/scenarios.py <span class="at">--check</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/scenarios.py <span class="dv">2</span><span class="op">&gt;&amp;</span><span class="dv">1</span> <span class="kw">|</span> <span class="fu">tee</span> lab-run.txt</span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a><span class="co"># 4. Clean up</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/lab.py services-stop</span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/lab.py down <span class="at">--all</span>        <span class="co"># or leave the VMs for the next run</span></span></code></pre></div>
+<p>If the host's <code>cargo</code> target directory is on a small disk, follow the layout advice in <a href="building.html">BUILDING.md</a> before the host build of the rendezvous service.</p>
+<p>Notes:</p>
+<ul>
+<li><code>lab.py up</code> takes a while the first time (image download, six boots, nftables install). <code>lab.py build</code> takes a while the first time (Rust install, a full release build of the workspace in the VM). The scripts print no expected durations and the repository has no measured run times for the whole lab, so a full run's length is not stated here; record it in the report.</li>
+<li>To test the binary CI built instead of one from the build VM, download the Linux package from the run (artifact <code>packages-linux-windows</code>, see BUILDING.md) and use <code>lab.py install &lt;package&gt;</code> instead of <code>build</code> and <code>install-bin</code>. Use the lab's own build for the strongroom scenario, or build with <code>--features software-key</code>.</li>
+<li><code>scenarios.py --binary PATH</code> combines the install and the run.</li>
+<li>Write the result into a report: <a href="./">report-template.md</a>.</li>
+</ul>
+<h2 id="running-one-scenario-or-a-subset">Running one scenario or a subset</h2>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/scenarios.py <span class="at">--only</span> reset,init-and-s3-through-nat,pair-over-lan,sync-to-second-device,policy</span></code></pre></div>
+<p>Start with <code>reset</code> so the run starts clean, and include the scenarios that make the vault the one you want. If a scenario fails at once with a missing vault, folder or key, a scenario before it in <code>--list</code> makes that state; add it. Some scenarios (for example <code>upgrade-from-alpha-15</code>) build their own vaults and need less, but the code does not say which; try them alone and add predecessors on failure. A passing subset does not replace the full run before a release.</p>
+<h2 id="results-and-logs">Results and logs</h2>
+<ul>
+<li><code>test-results/lab/results.json</code>: <code>results</code> (a list of <code>scenario</code>, <code>status</code>, <code>seconds</code>, <code>detail</code>, <code>logs</code>) and <code>context</code> (measurements and facts the scenarios noted, secrets left out). Written at the end of the run; an interrupted run leaves no file.</li>
+<li><code>test-results/lab/logs/&lt;scenario&gt;/&lt;vm&gt;/</code>: after each scenario, passed or not, the logs of every device VM (Varsto <code>logs/</code>, <code>service.log</code>, the <code>~/*.log</code> outputs of background commands), paths relative to the home of user <code>varsto</code>. A failed scenario prints the path. Running a scenario again replaces its directory. The logs hold generated file and folder names and endpoints but never keys, passphrases or recovery words. See also TESTING.md, "Lab logs".</li>
+<li>Host service logs: <code>&lt;dir&gt;/run/s3.log</code>, <code>stun.log</code>, <code>rendezvous.log</code>.</li>
+<li><code>test-results/</code> is git-ignored and CI does not upload lab logs.</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<ul>
+<li><code>command failed ... virsh</code>: you cannot use <code>qemu:///system</code>; check the <code>libvirt</code> group or <code>VARSTO_LIBVIRT_URI</code>.</li>
+<li><code>&lt;vm&gt; did not accept SSH within 300 s</code>: the VM did not boot (UEFI firmware missing, no KVM) or its network is down. <code>lab.py status</code>, then <code>virsh -c qemu:///system console &lt;vm&gt;</code>.</li>
+<li>The nftables install on a router fails: the <code>default</code> libvirt network is not active (<code>virsh net-start default</code>).</li>
+<li>Port in use when <code>services</code> starts: an old S3 or rendezvous process from another run; <code>lab.py services-stop</code>, check <code>ss -lntup</code>.</li>
+<li><code>no &lt;dir&gt;/bin/varsto-rendezvous: the rendezvous scenarios will fail</code>: build and copy the rendezvous service (see above).</li>
+<li><code>another scenarios.py run is using the lab</code>: wait, or find the other process. Two runs against the same VMs and bucket ruin both.</li>
+<li>Listings of the S3 bucket lag by up to 5 s (<code>rclone serve s3</code> directory cache); scenarios wait for it. A new scenario that deletes bucket objects must wait or poll before asserting.</li>
+<li>The <code>transmission</code> torrent scenario needs the build VM: the device VMs have no internet, so the build VM downloads the Debian packages and copies them over. Run <code>lab.py build</code> at least once.</li>
+<li>A scenario fails but the cause is unclear: read its logs directory, then re-run it alone with <code>VARSTO_LOG=trace</code>.</li>
+<li>Start over: <code>lab.py down</code> then <code>lab.py up</code>. A leftover state from a crashed run is also cleared by the first scenario, <code>reset</code>.</li>
+</ul>
+<h2 id="other-tools-that-need-a-lab-like-setup">Other tools that need a lab-like setup</h2>
+<ul>
+<li><code>scripts/test/provision-vm.sh</code> and friends: the single-VM <code>smoke</code> suite, see TESTING.md.</li>
+<li><code>scripts/bench</code> and <code>scripts/nat-test</code>: cross-country measurements on rented machines, see <a href="benchmarks-howto.html">benchmarks.md</a>.</li>
+<li><code>scripts/cloud-build</code>: builds and tests on throw-away Scaleway machines, see <a href="building.html">BUILDING.md</a>.</li>
+</ul>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>
