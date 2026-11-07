@@ -101,6 +101,16 @@ two branches added functions at the same place (both kept).
 - Build and test everything above: let one CI run finish, run the unit
   tests, and try the notification channels, the thumbnails on a phone and
   the pause on a phone. Until then no daily or release should be trusted.
+  What has been done without a build: `cargo fmt --check` (two files fixed
+  in PR #122), the Python tests of `ops/site`, the import-UI node test,
+  YAML and JSON checks, and a read-through review of the whole merge
+  (46adda3..main) whose seven findings PR #122 fixes. A `cargo check`
+  (type check only, no tests, no binaries) run by that review passed for
+  `varsto-core` and `varsto-cli`; `varsto-ffi` failed because
+  `desktop.rs` and `service.rs` referenced `crate::notifications::api`
+  and `crate::default_device_name`, which only `main.rs` had. PR #122
+  moves them into `notify_api.rs` and `device_name.rs`, which the ffi
+  crate includes by path. Not re-checked after the fix.
 - Membership (from the review, not fixed): a gap that stays below the
   sequence cap, a member of another vault does not apply the roster cap, and
   a folder key already shared cannot be revoked (spec 21). Medium findings

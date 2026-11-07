@@ -26,6 +26,9 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[path = "../../varsto-cli/src/desktop.rs"]
 mod desktop;
+#[path = "../../varsto-cli/src/device_name.rs"]
+mod device_name;
+use device_name::default_device_name;
 #[path = "../../varsto-cli/src/drive_mount.rs"]
 mod drive_mount;
 #[path = "../../varsto-cli/src/filemanager.rs"]
@@ -34,6 +37,8 @@ mod filemanager;
 mod import_jobs;
 #[path = "../../varsto-cli/src/mcp_keys.rs"]
 mod mcp_keys;
+#[path = "../../varsto-cli/src/notify_api.rs"]
+mod notify_api;
 #[path = "../../varsto-cli/src/readcache.rs"]
 mod readcache;
 #[path = "../../varsto-cli/src/remember.rs"]

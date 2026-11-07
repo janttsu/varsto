@@ -2541,9 +2541,15 @@ impl Engine {
             }
         }
         let p = ck.policy.as_ref()?;
-        let r = crate::policy::evaluate(
+        // The same rule as the report the page shows: a default policy in a
+        // vault with no storage in "home" gets a warning for that place, not
+        // a shortage that would hold the source back for ever.
+        let home_unavailable =
+            rec.policy.is_none() && !ck.pctx.places.values().any(|(place, _)| place == "home");
+        let r = crate::policy::evaluate_for_report(
             &rec.name,
             p,
+            home_unavailable,
             &facts,
             &ck.pctx.unreadable_places,
             &ck.pctx.unknown,

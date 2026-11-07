@@ -31,8 +31,10 @@
   function thumbKeep(url, u) {
     thumbCache.set(url, u);
     while (thumbCache.size > THUMB_CACHE_MAX) {
-      var oldest = thumbCache.keys().next().value;
-      URL.revokeObjectURL(thumbCache.get(oldest)); thumbCache.delete(oldest);
+      var oldest = thumbCache.keys().next().value, old = thumbCache.get(oldest);
+      thumbCache.delete(oldest);
+      // An image in the list may still show it: revoking would blank that row.
+      if (!document.querySelector('img[src="' + old + '"]')) { URL.revokeObjectURL(old); }
     }
   }
   function thumbDone() { thumbBusy--; thumbPump(); }
