@@ -83,7 +83,7 @@ varsto --home ~/.varsto-laptop p2p rendezvous status   # the optional meeting-po
 
 # a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3.
 # A folder without its own policy uses the default: 1 copy on any storage, 1 in external storage,
-# 1 on your own devices or disks, verified by another device within 30 days.
+# 1 on your own disks (a directory storage or a disk pool), verified by another device within 30 days.
 varsto --home ~/.varsto-laptop policy set docs --min-copies 2 --place cloud=2 --place home=1 --verified-within-days 30
 varsto --home ~/.varsto-laptop policy check
 

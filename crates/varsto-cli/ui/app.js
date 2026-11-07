@@ -626,7 +626,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }).catch(function (e) { alertBox(e.message); });
   }
   // Column and field labels for places: the two defaults by what they are.
-  function placeLabel(pl) { return pl === "home" ? "Copies on own devices and disks" : pl === "cloud" ? "Copies in external storage (S3 etc.)" : "Copies in place '" + pl + "'"; }
+  function placeLabel(pl) { return pl === "home" ? "Copies on own disks" : pl === "cloud" ? "Copies in external storage (S3 etc.)" : "Copies in place '" + pl + "'"; }
   // A place as a short tag beside a storage: "at home", "external", or its own name.
   function placeShort(pl) { return pl === "home" ? "at home" : pl === "cloud" ? "external" : pl; }
   // Places a policy can name: those of the storages, those already in use, and the two defaults.
