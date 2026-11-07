@@ -7,7 +7,8 @@ use varsto_core::crypto::{SecretKey, SigningKey};
 use varsto_core::logging::{self, Options};
 use varsto_core::replica::ReplicaToken;
 use varsto_core::s3::S3Config;
-use varsto_core::vault::SecretStore;
+use varsto_core::transmission::RpcSettings;
+use varsto_core::vault::{Keys, SecretStore};
 
 #[test]
 fn no_secret_reaches_the_log() {
@@ -24,8 +25,26 @@ fn no_secret_reaches_the_log() {
     let master = SecretKey::random();
     let master_hex = master.to_hex();
     logging::register_key(master.as_bytes());
-    let signer = SigningKey::generate();
+    // The device keys as an unlock loads them, with a passphrase that only
+    // `Keys` sees (as the service's, from the keyring, and the interface's
+    // are): saving and loading register it and both keys by themselves.
+    let keyring_passphrase = "canary keyring passphrase Qz4-w8";
+    let keys_home = tempfile::tempdir().unwrap();
+    let (vault_id, device_id) = (
+        varsto_core::ids::VaultId::random(),
+        varsto_core::ids::DeviceId::random(),
+    );
+    Keys {
+        master: SecretKey::random(),
+        signer: SigningKey::generate(),
+    }
+    .save(keys_home.path(), keyring_passphrase, &vault_id, &device_id)
+    .unwrap();
+    let device_keys =
+        Keys::load(keys_home.path(), keyring_passphrase, &vault_id, &device_id).unwrap();
+    let signer = &device_keys.signer;
     let signer_hex = hex::encode(signer.to_bytes());
+    let ed_seed_hex = hex::encode(&signer.to_bytes()[..32]);
     let folder_key = SecretKey::random();
     let folder_hex = folder_key.to_hex();
     // Tokens.
@@ -77,6 +96,15 @@ fn no_secret_reaches_the_log() {
         .insert("bucket-store".into(), s3_secret.into());
     let rclone_token = r#"{"access_token":"ya29.canaryRcloneAccessToken"}"#;
     let restic_password = "canary-restic-pw-991";
+    // The transmission RPC password, and any `Option<String>` secret, as
+    // `Debug` prints it (`Some("…")`).
+    let rpc_password = "canary-rpc-pw-7731";
+    let rpc = RpcSettings {
+        url: "http://127.0.0.1:9091/transmission/rpc".into(),
+        user: Some("canary-user".into()),
+        password: Some(rpc_password.into()),
+    };
+    let opt_password: Option<String> = Some("canary-option-pw-5520".into());
     // Recovery words.
     let words = varsto_core::recovery::words_from_key(&master_hex).unwrap();
     let shares = varsto_core::recovery::split(&master_hex, 2, 3).unwrap();
@@ -85,8 +113,10 @@ fn no_secret_reaches_the_log() {
 
     let secrets: Vec<(&str, String)> = vec![
         ("passphrase", passphrase.to_string()),
+        ("keyring passphrase", keyring_passphrase.to_string()),
         ("master", master_hex.clone()),
         ("signer", signer_hex.clone()),
+        ("signer ed25519 seed", ed_seed_hex.clone()),
         ("folder key", folder_hex.clone()),
         ("replica key", replica_hex.clone()),
         ("sealed", "Zm9vYmFyLXNlYWxlZC1jYW5hcnktdG9rZW4".to_string()),
@@ -95,6 +125,8 @@ fn no_secret_reaches_the_log() {
         ("s3", s3_secret.to_string()),
         ("rclone", "ya29.canaryRcloneAccessToken".to_string()),
         ("restic", restic_password.to_string()),
+        ("transmission", rpc_password.to_string()),
+        ("option password", "canary-option-pw-5520".to_string()),
         // Any five consecutive words of the phrase.
         (
             "words",
@@ -134,6 +166,9 @@ fn no_secret_reaches_the_log() {
     log::debug!("recovery words: {}", words.as_str());
     log::debug!("kit:\n1: {}\n2: {}", shares[0].words, shares[1].words);
     log::debug!("master hex by mistake {master_hex} and folder key {folder_hex}");
+    log::debug!("signer by mistake {signer_hex} and its seed {ed_seed_hex}");
+    log::warn!("unlock with {keyring_passphrase:?} failed: {keyring_passphrase}");
+    log::debug!("torrent rpc {rpc:?} settings password: {opt_password:?}");
     // Fields in every capture form.
     log::debug!(token = service_token.as_str(), passphrase = passphrase, key_hex:% = folder_hex, secret:? = s3_secret; "fields with secret names");
     log::debug!(value:% = share_text, other:? = replica_text, plain = mcp_key, words = words.as_str(); "fields with neutral names");

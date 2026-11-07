@@ -7,7 +7,9 @@
 //! Snapshot records are never pruned: a snapshot goes only when it expires
 //! (`snapshot_expired` in the ledger, or `expires_utc` of its signed body
 //! reached), and a base goes only after the last unexpired differential
-//! built on it.
+//! built on it. The newest live snapshot of a backup that is not stopped
+//! does not expire by its time (`kept_newest`): retention never leaves a
+//! backup without a snapshot.
 
 use super::record::SnapshotBody;
 use super::{stream, Hash32, Id16};
@@ -67,9 +69,27 @@ struct Loaded {
     removed: BTreeSet<String>,
 }
 
+/// The snapshot of `backup` that does not expire by its time: the newest
+/// live one (taken, not marked expired, by (taken_utc, seq, device)) of a
+/// device whose stream did not fork, while the backup is not stopped. So
+/// retention never removes the last snapshot of a backup, also when its
+/// source is gone and no newer one can be taken. A `snapshot_expired`
+/// mark still ends it (a stopped backup's snapshots get one).
+pub fn kept_newest(view: &LedgerView, backup: &Id16) -> Option<(Id16, u64)> {
+    if view.backups_stopped.contains(backup) {
+        return None;
+    }
+    view.snapshots
+        .range((*backup, [0u8; 16], 0)..=(*backup, [0xff; 16], u64::MAX))
+        .filter(|((_, d, _), r)| r.is_live() && !view.forked.contains(d))
+        .max_by_key(|((_, d, s), r)| (r.taken_utc, *s, *d))
+        .map(|((_, d, s), _)| (*d, *s))
+}
+
 /// Whether a snapshot is expired: marked so in the ledger, or past its
 /// expiry time (`expires_utc` from the signed body when loaded, else from
-/// `snapshot_taken`). Unknown to the ledger: not expired.
+/// `snapshot_taken`) unless it is the backup's `kept_newest`. Unknown to
+/// the ledger: not expired.
 fn expired_in(
     view: &LedgerView,
     backup: &Id16,
@@ -81,6 +101,9 @@ fn expired_in(
     let rec = view.snapshots.get(&(*backup, *device, seq));
     if rec.is_some_and(|r| r.expired) {
         return true;
+    }
+    if kept_newest(view, backup) == Some((*device, seq)) {
+        return false;
     }
     if let Some(t) = body_expires {
         return now >= t;
@@ -115,11 +138,15 @@ pub fn deletable(view: &LedgerView, backup: &Id16, device: &Id16, now: i64) -> V
 }
 
 /// The `snapshot_expired` events `me` owes the ledger: its own snapshots
-/// past their expiry time that the ledger does not show as expired.
+/// past their expiry time that the ledger does not show as expired, except
+/// the backup's `kept_newest`.
 pub fn expiry_due(view: &LedgerView, backup: &Id16, me: &Id16, now: i64) -> Vec<SnapshotExpired> {
+    let keep = kept_newest(view, backup);
     view.snapshots
         .range((*backup, *me, 0)..=(*backup, *me, u64::MAX))
-        .filter(|(_, r)| r.taken && !r.expired && now >= r.expires_utc)
+        .filter(|((_, d, seq), r)| {
+            r.taken && !r.expired && now >= r.expires_utc && keep != Some((*d, *seq))
+        })
         .map(|((b, d, seq), _)| SnapshotExpired {
             backup: *b,
             device: *d,

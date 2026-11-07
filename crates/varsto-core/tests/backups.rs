@@ -3,7 +3,8 @@
 //! byte for byte, the contents never reach the vault's devices or its
 //! transferrers, snapshots cannot be altered unnoticed, and expiry deletes
 //! exactly the blocks no live snapshot uses (packed ones included), leaves
-//! other folders alone and removes a stopped backup with its last snapshot.
+//! other folders alone, never takes the newest snapshot of a running backup
+//! and removes a stopped backup with its last snapshot.
 
 mod common;
 
@@ -590,7 +591,14 @@ fn a_differential_snapshot_keeps_its_base_until_it_expires() {
     a.restore_snapshot("bk", SnapshotPick::Latest, &out, &[], false, false)
         .unwrap();
     assert_eq!(tree(&out), tree2);
-    // When the differential expires, both records go.
+    // The differential is the newest snapshot: it outlives its retention,
+    // and so does the base it builds on ...
+    let r = a.expire_backups_at(s2.expires_utc + DAY + 60).unwrap();
+    assert_eq!(r.snapshots_expired, 0);
+    assert_eq!(r.snapshots_deleted, 0);
+    assert_eq!(snapshot_records(&lab.p("one")), 2);
+    // ... until the backup is stopped: then both records go.
+    a.stop_backup("bk").unwrap();
     let r = a.expire_backups_at(s2.expires_utc + DAY + 60).unwrap();
     assert_eq!(r.snapshots_expired, 1);
     assert_eq!(r.snapshots_deleted, 2);
@@ -611,6 +619,10 @@ fn other_devices_wait_for_the_source() {
     )
     .unwrap();
     let s1 = a.take_snapshot("bk").unwrap();
+    // A second snapshot kept longer, so the first is not the newest (the
+    // newest is never expired while the backup runs).
+    a.set_backup("bk", Some(90), None).unwrap();
+    let s2 = a.take_snapshot("bk").unwrap();
     let mut b = Engine::join(
         &lab.p("desktop"),
         "desktop",
@@ -627,9 +639,58 @@ fn other_devices_wait_for_the_source() {
     // ... and steps in once two days have passed.
     let r = b.expire_backups_at(s1.expires_utc + 2 * DAY + 60).unwrap();
     assert_eq!(r.snapshots_expired, 1);
-    assert_eq!(r.snapshots_deleted, 1);
     a.sync(None).unwrap();
-    assert!(a.backup_snapshots("bk").unwrap().is_empty());
+    assert_eq!(
+        a.backup_snapshots("bk")
+            .unwrap()
+            .iter()
+            .map(|s| s.seq)
+            .collect::<Vec<_>>(),
+        vec![s2.seq]
+    );
+}
+
+#[test]
+fn the_last_snapshot_outlives_its_retention() {
+    let (lab, mut a) = lab();
+    let id = a
+        .add_backup(
+            "bk",
+            &lab.p("src"),
+            BackupOptions {
+                retention_days: 1,
+                schedule: BackupSchedule::Manual,
+                placement: None,
+            },
+        )
+        .unwrap();
+    let s1 = a.take_snapshot("bk").unwrap();
+    let first = tree(&lab.p("src"));
+    let before = stored(&a, &lab.p("one"), &id);
+    assert!(!before.is_empty());
+    // The source directory is lost: no newer snapshot can be taken.
+    fs::remove_dir_all(lab.p("src")).unwrap();
+    assert!(a.take_snapshot("bk").is_err());
+    // Long past its retention the only snapshot is neither expired nor
+    // deleted, garbage collection keeps its blocks, and it restores whole.
+    let late = s1.expires_utc + 30 * DAY;
+    let r = a.expire_backups_at(late).unwrap();
+    assert_eq!(r.snapshots_expired, 0);
+    assert_eq!(r.snapshots_deleted, 0);
+    a.trash_upkeep_at(late).unwrap();
+    assert_eq!(stored(&a, &lab.p("one"), &id), before);
+    assert_eq!(snapshot_records(&lab.p("one")), 1);
+    let out = lab.p("out");
+    let r = a
+        .restore_snapshot("bk", SnapshotPick::Latest, &out, &[], false, false)
+        .unwrap();
+    assert!(r.unavailable.is_empty(), "{:?}", r.unavailable);
+    assert_eq!(tree(&out), first);
+    // Stopping the backup lets the last snapshot go, and the backup with it.
+    a.stop_backup("bk").unwrap();
+    let r = a.expire_backups_at(late).unwrap();
+    assert_eq!(r.snapshots_expired, 1);
+    assert_eq!(r.backups_removed, vec!["bk".to_string()]);
 }
 
 #[test]

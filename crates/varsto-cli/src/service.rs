@@ -2233,8 +2233,12 @@ pub fn passphrase_from_system(home: &Path) -> Option<String> {
         }
     }
     // systemd-creds, the kernel keyring, the desktop keyring or the macOS
-    // login keychain, whichever `remember` used (see `remember.rs`).
-    crate::remember::load(home)
+    // login keychain, whichever `remember` used (see `remember.rs`). Cut
+    // from the log at once: the service runs for days with it. (The one
+    // from the environment is registered by `logging::init`.)
+    let p = crate::remember::load(home)?;
+    varsto_core::logging::register_secret(&p);
+    Some(p)
 }
 
 /// Whether the desktop keyring's default collection is locked (Linux,

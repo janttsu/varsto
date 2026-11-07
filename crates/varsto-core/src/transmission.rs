@@ -24,13 +24,15 @@ pub const DEFAULT_URL: &str = "http://127.0.0.1:9091/transmission/rpc";
 /// is answered with 409 and the value to use.
 pub const SESSION_HEADER: &str = "X-Transmission-Session-Id";
 
-/// Where the daemon is and how to sign in.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Where the daemon is and how to sign in. `Debug` hides the password.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct RpcSettings {
     pub url: String,
     pub user: Option<String>,
     pub password: Option<String>,
 }
+
+crate::redacted_debug!(RpcSettings { url, user ; password });
 
 impl RpcSettings {
     /// Settings from the environment (`VARSTO_TRANSMISSION_URL`,

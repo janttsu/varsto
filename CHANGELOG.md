@@ -27,6 +27,9 @@ spec still names them because sections were written as the work was done.
 
 ### Fixed
 
+- Backup retention never removes the newest snapshot of a backup, whatever its age: with a lost source directory (or a device that took no newer snapshot) the last snapshot used to expire on time and its blocks were collected, leaving nothing to restore. Stopping the backup lets the last snapshot expire as before (spec sections 31 and 77).
+- The log scrubber cuts a secret the way `Debug` prints an optional or wrapped value (`password: Some("…")`, `password: Command("…")`); it used to cut only up to the quote and leave the value in the line. The transmission RPC settings no longer print their password in `Debug`.
+- The passphrase the device keys are unlocked or saved with is registered with the log scrubber on every path (the service unlocking from the system keyring, the interface's unlock, init and join), and so are the device signing key and the folder K11 keys (by keyed hash) and `VARSTO_RECOVERY_WORDS`, `VARSTO_MCP_KEY` and `VARSTO_TRANSMISSION_PASSWORD` from the environment. Before, the service ran for days with no passphrase registered.
 - The import check that decides when a source may be removed applies the same "no own disk" waiver as the folder report: a folder on the default policy in a vault without a directory storage or disk pool no longer waits for ever for a copy on your own disks.
 - `varsto recovery kit` no longer records the kit as printed when the printout lacks the recovery words or carries a fresh key no folder is escrowed under, so the recovery guide does not report a complete kit.
 - Push notifications: when a channel fails, its queued messages wait together for the channel's backoff instead of one attempt per message per second.
