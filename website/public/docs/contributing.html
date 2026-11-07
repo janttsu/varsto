@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Contributing: Varsto</title>
-<meta name="description" content="Varsto documentation: Contributing">
+<meta name="description" content="How to build Varsto from the GitHub repository, run the tests and send a change. Issues and pull requests are welcome.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/docs/contributing.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Contributing: Varsto">
-<meta property="og:description" content="Varsto documentation: Contributing">
+<meta property="og:description" content="How to build Varsto from the GitHub repository, run the tests and send a change. Issues and pull requests are welcome.">
 <meta property="og:url" content="https://varsto.net/docs/contributing.html">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -54,14 +54,15 @@
   <div class="wrap">
 <article class="prose">
 <h1>Contributing</h1>
-<p class="note">From <code>CONTRIBUTING.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>CONTRIBUTING.md</code> in the repository, rendered 2026-11-07. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <p>Thanks for your interest. Varsto is alpha (0.0.1-alpha.16) and the contribution process is still being defined.</p>
 <h2 id="rules-that-already-apply">Rules that already apply</h2>
 <ul>
 <li><strong>Language:</strong> everything in this repository is written in English: code comments, identifiers, commit messages, issues, pull requests and documentation.</li>
 <li><strong>No personal data.</strong> Never commit real personal data, real file names, real device or server names, credentials, keys or addresses. Test fixtures must be invented and generic (for example <code>IMG_0001.jpg</code>, <code>laptop</code>, <code>usb-a</code>, <code>cloud</code>).</li>
 <li><strong>No secrets.</strong> Do not commit credentials, tokens, private keys or recovery phrases.</li>
-<li><strong>Tests.</strong> New behaviour needs tests. See <a href="testing.html">TESTING.md</a>.</li>
+<li><strong>Tests.</strong> New behaviour needs tests. See <a href="testing.html">TESTING.md</a> (the multi-device VM lab: <a href="lab-runbook.html">docs/testing/lab.md</a>).</li>
+<li><strong>Builds.</strong> How to build every platform locally, what CI builds and which workflow runs when: <a href="building.html">BUILDING.md</a>. CI runs on pushes to <code>main</code>, on tags and on pull requests; a branch without a pull request starts nothing.</li>
 <li><strong>Security first.</strong> Do not implement your own cryptographic primitives. Use reviewed libraries and document every choice.</li>
 <li><strong>Logging.</strong> Never log secrets, keys, file names or paths in clear text. Use the sanctioned logging macros and the secret wrapper types; see <a href="logging.html">docs/architecture/logging.md</a>.</li>
 <li><strong>One name in one place.</strong> The product name lives in <code>brand/brand.toml</code>; do not hard-code it where it can be avoided, because the working name may change.</li>

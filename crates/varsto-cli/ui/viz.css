@@ -73,6 +73,11 @@ html.viz-fullscreen body > :not(.viz) { display: none !important; }
 .viz-row .r { color: var(--vz-muted); white-space: nowrap; font-size: .88em; }
 .viz-row .l2 { color: var(--vz-muted); font-size: .84em; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viz-row .eta { color: var(--vz-text); }
+.viz-row .viz-why { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.viz-row .viz-why[data-level="warn"] { color: var(--vz-warn); }
+.viz-row .viz-why[data-level="bad"] { color: var(--vz-bad); }
+/* On a phone the policy line wraps instead of being cut where the failing clause is. */
+body[data-mobile="1"] .viz-row .l2 { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .viz-bar-track { height: .5em; border-radius: 99px; background: var(--vz-track); margin-top: 5px; overflow: hidden; display: flex; }
 .viz-bar-track > i { display: block; height: 100%; }
 .viz-tag { display: inline-block; border-radius: 99px; padding: 0 8px; font-size: .78em; font-weight: 600; margin-left: 6px; background: var(--vz-track); color: var(--vz-muted); }

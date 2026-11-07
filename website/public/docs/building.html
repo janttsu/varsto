@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Building Varsto</title>
+<meta name="description" content="Building Varsto">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/docs/building.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Building Varsto">
+<meta property="og:description" content="Building Varsto">
+<meta property="og:url" content="https://varsto.net/docs/building.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/docs/building.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/building.html">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=e9308487f1">
+<script src="../assets/js/theme.js?v=0951491269"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
+
+    <nav class="main" aria-label="Main">
+      <a href="../">Project</a>
+      <a href="../features/">Features</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../compare/">Compare</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../screenshots/">Screenshots</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../downloads/">Downloads</a>
+      <a href="../blog/">Blog</a>
+      <a href="../forum/">Forum</a>
+      <a href="../contribute/">Contribute</a>
+      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
+      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Building Varsto</h1>
+<p class="note">From <code>BUILDING.md</code> in the repository, rendered 2026-11-07. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p>How every part of Varsto is built, where (GitHub Actions, your machine, the Scaleway fallback), and how the screenshots, the daily channel and the website are produced. Written from the scripts and workflows in this repository; if they disagree with this page, they are right and this page needs a fix.</p>
+<p>Related: <a href="testing.html">TESTING.md</a> (tests and the VM lab: <a href="lab-runbook.html">docs/testing/lab.md</a>), <a href="./">RELEASING.md</a> (signing and publishing), <a href="./">HANDOVER.md</a> (current state), <a href="contributing.html">CONTRIBUTING.md</a>.</p>
+<p><strong>Default: let GitHub Actions build.</strong> The repository is public, so GitHub-hosted runners are free, and they build every platform (including macOS and iOS, which need Apple hardware). Build locally for a quick check of one platform, and use the Scaleway fallback only when GitHub cannot be used.</p>
+<h2 id="contents">Contents</h2>
+<ol type="1">
+<li><a href="#what-gets-built">What gets built</a></li>
+<li><a href="#local-builds">Local builds</a></li>
+<li><a href="#a-layout-for-build-outputs">A layout for build outputs</a></li>
+<li><a href="#github-actions">GitHub Actions</a></li>
+<li><a href="#the-scaleway-fallback">The Scaleway fallback</a></li>
+<li><a href="#screenshots">Screenshots</a></li>
+<li><a href="#the-daily-channel">The daily channel</a></li>
+<li><a href="#the-website">The website</a></li>
+</ol>
+<h2 id="what-gets-built">What gets built</h2>
+<table>
+<thead>
+<tr>
+<th>Output</th>
+<th>Built by</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>varsto</code> (CLI, service, tray, local interface), Linux x86_64 static (musl)</td>
+<td><code>website/build-release.sh x86_64-unknown-linux-musl</code></td>
+<td><code>varsto-&lt;version&gt;-x86_64-unknown-linux-musl.tar.gz</code></td>
+</tr>
+<tr>
+<td><code>varsto.exe</code> and <code>varsto-window.exe</code>, Windows</td>
+<td><code>website/build-release.sh x86_64-pc-windows-gnu</code> (cross-compiled with mingw-w64)</td>
+<td>staged in <code>dist/windows/app</code>; input of the installer, not a download</td>
+</tr>
+<tr>
+<td><code>Varsto-&lt;version&gt;-setup.exe</code></td>
+<td><code>installer/windows/build.ps1</code> (Inno Setup, on Windows)</td>
+<td>the only Windows download</td>
+</tr>
+<tr>
+<td>Android APK</td>
+<td><code>apps/android/build.sh</code></td>
+<td>release-signed with four secrets, else debug</td>
+</tr>
+<tr>
+<td><code>Varsto-&lt;version&gt;-macos.dmg</code> (Apple Silicon)</td>
+<td><code>apps/macos/build.sh</code> (on a Mac)</td>
+<td>ad-hoc signed, not notarised</td>
+</tr>
+<tr>
+<td>iOS Simulator app</td>
+<td><code>apps/ios/build.sh</code> (on a Mac)</td>
+<td>built and photographed in CI</td>
+</tr>
+<tr>
+<td><code>Varsto-&lt;version&gt;-ios-unsigned.ipa</code></td>
+<td><code>apps/ios/make-ipa.sh</code> (on a Mac)</td>
+<td>unsigned, for sideloading; <a href="./">docs/ios-build.md</a></td>
+</tr>
+<tr>
+<td><code>varsto-rendezvous</code> (the optional meeting-point service), Linux static</td>
+<td><code>cargo build --release --target x86_64-unknown-linux-musl -p varsto-rendezvous</code></td>
+<td><a href="./">docs/rendezvous.md</a></td>
+</tr>
+<tr>
+<td>Source archive, <code>manifest.json</code>, <code>SHA256SUMS</code></td>
+<td><code>website/assemble-release.sh</code></td>
+<td>the maintainer signs <code>SHA256SUMS</code> offline: <a href="./">RELEASING.md</a></td>
+</tr>
+</tbody>
+</table>
+<p>The workspace (<code>Cargo.toml</code>) has five crates: <code>varsto-core</code> (library), <code>varsto-cli</code> (the <code>varsto</code> binary), <code>varsto-ffi</code> (C ABI for iOS), <code>varsto-window</code> (the Windows window, WebView2) and <code>varsto-rendezvous</code>. The Rust version is <code>rust-version</code> in <code>Cargo.toml</code> (CI uses the current stable toolchain). Cargo features of <code>varsto-cli</code>: <code>mimalloc</code> (default), <code>fsevents</code> (macOS builds), <code>software-key</code> (security keys kept in a file: tests and the lab only; the lab's own build turns it on, release builds do not).</p>
+<h2 id="local-builds">Local builds</h2>
+<p>Always start with the quality gates that CI also runs:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> fmt <span class="at">--all</span> <span class="at">--check</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> clippy <span class="at">--workspace</span> <span class="at">--all-targets</span> <span class="at">--</span> <span class="at">-D</span> warnings</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> test <span class="at">--workspace</span></span></code></pre></div>
+<p>(<code>cargo audit</code> and <code>cargo deny check</code> also run in CI; install <code>cargo-audit</code> and <code>cargo-deny</code> to run them.) Tests are described in <a href="testing.html">TESTING.md</a>.</p>
+<p>A plain development build on any platform: <code>cargo build --release -p varsto-cli</code>. The Linux tray needs the D-Bus development package (<code>libdbus-1-dev</code> on Debian and Ubuntu). The rest of this section is for packages.</p>
+<h3 id="linux-static-musl-and-windows-programs">Linux (static musl) and Windows programs</h3>
+<p>On Debian or Ubuntu:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get install musl-tools mingw-w64 zip libdbus-1-dev</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="ex">rustup</span> target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ex">website/build-release.sh</span> x86_64-unknown-linux-musl x86_64-pc-windows-gnu</span></code></pre></div>
+<p>Output: <code>website/public/downloads/varsto-&lt;version&gt;-x86_64-unknown-linux-musl.tar.gz</code>, <code>manifest.json</code>, <code>SHA256SUMS</code> and a source archive (<code>website/assemble-release.sh</code> runs at the end; it signs only if the release key is available, which it normally is not), and <code>dist/windows/app/{varsto.exe,varsto-window.exe,...}</code>. With no arguments the script builds Linux and Windows, plus macOS command-line binaries when <code>cargo-zigbuild</code> is installed. The script uses <code>musl-gcc</code> when present and turns <code>_FORTIFY_SOURCE</code> off, because musl lacks <code>__memcpy_chk</code>. A target that fails to build is skipped with a message (<code>!! build failed</code>), so read the output, not only the exit code.</p>
+<p>The lab can do the same in a VM: <code>lab.py release</code> (<a href="lab-runbook.html">docs/testing/lab.md</a>).</p>
+<h3 id="windows-installer">Windows installer</h3>
+<p>Needs Windows with PowerShell, Python, and Inno Setup 6 (the script installs it with Chocolatey if missing). The input is the folder with <code>varsto.exe</code>, <code>varsto-window.exe</code> and the licence files, made by <code>website/build-release.sh</code> for the Windows target:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>installer\windows\build<span class="op">.</span><span class="fu">ps1</span> <span class="op">-</span>Version <span class="dv">0.0</span><span class="op">.</span><span class="dv">1</span><span class="op">-</span>alpha<span class="op">.</span><span class="dv">16</span> <span class="op">-</span>Source dist\windows\app <span class="op">-</span>Out dist\installer</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>installer\windows\smoke-test<span class="op">.</span><span class="fu">ps1</span> <span class="op">-</span>Setup dist\installer\Varsto-<span class="op">&lt;</span>v<span class="op">&gt;-</span>setup<span class="op">.</span><span class="fu">exe</span> <span class="op">-</span>Newer <span class="op">&lt;</span>setup of a higher version<span class="op">&gt;</span> <span class="op">-</span>Version <span class="op">&lt;</span>v<span class="op">&gt;</span> <span class="op">-</span>NewerVersion <span class="op">&lt;</span>n<span class="op">&gt;</span> <span class="op">-</span>Work C<span class="op">:</span>\smoke</span></code></pre></div>
+<p><code>build.ps1</code> makes a multi-size icon (<code>make-ico.py</code>), downloads Microsoft's WebView2 bootstrapper and checks that Microsoft signed it (<code>-NoWebView2</code> skips it), and compiles <code>varsto.iss</code>. The smoke test installs silently, upgrades in place with a setup of a higher version (CI builds one as <code>99.0.0</code> for this), repairs, refuses a downgrade, opens the window, and uninstalls. It needs a desktop session. More about the installed product: <a href="./">docs/windows.md</a>.</p>
+<h3 id="android">Android</h3>
+<p>Needs a JDK 17 or newer, the Android SDK with platform 35, build-tools 34 and 35 and NDK 27 (<code>ndk;27.2.12479018</code> is what the scripts install), <code>ANDROID_HOME</code> set, and Rust:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">rustup</span> target add aarch64-linux-android x86_64-linux-android</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="va">ANDROID_HOME</span><span class="op">=</span><span class="va">$HOME</span>/android-sdk <span class="ex">apps/android/build.sh</span></span></code></pre></div>
+<p>It builds <code>varsto</code> for arm64 and x86_64 with the NDK linkers, copies them into <code>jniLibs</code> as <code>libvarsto.so</code>, and runs Gradle (the wrapper in <code>apps/android</code>). Result: <code>apps/android/app/build/outputs/apk/release/*.apk</code> or <code>.../debug/app-debug.apk</code>.</p>
+<p>Signing is decided by four environment variables, all or none: <code>VARSTO_ANDROID_KEYSTORE</code> (a path, or the keystore file as base64), <code>VARSTO_ANDROID_KEYSTORE_PASSWORD</code>, <code>VARSTO_ANDROID_KEY_ALIAS</code>, <code>VARSTO_ANDROID_KEY_PASSWORD</code>. All four set: a release APK signed with that key. None set: a debug APK for local use and the emulator, which must not be published (a debug APK is signed with a new key each time, so it cannot update over the previous one, and uninstalling removes the device's copy of the vault). A partial set is an error. In CI the four are repository secrets of the same names. The key itself is never in the repository. Version name = workspace version; the version code rules are in <a href="provider-price-data.html">apps/android/README.md</a>.</p>
+<h3 id="macos-app">macOS app</h3>
+<p>On a Mac with the Xcode command line tools and rustup:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">apps/macos/build.sh</span> <span class="at">--out</span> dist        <span class="co"># dist/Varsto-&lt;version&gt;-macos.dmg</span></span></code></pre></div>
+<p>It builds <code>varsto</code> for <code>aarch64-apple-darwin</code> (feature <code>fsevents</code>), compiles the Swift app, assembles <code>Varsto.app</code>, signs it ad hoc and makes the disk image. Details and the Finder integration: <a href="provider-price-data.html">apps/macos/README.md</a>. <code>website/publish-macos.sh</code> adds a Mac-built image to the download set (needs the release key).</p>
+<h3 id="ios">iOS</h3>
+<p>On a Mac with Xcode, <code>brew install xcodegen</code> and rustup:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">apps/ios/build.sh</span>                       <span class="co"># Simulator build; app in apps/ios/build/Build/Products/Release-iphonesimulator/</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="ex">apps/ios/simshot.sh</span> dist/ios            <span class="co"># boots a Simulator, runs the app, saves a screenshot</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="ex">apps/ios/make-ipa.sh</span> <span class="at">--out</span> dist/ios-ipa <span class="co"># unsigned .ipa for a real device</span></span></code></pre></div>
+<p>The <code>.ipa</code> is for AltStore, SideStore or Sideloadly, which sign it with your own Apple ID; no Apple account, certificate or secret is needed to build it. Install steps and limits: <a href="./">docs/ios-build.md</a> and <a href="provider-price-data.html">apps/ios/README.md</a>.</p>
+<h3 id="the-rendezvous-service">The rendezvous service</h3>
+<div class="sourceCode" id="cb7"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> build <span class="at">--release</span> <span class="at">-p</span> varsto-rendezvous                                   <span class="co"># for this machine</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="va">CC_x86_64_unknown_linux_musl</span><span class="op">=</span>musl-gcc <span class="va">CFLAGS_x86_64_unknown_linux_musl</span><span class="op">=</span><span class="st">&quot;-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0&quot;</span> <span class="dt">\</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="ex">cargo</span> build <span class="at">--release</span> <span class="at">--target</span> x86_64-unknown-linux-musl <span class="at">-p</span> varsto-rendezvous   <span class="co"># static</span></span></code></pre></div>
+<p><code>varsto-rendezvous --self-test</code> checks it. The lab needs a host build of it (see the lab runbook).</p>
+<h2 id="a-layout-for-build-outputs">A layout for build outputs</h2>
+<p>Rust builds are large: a workspace target directory runs to tens of GB, and a few branches' worth fills a small disk. A layout that works:</p>
+<ul>
+<li>Keep the build output off the disk with the source. Give every branch its own cargo target directory on a disk with room, for example <code>/mnt/ssd/varsto-lab/cargo-target-&lt;branch&gt;</code> (<a href="./">HANDOVER.md</a> uses this one). Delete the directory when the branch is merged.</li>
+<li>On a small machine limit parallelism: <code>cargo build -j 2</code> (or <code>CARGO_BUILD_JOBS=2</code>); a full release build with many jobs can run the machine out of memory.</li>
+<li>Prefer CI for anything heavier than a unit test.</li>
+</ul>
+<p>How to point cargo at it: <code>export CARGO_TARGET_DIR=/mnt/ssd/varsto-lab/cargo-target-&lt;branch&gt;</code> works for <code>cargo build/test/clippy</code>. <strong>The packaging scripts do not honour it</strong>: <code>website/build-release.sh</code>, <code>apps/android/build.sh</code>, <code>apps/macos/build.sh</code> and the Xcode project (<code>apps/ios/project.yml</code>) read <code>&lt;repo&gt;/target/...</code>. For those, make <code>target</code> in the repository a symlink to the big directory instead (<code>ln -s /mnt/ssd/varsto-lab/cargo-target-&lt;branch&gt; target</code>; <code>target</code> is git-ignored) and leave <code>CARGO_TARGET_DIR</code> unset.</p>
+<p>Other git-ignored output: <code>dist/</code> (packages, screenshots, cloud-build and benchmark output), <code>test-results/</code>, <code>website/public/downloads/</code>.</p>
+<h2 id="github-actions">GitHub Actions</h2>
+<p>Three workflows in <code>.github/workflows/</code>. All use <code>permissions: contents: read</code> by default; only the jobs that publish a release asset get <code>contents: write</code>. No job gets a key that can push code. <strong>The release key is never in CI.</strong></p>
+<h3 id="when-do-they-run">When do they run</h3>
+<table>
+<thead>
+<tr>
+<th>Workflow</th>
+<th>Triggers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ci.yml</code> (CI)</td>
+<td>push to <code>main</code>, push of a tag <code>v*</code>, <strong>every pull request</strong>, manual run (<code>workflow_dispatch</code>), and <code>workflow_call</code> from <code>daily.yml</code></td>
+</tr>
+<tr>
+<td><code>daily.yml</code> (Daily builds)</td>
+<td>every day at 03:00 UTC (<code>schedule</code>), manual run with inputs <code>ref</code> (default <code>main</code>) and <code>publish</code> (default true)</td>
+</tr>
+<tr>
+<td><code>ios-ipa.yml</code> (iOS .ipa)</td>
+<td>manual run (inputs <code>ref</code>, <code>release_tag</code>), push of a tag <code>ios-v*</code>, and <code>workflow_call</code> from <code>daily.yml</code>. Never on a plain push.</td>
+</tr>
+</tbody>
+</table>
+<p>A push to a branch that is not <code>main</code> and has no pull request starts nothing. Open a pull request (draft is enough), or start CI by hand: <code>gh workflow run ci.yml --ref &lt;branch&gt;</code>. Runs of the same workflow and ref queue instead of cancelling (<code>cancel-in-progress: false</code>). <code>gh run list</code>, <code>gh run watch &lt;id&gt;</code> and <code>gh run download &lt;id&gt; --name &lt;artifact&gt;</code> follow and fetch runs.</p>
+<h3 id="ciyml-jobs"><code>ci.yml</code> jobs</h3>
+<table>
+<thead>
+<tr>
+<th>Job</th>
+<th>Runner</th>
+<th>What it does</th>
+<th>Artifacts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>linux</code></td>
+<td><code>ubuntu-24.04</code></td>
+<td><code>cargo fmt --check</code>, <code>clippy -D warnings</code>, <code>cargo audit</code>, <code>cargo deny check</code>, <code>cargo test --workspace</code>, the site-tool unit tests (<code>ops/site</code>), builds the Linux musl package and the cross-compiled Windows programs (<code>website/build-release.sh</code>), smoke-tests the Linux package, builds the rendezvous binary and runs its <code>--self-test</code>, then seeds the invented demo vault and takes the Linux screenshots (interface in English, Finnish, Swedish; the 4K TV scene, allowed to fail; tray and own window)</td>
+<td><code>packages-linux-windows</code>, <code>rendezvous-linux</code>, <code>windows-programs</code>, <code>shots-linux</code>, <code>shots-linux-fi</code>, <code>shots-linux-sv</code>, <code>shots-linux-viz</code></td>
+</tr>
+<tr>
+<td><code>windows</code></td>
+<td><code>windows-2025</code>, 30 min limit</td>
+<td>smoke test of <code>varsto.exe</code> (<code>scripts/cloud-build/remote-windows.ps1</code>) and Windows screenshots (<code>windows-desktop.ps1</code>); needs <code>linux</code></td>
+<td><code>shots-windows</code></td>
+</tr>
+<tr>
+<td><code>windows-installer</code></td>
+<td><code>windows-2025</code>, 30 min limit</td>
+<td>builds the setup with Inno Setup, builds a <code>99.0.0</code> setup, runs <code>smoke-test.ps1</code> (install, upgrade, repair, window, uninstall); needs <code>linux</code></td>
+<td><code>installer-windows</code>, <code>installer-windows-logs</code></td>
+</tr>
+<tr>
+<td><code>android</code></td>
+<td><code>ubuntu-24.04</code></td>
+<td>builds the APK with <code>apps/android/build.sh</code> (release-signed when the four secrets exist, otherwise the job fails at "Refuse a debug APK as the published package"), builds the debug APK for the emulator, runs it in an API 34 emulator with KVM, takes the Android screenshots</td>
+<td><code>packages-android</code>, <code>shots-android</code></td>
+</tr>
+<tr>
+<td><code>macos</code></td>
+<td><code>macos-15</code></td>
+<td><code>cargo test --workspace</code>, builds <code>Varsto.app</code> and the dmg, smoke-tests the bundled command line, Finder placeholder double-click and Services, takes the window screenshot</td>
+<td><code>Varsto-macos</code></td>
+</tr>
+<tr>
+<td><code>ios</code></td>
+<td><code>macos-15</code></td>
+<td>builds the app for the Simulator and takes a screenshot</td>
+<td><code>Varsto-ios-simulator</code></td>
+</tr>
+<tr>
+<td><code>downloads</code></td>
+<td><code>ubuntu-24.04</code></td>
+<td>gathers the Linux, installer, Android, rendezvous and macOS packages and runs <code>website/assemble-release.sh</code>: source archive, <code>manifest.json</code>, unsigned <code>SHA256SUMS</code>; needs <code>linux</code>, <code>windows-installer</code>, <code>android</code>, <code>macos</code></td>
+<td><code>downloads</code></td>
+</tr>
+<tr>
+<td><code>release</code></td>
+<td><code>ubuntu-24.04</code></td>
+<td>only on a <code>v*</code> tag: attaches the <code>downloads</code> files to a draft pre-release of that tag (<code>gh release create --draft --prerelease</code>, <code>gh release upload --clobber</code>); needs <code>downloads</code></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>screenshots</code></td>
+<td><code>ubuntu-24.04</code></td>
+<td>runs after the platform jobs even if some failed; tests the website sync against a fixture; packs all screenshots with <code>scripts/screenshots/finalize.py --pack</code></td>
+<td><code>screenshots</code></td>
+</tr>
+<tr>
+<td><code>screenshots-publish</code></td>
+<td><code>ubuntu-24.04</code></td>
+<td>only on a push (<code>main</code> or a tag): uploads <code>screenshots.tar.gz</code> to the rolling pre-release <code>screenshots-latest</code></td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>The iOS <code>.ipa</code> is not part of <code>ci.yml</code>; it comes from <code>ios-ipa.yml</code>. The two publishing jobs run <code>gh</code> without a checkout, so they set <code>GH_REPO</code> (<a href="./">HANDOVER.md</a> tells why).</p>
+<p>Duration: <a href="./">HANDOVER.md</a> records about 1 h 45 min for the Linux job and about 1 h 10 min for the macOS job, which run in parallel; the whole workflow is as long as the slowest chain. <code>ios-ipa.yml</code> documents 15-25 minutes cold and 8-12 warm as an estimate. Rust caches (<code>Swatinem/rust-cache</code>) make repeat runs shorter.</p>
+<h3 id="ios-ipayml"><code>ios-ipa.yml</code></h3>
+<p>One job, <code>ipa</code> on <code>macos-15</code> (60 min limit): installs Rust with the <code>aarch64-apple-ios</code> target and <code>xcodegen</code>, runs <code>apps/ios/make-ipa.sh --out dist/ios-ipa --version &lt;Cargo version&gt; --build-number &lt;run number&gt;</code>, writes install steps to the job summary, and uploads artifact <code>Varsto-ios-unsigned</code> (14 days). The <code>release</code> job attaches the file to a draft pre-release when the run was started by an <code>ios-v*</code> tag or with <code>release_tag</code>. Needs no secrets. Run it by hand:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">gh</span> workflow run ios-ipa.yml <span class="at">--ref</span> main <span class="at">-f</span> ref=main</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="ex">gh</span> run download <span class="op">&lt;</span>run id<span class="op">&gt;</span> --name Varsto-ios-unsigned</span></code></pre></div>
+<h3 id="secrets-used-names-only">Secrets used (names only)</h3>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>Used by</th>
+<th>For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VARSTO_ANDROID_KEYSTORE</code>, <code>VARSTO_ANDROID_KEYSTORE_PASSWORD</code>, <code>VARSTO_ANDROID_KEY_ALIAS</code>, <code>VARSTO_ANDROID_KEY_PASSWORD</code></td>
+<td><code>ci.yml</code> job <code>android</code></td>
+<td>signing the release APK; if any is missing the build fails instead of using the debug key</td>
+</tr>
+<tr>
+<td><code>VARSTO_DAILY_KEY</code></td>
+<td><code>daily.yml</code> job <code>package</code></td>
+<td>signing the daily file list (the daily key, not the release key); <a href="provider-price-data.html">ops/site/README.md</a></td>
+</tr>
+<tr>
+<td><code>GITHUB_TOKEN</code> (automatic)</td>
+<td>publishing jobs</td>
+<td><code>gh release</code> calls</td>
+</tr>
+</tbody>
+</table>
+<p><code>ci.yml</code> is called from <code>daily.yml</code> with <code>secrets: inherit</code>, so the Android secrets reach it there. Pull requests from forks do not receive secrets, so their Android job cannot make the signed APK. HANDOVER.md lists the GitHub settings that workflows cannot set (branch protection, a protected environment for the daily key).</p>
+<h3 id="cutting-a-release-from-ci">Cutting a release from CI</h3>
+<p>Tag <code>v&lt;version&gt;</code> on the merge commit (steps in <a href="./">RELEASING.md</a>). CI builds everything and the <code>release</code> job attaches the set to a draft release; then <code>website/publish-ci-release.sh v&lt;version&gt; --publish</code>, run where the release key is, downloads the set, signs <code>SHA256SUMS</code>, publishes the release, pulls in the iOS <code>.ipa</code> and the screenshots, and deploys the site.</p>
+<h2 id="the-scaleway-fallback">The Scaleway fallback</h2>
+<p><code>scripts/cloud-build/</code> builds and tests on rented Scaleway machines when GitHub Actions cannot be used. It is slower to set up and costs money; GitHub is preferred.</p>
+<p><code>scripts/cloud-build/scw-build.py &lt;target&gt;</code> needs the <code>scw</code> command line configured (<code>scw init</code>) with a project where this machine's SSH key is registered, and <code>rclone</code> for the integration test. Every machine is tagged <code>varsto-build</code> and deleted at the end, also on failure, unless <code>--keep</code> is given. <code>git archive HEAD</code> is what gets built, so commit first. Output lands in <code>dist/cloud/&lt;target&gt;/</code> (the <code>windows</code> target needs the cross-compiled programs in <code>dist/windows/app</code> first, or in <code>$ARTIFACTS/windows-app</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Machine</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>linux</code></td>
+<td>Ubuntu 24.04, default type <code>POP2-4C-16G</code></td>
+<td><code>remote-linux.sh</code>: installs the toolchain, <code>cargo test --workspace --release</code>, <code>website/build-release.sh x86_64-unknown-linux-musl</code></td>
+</tr>
+<tr>
+<td><code>android</code></td>
+<td>Ubuntu, <code>POP2-8C-32G</code>, 40 GB disk</td>
+<td><code>remote-android.sh</code>: JDK 17, Android SDK 35 / NDK 27, builds with <code>apps/android/build.sh</code>; publishes only a signed release APK. <code>scw-build.py</code> does not forward the four <code>VARSTO_ANDROID_*</code> variables to the machine, so as it stands the target ends with "no signed release APK" (exit 1) unless you run it with <code>--keep</code> and rerun <code>remote.sh</code> on the machine with the variables set</td>
+</tr>
+<tr>
+<td><code>windows</code></td>
+<td>Windows Server 2025, <code>POP2-2C-8G-WIN</code></td>
+<td>enables OpenSSH, copies the cross-compiled programs (<code>dist/windows/app</code>, build them first), runs <code>remote-windows.ps1</code> (smoke test). Needs an RSA key in Scaleway IAM (name from <code>SCW_RSA_KEY_NAME</code>, private key file from <code>SCW_RSA_KEY_FILE</code>) to decrypt the administrator password; the script does the <code>win-bootstrap</code> step itself if the first-boot script did not enable SSH</td>
+</tr>
+<tr>
+<td><code>macos</code></td>
+<td>Mac mini, Apple Silicon (<code>M4-S</code> and others; <code>--type</code>, <code>--zone</code>, <code>--wait-for-stock</code>, <code>--any-type</code>; <code>mac-stock</code> lists stock)</td>
+<td><code>remote-macos.sh</code>: Command Line Tools, tests, <code>apps/macos/build.sh</code>, a smoke test and a window screenshot. <strong>Billed for 24 hours minimum</strong></td>
+</tr>
+<tr>
+<td><code>integration</code></td>
+<td>one Linux and one Windows machine plus a temporary Scaleway bucket</td>
+<td><code>it-linux.sh</code> and <code>it-windows.ps1</code>: sync both ways through S3, then fetch blocks peer to peer over the public internet. Needs the packages in <code>ARTIFACTS</code> (a directory; default <code>website/public/downloads</code>)</td>
+</tr>
+<tr>
+<td><code>shots-linux</code></td>
+<td>Ubuntu</td>
+<td>screenshots of the tray on a virtual desktop (<code>shots-linux.sh</code>)</td>
+</tr>
+<tr>
+<td><code>win-bootstrap --server &lt;id&gt;</code> (also reachable as <code>shots-windows</code>)</td>
+<td>an existing Windows instance</td>
+<td>enables OpenSSH over RDP from a jump machine</td>
+</tr>
+<tr>
+<td><code>cleanup [--all]</code></td>
+<td>n/a</td>
+<td>deletes machines tagged <code>varsto-build</code>; without <code>--all</code> it keeps those created in the last 90 minutes</td>
+</tr>
+</tbody>
+</table>
+<p>Environment: <code>SCW_ZONE</code> (default <code>fr-par-1</code>), <code>ARTIFACTS</code>. There is no iOS target here: building the <code>.ipa</code> on rented hardware means a Mac mini (<code>macos</code> target machine, then <code>apps/ios/make-ipa.sh</code> by hand); see <a href="./">docs/ios-build.md</a>. The benchmark and NAT tools reuse this script's machine handling: <a href="benchmarks-howto.html">docs/testing/benchmarks.md</a>.</p>
+<h2 id="screenshots">Screenshots</h2>
+<p>Every CI build refreshes all website pictures, for every platform and language, with no manual step.</p>
+<p>How they are made (<code>scripts/screenshots/</code>):</p>
+<ul>
+<li><code>demo-vault.sh &lt;varsto binary&gt; &lt;work dir&gt;</code> seeds an invented user "aino" (laptop and phone, local storage, Documents and Photos with generated pictures from <code>mkimg.py</code>) and starts two services. <code>DEMO_HOME</code> sets where the demo files live (CI uses <code>/home/aino</code>, because the paths show in the interface).</li>
+<li><code>ui-shots.py &lt;demo dir&gt; &lt;out dir&gt; [--lang fi|sv]</code> drives the interface in Chromium (Playwright) in light and dark, desktop and phone sizes. <code>example_data.py</code> supplies invented peer-to-peer, data-location and import data that a small demo vault cannot show.</li>
+<li><code>viz-shots.py</code> photographs the full-screen visualization page; CI renders the 4K TV scene (<code>website/tools/screenshots/viz_tv_scene.py</code> makes the scene file).</li>
+<li><code>linux-desktop.sh</code> (tray and own window on a virtual Xfce panel), <code>windows-desktop.ps1</code>, <code>android.sh</code> (emulator), the macOS and iOS jobs (<code>screencapture</code>, <code>simctl</code>).</li>
+<li><code>finalize.py &lt;in&gt; &lt;out&gt; --pack ...</code> renames and scales everything to the website's names and widths and writes <code>shots.json</code>: sets <code>en/</code>, <code>fi/</code>, <code>sv/</code>, <code>viz/</code>.</li>
+</ul>
+<p>Where they go:</p>
+<ol type="1">
+<li>The CI job <code>screenshots</code> uploads the package as artifact <code>screenshots</code>.</li>
+<li>On a push to <code>main</code> or a tag, <code>screenshots-publish</code> attaches <code>screenshots.tar.gz</code> to the rolling pre-release <code>screenshots-latest</code>.</li>
+<li>The web server pulls it every 15 minutes (<code>ops/site/screenshots-sync.py</code>, installed as a systemd user timer: <a href="provider-price-data.html">ops/site/README.md</a>) and writes the pictures and their sizes into the live pages. A deploy never touches them.</li>
+<li><code>scripts/screenshots/update-site.sh [run id | --dir DIR]</code> puts a run's pictures (default: the newest successful CI run on <code>main</code>; needs <code>gh</code>) into the repository's copy of the site and rebuilds it; deploy separately with <code>website/deploy.sh</code>. <code>publish-ci-release.sh</code> calls it for a release.</li>
+</ol>
+<p>Local test of one part: build the Linux binary, run <code>scripts/screenshots/demo-vault.sh</code>, then <code>ui-shots.py</code> (needs <code>pip install playwright pillow</code> and <code>playwright install chromium</code>). A set missing from a run keeps the website's previous picture. Fixture test of the sync: <code>python3 -I ops/site/tests/test_screenshots_sync.py</code>. More in <a href="./">RELEASING.md</a>, "Screenshots".</p>
+<h2 id="the-daily-channel">The daily channel</h2>
+<p>A development build of <code>main</code> for every platform, signed with a daily key (not the release key), at <a href="https://varsto.net/daily/">https://varsto.net/daily/</a>; <code>varsto update --daily</code> installs from it. <a href="./">RELEASING.md</a> ("Daily builds") has the keys, the signature format and what the updater checks. The pipeline:</p>
+<ol type="1">
+<li><code>daily.yml</code> runs at 03:00 UTC. Job <code>check</code> resolves <code>main</code> (or the <code>ref</code> input) and stops the scheduled run if that commit is already the one in the notes of the published <code>daily</code> pre-release (a manual run always builds). It also validates the version string from <code>Cargo.toml</code>.</li>
+<li>Job <code>ci</code> calls <code>ci.yml</code> for that commit and job <code>ipa</code> calls <code>ios-ipa.yml</code>.</li>
+<li>Job <code>package</code>: <code>scripts/daily-assemble.py</code> collects the artifacts under stable names (<code>varsto-daily-linux-x86_64.tar.gz</code>, <code>-windows-setup.exe</code>, <code>-macos-apple-silicon.dmg</code>, <code>-android-debug.apk</code> (release bytes; the name is kept so the signed list stays valid), <code>-ios-unsigned.ipa</code>, <code>-rendezvous-linux-x86_64</code>, <code>-screenshots.tar.gz</code>) and writes an unsigned <code>SHA256SUMS</code> and <code>latest.json</code>; every file must be found exactly once or the script stops. <code>scripts/sign-daily.sh</code> signs the list with the key from the secret <code>VARSTO_DAILY_KEY</code>, refusing a key that does not match <code>daily-key.pub</code>, and the step verifies it. The files go to the artifact <code>daily-assets</code> (14 days).</li>
+<li>If publishing is on (always for the schedule; the <code>publish</code> input for a manual run), the old <code>daily</code> release and tag are deleted and a new pre-release <code>daily</code> is created with the files; its notes start with <code>commit: &lt;sha&gt;</code> and <code>build: &lt;id&gt;</code> (<code>YYYYMMDD-&lt;short sha&gt;</code>).</li>
+<li>On the web server, <code>ops/site/daily-sync.py</code> (cron, hourly) fetches the release, verifies <code>SHA256SUMS.sig</code> against the built-in daily public key and every size and hash, and only then writes <code>daily/builds/&lt;id&gt;/</code> and the <code>daily/latest/</code> links; it keeps the newest 7 builds and refuses a rollback. Setup of the cron line and the one-time secret: <a href="provider-price-data.html">ops/site/README.md</a>. Nothing on GitHub writes to the server.</li>
+</ol>
+<p>Rehearse with a manual run with <code>publish</code> off (Actions, Daily builds, Run workflow): the result stays an artifact. The manual path for a build made elsewhere is <code>website/tools/daily/make_daily.py</code> plus <code>scripts/sign-daily.sh</code> (see its header). Tests: <code>python3 -I -m unittest discover -s ops/site -p 'test_*.py'</code> (needs OpenSSL 3; CI runs them).</p>
+<h2 id="the-website">The website</h2>
+<p>Static site in <code>website/</code> (pages in English, Finnish, Swedish and French; docs, blog and downloads in English). Full details: <a href="provider-price-data.html">website/README.md</a> and <a href="provider-price-data.html">ops/site/README.md</a>. Summary:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> website/build.py                          <span class="co"># needs pandoc; renders pages, posts and the repository docs into website/public</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="at">-m</span> http.server <span class="at">-d</span> website/public 8080     <span class="co"># preview</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="va">DEPLOY_HOST</span><span class="op">=</span>user@host <span class="va">DEPLOY_PATH</span><span class="op">=</span>/path/to/webroot <span class="ex">website/deploy.sh</span></span></code></pre></div>
+<ul>
+<li><code>website/public/</code> is committed (except <code>downloads/</code>); rebuild it and commit it with the change to the sources in <code>website/src/</code>. The front page counts Rust lines, tests and lab scenarios from the tree at build time (the scenario count reads <code>@scenario("</code> lines of <code>scenarios.py</code>).</li>
+<li>The download cards come from <code>website/public/downloads</code> (<code>SHA256SUMS</code>, <code>manifest.json</code>); without one, <code>build.py</code> reads the live site's list (<code>DOWNLOADS_SOURCE_URL</code>). If neither exists it renders a stub and <code>deploy.sh</code> refuses to upload it. <code>RELEASED_VERSION</code> in <code>build.py</code> is the last tagged release; update it when tagging.</li>
+<li><code>deploy.sh</code> rsyncs to <code>DEPLOY_PATH</code> on <code>DEPLOY_HOST</code> (<code>DEPLOY_HOST=local</code> copies to a local directory for a dry run). Host and path are never committed. It refuses a <code>SHA256SUMS</code> whose signature does not verify against <code>release-key.pub</code>, and never touches the server's screenshots, <code>/testbuilds/</code> or <code>/daily/</code>.</li>
+<li>Release downloads are published by <code>website/publish-ci-release.sh</code> (CI-built) or <code>website/publish-macos.sh</code> (Mac-built disk image); both sign with the release key, so run them where it is.</li>
+<li>Benchmark page data: <a href="benchmarks-howto.html">docs/testing/benchmarks.md</a>.</li>
+<li>Other tools: <code>website/tools/gen_svgs.py</code>, <code>og/make-card.py</code> (social cards), <code>render/</code> (illustrations; its own README).</li>
+</ul>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+</body>
+</html>

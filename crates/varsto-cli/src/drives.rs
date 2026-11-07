@@ -117,7 +117,10 @@ impl ServicePause {
             .and_then(|p| p.as_bool())
             .unwrap_or(false);
         let url = format!("http://127.0.0.1:{}/api/service/pause", sf.port);
-        match crate::service::http_post(&url, &sf.token, &json!({"paused": true}).to_string()) {
+        // Temporary: not saved, so a command that dies on the way leaves no
+        // pause behind for the next start of the service.
+        let body = json!({"paused": true, "temporary": true}).to_string();
+        match crate::service::http_post(&url, &sf.token, &body) {
             Ok(_) => ServicePause {
                 target: Some((sf, was)),
             },
@@ -137,7 +140,7 @@ impl Drop for ServicePause {
                 let _ = crate::service::http_post(
                     &url,
                     &sf.token,
-                    &json!({"paused": false}).to_string(),
+                    &json!({"paused": false, "temporary": true}).to_string(),
                 );
             }
         }
@@ -396,7 +399,7 @@ pub fn insert(
             }
         }
         if rep.fill.failed.is_none() {
-            crate::service::notify("Varsto disk", &msg);
+            crate::service::notify(varsto_core::notify::Category::Disks, "Varsto disk", &msg);
         }
         reports.push(json!({"drive": drive.label, "partuuid": drive.partuuid, "mount": mount, "mount_method": method, "fsck": fsck, "report": rep, "message": msg}));
     }

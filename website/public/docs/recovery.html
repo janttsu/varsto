@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Recovery package: Varsto</title>
-<meta name="description" content="Varsto documentation: Recovery package">
+<meta name="description" content="The recovery kit for a Varsto vault: the words and shares to keep off the devices, and how a new device is restored.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/docs/recovery.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Recovery package: Varsto">
-<meta property="og:description" content="Varsto documentation: Recovery package">
+<meta property="og:description" content="The recovery kit for a Varsto vault: the words and shares to keep off the devices, and how a new device is restored.">
 <meta property="og:url" content="https://varsto.net/docs/recovery.html">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Recovery package</h1>
-<p class="note">From <code>docs/recovery.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>docs/recovery.md</code> in the repository, rendered 2026-11-07. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <p>Your devices hold the keys to your vault. If one of them is lost, another one adds a new device with a pairing code and nothing else is needed. This page is about the other case: <strong>every device is lost at once</strong>, in a fire, a burglary or a flood. Then you restore from what you kept somewhere else: the <em>recovery package</em>.</p>
 <p>Varsto makes a checklist of that package for your vault, with the restore steps for a new computer:</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">varsto</span> recovery guide                                   <span class="co"># text in the terminal</span></span>

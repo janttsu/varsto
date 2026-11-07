@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Key hierarchy (draft): Varsto</title>
-<meta name="description" content="Varsto documentation: Key hierarchy (draft)">
+<meta name="description" content="Draft of how Varsto derives and seals keys, from the vault key to folder keys and device keys.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/docs/key-hierarchy.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Key hierarchy (draft): Varsto">
-<meta property="og:description" content="Varsto documentation: Key hierarchy (draft)">
+<meta property="og:description" content="Draft of how Varsto derives and seals keys, from the vault key to folder keys and device keys.">
 <meta property="og:url" content="https://varsto.net/docs/key-hierarchy.html">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Key hierarchy (draft)</h1>
-<p class="note">From <code>docs/spec/key-hierarchy.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>docs/spec/key-hierarchy.md</code> in the repository, rendered 2026-11-07. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <blockquote>
 <p><strong>DRAFT, not final; parts implemented.</strong> This is a design-stage proposal written to answer the open question about the locked-state key set. It does not fix algorithms or parameters: wherever a value is not backed by a cited standard it is marked <strong>TBD</strong>. Parts exist in code in a simpler form; the Status lines below say which, and none of the properties has been tested or reviewed. Adversary IDs (A1 to A13) refer to <a href="threat-model.html">../architecture/threat-model.md</a>.</p>
 </blockquote>
