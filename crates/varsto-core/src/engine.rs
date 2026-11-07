@@ -835,6 +835,10 @@ pub struct Engine {
     /// deletes it (`set_replace_hook`), so an edit during the download can
     /// be simulated.
     replace_hook: Option<ReplaceHook>,
+    /// Tests: called with a changed file's path after the scan has stated
+    /// it and before it reads it (`set_scan_read_hook`), so a file that
+    /// changes while it is scanned can be simulated.
+    scan_read_hook: Option<ReplaceHook>,
     /// Tests: the next pull fails with this message after the scan
     /// (`fail_next_pull_for_tests`).
     pull_fault: Option<String>,
@@ -1279,10 +1283,75 @@ enum PlaceGuard {
     Check(Option<LocalIndexEntry>),
 }
 
+/// A conflict this device's version loses: the local file `from` becomes
+/// the conflict copy `to` only when the winner is complete and about to
+/// take its place, so a winner that cannot be fetched leaves it where it
+/// is (ENGINE-4). `moved` says whether it went.
+struct Aside {
+    from: PathBuf,
+    to: PathBuf,
+    moved: bool,
+}
+
+impl Aside {
+    /// Move the local file to the conflict copy. A file that is no longer
+    /// there (deleted meanwhile) is nothing to move.
+    fn move_away(&mut self) -> std::io::Result<()> {
+        match fs::rename(&self.from, &self.to) {
+            Ok(()) => {
+                self.moved = true;
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Undo `move_away` when the winner did not take the place after all.
+    fn put_back(&mut self) {
+        if self.moved && fs::rename(&self.to, &self.from).is_ok() {
+            self.moved = false;
+        }
+    }
+}
+
 /// Names Varsto keeps for itself inside folders (`.varsto*`), except the
 /// synced ignore file.
 fn reserved_name(name: &str) -> bool {
     name.starts_with(".varsto") && name != ignore_rules::IGNORE_FILE
+}
+
+/// How long one of Varsto's temporary files in a folder may go unwritten
+/// before a scan removes it. A download or a write through the engine
+/// writes its file continually and renames or removes it when done, so one
+/// this old was left by a process that stopped (a crash, a power cut).
+const STALE_TEMP_SECS: u64 = 24 * 3600;
+
+/// Remove `entry` when it is one of Varsto's own temporary files
+/// (`util::is_folder_temp_name`): a regular file not written for
+/// `STALE_TEMP_SECS`. Anything else with a reserved name stays.
+fn remove_stale_temp(entry: &walkdir::DirEntry) {
+    if !entry.file_type().is_file()
+        || !util::is_folder_temp_name(&entry.file_name().to_string_lossy())
+    {
+        return;
+    }
+    let stale = entry
+        .metadata()
+        .ok()
+        .and_then(|md| md.modified().ok())
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age.as_secs() >= STALE_TEMP_SECS);
+    if !stale {
+        return;
+    }
+    match fs::remove_file(entry.path()) {
+        Ok(()) => log::info!(
+            "removed {}, a temporary file left by an interrupted transfer",
+            entry.path().display()
+        ),
+        Err(e) => log::debug!("{}: {e}", entry.path().display()),
+    }
 }
 
 /// `path` is an unreadable entry, or lies inside an unreadable directory.
@@ -2014,6 +2083,7 @@ impl Engine {
             hold_exempt: None,
             download_log: None,
             replace_hook: None,
+            scan_read_hook: None,
             pull_fault: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
@@ -2124,6 +2194,7 @@ impl Engine {
             hold_exempt: None,
             download_log: None,
             replace_hook: None,
+            scan_read_hook: None,
             pull_fault: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
@@ -3284,7 +3355,7 @@ impl Engine {
     /// Switch selective sync on or off for an attached folder.
     pub fn set_selective(&mut self, name_or_id: &str, selective: bool) -> Result<()> {
         crate::logged_op_plain!("set selective", name_or_id, {
-            self.set_selective_inner(name_or_id, selective)
+            self.exclusive(|e| e.set_selective_inner(name_or_id, selective))
         })
     }
 
@@ -3621,7 +3692,16 @@ impl Engine {
         let mut walker = walkdir::WalkDir::new(root)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|e| e.depth() == 0 || !reserved_name(&e.file_name().to_string_lossy()));
+            .filter_entry(|e| {
+                if e.depth() == 0 || !reserved_name(&e.file_name().to_string_lossy()) {
+                    return true;
+                }
+                // A backup's source is only read.
+                if !backup {
+                    remove_stale_temp(e);
+                }
+                false
+            });
         while let Some(entry) = walker.next() {
             let entry = match entry {
                 Ok(e) => e,
@@ -3809,6 +3889,9 @@ impl Engine {
                 continue;
             }
             // Changed or new: chunk, hash, (upload).
+            if let Some(hook) = self.scan_read_hook.clone() {
+                hook(entry.path());
+            }
             let file = match fs::File::open(entry.path()) {
                 Ok(f) => f,
                 Err(_) => {
@@ -3881,6 +3964,25 @@ impl Engine {
                 // Not a version: the blocks read so far are not offered.
                 self.pending.truncate(events_before);
                 state.unreadable.insert(path.clone());
+                continue;
+            }
+            // Grew, shrank or was written while it was read: the size from
+            // the stat before the read is not what the chunks hold, and
+            // every other device refuses a manifest with such an entry. Not
+            // a version this round; the index keeps what it had, so the
+            // next scan reads the file again (as `scan_cached` does).
+            let read: u64 = chunks.iter().map(|c| c.size).sum();
+            let still = fs::symlink_metadata(entry.path())
+                .is_ok_and(|now| now.len() == size && mtime_ns_of(&now) == mtime);
+            if read != size || !still {
+                self.pending.truncate(events_before);
+                if let Some(e) = state.local_index.get(&path) {
+                    new_index.insert(path.clone(), e.clone());
+                }
+                log::debug!(
+                    folder = rec.name.as_str();
+                    "scan: {path} changed while it was read; taken by a later scan"
+                );
                 continue;
             }
             let content_hash = hex::encode(hasher.finalize());
@@ -4982,7 +5084,6 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
-        let me = self.vault.device_id.clone();
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         match manifest::merge(state.files.get(path), remote) {
             Merge::KeepLocal => {}
@@ -4994,6 +5095,7 @@ impl Engine {
                 // Receive-only: a local change of the file is not one of
                 // the versions; it goes to the trash.
                 self.drop_local_change(rec, root, state, path)?;
+                let mut aside: Option<(String, FileState, Aside)> = None;
                 if let (true, Some(loser)) = (encrypted_here, &loser) {
                     self.conflict_copy_cached(rec, fk, state, path, loser, storages, report)?;
                 } else if let Some(loser) = loser {
@@ -5009,48 +5111,42 @@ impl Engine {
                         fs::create_dir_all(parent)?;
                     }
                     let local = self.disk_of(root, state, path);
-                    let mut copied = true;
                     if local_is_loser && present(&local) {
-                        fs::rename(&local, &disk)?;
-                    } else if let Some(target) = loser.symlink() {
-                        fsmeta::write_link(&disk, target)?;
-                    } else if let Err(e) =
-                        self.download_to(rec, fk, &disk, &loser, storages, report)
-                    {
-                        // The losing version could not be fetched. That must
-                        // not drop the winner or the rest of the pull; the
-                        // copy is retried from pending.
-                        report.files_unavailable.push(format!("{cpath}: {e}"));
-                        let mut pending = loser.clone();
-                        pending.path = cpath.clone();
-                        state.pending_remote.insert(cpath.clone(), pending);
-                        copied = false;
-                    }
-                    if copied {
-                        // The conflict copy is a new local file: it gets its own version.
-                        let clock = self.tick()?;
-                        let mut cstate = loser.clone();
-                        cstate.path = cpath.clone();
-                        cstate.version = BTreeMap::from([(me.clone(), clock)]);
-                        cstate.modified_by = me.clone();
-                        cstate.modified_clock = clock;
-                        let seen = self.settle_meta(
-                            &rec.folder_id,
-                            &disk,
-                            &cstate,
-                            &mut report.metadata_problems,
-                        );
-                        let md = fs::symlink_metadata(&disk)?;
-                        state.local_index.insert(
-                            cpath.clone(),
-                            LocalIndexEntry {
-                                size: md.len(),
-                                mtime: mtime_ns_of(&md),
-                                content_hash: cstate.content_hash.clone(),
-                                meta_seen: seen,
+                        // The local file becomes the conflict copy when the
+                        // winner takes its place (below), not before: a
+                        // winner that cannot be fetched now must not leave
+                        // the path empty (the next scan would publish a
+                        // deletion).
+                        aside = Some((
+                            cpath,
+                            loser,
+                            Aside {
+                                from: local,
+                                to: disk,
+                                moved: false,
                             },
-                        );
-                        state.files.insert(cpath, cstate);
+                        ));
+                    } else {
+                        let copied = if let Some(target) = loser.symlink() {
+                            fsmeta::write_link(&disk, target)?;
+                            true
+                        } else if let Err(e) =
+                            self.download_to(rec, fk, &disk, &loser, storages, report)
+                        {
+                            // The losing version could not be fetched. That
+                            // must not drop the winner or the rest of the
+                            // pull; the copy is retried from pending.
+                            report.files_unavailable.push(format!("{cpath}: {e}"));
+                            let mut pending = loser.clone();
+                            pending.path = cpath.clone();
+                            state.pending_remote.insert(cpath.clone(), pending);
+                            false
+                        } else {
+                            true
+                        };
+                        if copied {
+                            self.record_conflict_copy(rec, state, cpath, &loser, &disk, report)?;
+                        }
                     }
                 }
                 let local_has_winner = state
@@ -5081,10 +5177,61 @@ impl Engine {
                     }
                     state.files.insert(path.to_string(), winner);
                 } else {
-                    self.apply_remote(rec, fk, root, state, winner, storages, report)?;
+                    let applied = self.apply_remote_aside(
+                        rec,
+                        fk,
+                        root,
+                        state,
+                        winner,
+                        storages,
+                        report,
+                        aside.as_mut().map(|(_, _, a)| a),
+                    );
+                    // Only a local file that made room for the winner is a
+                    // conflict copy; otherwise it stays as this device's
+                    // version and the conflict is merged again next pull.
+                    if let Some((cpath, loser, a)) = aside {
+                        if a.moved {
+                            self.record_conflict_copy(rec, state, cpath, &loser, &a.to, report)?;
+                        }
+                    }
+                    applied?;
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Record the conflict copy `cpath` of `loser`, now on `disk`: a new
+    /// local file with its own version.
+    fn record_conflict_copy(
+        &mut self,
+        rec: &FolderRecord,
+        state: &mut FolderState,
+        cpath: String,
+        loser: &FileState,
+        disk: &Path,
+        report: &mut PullReport,
+    ) -> Result<()> {
+        let me = self.vault.device_id.clone();
+        let clock = self.tick()?;
+        let mut cstate = loser.clone();
+        cstate.path = cpath.clone();
+        cstate.version = BTreeMap::from([(me.clone(), clock)]);
+        cstate.modified_by = me;
+        cstate.modified_clock = clock;
+        let seen = self.settle_meta(&rec.folder_id, disk, &cstate, &mut report.metadata_problems);
+        let md = fs::symlink_metadata(disk)?;
+        state.local_index.insert(
+            cpath.clone(),
+            LocalIndexEntry {
+                size: md.len(),
+                mtime: mtime_ns_of(&md),
+                content_hash: cstate.content_hash.clone(),
+                meta_seen: seen,
+            },
+        );
+        state.files.insert(cpath, cstate);
         Ok(())
     }
 
@@ -5237,6 +5384,23 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
+        self.apply_remote_aside(rec, fk, root, state, remote, storages, report, None)
+    }
+
+    /// `apply_remote`; with `aside`, the local file moves to its conflict
+    /// copy just before the remote version takes its place (and only then).
+    #[allow(clippy::too_many_arguments)]
+    fn apply_remote_aside(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        root: &Path,
+        state: &mut FolderState,
+        remote: FileState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut PullReport,
+        mut aside: Option<&mut Aside>,
+    ) -> Result<()> {
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.apply_remote_cached(rec, fk, state, remote, storages, report);
         }
@@ -5298,6 +5462,15 @@ impl Engine {
                 return Ok(());
             }
             let _ = fs::remove_file(placeholder_path(&disk));
+            if let Some(a) = aside.as_deref_mut() {
+                if let Err(e) = a.move_away() {
+                    report
+                        .files_unavailable
+                        .push(format!("{}: {e}", remote.path));
+                    state.pending_remote.insert(remote.path.clone(), remote);
+                    return Ok(());
+                }
+            }
             match fsmeta::write_link(&disk, target) {
                 Ok(fsmeta::LinkOutcome::Link) => {
                     let seen = self.settle_meta(
@@ -5322,6 +5495,9 @@ impl Engine {
                     state.local_index.remove(&remote.path);
                 }
                 Err(e) => {
+                    if let Some(a) = aside {
+                        a.put_back();
+                    }
                     report
                         .files_unavailable
                         .push(format!("{}: {e}", remote.path));
@@ -5375,6 +5551,7 @@ impl Engine {
                 storages,
                 report,
                 PlaceGuard::Check(indexed),
+                aside,
             )
         };
         match fetched {
@@ -5495,11 +5672,13 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
-        self.download_to_guarded(rec, fk, disk, file, storages, report, PlaceGuard::No)
+        self.download_to_guarded(rec, fk, disk, file, storages, report, PlaceGuard::No, None)
     }
 
     /// `download_to`, optionally refusing to replace a file that no longer
-    /// matches the index from the scan (`PlaceGuard::Check`).
+    /// matches the index from the scan (`PlaceGuard::Check`), and moving
+    /// the local file to its conflict copy (`aside`) only once the new
+    /// content is complete.
     #[allow(clippy::too_many_arguments)]
     fn download_to_guarded(
         &mut self,
@@ -5510,6 +5689,7 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
         guard: PlaceGuard,
+        mut aside: Option<&mut Aside>,
     ) -> Result<()> {
         // Nothing new is written where the disk would keep less free space
         // than its limit; the caller keeps the file for a later sync.
@@ -5525,6 +5705,8 @@ impl Engine {
         }
         let (tmp, tmp_file) = util::temp_beside(disk, "tmp")
             .with_context(|| format!("create a temporary file for {}", disk.display()))?;
+        // Any error from here on removes the partly written file.
+        let mut cleanup = util::RemoveOnDrop::new(&tmp);
         if let Some(log) = &self.download_log {
             log.lock().unwrap().push(file.path.clone());
         }
@@ -5681,11 +5863,25 @@ impl Engine {
                     }
                 }
             }
+            // The modification time the writer recorded, as a restore
+            // sets it (the index takes what the disk then shows).
+            if file.mtime > 0 {
+                let t = std::time::UNIX_EPOCH + std::time::Duration::from_nanos(file.mtime as u64);
+                let _ = out.set_modified(t);
+            }
             out.sync_all()?;
             // The mode the folder records, set on the open file before it
             // becomes visible under its name (the metadata step after the
-            // rename sets it again and reports a failure).
-            util::set_final_mode(&out, file.meta.as_ref().and_then(|m| m.mode));
+            // rename sets it again and reports a failure). With permissions
+            // off here (or no mode bits on this system) the vault's mode is
+            // not applied: the file gets the mode a new file gets here.
+            let settings = self.meta_settings(&rec.folder_id);
+            let mode = if settings.permissions && self.meta_caps.mode == fsmeta::ModeCap::Full {
+                file.meta.as_ref().and_then(|m| m.mode)
+            } else {
+                None
+            };
+            util::set_final_mode(&out, mode);
         }
         if let PlaceGuard::Check(index) = &guard {
             // The scan that chose this download is already over. An edit
@@ -5697,8 +5893,24 @@ impl Engine {
                 bail!("changed while syncing; nothing was overwritten");
             }
         }
+        // A conflict this device lost: its file becomes the conflict copy
+        // now that the winner is complete, and comes back if the winner
+        // cannot take the place.
+        if let Some(a) = aside.as_deref_mut() {
+            if let Err(e) = a.move_away() {
+                let _ = fs::remove_file(&tmp);
+                return Err(anyhow::Error::new(e)
+                    .context(format!("move {} to its conflict copy", a.from.display())));
+            }
+        }
         fsmeta::make_replaceable(disk);
-        fs::rename(&tmp, disk)?;
+        if let Err(e) = fs::rename(&tmp, disk) {
+            if let Some(a) = aside {
+                a.put_back();
+            }
+            return Err(e.into());
+        }
+        cleanup.keep();
         if self.share_read_only(rec) {
             share_roles::set_read_only(disk, true);
         }
@@ -5804,7 +6016,7 @@ impl Engine {
     /// Download a placeholder file of a selective folder and keep it here.
     pub fn fetch_file(&mut self, folder: &str, path: &str) -> Result<PullReport> {
         crate::logged_op!("fetch file", format!("{folder}/{path}"), {
-            self.fetch_file_inner(folder, path)
+            self.exclusive(|e| e.fetch_file_inner(folder, path))
         })
     }
 
@@ -5911,7 +6123,7 @@ impl Engine {
     /// and unless the file on disk is the version that was synced.
     pub fn free_file(&mut self, folder: &str, path: &str) -> Result<()> {
         crate::logged_op_plain!("free file", format!("{folder}/{path}"), {
-            self.free_file_inner(folder, path)
+            self.exclusive(|e| e.free_file_inner(folder, path))
         })
     }
 
@@ -6575,6 +6787,13 @@ impl Engine {
         self.replace_hook = hook;
     }
 
+    /// Tests: run after the scan has stated a changed file, before it
+    /// reads it.
+    #[doc(hidden)]
+    pub fn set_scan_read_hook(&mut self, hook: Option<ReplaceHook>) {
+        self.scan_read_hook = hook;
+    }
+
     /// Tests: the next pull fails with `message` before it merges.
     #[doc(hidden)]
     pub fn fail_next_pull_for_tests(&mut self, message: impl Into<String>) {
@@ -6775,17 +6994,22 @@ impl Engine {
         size: Option<u64>,
     ) -> Result<PushReport> {
         block_cache::check_rel_path(path)?;
+        // The content is read outside the home lock (an upload can take
+        // long); the state is written inside it.
         if let Some(writer) = self.block_writer(folder)? {
             let staged = writer.write_sized(reader, size)?;
-            return self.commit_staged(folder, path, staged);
+            return self.exclusive(|e| e.commit_staged(folder, path, staged));
         }
         let (rec, root) = self.resolve_for_write(folder)?;
         // The file's local name (mapped where this filesystem needs it) is
         // recorded before the scan of the push finds it.
         self.ensure_share_writable(&rec)?;
-        let mut state = self.load_state(&rec.folder_id)?;
-        let disk = self.place(&root, &mut state, path, None)?;
-        self.save_state(&rec.folder_id, &state)?;
+        let disk = self.exclusive(|e| {
+            let mut state = e.load_state(&rec.folder_id)?;
+            let disk = e.place(&root, &mut state, path, None)?;
+            e.save_state(&rec.folder_id, &state)?;
+            Ok(disk)
+        })?;
         if placeholder_path(&disk).exists() {
             bail!("{path} is a placeholder here; fetch it before overwriting");
         }
@@ -6794,6 +7018,7 @@ impl Engine {
         }
         let (tmp, tmp_file) = util::temp_beside(&disk, "upload")
             .with_context(|| format!("write {}", disk.display()))?;
+        let mut cleanup = util::RemoveOnDrop::new(&tmp);
         let written = (|| -> Result<()> {
             let mut out = tmp_file;
             std::io::copy(&mut { reader }, &mut out)?;
@@ -6802,10 +7027,10 @@ impl Engine {
             Ok(())
         })();
         if let Err(e) = written {
-            let _ = fs::remove_file(&tmp);
             return Err(e.context(format!("write {}", disk.display())));
         }
         fs::rename(&tmp, &disk).with_context(|| format!("write {}", disk.display()))?;
+        cleanup.keep();
         self.push_after_local(folder)
     }
 
@@ -6850,7 +7075,14 @@ impl Engine {
     }
 
     /// Record that `path` was used now (open, read, export) on this device.
+    /// Left out while another process holds the device directory (a sync):
+    /// a read does not wait for it.
     pub fn touch_access(&mut self, folder: &str, path: &str) -> Result<()> {
+        self.exclusive_if_free(|e| e.touch_access_inner(folder, path))
+            .map(|_| ())
+    }
+
+    fn touch_access_inner(&mut self, folder: &str, path: &str) -> Result<()> {
         let (rec, _) = self.resolve_folder(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         if !state.files.get(path).is_some_and(|f| !f.deleted) {
@@ -6899,7 +7131,7 @@ impl Engine {
     /// folder root), then push so other devices see the move.
     pub fn move_file(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
         crate::logged_op!("move file", format!("{folder}/{from} -> {to}"), {
-            self.move_file_inner(folder, from, to)
+            self.exclusive(|e| e.move_file_inner(folder, from, to))
         })
     }
 

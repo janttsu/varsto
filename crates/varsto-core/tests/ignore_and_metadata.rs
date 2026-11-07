@@ -215,6 +215,29 @@ fn local_rules_stay_on_the_device_and_incoming_files_are_skipped() {
     assert!(!a.ignore_remove("docs", "*.bak", false).unwrap());
 }
 
+/// A pulled file has the modification time its writer recorded, not the
+/// time of the download, and the receiving device sees no change in it.
+#[test]
+fn pulled_files_keep_their_modification_time() {
+    let (lab, mut a, mut b) = two(&[("first.txt", b"first")]);
+    write(&lab.a_dir, "old/photo.jpg", b"taken long ago");
+    // 2020-01-01 00:00:00 UTC.
+    let then = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_577_836_800);
+    fs::File::options()
+        .write(true)
+        .open(lab.a_dir.join("old/photo.jpg"))
+        .unwrap()
+        .set_modified(then)
+        .unwrap();
+    a.push("docs").unwrap();
+    b.pull("docs").unwrap();
+    let got = lab.b_dir.join("old/photo.jpg");
+    assert_eq!(fs::read(&got).unwrap(), b"taken long ago");
+    assert_eq!(fs::metadata(&got).unwrap().modified().unwrap(), then);
+    // The local index took the time on disk: nothing to publish.
+    assert_eq!(b.push("docs").unwrap().files_changed, 0);
+}
+
 #[cfg(unix)]
 fn mode(p: &Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
@@ -317,6 +340,45 @@ fn settings_off_means_not_synced() {
     let push = a.push("docs").unwrap();
     assert_eq!(push.metadata_changed, 1);
     assert!(a.list_files("docs").unwrap()[0].owner.is_some());
+}
+
+/// ENGINE-6: with permissions off, a file whose content is downloaded gets
+/// the mode a new file gets here, not the vault's (which the step before
+/// the rename used to set).
+#[cfg(unix)]
+#[test]
+fn permissions_off_applies_no_vault_mode_to_downloaded_content() {
+    let (lab, mut a, mut b) = two(&[("f.txt", b"x")]);
+    b.set_folder_settings(
+        "docs",
+        MetaSettings {
+            permissions: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // Execute bits: a mode no umask default can give.
+    fs::write(lab.a_dir.join("f.txt"), b"new content from a").unwrap();
+    chmod(&lab.a_dir.join("f.txt"), 0o700);
+    write(&lab.a_dir, "g.sh", b"#!/bin/sh\n");
+    chmod(&lab.a_dir.join("g.sh"), 0o700);
+    a.push("docs").unwrap();
+    let pull = b.pull("docs").unwrap();
+    assert_eq!(pull.files_updated, 2, "{pull:?}");
+    let here = varsto_core::util::default_file_mode();
+    for p in ["f.txt", "g.sh"] {
+        assert_eq!(
+            fs::read(lab.b_dir.join(p)).unwrap(),
+            fs::read(lab.a_dir.join(p)).unwrap()
+        );
+        assert_eq!(mode(&lab.b_dir.join(p)), here, "{p}");
+    }
+    // The vault keeps A's mode.
+    assert!(b
+        .list_files("docs")
+        .unwrap()
+        .iter()
+        .all(|f| f.mode == Some(0o700)));
 }
 
 #[cfg(unix)]

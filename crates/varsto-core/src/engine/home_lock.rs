@@ -9,10 +9,15 @@
 //!
 //! An operation that writes the local state (`sync`, `pull`, `push`,
 //! `fsck`, `repair`, `scrub`, trash upkeep, folder attach and detach, a
-//! backup snapshot) runs holding `state/home.lock` (an exclusive file lock,
-//! waited for). Each holder bumps the counter in `state/home.gen` when it
-//! is done; an engine that finds the counter changed since its own last
-//! operation read the state again from disk before going on.
+//! backup snapshot, and the short ones that rewrite a folder's state or the
+//! configuration: fetching, freeing, writing and moving a file, the folder
+//! mode, selective sync, the deletion guard, confirming or discarding held
+//! deletions, reverting, overriding) runs holding `state/home.lock` (an
+//! exclusive file lock, waited for). Recording that a file was used takes
+//! the lock only when it is free and is left out otherwise. Each holder
+//! bumps the counter in `state/home.gen` when it is done; an engine that
+//! finds the counter changed since its own last operation read the state
+//! again from disk before going on.
 
 use super::*;
 
@@ -33,7 +38,7 @@ struct HomeLock {
 }
 
 impl HomeLock {
-    fn take(home: &Path) -> Result<HomeLock> {
+    fn open(home: &Path) -> Result<(std::fs::File, PathBuf)> {
         let dir = home.join("state");
         std::fs::create_dir_all(&dir)?;
         let path = dir.join(LOCK_FILE);
@@ -43,11 +48,22 @@ impl HomeLock {
             .write(true)
             .open(&path)
             .with_context(|| format!("open {}", path.display()))?;
+        Ok((file, path))
+    }
+
+    fn take(home: &Path) -> Result<HomeLock> {
+        let (file, path) = Self::open(home)?;
         if !try_lock(&file)? {
             log::info!("another process is using this device directory; waiting for it");
             lock(&file).with_context(|| format!("lock {}", path.display()))?;
         }
         Ok(HomeLock { _file: file })
+    }
+
+    /// The lock when nobody holds it, without waiting.
+    fn take_if_free(home: &Path) -> Result<Option<HomeLock>> {
+        let (file, _) = Self::open(home)?;
+        Ok(try_lock(&file)?.then_some(HomeLock { _file: file }))
     }
 }
 
@@ -107,6 +123,33 @@ impl Engine {
             return f(self);
         }
         let lock = HomeLock::take(&self.home)?;
+        self.holding(lock, f)
+    }
+
+    /// [`Engine::exclusive`] for an update that may be left out (when a
+    /// file was last used): while another engine holds the device
+    /// directory, `f` is not run and `None` is returned instead of waiting
+    /// for a sync to end.
+    pub(crate) fn exclusive_if_free<T>(
+        &mut self,
+        f: impl FnOnce(&mut Engine) -> Result<T>,
+    ) -> Result<Option<T>> {
+        if self.home_held {
+            return f(self).map(Some);
+        }
+        match HomeLock::take_if_free(&self.home)? {
+            Some(lock) => self.holding(lock, f).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Run `f` with `lock` taken: read again what others wrote, then mark
+    /// the directory written.
+    fn holding<T>(
+        &mut self,
+        lock: HomeLock,
+        f: impl FnOnce(&mut Engine) -> Result<T>,
+    ) -> Result<T> {
         let found = read_generation(&self.home);
         if found != self.home_generation {
             log::debug!(
