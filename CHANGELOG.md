@@ -26,6 +26,7 @@ spec still names them because sections were written as the work was done.
 
 ### Fixed
 
+- Joining a vault reads the organization's manifest and adopts vault epochs and revocations only from its administrators. A roster member's revocation no longer opens the vault for a device that is joining.
 - Pausing the background service now stops peer-to-peer as well: the listener, the LAN beacon, the rendezvous, the relay and the router mapping stop until the service is resumed, so a paused phone sends and receives nothing for Varsto. Before, only syncing stopped and peer traffic went on. A pause set by the user also survives a restart of the service (`<home>/service-paused`), as a phone stops and starts the service often; the short pause that `varsto disk` and import commands take for their duration is not saved.
 - Thumbnails in the file list show on phones again: the service answers "busy"
   (503, with Retry-After) instead of "no thumbnail" when the engine is busy

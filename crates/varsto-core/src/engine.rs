@@ -1460,8 +1460,9 @@ impl Engine {
         // keys down to K3₀ (an out-of-date key is refused).
         let vault_keys = {
             let refs: Vec<&dyn Storage> = vec![backend.as_ref()];
-            let m = crate::membership3::Membership::join(
+            let m = crate::membership3::Membership::join_in_vault(
                 members3::bin(&meta.vault_id)?,
+                &meta.vault_id,
                 &refs,
                 &signer,
                 &kem,
@@ -1676,8 +1677,9 @@ impl Engine {
                 .next_back()
                 .cloned()
                 .ok_or_else(|| anyhow!("this device holds no vault key"))?;
-            let m = crate::membership3::Membership::join(
+            let m = crate::membership3::Membership::join_in_vault(
                 members3::bin(&meta.vault_id)?,
+                &meta.vault_id,
                 &refs,
                 &self.keys.signer,
                 kem,
