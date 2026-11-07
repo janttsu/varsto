@@ -1399,22 +1399,41 @@ fn handle(fixed: &Fixed, mut request: Request) -> Result<()> {
     if path == "/api/thumb" {
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
         // A missing thumbnail may be fetched from a storage: off the lock.
-        // A page full of pictures does not wait for a sync: no picture yet.
-        let bytes = match checkout_within(state, "thumbnail", std::time::Duration::from_secs(2)) {
-            Ok(work) => match (&work.engine, folder, file) {
-                (Some(e), Some(f), Some(p)) => e.thumbnail(&f, &p).unwrap_or(None),
-                _ => None,
-            },
-            Err(_) => None,
-        };
+        // A page full of pictures does not wait for a sync: "busy" (503, try
+        // again in a moment) is not the answer "this file has no thumbnail"
+        // (404), or a phone would give up on every picture for good.
+        let bytes: std::result::Result<Option<Vec<u8>>, u32> =
+            match checkout_within(state, "thumbnail", std::time::Duration::from_secs(2)) {
+                Ok(work) => match (&work.engine, folder, file) {
+                    (Some(e), Some(f), Some(p)) => match e.thumbnail(&f, &p) {
+                        Ok(found) => Ok(found),
+                        Err(err) => {
+                            log::debug!("thumbnail not available now: {err:#}");
+                            Err(5)
+                        }
+                    },
+                    _ => Ok(None),
+                },
+                Err(_) => Err(2),
+            };
         match bytes {
-            Some(b) => request.respond(
+            Ok(Some(b)) => request.respond(
                 Response::from_data(b)
                     .with_header(header("Content-Type", "image/jpeg"))
                     // No decrypted thumbnail in any disk cache.
                     .with_header(header("Cache-Control", "no-store")),
             )?,
-            None => request.respond(api_plain(404, "no thumbnail"))?,
+            Ok(None) => request.respond(api_plain(404, "no thumbnail"))?,
+            Err(retry) => {
+                let msg = if retry == 2 {
+                    "busy"
+                } else {
+                    "not available now"
+                };
+                request.respond(
+                    api_plain(503, msg).with_header(header("Retry-After", &retry.to_string())),
+                )?
+            }
         }
         return Ok(());
     }
