@@ -110,7 +110,14 @@ two branches added functions at the same place (both kept).
   `desktop.rs` and `service.rs` referenced `crate::notifications::api`
   and `crate::default_device_name`, which only `main.rs` had. PR #122
   moves them into `notify_api.rs` and `device_name.rs`, which the ffi
-  crate includes by path. Not re-checked after the fix.
+  crate includes by path. Not re-checked after the fix by hand, but the
+  scheduled daily run 42360310657 (started late, 09:34 UTC on 2026-11-07,
+  on `main` = f96a9c9, before PR #122) was the first real compile: Linux
+  stopped at `cargo fmt --check` (the two files PR #122 formats), macOS
+  and iOS stopped at the two ffi errors PR #122 fixes, Android built its
+  APK, and the run was cancelled before packaging; its four artifacts were
+  deleted and nothing was published. Clippy and the test suites have not
+  run on the merged code yet.
 - Membership (from the review, not fixed): a gap that stays below the
   sequence cap, a member of another vault does not apply the roster cap, and
   a folder key already shared cannot be revoked (spec 21). Medium findings
