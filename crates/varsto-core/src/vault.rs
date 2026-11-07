@@ -54,7 +54,11 @@ pub const SHARE_REQUEST_PREFIX: &str = "vsr1.";
 /// Recipient-side state for a pending share request: the device keys of
 /// the member device it will become (format 3: K6 signs everything it
 /// writes, K8 receives its grants), kept in the device directory until the
-/// share is accepted (they then move into the device's key files).
+/// share is accepted (they then move into the device's key files). The
+/// file is sealed under the passphrase the device will have, stretched
+/// with Argon2id as `keys.enc` is: a copy of the directory taken while
+/// the request waits (days, sometimes) holds no usable private key.
+/// Accepting the share needs the same passphrase.
 #[derive(Serialize, Deserialize)]
 pub struct ShareRequest {
     pub kem_alg: String,
@@ -90,29 +94,43 @@ pub struct RequestCode {
 }
 
 impl ShareRequest {
-    pub const FILE: &'static str = "share-request.json";
+    /// The sealed request.
+    pub const FILE: &'static str = "share-request.enc";
+    /// The request as 0.0.1-alpha.16 and earlier wrote it, in clear: read
+    /// once with the passphrase, sealed into `FILE` and removed.
+    pub const LEGACY_FILE: &'static str = "share-request.json";
 
-    /// Load or create the request keys for `home` and return the request code.
-    pub fn code_for(home: &Path) -> Result<String> {
-        Self::code_for_named(home, None)
+    /// Whether `home` holds a pending request (sealed or legacy).
+    pub fn exists(home: &Path) -> bool {
+        home.join(Self::FILE).exists() || home.join(Self::LEGACY_FILE).exists()
+    }
+
+    /// Load or create the request keys for `home` and return the request
+    /// code. `passphrase` seals a new request and opens an existing one; it
+    /// is the passphrase the device gets when the share is accepted.
+    pub fn code_for(home: &Path, passphrase: &str) -> Result<String> {
+        Self::code_for_named(home, None, passphrase)
     }
 
     /// Like `code_for`, binding `name` to the code when given (the keys stay
     /// the same; only the name and with it the fingerprint change).
-    pub fn code_for_named(home: &Path, name: Option<&str>) -> Result<String> {
+    pub fn code_for_named(home: &Path, name: Option<&str>, passphrase: &str) -> Result<String> {
         std::fs::create_dir_all(home)?;
-        let path = home.join(Self::FILE);
-        let mut r: ShareRequest = if path.exists() {
-            serde_json::from_slice(&std::fs::read(&path)?)?
-        } else {
-            ShareRequest {
-                kem_alg: crate::kem::KEM_ALG.to_string(),
-                secret_hex: hex::encode(crate::kem::DecapsKey::generate().to_bytes()),
-                signing_hex: String::new(),
-                name: String::new(),
+        let (mut r, mut changed) = match Self::load_opt(home, passphrase)? {
+            Some(r) => (r, false),
+            None => {
+                crypto::check_passphrase(passphrase)?;
+                (
+                    ShareRequest {
+                        kem_alg: crate::kem::KEM_ALG.to_string(),
+                        secret_hex: hex::encode(crate::kem::DecapsKey::generate().to_bytes()),
+                        signing_hex: String::new(),
+                        name: String::new(),
+                    },
+                    true,
+                )
             }
         };
-        let mut changed = !path.exists();
         if r.signing_hex.is_empty() {
             r.signing_hex = hex::encode(SigningKey::generate().to_bytes());
             changed = true;
@@ -126,7 +144,7 @@ impl ShareRequest {
             r.name = n;
         }
         if changed {
-            util::write_atomic(&path, &serde_json::to_vec_pretty(&r)?)?;
+            r.save(home, passphrase)?;
         }
         let (sign, dk) = r.keys()?;
         Ok(Self::code_of(
@@ -193,28 +211,77 @@ impl ShareRequest {
         })
     }
 
-    fn load(home: &Path) -> Result<ShareRequest> {
+    fn aad() -> Vec<u8> {
+        crypto::aad("share-request", &[])
+    }
+
+    /// Seal the request under `passphrase` into `FILE` (fresh Argon2id
+    /// parameters and salt on every write, as `keys.enc`).
+    fn save(&self, home: &Path, passphrase: &str) -> Result<()> {
+        let params = PassphraseParams::new();
+        let wrap = crypto::passphrase_key(passphrase, &params)?;
+        let plain = Zeroizing::new(serde_json::to_vec(self)?);
+        let blob = crypto::encrypt(&wrap, &Self::aad(), &plain)?;
+        util::write_json(
+            &home.join(Self::FILE),
+            &KeyFile {
+                params,
+                blob_hex: hex::encode(blob),
+            },
+        )
+    }
+
+    /// The pending request of `home`, if any. A request that an earlier
+    /// version left in clear is sealed under `passphrase` and the clear
+    /// file removed, so the exposure ends with the first command that
+    /// reads it.
+    fn load_opt(home: &Path, passphrase: &str) -> Result<Option<ShareRequest>> {
         let path = home.join(Self::FILE);
-        if !path.exists() {
-            bail!(
+        if path.exists() {
+            let kf: KeyFile = util::read_json(&path)?;
+            let blob = hex::decode(&kf.blob_hex)?;
+            let wrap = crypto::passphrase_key(passphrase, &kf.params)?;
+            let plain = Zeroizing::new(crypto::decrypt(&wrap, &Self::aad(), &blob).context(
+                "the share request did not open: wrong passphrase (the one given to `varsto share request`) or damaged file",
+            )?);
+            return Ok(Some(serde_json::from_slice(&plain)?));
+        }
+        let legacy = home.join(Self::LEGACY_FILE);
+        if legacy.exists() {
+            let bytes = Zeroizing::new(std::fs::read(&legacy)?);
+            let r: ShareRequest = serde_json::from_slice(&bytes)?;
+            crypto::check_passphrase(passphrase)?;
+            r.save(home, passphrase)?;
+            std::fs::remove_file(&legacy)
+                .with_context(|| format!("remove {}", legacy.display()))?;
+            return Ok(Some(r));
+        }
+        Ok(None)
+    }
+
+    fn load(home: &Path, passphrase: &str) -> Result<ShareRequest> {
+        Self::load_opt(home, passphrase)?.ok_or_else(|| {
+            anyhow!(
                 "no share request in {}: run `varsto share request` there first and give its code to the owner",
                 home.display()
-            );
-        }
-        Ok(serde_json::from_slice(&std::fs::read(&path)?)?)
+            )
+        })
     }
 
     /// The device keys of the pending request in `home` (K6, K8), if there
     /// is one.
-    pub fn device_keys(home: &Path) -> Result<(SigningKey, crate::kem::DecapsKey, String)> {
-        let r = Self::load(home)?;
+    pub fn device_keys(
+        home: &Path,
+        passphrase: &str,
+    ) -> Result<(SigningKey, crate::kem::DecapsKey, String)> {
+        let r = Self::load(home, passphrase)?;
         let (sign, dk) = r.keys()?;
         Ok((sign, dk, r.name.clone()))
     }
 
     /// The fingerprint of the pending request in `home`.
-    pub fn fingerprint_for(home: &Path) -> Result<String> {
-        let r = Self::load(home)?;
+    pub fn fingerprint_for(home: &Path, passphrase: &str) -> Result<String> {
+        let r = Self::load(home, passphrase)?;
         let (sign, dk) = r.keys()?;
         Ok(crate::share::fingerprint(
             &sign.public().to_bytes(),
@@ -225,6 +292,7 @@ impl ShareRequest {
 
     pub fn clear(home: &Path) {
         let _ = std::fs::remove_file(home.join(Self::FILE));
+        let _ = std::fs::remove_file(home.join(Self::LEGACY_FILE));
     }
 }
 
@@ -1408,10 +1476,64 @@ mod tests {
             assert!(format!("{e:#}").contains("name"), "{bad:?}: {e:#}");
         }
         let dir = tempfile::tempdir().unwrap();
+        let pass = "correct horse battery staple";
         for bad in ["x\u{1b}[2Ay", "a\u{202e}b"] {
-            assert!(ShareRequest::code_for_named(dir.path(), Some(bad)).is_err());
+            assert!(ShareRequest::code_for_named(dir.path(), Some(bad), pass).is_err());
         }
-        assert!(ShareRequest::code_for_named(dir.path(), Some("Ville")).is_ok());
+        assert!(ShareRequest::code_for_named(dir.path(), Some("Ville"), pass).is_ok());
+    }
+
+    #[test]
+    fn a_share_request_is_sealed_under_the_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let pass = "correct horse battery staple";
+        // Too short a passphrase is refused before any key is made.
+        assert!(ShareRequest::code_for(home, "short").is_err());
+        assert!(!ShareRequest::exists(home));
+        let code = ShareRequest::code_for_named(home, Some("Robin"), pass).unwrap();
+        assert!(home.join(ShareRequest::FILE).exists());
+        assert!(!home.join(ShareRequest::LEGACY_FILE).exists());
+        // Nothing of the private keys is on disk in clear: the file is the
+        // Argon2id parameters and a blob.
+        let (sign, dk, name) = ShareRequest::device_keys(home, pass).unwrap();
+        assert_eq!(name, "Robin");
+        let on_disk = std::fs::read_to_string(home.join(ShareRequest::FILE)).unwrap();
+        assert!(!on_disk.contains(&hex::encode(sign.to_bytes())));
+        assert!(!on_disk.contains(&hex::encode(dk.to_bytes())));
+        assert!(!on_disk.contains("Robin"));
+        assert!(on_disk.contains("argon2"), "{on_disk}");
+        // The same passphrase gives the same code; another does not open it.
+        assert_eq!(ShareRequest::code_for(home, pass).unwrap(), code);
+        let e = ShareRequest::code_for(home, "another passphrase here")
+            .err()
+            .unwrap();
+        assert!(format!("{e:#}").contains("wrong passphrase"), "{e:#}");
+        assert!(ShareRequest::fingerprint_for(home, "another passphrase here").is_err());
+        // A request a version before this one left in clear is sealed by
+        // the first read and the clear file removed; keys and code stay.
+        let legacy = dir.path().join("legacy");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let r = ShareRequest {
+            kem_alg: crate::kem::KEM_ALG.to_string(),
+            secret_hex: hex::encode(dk.to_bytes()),
+            signing_hex: hex::encode(sign.to_bytes()),
+            name: "Robin".into(),
+        };
+        std::fs::write(
+            legacy.join(ShareRequest::LEGACY_FILE),
+            serde_json::to_vec(&r).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ShareRequest::code_for(&legacy, pass).unwrap(), code);
+        assert!(!legacy.join(ShareRequest::LEGACY_FILE).exists());
+        assert!(legacy.join(ShareRequest::FILE).exists());
+        assert_eq!(
+            ShareRequest::fingerprint_for(&legacy, pass).unwrap(),
+            ShareRequest::fingerprint_for(home, pass).unwrap()
+        );
+        ShareRequest::clear(home);
+        assert!(!ShareRequest::exists(home));
     }
 
     #[test]

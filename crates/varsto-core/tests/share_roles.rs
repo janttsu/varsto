@@ -65,8 +65,8 @@ fn owner(lab: &Lab) -> Engine {
 
 fn invite(lab: &Lab, owner: &mut Engine, who: &str, role: ShareRole) -> Engine {
     let home = lab.home(who);
-    let code = ShareRequest::code_for_named(&home, Some(who)).unwrap();
-    let words = ShareRequest::fingerprint_for(&home).unwrap();
+    let code = ShareRequest::code_for_named(&home, Some(who), PASS).unwrap();
+    let words = ShareRequest::fingerprint_for(&home, PASS).unwrap();
     let added = owner
         .share_add("project", &code, Some(&words), role)
         .unwrap();

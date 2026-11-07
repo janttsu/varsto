@@ -1063,7 +1063,9 @@ enum AnalysisCmd {
 #[derive(Subcommand)]
 enum ShareCmd {
     /// (Recipient) Print a request code for this device and its fingerprint (six words); the
-    /// owner shares the folder with it after comparing the words with you.
+    /// owner shares the folder with it after comparing the words with you. Asks for the
+    /// passphrase this device will have: the request's keys wait sealed under it, and
+    /// `share accept` needs the same one.
     Request {
         /// Your name, bound to the code (the owner sees it, and it is part of the fingerprint).
         #[arg(long)]
@@ -4811,9 +4813,15 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Share { cmd } => match cmd {
             ShareCmd::Request { name, qr } => {
-                let code =
-                    varsto_core::vault::ShareRequest::code_for_named(&home, name.as_deref())?;
-                let words = varsto_core::vault::ShareRequest::fingerprint_for(&home)?;
+                // The passphrase this device gets when the share is accepted:
+                // the request's keys wait sealed under it.
+                let pass = passphrase()?;
+                let code = varsto_core::vault::ShareRequest::code_for_named(
+                    &home,
+                    name.as_deref(),
+                    &pass,
+                )?;
+                let words = varsto_core::vault::ShareRequest::fingerprint_for(&home, &pass)?;
                 if *qr && !cli.json {
                     show_qr(&code, false, false)?;
                 }

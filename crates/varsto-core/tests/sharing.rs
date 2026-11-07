@@ -74,8 +74,8 @@ fn owner(lab: &Lab) -> (Engine, String) {
 /// adds it; `who` accepts with the owner device's words and syncs.
 fn invite(lab: &Lab, owner: &mut Engine, who: &str) -> Engine {
     let home = lab.home(who);
-    let code = ShareRequest::code_for_named(&home, Some(who)).unwrap();
-    let words = ShareRequest::fingerprint_for(&home).unwrap();
+    let code = ShareRequest::code_for_named(&home, Some(who), PASS).unwrap();
+    let words = ShareRequest::fingerprint_for(&home, PASS).unwrap();
     let added = owner
         .share_add("project", &code, Some(&words), ShareRole::Editor)
         .unwrap();
@@ -116,15 +116,15 @@ fn request_fingerprint_matches_on_both_sides() {
     let lab = Lab::new();
     let (mut a, _) = owner(&lab);
     let home = lab.home("robin");
-    let code = ShareRequest::code_for_named(&home, Some("Robin")).unwrap();
+    let code = ShareRequest::code_for_named(&home, Some("Robin"), PASS).unwrap();
     // The code carries the keys and the name; both sides derive the same six words.
-    let mine = ShareRequest::fingerprint_for(&home).unwrap();
+    let mine = ShareRequest::fingerprint_for(&home, PASS).unwrap();
     let seen = Engine::share_request_info(&code).unwrap();
     assert_eq!(seen.fingerprint, mine);
     assert_eq!(seen.name, "Robin");
     assert_eq!(mine.split(' ').count(), 6);
     // Asking again keeps the keys and the words.
-    assert_eq!(ShareRequest::code_for(&home).unwrap(), code);
+    assert_eq!(ShareRequest::code_for(&home, PASS).unwrap(), code);
 
     // Someone swaps the name on the way: the owner sees other words.
     let (keys, _) = code.rsplit_once(".Robin").unwrap();
@@ -166,7 +166,7 @@ fn request_fingerprint_matches_on_both_sides() {
         .iter()
         .any(|m| m.kind == "member" && m.fingerprint == mine && m.name == "Robin"));
     // Without the words, the only offer is taken.
-    let offers = Engine::share_offers(&home, &lab.storage, None).unwrap();
+    let offers = Engine::share_offers(&home, PASS, &lab.storage, None).unwrap();
     assert_eq!(offers.len(), 1);
     assert_eq!(offers[0].owner_fingerprint, added.owner_fingerprint);
     let mut m =
@@ -320,7 +320,7 @@ fn removed_member_reads_nothing_new_and_the_others_read_on() {
     // C cannot come back as a new device: nothing is shared with a new
     // request, and the owner's words do not change that.
     let c2 = lab.home("c2");
-    ShareRequest::code_for_named(&c2, Some("cai-again")).unwrap();
+    ShareRequest::code_for_named(&c2, Some("cai-again"), PASS).unwrap();
     let owner_words = a.f3_own_fingerprint().unwrap();
     assert!(Engine::accept_share(
         &c2,
@@ -354,14 +354,14 @@ fn a_member_removed_before_it_accepted_gets_nothing_new() {
     let (mut a, _) = owner(&lab);
     let mut b = invite(&lab, &mut a, "bea");
     let home = lab.home("eve");
-    let code = ShareRequest::code_for_named(&home, Some("eve")).unwrap();
-    let words = ShareRequest::fingerprint_for(&home).unwrap();
+    let code = ShareRequest::code_for_named(&home, Some("eve"), PASS).unwrap();
+    let words = ShareRequest::fingerprint_for(&home, PASS).unwrap();
     let added = a
         .share_add("project", &code, Some(&words), ShareRole::Editor)
         .unwrap();
     // A second one, kept: it keeps working after the first is removed.
     let fhome = lab.home("fay");
-    let fcode = ShareRequest::code_for_named(&fhome, Some("fay")).unwrap();
+    let fcode = ShareRequest::code_for_named(&fhome, Some("fay"), PASS).unwrap();
     a.share_add("project", &fcode, None, ShareRole::Editor)
         .unwrap();
 

@@ -2760,10 +2760,14 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         }
         (Method::Post, "/api/share/request") => {
             let name = opt(input, "name").filter(|n| !n.trim().is_empty());
-            let code = varsto_core::vault::ShareRequest::code_for_named(&st.home, name.as_deref())?;
+            // The passphrase of the accept form: the request's keys wait
+            // sealed under it, and /api/share/accept opens them with it.
+            let pass = s(input, "passphrase")?;
+            let code =
+                varsto_core::vault::ShareRequest::code_for_named(&st.home, name.as_deref(), &pass)?;
             Ok(json!({
                 "request_code": code,
-                "fingerprint": varsto_core::vault::ShareRequest::fingerprint_for(&st.home)?,
+                "fingerprint": varsto_core::vault::ShareRequest::fingerprint_for(&st.home, &pass)?,
             }))
         }
         // Organization: a request code for this device, and joining with an approval token.

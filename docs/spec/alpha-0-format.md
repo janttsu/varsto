@@ -244,7 +244,7 @@ Every place a public key is used now combines a classical and a post-quantum alg
 
 ### Key encapsulation: X25519 + ML-KEM-768
 
-- Used wherever a secret must reach another party's public key. Today that is the share token: the recipient runs `varsto share request`, which stores a private key in its device directory and prints a request code `vsr1.<X25519 key || ML-KEM-768 key>` (1216 bytes, hex). The owner runs `share create <folder> --to <code>`.
+- Used wherever a secret must reach another party's public key. Today that is the share token: the recipient runs `varsto share request`, which keeps a private key in its device directory (`share-request.enc`, sealed under the passphrase the device will have, Argon2id as `keys.enc`; alpha.16 wrote it in clear as `share-request.json`, which the next read seals and removes) and prints a request code `vsr1.<X25519 key || ML-KEM-768 key>` (1216 bytes, hex). The owner runs `share create <folder> --to <code>`.
 - The owner encapsulates to both halves, derives one key with `derive_key("e2ee-sync-format/0/hybrid-kem/x25519+ml-kem-768", len-prefixed(x25519_ss, mlkem_ss, ciphertext, encapsulation_key))`, and encrypts the folder key with XChaCha20-Poly1305 under associated data (`share-token`, vault id, folder id, name). The sealed token `vst1.<vault>.<folder>.<kem-alg>.<kem-ct>.<sealed-key>.<name>` carries only ciphertext and can travel over any channel; only the requesting device can open it. The plain token format of alpha.2 still exists and is marked as carrying the key.
 - Confirming that a request code came from the intended person (a six-word fingerprint both sides compare), version-2 tokens, removing members and revoking tokens are in section 24. QR codes: section 51 (new in 0.0.1-alpha.14).
 

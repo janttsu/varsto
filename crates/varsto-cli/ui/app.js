@@ -4015,7 +4015,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("replicatoken").onclick = function () { api("GET", "/api/replica/token").then(function (r) { $("replicaout").textContent = "Replica token (give to the device that will hold your encrypted copies without being able to open them): " + r.token; $("replicaout").classList.remove("hidden"); }).catch(function (e) { alertBox(e.message); }); };
   $("sharerequest").onclick = function () {
     var nm = $("acceptshare").querySelector("input[name=name]");
-    api("POST", "/api/share/request", { name: nm ? nm.value.trim() : "" }).then(function (r) {
+    var pw = $("acceptshare").querySelector("input[name=passphrase]");
+    if (!pw || pw.value.length < 12) { if (pw) { pw.focus(); } return alertBox("Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and accepting needs the same one."); }
+    api("POST", "/api/share/request", { name: nm ? nm.value.trim() : "", passphrase: pw.value }).then(function (r) {
       $("sharerequestout").textContent = r.request_code + "\n\nFingerprint: " + r.fingerprint + "\nThe owner sees the same six words for this code. Read them to each other over a call or in person before the owner shares.";
       $("sharerequestout").classList.remove("hidden");
       return renderQr($("sharerequestqr"), r.request_code);

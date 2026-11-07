@@ -4,7 +4,8 @@
 //! 77.6, "Members of other vaults", "As built").
 //!
 //! - **Asking.** The other person's device makes a request code (`vsr1`:
-//!   its K6 and K8 public keys and a name, `vault::ShareRequest`) and reads
+//!   its K6 and K8 public keys and a name, `vault::ShareRequest`; the
+//!   private keys wait sealed under the device's passphrase) and reads
 //!   out the six words of its fingerprint.
 //! - **Answering** (`share_add`): an owner device compares the words, then
 //!   writes a folder record that lists the member with its keys and role
@@ -378,10 +379,11 @@ impl Engine {
     /// grants on `storage` show them, with each owner device's six words.
     pub fn share_offers(
         home: &Path,
+        passphrase: &str,
         storage: &StorageSpec,
         secret: Option<String>,
     ) -> Result<Vec<ShareOffer>> {
-        let (sign, dk, _) = ShareRequest::device_keys(home)?;
+        let (sign, dk, _) = ShareRequest::device_keys(home, passphrase)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(
             &backend
@@ -446,7 +448,7 @@ impl Engine {
         crypto::check_passphrase(passphrase)?;
         crate::names::check_display_name(device_name)?;
         ensure_no_vault(home)?;
-        let offers = Self::share_offers(home, &storage, secret.clone())?;
+        let offers = Self::share_offers(home, passphrase, &storage, secret.clone())?;
         let picked: Vec<&ShareOffer> = offers
             .iter()
             .filter(|o| {
@@ -484,7 +486,9 @@ impl Engine {
                     .join("; ")
             ),
         };
-        let (signer, kem, _) = ShareRequest::device_keys(home)?;
+        // The request's keys open with the device's passphrase: the one
+        // given to `share request`, and the one this device gets now.
+        let (signer, kem, _) = ShareRequest::device_keys(home, passphrase)?;
         let backend = storage.open_with(&|_| secret.clone())?;
         let meta: VaultMeta = serde_json::from_slice(
             &backend
@@ -558,7 +562,7 @@ impl Engine {
 /// Take a member home that `accept_share` began back out, keeping the
 /// share request (its keys are the ones the owner shared with).
 fn undo_member_home(home: &Path) {
-    let request = home.join("share-request.json");
+    let request = home.join(ShareRequest::FILE);
     let kept = fs::read(&request).ok();
     if let Err(e) = reset_device(home) {
         log::warn!("the unfinished member home was not removed: {e:#}");
