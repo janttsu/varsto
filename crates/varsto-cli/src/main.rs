@@ -5200,7 +5200,7 @@ fn run(cli: &Cli) -> Result<()> {
                         if r.keys_sent_to.is_empty() { "(no other device)".to_string() } else { r.keys_sent_to.join(", ") },
                         if r.keys_pending_for.is_empty() { String::new() } else { format!("\nwaiting for (they get it once they publish a key-exchange key): {}", r.keys_pending_for.join(", ")) },
                         if r.folders_rekeyed.is_empty() { "none".to_string() } else { r.folders_rekeyed.join(", ") },
-                        if r.folders_not_rekeyed.is_empty() { String::new() } else { format!("\nkept their key (shared or Strongroom): {}", r.folders_not_rekeyed.join(", ")) },
+                        if r.folders_not_rekeyed.is_empty() { String::new() } else { format!("\nnot re-keyed here (an owner device of each re-keys it at its next sync): {}", r.folders_not_rekeyed.join(", ")) },
                     )
                 })?;
             }

@@ -198,9 +198,11 @@ impl RecordBody for VaultEpochRecord {
 }
 
 /// One registry stream of a removed device (`folder`, `grant` or `escrow`):
-/// records with a higher seq than `seq` do not count. A stream that is not
-/// listed had nothing at removal, so none of its records count. Lamport
-/// stamps can be backdated; the seq of a stream cannot.
+/// records with a higher seq than `seq` do not count. `seq` ends the run of
+/// seqs from 1 that held a signed record at removal, so a number the device
+/// left empty below its highest one cannot be filled afterwards. A stream
+/// that is not listed had no such run at removal, so none of its records
+/// count. Lamport stamps can be backdated; the seq of a stream cannot.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamCut {
     pub kind: u8,

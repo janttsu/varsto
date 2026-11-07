@@ -16,8 +16,9 @@
 //! the epoch and the entries' stamps are known. A device removed from the
 //! vault is cut off by sequence, not by stamp: its `folder`, `grant` and
 //! `escrow` records count only through the seq each stream had at removal
-//! (`DeviceRegistry::registry_cuts`, spec 77.20). A later record, whatever
-//! stamp it carries, is refused.
+//! (`DeviceRegistry::registry_cuts`, spec 77.20), and only up to the first
+//! number it had left empty. A later record, or one put under such an empty
+//! number, is refused whatever stamp it carries.
 
 use super::devices::DeviceRegistry;
 use super::folders::FolderRegistry;

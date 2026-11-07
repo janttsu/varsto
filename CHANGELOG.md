@@ -27,6 +27,9 @@ spec still names them because sections were written as the work was done.
 
 ### Fixed
 
+- Membership: a removed device's folder records, grants and escrow count only up to the first sequence number it had left empty, so it can no longer fill a gap below its cut-off with a backdated record after the removal.
+- Membership: a member device of another vault applies a removal from the folder epoch record: grants and directories of an owner device that epoch removed, and the devices those name, no longer count, and that device starts no later epoch.
+- Membership: a folder the remover could not re-key is re-keyed at the next sync of an owner device that holds its key, and every folder epoch lists a removed device that still takes part as removed. What the removed device already holds it keeps (spec 77.20).
 - The import check that decides when a source may be removed applies the same "no own disk" waiver as the folder report: a folder on the default policy in a vault without a directory storage or disk pool no longer waits for ever for a copy on your own disks.
 - `varsto recovery kit` no longer records the kit as printed when the printout lacks the recovery words or carries a fresh key no folder is escrowed under, so the recovery guide does not report a complete kit.
 - Push notifications: when a channel fails, its queued messages wait together for the channel's backoff instead of one attempt per message per second.
