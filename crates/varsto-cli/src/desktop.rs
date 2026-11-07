@@ -1575,7 +1575,7 @@ fn handle(fixed: &Fixed, mut request: Request) -> Result<()> {
         // Push channels: a file in the device directory, so no engine and
         // no state lock (a test message may take 15 seconds). Works while
         // the vault is locked.
-        let result = crate::notifications::api(&fixed.home, &method, &path, &input);
+        let result = crate::notify_api::api(&fixed.home, &method, &path, &input);
         return match result {
             Ok(v) => Ok(request.respond(json_response(200, &v))?),
             Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),

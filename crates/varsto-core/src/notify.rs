@@ -1660,6 +1660,10 @@ impl Worker {
             device
         };
         let mut failed: BTreeSet<String> = BTreeSet::new();
+        // When a channel fails, its other messages wait as long as the one
+        // that failed: one attempt per channel per backoff, not one per
+        // message per second.
+        let mut held: BTreeMap<String, i64> = BTreeMap::new();
         let mut keep: Vec<Entry> = Vec::new();
         let entries = std::mem::take(&mut self.out.entries);
         for mut e in entries {
@@ -1704,6 +1708,7 @@ impl Worker {
                 Err(err) => {
                     e.tries += 1;
                     e.next_try = now + backoff_secs(e.tries);
+                    held.insert(e.channel.clone(), e.next_try);
                     failed.insert(e.channel.clone());
                     lock(&self.shared.status).insert(
                         ch.id.clone(),
@@ -1715,6 +1720,11 @@ impl Worker {
                     );
                     keep.push(e);
                 }
+            }
+        }
+        for e in &mut keep {
+            if let Some(t) = held.get(&e.channel) {
+                e.next_try = e.next_try.max(*t);
             }
         }
         self.out.entries = keep;

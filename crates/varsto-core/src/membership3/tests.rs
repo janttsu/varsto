@@ -1600,14 +1600,9 @@ fn joining_a_vault_uses_the_organization_administrators() {
         }],
         roster_seq: 0,
     };
-    let signed = crate::org::SignedManifest::seal(
-        &manifest,
-        &vault_id,
-        0,
-        keys.get(0).unwrap(),
-        &root,
-    )
-    .unwrap();
+    let signed =
+        crate::org::SignedManifest::seal(&manifest, &vault_id, 0, keys.get(0).unwrap(), &root)
+            .unwrap();
     let raw = serde_json::to_vec(&signed).unwrap();
     s.put_if_absent(&crate::org::SignedManifest::storage_key(1, 0), &raw)
         .unwrap();
@@ -1626,7 +1621,8 @@ fn joining_a_vault_uses_the_organization_administrators() {
         "a member's revocation must not open an organization vault"
     );
     assert_eq!(joined.vault_keys.newest_epoch(), 0);
-    let without = Membership::join(VAULT, &st, &n.sign, &n.kem, keys.k3_0().unwrap().clone()).unwrap();
+    let without =
+        Membership::join(VAULT, &st, &n.sign, &n.kem, keys.k3_0().unwrap().clone()).unwrap();
     assert!(
         without.is_revoked(&ma.me),
         "without the organization the same records still count"

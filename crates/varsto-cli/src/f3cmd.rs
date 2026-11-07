@@ -308,7 +308,11 @@ mod imp {
         if let Some(note) = crate::restic::kit_note(home) {
             print!("{note}");
         }
-        varsto_core::recovery_guide::record_kit_printed(home, e.key_epoch(), shares)?;
+        // A printout without the recovery words, or with a fresh key that no
+        // folder is escrowed under yet, is not the kit the guide asks for.
+        if !missing && !fresh {
+            varsto_core::recovery_guide::record_kit_printed(home, e.key_epoch(), shares)?;
+        }
         if fresh {
             println!("\nThis recovery key is new and was not stored anywhere. Folders get recovery copies under it with `varsto recovery escrow` (it asks for these words).");
         }

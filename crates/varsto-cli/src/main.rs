@@ -17,6 +17,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod backup;
 mod desktop;
+mod device_name;
+use device_name::default_device_name;
 mod drive_mount;
 mod drives;
 mod f3cmd;
@@ -30,6 +32,7 @@ mod logcmd;
 mod mcp;
 mod mcp_keys;
 mod notifications;
+mod notify_api;
 mod placing;
 mod readcache;
 mod remember;
@@ -1937,35 +1940,6 @@ fn open_link(home: &Path, uri: &str) -> Result<()> {
         }
     }
     r
-}
-
-/// This computer's name, for devices joined without `--name`.
-fn default_device_name() -> String {
-    let name = if cfg!(target_os = "macos") {
-        std::process::Command::new("scutil")
-            .args(["--get", "ComputerName"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-    } else if cfg!(windows) {
-        std::env::var("COMPUTERNAME").ok()
-    } else {
-        std::fs::read_to_string("/proc/sys/kernel/hostname")
-            .or_else(|_| std::fs::read_to_string("/etc/hostname"))
-            .ok()
-            .map(|h| h.trim().to_string())
-    };
-    name.filter(|n| !n.is_empty() && !n.contains('.'))
-        .or_else(name_before_dot)
-        .unwrap_or_else(|| "this-device".into())
-}
-
-fn name_before_dot() -> Option<String> {
-    std::fs::read_to_string("/proc/sys/kernel/hostname")
-        .ok()
-        .and_then(|h| h.trim().split('.').next().map(|s| s.to_string()))
-        .filter(|s| !s.is_empty())
 }
 
 fn bail_usage<T>(msg: &str) -> Result<T> {
