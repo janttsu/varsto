@@ -1,5 +1,7 @@
 {
  "strings": {
+  "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and joining needs the same one.": "Ange först lösenordet för den här enheten (minst 12 tecken): begärans nycklar förvaras förseglade under det, och att ansluta kräver samma lösenord.",
+  "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and accepting needs the same one.": "Ange först lösenordet för den här enheten (minst 12 tecken): begärans nycklar förvaras förseglade under det, och att acceptera kräver samma lösenord.",
   "You can give another person one folder, and nothing else of your vault. They send you a request code from their device, you compare a six-word fingerprint with them over a call or in person, and you share the folder with that device. They accept it through a storage you both reach, after comparing the six words of your device.": "Du kan ge en annan person en mapp och inget annat i ditt valv. Personen skickar en begäranskod från sin enhet, ni jämför ett fingeravtryck på sex ord i ett samtal eller personligen, och du delar mappen med den enheten. Personen tar emot den genom en lagringsplats som ni båda når, efter att ha jämfört din enhets sex ord.",
   "Choose Accept a shared folder, send the owner your request code, and accept once they shared the folder with it.": "Välj Ta emot en delad mapp, skicka din begäranskod till ägaren och ta emot mappen när ägaren har delat den med koden.",
   "This cannot be undone; share again with a new request code.": "Detta kan inte ångras; dela igen med en ny begäranskod.",
@@ -370,7 +372,7 @@
   "Size": "Storlek",
   "Start over on this device": "Börja om på den här enheten",
   "State": "Tillstånd",
-  "Step 1: send an administrator the request code from this device. Step 2: read its six-word fingerprint to them over a call or in person; they see the same words. Step 3: paste the approval token they send back.": "Steg 1: skicka begäranskoden från den här enheten till en administratör. Steg 2: läs upp dess fingeravtryck på sex ord för administratören i ett samtal eller personligen; hen ser samma ord. Steg 3: klistra in godkännandetoken som hen skickar tillbaka.",
+  "Step 1: give the device a name and a passphrase, then send an administrator the request code from this device (its keys wait sealed under the passphrase). Step 2: read its six-word fingerprint to them over a call or in person; they see the same words. Step 3: paste the approval token they send back and join with the same passphrase.": "Steg 1: ge enheten ett namn och ett lösenord och skicka sedan en administratör begäranskoden från den här enheten (dess nycklar väntar förseglade under lösenordet). Steg 2: läs upp dess fingeravtryck på sex ord för hen i ett samtal eller på plats; hen ser samma ord. Steg 3: klistra in godkännandetoken hen skickar tillbaka och anslut med samma lösenord.",
   "Still working…": "Arbetar fortfarande…",
   "Stop syncing here": "Sluta synkronisera här",
   "Storage both of you can reach": "Lagringsplats som ni båda kan nå",
