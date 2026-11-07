@@ -673,6 +673,80 @@ impl Engine {
         self.peers = fresh;
     }
 
+    /// A pull put `remote` in place at `path` (or kept what was there):
+    /// when the folder state now holds exactly that version, its blocks are
+    /// served from the file from now on (`p2p::FreshPieces`), so a device
+    /// pulling the same folder at the same time can take them from here
+    /// instead of from the writer. Only with peers and a server (the
+    /// service), for folders kept in plain form here.
+    pub(super) fn note_fresh(
+        &self,
+        rec: &FolderRecord,
+        root: &Path,
+        state: &FolderState,
+        path: &str,
+        remote: &FileState,
+    ) {
+        if self.snapshot_sink.is_none() || !self.has_peers() || remote.deleted {
+            return;
+        }
+        let Some(f) = state.files.get(path) else {
+            return;
+        };
+        if f.deleted
+            || f.chunks.is_empty()
+            || f.chunks.len() != remote.chunks.len()
+            || f.chunks
+                .iter()
+                .zip(&remote.chunks)
+                .any(|(a, b)| a.object != b.object)
+            || self.mount_is_encrypted(&rec.folder_id)
+        {
+            return;
+        }
+        let keys = if self.fresh.has_keys(&rec.folder_id) {
+            None
+        } else {
+            match self.folder_keys(rec) {
+                Ok(k) => Some(k),
+                Err(_) => return,
+            }
+        };
+        let disk = self.disk_of(root, state, path);
+        let mut offset = 0u64;
+        let pieces: Vec<_> = f
+            .chunks
+            .iter()
+            .map(|cr| {
+                let piece = crate::p2p::Piece {
+                    folder: rec.folder_id.clone(),
+                    chunk: cr.chunk.clone(),
+                    epoch: cr.epoch,
+                    path: disk.clone(),
+                    offset,
+                    len: cr.size,
+                };
+                offset += cr.size;
+                (cr.object.clone(), piece)
+            })
+            .collect();
+        self.fresh.add(&rec.folder_id, keys, pieces);
+    }
+
+    /// "Sync now": peers resting after a failure are tried again
+    /// (`Peers::wake`), as `retry_storages_now` does for storages, so a
+    /// sync right after a peer restarted asks it instead of giving its
+    /// blocks up. Returns how many rests ended.
+    pub fn retry_peers_now(&self) -> usize {
+        self.peers.as_ref().map(|p| p.wake()).unwrap_or(0)
+    }
+
+    /// Blocks of files pulls wrote since the last snapshot (tests).
+    #[doc(hidden)]
+    pub fn fresh_pieces(&self) -> usize {
+        self.fresh.len()
+    }
+
     /// Where this device's peer-to-peer snapshot finds batches for heads
     /// and `/p2p/ledger/`: its head list and its ledger directory.
     pub(super) fn snapshot_heads(&self) -> (Vec<HeadRef>, Option<PathBuf>) {

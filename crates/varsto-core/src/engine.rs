@@ -761,6 +761,9 @@ pub struct Engine {
     /// Where the peer-to-peer server takes what it serves from: refreshed
     /// as soon as a push has published new files, before their upload.
     snapshot_sink: Option<SnapshotSink>,
+    /// Blocks of files this device's pulls wrote since the last snapshot,
+    /// which the snapshot serves too (`p2p::FreshPieces`, `note_fresh`).
+    fresh: std::sync::Arc<crate::p2p::FreshPieces>,
     /// How often a long push with peers publishes what it stored so far
     /// (`EarlyPublish`).
     early_publish: EarlyPublish,
@@ -2047,6 +2050,7 @@ impl Engine {
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
+            fresh: Default::default(),
             early_publish: EarlyPublish::default(),
             pack_target_for_tests: None,
             pack_write_hook: None,
@@ -2156,6 +2160,7 @@ impl Engine {
         let mut engine = Engine {
             peers: None,
             snapshot_sink: None,
+            fresh: Default::default(),
             early_publish: EarlyPublish::default(),
             pack_target_for_tests: None,
             pack_write_hook: None,
@@ -5033,6 +5038,8 @@ impl Engine {
                     &storages,
                     &mut report,
                 );
+                // Served to other devices pulling the same files from now on.
+                self.note_fresh(&rec, &root, &state, path, remote);
             }
             state.last_seen.insert(dev, v.seq);
             self.prefetched.clear();
@@ -6903,6 +6910,8 @@ impl Engine {
             local_roots.push(outbox.root().to_path_buf());
         }
         let (heads, ledger_dir) = self.snapshot_heads();
+        // What the pulls wrote so far is in `pieces` now.
+        self.fresh.clear();
         Ok(crate::p2p::Snapshot {
             vault_id: self.vault.vault_id.clone(),
             device_id: self.vault.device_id.clone(),
@@ -6922,6 +6931,7 @@ impl Engine {
             activity_audience: self.activity_audience(),
             heads,
             ledger_dir,
+            fresh: self.fresh.clone(),
         })
     }
 
