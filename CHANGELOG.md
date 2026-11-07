@@ -16,9 +16,24 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Added
+
+- Push notifications to your phone through ntfy, Pushover or Telegram ([docs/notifications.md](docs/notifications.md)). Add a channel in Settings (a guide for each service, a test message, a choice of what it receives, an option to leave folder, storage and device names out) or with `varsto notify`. Alerts (storage problems, low space, fewer copies than a policy asks, damaged data, failed or overdue backups, requests waiting for you) are on by default; finished backups, new files and a daily summary are opt-in. The channels are a device-local file with the tokens (`notify.json`, mode 0600, never synced). Messages are not end-to-end encrypted on their way through the service. Failed sends wait in an outbox and are retried, also after a restart; repeats are dropped for six hours and a channel gets at most 20 an hour. The settings work while the vault is locked.
+
+### Changed
+
+- Website: the alpha warning is marked so a search engine does not quote it. Page titles and descriptions name the product and the document. The home page, the docs index and the older release notes point developers at the GitHub repository.
+
 ### Fixed
 
 - Joining a vault reads the organization's manifest and adopts vault epochs and revocations only from its administrators. A roster member's revocation no longer opens the vault for a device that is joining.
+- Pausing the background service now stops peer-to-peer as well: the listener, the LAN beacon, the rendezvous, the relay and the router mapping stop until the service is resumed, so a paused phone sends and receives nothing for Varsto. Before, only syncing stopped and peer traffic went on. A pause set by the user also survives a restart of the service (`<home>/service-paused`), as a phone stops and starts the service often; the short pause that `varsto disk` and import commands take for their duration is not saved.
+- Thumbnails in the file list show on phones again: the service answers "busy"
+  (503, with Retry-After) instead of "no thumbnail" when the engine is busy
+  and the page retries; two requests at a time, a memory-only cache for
+  re-rendered lists, no lazy-loading attribute.
+- The default policy no longer reports a folder as violated in a vault without a disk pool or directory storage: the folder gets one warning that there is no copy on your own disks and how to add one (a policy set on purpose that asks for a copy at home is still held to it). The texts say "your own disks" (copies on devices were never counted) and "no copy" instead of "fewer than 1 copies"; on the Visualization page the reason shows under the bar of the "Is it safe?" card, the policy line wraps on phones, and the repair line no longer shows the key epoch.
+
 
 ## [0.0.1-alpha.16] - 2026-11-04
 

@@ -1,14 +1,16 @@
 ---
-title: Downloads
+title: Download Varsto for Linux, Windows, macOS and Android
 nav: Downloads
 output: downloads/index.html
-description: Download the Varsto alpha for Linux, macOS, Windows, Android and iOS (unsigned), or the source, and verify the checksums.
+description: Download Varsto for Linux, Windows, macOS and Android, or the unsigned iOS ipa signed on your own Apple ID with AltStore, SideStore or Sideloadly. Checksums are signed.
 ---
     <h1>Downloads</h1>
     <p class="note">See the <a href="../screenshots/">screenshots</a> for what the alpha looks like.</p>
     <p class="note">Want the newest development build? The <a href="../daily/">daily builds</a> are unsigned and not for production data.</p>
     <p class="lead">One package per platform with the background service, the interface and the same command line inside; on Linux and macOS the service starts at login (a systemd user unit or a launch agent), on Windows the tray app runs it. On Linux and Windows the interface opens in your browser; on macOS the native app has its own window. Alpha: use it with test data only and keep your own backups.</p>
-    <p class="note"><strong>Android.</strong> The APK is signed for release under a new key, so later releases install over it as an update. An earlier debug APK (alpha.15 or an older daily build) cannot be updated to it: uninstall the old app first, which removes that device's copy of the vault, so make sure the vault has another device or a storage, then install the new APK. The iOS <code>.ipa</code> is unsigned and is meant for AltStore, SideStore or Sideloadly.</p>
+    <p class="note"><strong>Android.</strong> The APK is signed for release under a new key, so later releases install over it as an update. An earlier debug APK (alpha.15 or an older daily build) cannot be updated to it: uninstall the old app first, which removes that device's copy of the vault, so make sure the vault has another device or a storage, then install the new APK.</p>
+    <h2>iOS: unsigned ipa, AltStore, SideStore and Sideloadly</h2>
+    <p>The iOS package is an unsigned <code>.ipa</code>. It does not install from the file alone. AltStore, SideStore or Sideloadly sign it with your own Apple ID and install it. Varsto does not have an Apple developer signature. A Sideloadly error about signing, an Apple ID that cannot sign more apps, an expired sideload, or a device that does not trust the developer comes from that tool or from Apple, not from a broken package. The same file is what those tools install. The app has been built in CI and has not been run on a real device yet. The source of the shell is in <code>apps/ios</code> on <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>.</p>
     {{DOWNLOADS}}
     <h2>Install and verify</h2>
     <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS

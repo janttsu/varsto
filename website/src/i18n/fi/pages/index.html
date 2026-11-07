@@ -2,7 +2,7 @@
 title: Projekti
 nav: Project
 output: index.html
-description: Varsto: päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla ja allekirjoitetulla kirjanpidolla siitä, missä jokainen kopio on. Alfa, työnimi.
+description: Varsto-sovellus: päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.
 ---
     <h1>Tuo oma tallennuspaikkasi. Pidä omat avaimesi. Tiedä, missä jokainen lohko on.</h1>
     <p class="lead">Päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi laitteidesi välillä, jälkikvanttisella hybridikryptografialla ja kirjanpidolla, jonka voit itse tarkastaa. Ei palvelinta, ei tiliä, ei palveluntarjoajaa, johon pitäisi luottaa.</p>
@@ -34,6 +34,10 @@ description: Varsto: päästä päähän salattu synkronointi, jakaminen ja varm
 
     <h2 id="teams">Tiimeille</h2>
     <p>Organisaatio lisää holvin päälle kerroksen, jota yritys tarvitsee: ylläpitäjät hyväksyvät laitteita nimetyille henkilöille verrattuaan heidän kanssaan kuuden sanan sormenjälkeä, poistavat henkilön kaikkine laitteineen yhdellä toimenpiteellä (jäljelle jäävät laitteet saavat uudet avaimet), määrittävät, mitä jäsenet saavat tehdä omin päin, ja pitävät tästä lokia, jonka heidän laitteensa allekirjoittavat ja ketjuttavat. Ylläpitäjät nimittävä juuriavain on 24 sanaa paperilla, ei koskaan laitteella. Holvi ilman organisaatiota ei näe tästä mitään. <a href="{{L}}features/#organizations">Organisaatiot</a>.</p>
+
+    <h2 id="developers">Kehittäjille</h2>
+    <p>Varsto on Rust-työtila <a href="https://github.com/janttsu/varsto" rel="noopener">GitHubissa</a>. <code>varsto-core</code> on moottori ja tallennusmuoto, <code>varsto-cli</code> on komentorivi, palvelu ja verkkokäyttöliittymä, ja <code>varsto-ffi</code> on se, jota Swift- ja Kotlin-kuoret kutsuvat. Tallennusmuoto on kirjoitettu auki, ja virtuaalikoneiden laboratorio ajaa skenaariot. Lisenssi on <a href="{{P}}docs/licence.html">PolyForm Shield 1.0.0</a>: lähdekoodi on saatavilla, eikä lisenssi ole OSI-avoimen lähdekoodin lisenssi. Leimat <code>help wanted</code> ja <code>good first issue</code> näyttävät, mistä uusi tekijä voi aloittaa, kun sellaisia on auki. Vikailmoitus tai pieni dokumentaatiokorjaus käy silloinkin, kun lista on tyhjä.</p>
+    <p><a class="button" href="{{L}}contribute/">Näin osallistut</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issuet</a> <a class="button secondary" href="{{P}}docs/contributing.html">Säännöt (en)</a> <a class="button secondary" href="{{P}}docs/alpha-0-format.html">Tallennusmuoto</a></p>
 
     <h2 id="next">Uutta versiossa {{RELEASED}}</h2>
     <p class="note">Tallennusmuoto 3 ja sen mukana tulevat asiat. Versiolla 0.0.1-alpha.15 tai vanhemmalla tehty holvi on luotava uudelleen:</p>

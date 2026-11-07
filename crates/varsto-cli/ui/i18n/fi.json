@@ -115,7 +115,7 @@
   "Copies in place '": "Kopiot paikassa '",
   "Copies on any storage": "Kopiot missä tahansa tallennuspaikassa",
   "Copies on disks in different places": "Kopiot levyillä eri paikoissa",
-  "Copies on own devices and disks": "Kopiot omilla laitteilla ja levyillä",
+  "Copies on own disks": "Kopiot omilla levyillä",
   "Could not create the organization": "Organisaation luominen epäonnistui",
   "Could not remove the device": "Laitteen poistaminen epäonnistui",
   "Could not remove the user": "Käyttäjän poistaminen epäonnistui",
@@ -1131,7 +1131,7 @@
   "Keep a copy of {folder} in another place: {places}": "Säilytä kansiosta {folder} kopio toisessa paikassa: {places}",
   "The folder's policy asks for a copy in each of these places, and you have no storage there yet.": "Kansion säilytyssääntö vaatii kopion jokaiseen näistä paikoista, eikä sinulla ole siellä vielä tallennuspaikkaa.",
   "For the cloud, add an S3 bucket or an rclone remote. For home, add a directory on a disk or NAS, or a pool of disks.": "Pilveä varten lisää S3-säilö tai rclone-etäkohde. Kotia varten lisää hakemisto levyltä tai NAS-laitteesta tai levyvarasto.",
-  "The default policy asks for one copy at home and one in the cloud, checked by another device within 30 days. You can change it on the Policies page.": "Oletussääntö vaatii yhden kopion kotona ja yhden pilvessä, ja toisen laitteen on tarkistettava ne 30 päivän välein. Voit muuttaa sääntöä Säilytyssäännöt-sivulla.",
+  "The default policy asks for one copy on your own disks and one in the cloud, checked by another device within 30 days. You can change it on the Policies page.": "Oletussääntö vaatii yhden kopion omilla levyillä ja yhden pilvessä, ja toisen laitteen on tarkistettava ne 30 päivän välein. Voit muuttaa sääntöä Säilytyssäännöt-sivulla.",
   "Give {folder} the copies its policy asks for": "Anna kansiolle {folder} sen säilytyssäännön vaatimat kopiot",
   "The policy says how many copies the folder needs and where; some blocks do not have them now.": "Säilytyssääntö kertoo, montako kopiota kansio tarvitsee ja missä; osalta lohkoista ne nyt puuttuvat.",
   "The policy asks for {min} copies, but there are only {have} storages. Add a storage, or lower the number in the policy.": "Sääntö vaatii {min} kopiota, mutta tallennuspaikkoja on vain {have}. Lisää tallennuspaikka tai pienennä säännön lukua.",
@@ -1194,7 +1194,7 @@
   "Keep snapshots of a directory": "Säilytä hakemistosta versioita",
   "A backup keeps read-only snapshots, for example of a project folder, for as many days as you choose.": "Varmuuskopio säilyttää vain luku -versioita esimerkiksi projektikansiosta niin monta päivää kuin haluat.",
   "Choose how many copies each folder needs": "Valitse, montako kopiota kukin kansio tarvitsee",
-  "Every folder follows a policy: by default one copy at home and one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short.": "Jokaisella kansiolla on säilytyssääntö: oletuksena yksi kopio kotona ja yksi pilvessä, ja toinen laite tarkistaa ne 30 päivän välein. Varsto varoittaa, jos kansio jää vajaaksi.",
+  "Every folder follows a policy: by default one copy on your own disks and one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short.": "Jokaisella kansiolla on säilytyssääntö: oletuksena yksi kopio omilla levyillä ja yksi pilvessä, ja toinen laite tarkistaa ne 30 päivän välein. Varsto varoittaa, jos kansio jää vajaaksi.",
   "Deleted files are kept {days} days": "Poistettuja tiedostoja säilytetään {days} päivää",
   "Files deleted on any device go to the trash first. You can restore them or change how long they are kept.": "Millä tahansa laitteella poistetut tiedostot menevät ensin roskakoriin. Voit palauttaa ne tai muuttaa, kuinka kauan niitä säilytetään.",
   "Share a folder with someone": "Jaa kansio jonkun kanssa",
@@ -1276,7 +1276,7 @@
   "Backups on the website": "Varmuuskopiot verkkosivuilla",
   "A file deleted on any device goes to the trash first and is kept there for a number of days (30 unless you change it). From the Trash page you can restore it to where it was, or delete it for good.": "Millä tahansa laitteella poistettu tiedosto menee ensin roskakoriin ja säilyy siellä tietyn määrän päiviä (30, ellet muuta sitä). Roskakori-sivulta voit palauttaa sen entiselle paikalleen tai poistaa sen lopullisesti.",
   "Policies, checks and repair": "Säilytyssäännöt, tarkistukset ja korjaus",
-  "A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy at home, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.": "Säilytyssääntö kertoo, montako kopiota kansio tarvitsee, missä paikoissa ja kuinka usein toisen laitteen on tarkistettava ne. Jokainen kansio saa aluksi oletussäännön: yksi kopio kotona, yksi pilvessä, ja toinen laite tarkistaa ne 30 päivän välein. Varsto varoittaa, jos kansio jää vajaaksi, ja kertoo, mitä puuttuu.",
+  "A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy on your own disks, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.": "Säilytyssääntö kertoo, montako kopiota kansio tarvitsee, missä paikoissa ja kuinka usein toisen laitteen on tarkistettava ne. Jokainen kansio saa aluksi oletussäännön: yksi kopio omilla levyillä, yksi pilvessä, ja toinen laite tarkistaa ne 30 päivän välein. Varsto varoittaa, jos kansio jää vajaaksi, ja kertoo, mitä puuttuu.",
   "Verification reads copies back now and then; the bit-rot check re-hashes copies and files on this device; repair replaces a damaged copy with a good one. All three run by themselves and can be started on the Policies page.": "Tarkistus lukee kopioita takaisin aika ajoin; bittimädän tarkistus laskee kopioiden ja tämän laitteen tiedostojen tiivisteet uudelleen; korjaus korvaa vioittuneen kopion ehjällä. Kaikki kolme toimivat itsestään, ja ne voi käynnistää Säilytyssäännöt-sivulta.",
   "Disk pools": "Levyvarastot",
   "Eject a disk on the Storages page before you unplug it.": "Poista levy asemasta Tallennuspaikat-sivulla ennen kuin irrotat sen.",
@@ -1634,6 +1634,8 @@
   "policy met": "sääntö täyttyy",
   "at risk": "vaarassa",
   "violated": "rikottu",
+  "no own disk": "ei omaa levyä",
+  "No copy on your own disks: this vault has no disk pool or directory storage. Add one, or change the folder's policy on the Policies page.": "Ei kopiota omilla levyillä: tässä holvissa ei ole levyvarastoa eikä hakemistotallennuspaikkaa. Lisää sellainen tai muuta kansion sääntöä Säilytyssäännöt-sivulla.",
   "stored, not yet verified": "tallennettu, ei vielä tarkistettu",
   "stored, verification pending": "tallennettu, tarkistus odottaa",
   "only on this device": "vain tällä laitteella",
@@ -1949,7 +1951,90 @@
   "No access to this folder yet": "Kansioon ei ole vielä käyttöoikeutta",
   "This device sees the name of the folder but holds no key to open it. Ask an owner for access: you get six words to read out, the owner compares them with the words on their screen and approves on a device that has the folder.": "Tämä laite näkee kansion nimen mutta sillä ei ole avainta, jolla kansion saisi auki. Pyydä omistajalta käyttöoikeutta: saat kuusi sanaa luettavaksi ääneen, omistaja vertaa niitä näytöllään oleviin sanoihin ja hyväksyy pyynnön laitteella, jolla kansio on.",
   "Read these six words to an owner of the folder, in person or by phone. The owner compares them with the words on their screen and approves the request. The folder opens here after the next sync.": "Lue nämä kuusi sanaa kansion omistajalle kasvokkain tai puhelimessa. Omistaja vertaa niitä näytöllään oleviin sanoihin ja hyväksyy pyynnön. Kansio aukeaa tällä laitteella seuraavan synkronoinnin jälkeen.",
-  "An owner approved this device. The key of the folder arrives with the next sync.": "Omistaja on hyväksynyt tämän laitteen. Kansion avain tulee seuraavassa synkronoinnissa."
+  "An owner approved this device. The key of the folder arrives with the next sync.": "Omistaja on hyväksynyt tämän laitteen. Kansion avain tulee seuraavassa synkronoinnissa.",
+  "Notifications": "Ilmoitukset",
+  "Get a message on your phone when something needs you: a storage that stops answering, a failed backup, a full disk. This device sends the messages itself, straight to the service you choose.": "Saat viestin puhelimeesi, kun jokin vaatii huomiotasi: tallennuspaikka lakkaa vastaamasta, varmuuskopio epäonnistuu tai levy täyttyy. Tämä laite lähettää viestit itse suoraan valitsemallesi palvelulle.",
+  "Add a channel": "Lisää kanava",
+  "Edit channel": "Muokkaa kanavaa",
+  "Daily summary at": "Päivän yhteenveto kello",
+  "No channels yet. Add one to get a message on your phone when something needs you.": "Kanavia ei vielä ole. Lisää yksi, niin saat viestin puhelimeesi, kun jokin vaatii huomiotasi.",
+  "On": "Päällä",
+  "Send messages to this channel": "Lähetä viestejä tälle kanavalle",
+  "1 kind of message": "1 viestityyppi",
+  "The last message could not be sent": "Viimeisintä viestiä ei voitu lähettää",
+  "Edit…": "Muokkaa…",
+  "Sending…": "Lähetetään…",
+  "The test message was sent.": "Kokeiluviesti lähetettiin.",
+  "Messages stop going to this channel. You can add it again later.": "Viestit eivät enää mene tälle kanavalle. Voit lisätä sen myöhemmin uudelleen.",
+  "Remove this channel?": "Poistetaanko tämä kanava?",
+  "Free, no account needed; open source, can run on your own server": "Ilmainen, tiliä ei tarvita; avoin lähdekoodi, voi pyöriä omalla palvelimellasi",
+  "A reliable app; one-time purchase after a 30-day trial": "Luotettava sovellus; kertaostos 30 päivän kokeilun jälkeen",
+  "Messages from your own bot in Telegram": "Viestejä omalta botiltasi Telegramissa",
+  "Where should the messages go? Choose the service you want to use.": "Minne viestit lähetetään? Valitse käyttämäsi palvelu.",
+  "Saved": "Tallennettu",
+  "Leave it empty to keep it.": "Jätä tyhjäksi, jos haluat säilyttää sen.",
+  "Install the ntfy app (Android: Google Play or F-Droid; iPhone: App Store), or open ntfy.sh in a browser.": "Asenna ntfy-sovellus (Android: Google Play tai F-Droid; iPhone: App Store) tai avaa ntfy.sh selaimessa.",
+  "Topic": "Aihe",
+  "Anyone who knows a topic on ntfy.sh can read its messages, so keep it to yourself.": "Jokainen, joka tietää ntfy.sh:n aiheen, voi lukea sen viestit, joten pidä se omana tietonasi.",
+  "Choose a topic. Varsto suggests a name that is hard to guess.": "Valitse aihe. Varsto ehdottaa nimeä, jota on vaikea arvata.",
+  "In the app press +, choose Subscribe to topic and enter the same topic.": "Paina sovelluksessa +, valitse Subscribe to topic ja kirjoita sama aihe.",
+  "Use my own ntfy server": "Käytä omaa ntfy-palvelinta",
+  "Optional: use your own ntfy server instead of ntfy.sh.": "Valinnainen: käytä omaa ntfy-palvelinta ntfy.sh:n sijaan.",
+  "This address starts with http://, so messages travel unencrypted. Use it only on your own network.": "Osoite alkaa http://, joten viestit kulkevat salaamattomina. Käytä sitä vain omassa verkossasi.",
+  "Server address": "Palvelimen osoite",
+  "If the server needs a login, use an access token (in the ntfy web app: Account → Access tokens, or run ntfy token add on the server) or a user name and password.": "Jos palvelin vaatii kirjautumisen, käytä käyttöoikeustunnusta (ntfy:n verkkosovelluksessa: Account → Access tokens, tai aja palvelimella ntfy token add) tai käyttäjänimeä ja salasanaa.",
+  "Access token": "Käyttöoikeustunnus",
+  "User name": "Käyttäjänimi",
+  "Password": "Salasana",
+  "Make an account at pushover.net and install the Pushover app on your phone.": "Tee tili osoitteessa pushover.net ja asenna Pushover-sovellus puhelimeesi.",
+  "Copy your User Key from the top of pushover.net after you log in, and paste it here.": "Kopioi User Key pushover.net-sivun yläreunasta kirjauduttuasi sisään ja liitä se tähän.",
+  "User Key": "User Key",
+  "Create an application at pushover.net/apps/build (name it Varsto) and paste its API Token here.": "Luo sovellus osoitteessa pushover.net/apps/build (nimeä se Varstoksi) ja liitä sen API Token tähän.",
+  "Create an application": "Luo sovellus",
+  "API Token": "API Token",
+  "Optional: a device name, to send only to that device.": "Valinnainen: laitteen nimi, jos haluat lähettää vain sille laitteelle.",
+  "In Telegram open @BotFather, send /newbot, and choose a name and a user name that ends in bot.": "Avaa Telegramissa @BotFather, lähetä /newbot ja valitse nimi sekä käyttäjänimi, joka päättyy sanaan bot.",
+  "Paste the token BotFather sends you here. It looks like 123456789:AA…": "Liitä tähän BotFatherin lähettämä tunnus (token). Se näyttää tältä: 123456789:AA…",
+  "Bot token": "Botin token",
+  "Open your new bot in Telegram and press Start (or send it any message). For a group, add the bot to the group and send a message there.": "Avaa uusi bottisi Telegramissa ja paina Start (tai lähetä sille mikä tahansa viesti). Ryhmää varten lisää botti ryhmään ja lähetä siellä viesti.",
+  "Press Find my chat and choose the chat, or type the chat id yourself.": "Paina Etsi chattini ja valitse chatti tai kirjoita chatin tunnus itse.",
+  "Find my chat": "Etsi chattini",
+  "Chat id": "Chatin tunnus",
+  "No chats yet. Send a message to your bot in Telegram, then press Find my chat again.": "Chatteja ei vielä ole. Lähetä botillesi viesti Telegramissa ja paina sitten Etsi chattini uudelleen.",
+  "Paste the bot token first.": "Liitä ensin botin token.",
+  "Back": "Takaisin",
+  "Shown in this list. Messages start with the name of this device.": "Näkyy tässä luettelossa. Viestien alussa on tämän laitteen nimi.",
+  "Send a test message": "Lähetä kokeiluviesti",
+  "The test message was sent. Check your phone.": "Kokeiluviesti lähetettiin. Katso puhelimestasi.",
+  "Send me a message when": "Lähetä minulle viesti, kun",
+  "Needs your attention": "Vaatii huomiotasi",
+  "Good to know": "Hyvä tietää",
+  "Include names of folders, storages and devices": "Sisällytä kansioiden, tallennuspaikkojen ja laitteiden nimet",
+  "Messages pass through the service's servers unencrypted. Without names a message only says what kind of event it is and asks you to open Varsto.": "Viestit kulkevat palvelun palvelimien kautta salaamattomina. Ilman nimiä viesti kertoo vain tapahtuman tyypin ja pyytää avaamaan Varston.",
+  "Storage problems": "Tallennuspaikkaongelmat",
+  "A storage cannot be reached or fails, and when it works again.": "Tallennuspaikkaan ei saada yhteyttä tai se ei toimi, sekä kun se toimii taas.",
+  "Low disk space": "Levytila vähissä",
+  "Disk space is low on this device, or a storage quota is full.": "Tämän laitteen levytila on vähissä tai tallennuspaikan kiintiö on täynnä.",
+  "Fewer copies than wanted": "Kopioita vähemmän kuin pitäisi",
+  "A folder has fewer copies than its policy asks, and the result of repairs.": "Kansiolla on vähemmän kopioita kuin sen käytäntö vaatii, sekä korjausten tulokset.",
+  "Damaged or missing data": "Vaurioitunutta tai puuttuvaa dataa",
+  "Verification or the bit-rot check found damaged or missing blocks, or the ledger has problems.": "Tarkistus tai bittimätätarkistus löysi vaurioituneita tai puuttuvia lohkoja, tai pääkirjassa on ongelmia.",
+  "Failed or overdue backups": "Epäonnistuneet tai myöhästyneet varmuuskopiot",
+  "A backup or a restic backup failed or is overdue.": "Varmuuskopio tai restic-varmuuskopio epäonnistui tai on myöhässä.",
+  "Requests waiting for you": "Pyyntöjä odottamassa vastaustasi",
+  "A device asks to pair, or asks for access to a folder. It waits for your approval.": "Laite pyytää paria tai pääsyä kansioon. Se odottaa hyväksyntääsi.",
+  "A disk check is due, a disk was attached, removed or mounted, or which disk to dock next.": "Levyn tarkistus erääntyy, levy liitettiin, poistettiin tai liitettiin tiedostojärjestelmään, tai mikä levy kytketään seuraavaksi.",
+  "A folder was paused, or a move finished or waits.": "Kansio keskeytettiin tai siirto valmistui tai odottaa.",
+  "Finished backups": "Valmistuneet varmuuskopiot",
+  "A backup finished.": "Varmuuskopio valmistui.",
+  "New files from other devices": "Uusia tiedostoja muilta laitteilta",
+  "New files arrived from other devices (at most one message per folder every 15 minutes).": "Muilta laitteilta tuli uusia tiedostoja (enintään yksi viesti kansiota kohti 15 minuutin välein).",
+  "New Varsto version": "Uusi Varsto-versio",
+  "A new version of Varsto is available.": "Varstosta on saatavilla uusi versio.",
+  "Daily summary": "Päivän yhteenveto",
+  "Once a day: Varsto is running, and how many alerts there were. Shows that the device is alive.": "Kerran päivässä: Varsto on käynnissä ja kuinka monta hälytystä oli. Osoittaa, että laite on elossa.",
+  "Other messages": "Muut viestit",
+  "Anything else Varsto reports.": "Kaikki muu, mistä Varsto ilmoittaa."
  },
  "patterns": [
   [
@@ -2767,6 +2852,10 @@
   [
    "^This device holds no key of folder (.+)$",
    "Tällä laitteella ei ole kansion $1 avainta"
+  ],
+  [
+   "^(\\d+) kinds of messages$",
+   "$1 viestityyppiä"
   ]
  ],
  "parts": [
@@ -2779,8 +2868,8 @@
    "$1 ulkoisessa tallennuspaikassa (S3 ym.)"
   ],
   [
-   "(\\d+) on your own devices and disks",
-   "$1 omilla laitteilla ja levyillä"
+   "(\\d+) on your own disks",
+   "$1 omilla levyillä"
   ],
   [
    "verified within (\\d+) days",
@@ -2799,8 +2888,24 @@
    "$1 lohkolla on alle $2 kopiota ulkoisessa tallennuspaikassa (S3 ym.)"
   ],
   [
-   "(\\d+) chunks have fewer than (\\d+) copies on your own devices and disks",
-   "$1 lohkolla on alle $2 kopiota omilla laitteilla ja levyillä"
+   "(\\d+) chunks have fewer than (\\d+) copies on your own disks",
+   "$1 lohkolla on alle $2 kopiota omilla levyillä"
+  ],
+  [
+   "(\\d+) chunks have no copy on your own disks",
+   "$1 lohkolla ei ole kopiota omilla levyillä"
+  ],
+  [
+   "(\\d+) chunks have no copy in external storage \\(S3 and the like\\)",
+   "$1 lohkolla ei ole kopiota ulkoisessa tallennuspaikassa (S3 ym.)"
+  ],
+  [
+   "(\\d+) chunks have no copy on any storage",
+   "$1 lohkolla ei ole kopiota millään tallennuspaikalla"
+  ],
+  [
+   "(\\d+) chunks have fewer than (\\d+) copies",
+   "$1 lohkolla on alle $2 kopiota"
   ],
   [
    "(\\d+) chunks were not verified by another device within (\\d+) days",

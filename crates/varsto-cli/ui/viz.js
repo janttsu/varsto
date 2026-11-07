@@ -868,10 +868,16 @@
       var lvl = f.policy_state === "violated" ? "bad" : f.policy_state === "at_risk" ? "warn" : f.policy_state === "ok" ? "ok" : "";
       var total = f.verified_blocks + f.unverified_blocks + f.local_only_blocks + f.missing_blocks;
       var r = row(f.name, bytes(f.bytes), "", null);
-      if (lvl) { r.firstChild.firstChild.appendChild(tag(T(f.policy_state === "ok" ? "policy met" : f.policy_state === "at_risk" ? "at risk" : "violated"), lvl)); }
+      // Why the policy is not met, in the folder's own words: the first reason, or the first warning.
+      var why = f.policy_state === "violated" ? (f.policy_reasons || [])[0] : f.policy_state === "at_risk" ? (f.policy_warnings || [])[0] : "";
+      // The default policy asks for a copy on your own disks in a vault that has none: a warning, not a violation.
+      var noOwnDisk = f.policy_state === "at_risk" && !!why && why.toLowerCase().indexOf("no copy on your own disks") === 0;
+      if (lvl) { r.firstChild.firstChild.appendChild(tag(T(noOwnDisk ? "no own disk" : f.policy_state === "ok" ? "policy met" : f.policy_state === "at_risk" ? "at risk" : "violated"), lvl)); }
       // New data is given time to be verified: neutral, not an alert.
       if (f.policy_state === "ok" && f.blocks_verification_pending > 0) { r.firstChild.firstChild.appendChild(tag(T("stored, verification pending"), "")); }
       r.appendChild(bar2([{ v: f.verified_blocks, c: "var(--vz-ok)", t: T("verified") }, { v: f.unverified_blocks, c: "var(--vz-info)", t: T("stored, not yet verified") }, { v: f.local_only_blocks, c: "#9aa7b6", t: T("only on this device") }, { v: f.missing_blocks, c: "var(--vz-bad)", t: T("missing") }], total));
+      // The bar shows verified copies only; the reason must be readable even when it is all green.
+      if (why) { var wl = el("div", "l2 viz-why", T(why)); wl.dataset.level = lvl; r.appendChild(wl); }
       var sub = [f.policy || T("no policy"), f.oldest_verification_days !== null && f.oldest_verification_days !== undefined ? T("oldest check") + " " + f.oldest_verification_days + " " + T("d") : ""].filter(Boolean).join(" · ");
       r.appendChild(el("div", "l2", sub));
       p.appendChild(r);
@@ -884,7 +890,7 @@
     p = card("health", "Health and alerts", alerts.length || "");
     p.appendChild(row(T("Verification"), h.verify && h.verify.enabled ? T("on") : T("off"), T("last") + " " + ago(h.verify && h.verify.last_run_utc) + " · " + T("next") + " " + (h.verify && h.verify.next_run_utc ? dur(h.verify.next_run_utc - nowSec()) : "—")));
     p.appendChild(row(T("Bit-rot check"), h.scrub && h.scrub.enabled ? T("on") : T("off"), T("last") + " " + ago(h.scrub && h.scrub.last_run_utc) + " · " + T("next") + " " + (h.scrub && h.scrub.next_run_utc ? dur(h.scrub.next_run_utc - nowSec()) : "—")));
-    p.appendChild(row(T("Repairs"), String(h.repair ? h.repair.queued : 0) + " " + T("queued"), (h.repair && h.repair.losses ? h.repair.losses + " " + T("lost") : T("nothing lost")) + " · " + T("Key epoch") + " " + (sn.key_epoch || 0)));
+    p.appendChild(row(T("Repairs"), String(h.repair ? h.repair.queued : 0) + " " + T("queued"), (h.repair && h.repair.losses ? h.repair.losses + " " + T("lost") : T("nothing lost"))));
     (sn.backups || []).forEach(function (b) { p.appendChild(row(T("Backup") + " · " + b.name, b.stopped ? T("stopped") : "", T("last") + " " + ago(b.latest_utc) + " · " + (b.snapshots || 0) + " " + T("snapshots"))); });
     alerts.slice(0, 8).forEach(function (a) {
       var r = el("div", "viz-row"); var l1 = el("div", "l1"); l1.appendChild(el("span", "t", a.text)); l1.appendChild(tag(T(a.level === "bad" ? "problem" : a.level === "warn" ? "attention" : "note"), a.level === "bad" ? "bad" : a.level === "warn" ? "warn" : "info")); r.appendChild(l1); p.appendChild(r);

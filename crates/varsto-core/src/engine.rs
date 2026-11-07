@@ -6052,11 +6052,15 @@ impl Engine {
         F: Fn(&FolderId) -> Result<std::borrow::Cow<'s, FolderState>>,
     {
         let mut ctx = self.policy_ctx();
+        // Without a directory storage or a disk pool the default policy's
+        // "home" rule cannot be met: it is a warning, not a violation.
+        let has_home_storage = ctx.places.values().any(|(place, _)| place == "home");
         let mut reports = Vec::new();
         for (rec, _) in self.folders() {
             let Some(policy) = rec.effective_policy() else {
                 continue;
             };
+            let home_unavailable = rec.policy.is_none() && !has_home_storage;
             let state = state_of(&rec.folder_id)?;
             let mut seen: BTreeMap<ObjectName, u64> = BTreeMap::new();
             let mut facts = Vec::new();
@@ -6077,9 +6081,10 @@ impl Engine {
                     }
                 }
             }
-            let mut report = crate::policy::evaluate(
+            let mut report = crate::policy::evaluate_for_report(
                 &rec.name,
                 &policy,
+                home_unavailable,
                 &facts,
                 &ctx.unreadable_places,
                 &ctx.unknown,

@@ -18,15 +18,55 @@
   // Pictures and the viewer's links cannot send a header. Thumbnails are
   // fetched with the header and shown from a blob; the links of downloads and
   // the viewer carry a ticket for that one file (POST /api/ticket).
-  var thumbQueue = [], thumbBusy = 0;
+  // The engine serves one request at a time, so two at once are enough. A
+  // "busy" answer (503) is retried later; only 404 (or the last try) shows
+  // the icon. Decoded thumbnails stay in memory only (object URLs, at most
+  // 300, never on disk: the service sends no-store on purpose) so a list that
+  // is drawn again shows them without asking.
+  var thumbQueue = [], thumbBusy = 0, thumbCache = new Map(), THUMB_CACHE_MAX = 300, THUMB_TRIES = 6;
+  function thumbClear() {
+    thumbCache.forEach(function (u) { URL.revokeObjectURL(u); });
+    thumbCache.clear(); thumbQueue.length = 0;
+  }
+  function thumbKeep(url, u) {
+    thumbCache.set(url, u);
+    while (thumbCache.size > THUMB_CACHE_MAX) {
+      var oldest = thumbCache.keys().next().value;
+      URL.revokeObjectURL(thumbCache.get(oldest)); thumbCache.delete(oldest);
+    }
+  }
+  function thumbDone() { thumbBusy--; thumbPump(); }
+  function thumbRetry(job, waitMs) {
+    job.tries = (job.tries || 0) + 1;
+    if (job.tries >= THUMB_TRIES) { if (job.img.onerror) { job.img.onerror(); } thumbDone(); return; }
+    var delay = Math.min(30000, Math.max(waitMs, 500 * Math.pow(2, job.tries - 1)));
+    thumbDone();
+    setTimeout(function () { if (job.img.isConnected) { thumbQueue.push(job); thumbPump(); } }, delay);
+  }
   function thumbFetch(job) {
-    fetch(job.url, { headers: { "X-Varsto-Token": token } }).then(function (r) { if (!r.ok) { throw new Error("no thumbnail"); } return r.blob(); })
-      .then(function (b) { var u = URL.createObjectURL(b); job.img.onload = function () { URL.revokeObjectURL(u); }; job.img.src = u; })
-      .catch(function () { if (job.img.onerror) { job.img.onerror(); } })
-      .then(function () { thumbBusy--; thumbPump(); });
+    if (!job.img.isConnected) { thumbDone(); return; }
+    var hit = thumbCache.get(job.url);
+    if (hit) { job.img.src = hit; thumbDone(); return; }
+    fetch(job.url, { headers: { "X-Varsto-Token": token } }).then(function (r) {
+      if (r.ok) {
+        // A body that breaks off is retried like a network error: the slot is freed either way.
+        return r.blob().then(function (b) {
+          var u = URL.createObjectURL(b); thumbKeep(job.url, u);
+          if (job.img.isConnected) { job.img.src = u; }
+          thumbDone();
+        }, function () { thumbRetry(job, 2000); });
+      }
+      if (r.status === 503) {
+        var ra = parseInt(r.headers.get("Retry-After"), 10);
+        thumbRetry(job, (isNaN(ra) || ra < 0 ? 2 : ra) * 1000);
+      } else {
+        if (job.img.onerror) { job.img.onerror(); }
+        thumbDone();
+      }
+    }, function () { thumbRetry(job, 2000); });
   }
   function thumbPump() {
-    while (thumbBusy < 6 && thumbQueue.length) { thumbBusy++; thumbFetch(thumbQueue.shift()); }
+    while (thumbBusy < 2 && thumbQueue.length) { thumbBusy++; thumbFetch(thumbQueue.shift()); }
   }
   var thumbSeen = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver(function (entries) {
     entries.forEach(function (en) { if (en.isIntersecting) { thumbSeen.unobserve(en.target); thumbQueue.push(en.target.__thumb); } });
@@ -34,7 +74,10 @@
   }, { rootMargin: "200px" });
   function thumbSrc(img, folder, path) {
     var job = { img: img, url: "/api/thumb?folder=" + encodeURIComponent(folder) + "&path=" + encodeURIComponent(path) };
-    if (!thumbSeen) { thumbQueue.push(job); thumbPump(); return; }
+    var hit = thumbCache.get(job.url);
+    if (hit) { img.src = hit; return; }
+    // No observer: ask once the row is in the page (the connected check skips it before).
+    if (!thumbSeen) { setTimeout(function () { thumbQueue.push(job); thumbPump(); }, 0); return; }
     img.__thumb = job; thumbSeen.observe(img);
   }
   function ticketUrl(route, folder, path) {
@@ -186,7 +229,7 @@
     document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.add("hidden"); });
     lastStatus = null;
   }
-  function show(section) { if (section === "setup") { clearVaultViews(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); activityWatch(); taskbarSchedule(section === "app" ? 0 : undefined); }
+  function show(section) { if (section === "setup") { clearVaultViews(); } if (section !== "app") { thumbClear(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); activityWatch(); taskbarSchedule(section === "app" ? 0 : undefined); }
   function fmtBytes(n) { var u = ["B", "KiB", "MiB", "GiB", "TiB"]; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
   function fmtDate(t) { return t ? new Date(t * 1000).toLocaleDateString() : ""; }
   function formData(form) { var o = {}; new FormData(form).forEach(function (v, k) { o[k] = v; }); form.querySelectorAll("input[type=checkbox]").forEach(function (c) { o[c.name] = c.checked; }); return o; }
@@ -462,7 +505,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     activityWatch();
     if (page === "files") { ensureFiles(); f3Reload(); }
     if (page === "settings" && droid && lastStatus) { refreshAllFiles(); }
-    if (page === "settings") { loadLogs(); }
+    if (page === "settings") { loadLogs(); loadNotify(); }
     window.scrollTo(0, 0);
   }
   // A field that gets focus is scrolled into view once the on-screen keyboard has made room
@@ -510,7 +553,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (!st.has_vault) { show("setup"); showPreHelp(true); takeLink(); return; }
       if (!st.unlocked) { show("unlock"); showPreHelp(false); return; }
       show("app");
-      if (currentPage === "settings") { loadLogs(); }
+      if (currentPage === "settings") { loadLogs(); loadNotify(); }
       return refreshStatus().then(takeLink);
     }).catch(function (e) { log("error: " + e.message); });
   }
@@ -626,7 +669,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }).catch(function (e) { alertBox(e.message); });
   }
   // Column and field labels for places: the two defaults by what they are.
-  function placeLabel(pl) { return pl === "home" ? "Copies on own devices and disks" : pl === "cloud" ? "Copies in external storage (S3 etc.)" : "Copies in place '" + pl + "'"; }
+  function placeLabel(pl) { return pl === "home" ? "Copies on own disks" : pl === "cloud" ? "Copies in external storage (S3 etc.)" : "Copies in place '" + pl + "'"; }
   // A place as a short tag beside a storage: "at home", "external", or its own name.
   function placeShort(pl) { return pl === "home" ? "at home" : pl === "cloud" ? "external" : pl; }
   // Places a policy can name: those of the storages, those already in use, and the two defaults.
@@ -3725,7 +3768,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           var cell = document.createElement("td"); var row = el("div", "mrow-in");
           var pick = el("span", "mrow-pick"); pick.setAttribute("aria-hidden", "true"); row.appendChild(pick);
           var media = el("span", "mrow-thumb");
-          if (f.media) { var mi = document.createElement("img"); mi.alt = showName(f.path.split("/").pop()); mi.loading = "lazy"; mi.onerror = function () { mi.replaceWith(icon("image")); }; media.appendChild(mi); thumbSrc(mi, folder, f.path); } else { media.appendChild(icon("files")); }
+          if (f.media) { var mi = document.createElement("img"); mi.alt = showName(f.path.split("/").pop()); mi.onerror = function () { mi.replaceWith(icon("image")); }; media.appendChild(mi); thumbSrc(mi, folder, f.path); } else { media.appendChild(icon("files")); }
           row.appendChild(media);
           var slash = f.path.lastIndexOf("/");
           var body = el("div", "mrow-body");
@@ -3747,7 +3790,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         function td(t, cls, label) { var d = document.createElement("td"); d.textContent = t; if (cls) { d.className = cls; } if (label) { d.dataset.label = label; } tr.appendChild(d); }
         var nameCell = document.createElement("td"); var wrap = el("span", "file-name");
         wrap.appendChild(stateSquare(f));
-        if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = showName(f.path.split("/").pop()); im.loading = "lazy"; im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); thumbSrc(im, folder, f.path); }
+        if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = showName(f.path.split("/").pop()); im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); thumbSrc(im, folder, f.path); }
         else { var fi = el("span", "file-icon"); fi.appendChild(icon("files")); wrap.appendChild(fi); }
         var fname = el("span", null, showName(f.path)); fname.setAttribute("data-no-i18n", ""); wrap.appendChild(fname);
         if (f.analysis) { var ap = pill(f.analysis_stale ? "risk" : "accent", f.analysis_stale ? "Analysis stale" : "Analysed"); ap.title = f.analysis.slice(0, 200); ap.classList.add("analysis-pill"); wrap.appendChild(ap); }
@@ -5604,6 +5647,260 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (l.bytes !== undefined) { $("log-usage").textContent = "Using " + fmtBytes(l.bytes || 0) + " in " + (l.files || 0) + " files"; }
     $("log-open").classList.toggle("hidden", l.can_open === false);
   }
+  // ----- Notifications: push channels (ntfy, Pushover, Telegram) -----
+  // The channels live in notify.json on this device; the routes work while the
+  // vault is locked. Secrets never come back from the service: a stored one is
+  // shown as "Saved (...1234)" and stays when its field is left empty.
+  var ntData = null, nt = null;
+  var NT_SERVICES = [
+    ["ntfy", "ntfy", "Free, no account needed; open source, can run on your own server"],
+    ["pushover", "Pushover", "A reliable app; one-time purchase after a 30-day trial"],
+    ["telegram", "Telegram", "Messages from your own bot in Telegram"]
+  ];
+  function ntName(service) { return (NT_SERVICES.filter(function (s) { return s[0] === service; })[0] || [0, service])[1]; }
+  function ntT(s) { return window.varstoLang && window.varstoLang.t ? window.varstoLang.t(s) : s; }
+  function ntLink(text, href) { var a = el("a", null, text); a.href = href; a.target = "_blank"; a.rel = "noopener"; return a; }
+  function ntNoI18n(node) { node.setAttribute("data-no-i18n", ""); return node; }
+  function loadNotify() {
+    if (document.body.dataset.view !== "app") { return; }
+    api("GET", "/api/notify").then(function (d) { ntData = d; renderNotify(); }).catch(function (e) {
+      var p = $("notify-empty"); p.textContent = e.message; p.classList.remove("hidden");
+    });
+  }
+  function renderNotify() {
+    var d = ntData, ul = $("notify-list"); ul.innerHTML = "";
+    $("notify-empty").textContent = "No channels yet. Add one to get a message on your phone when something needs you.";
+    $("notify-empty").classList.toggle("hidden", d.channels.length > 0);
+    d.channels.forEach(function (c) {
+      var li = el("li"), body = el("div", "li-body"), title = el("div", "li-title");
+      title.appendChild(ntNoI18n(el("span", null, c.name)));
+      title.appendChild(ntNoI18n(pill("grey", ntName(c.service))));
+      if (!c.enabled) { title.appendChild(pill("risk", "Off")); }
+      body.appendChild(title);
+      var sub = el("div", "li-sub");
+      sub.appendChild(el("span", null, c.events.length === 1 ? "1 kind of message" : c.events.length + " kinds of messages"));
+      var st = d.status && d.status[c.id];
+      if (st && !st.ok) {
+        sub.appendChild(document.createTextNode(" · "));
+        sub.appendChild(el("span", "nt-bad", "The last message could not be sent"));
+        sub.appendChild(ntNoI18n(el("span", "nt-bad", ": " + (st.error || ""))));
+      }
+      var res = el("div", "li-sub nt-result hidden");
+      body.appendChild(sub); body.appendChild(res);
+      li.appendChild(body);
+      var a = el("div", "li-actions nt-row");
+      var sw = el("label", "inline nt-switch"), cb = el("input");
+      cb.type = "checkbox"; cb.checked = !!c.enabled; cb.setAttribute("aria-label", "Send messages to this channel");
+      sw.appendChild(cb); sw.appendChild(el("span", null, "On")); a.appendChild(sw);
+      cb.onchange = function () {
+        api("POST", "/api/notify/channel", { id: c.id, enabled: cb.checked }).then(loadNotify).catch(function (e) { alertBox(e.message); loadNotify(); });
+      };
+      var t = el("button", "secondary", "Test"); t.type = "button";
+      t.onclick = function () {
+        res.className = "li-sub nt-result"; res.removeAttribute("data-no-i18n"); res.textContent = "Sending…";
+        api("POST", "/api/notify/test", { id: c.id }).then(function () { res.className = "li-sub nt-result nt-good"; res.textContent = "The test message was sent."; })
+          .catch(function (e) { res.className = "li-sub nt-result nt-bad"; res.textContent = e.message; res.setAttribute("data-no-i18n", ""); });
+      };
+      var ed = el("button", "secondary", "Edit…"); ed.type = "button"; ed.onclick = function () { ntOpen(c); };
+      var rm = el("button", "secondary danger", "Remove…"); rm.type = "button";
+      rm.onclick = function () {
+        confirmBox("Messages stop going to this channel. You can add it again later.", { title: "Remove this channel?", ok: "Remove", danger: true }).then(function (yes) {
+          if (!yes) { return; }
+          api("POST", "/api/notify/channel/remove", { id: c.id }).then(loadNotify).catch(function (e) { alertBox(e.message); });
+        });
+      };
+      a.appendChild(t); a.appendChild(ed); a.appendChild(rm);
+      li.appendChild(a);
+      ul.appendChild(li);
+    });
+    // The daily summary hour matters only when a channel asks for the summary.
+    var wants = d.channels.some(function (c) { return c.enabled && c.events.indexOf("daily_summary") >= 0; });
+    $("notify-summary-row").classList.toggle("hidden", !wants);
+    var sel = $("notify-hour");
+    if (!sel.options.length) {
+      for (var h = 0; h < 24; h++) { var o = el("option", null, (h < 10 ? "0" : "") + h + ":00"); o.value = String(h); sel.appendChild(o); }
+    }
+    sel.value = String(d.summary_hour);
+  }
+  $("notify-hour").onchange = function () {
+    api("POST", "/api/notify/settings", { summary_hour: parseInt(this.value, 10) }).then(loadNotify).catch(function (e) { alertBox(e.message); loadNotify(); });
+  };
+  $("notify-add").onclick = function () {
+    api("GET", "/api/notify").then(function (d) { ntData = d; renderNotify(); ntOpen(null); }).catch(function (e) { alertBox(e.message); });
+  };
+
+  // The dialog: choose a service, then one form with numbered steps.
+  function ntOpen(c) {
+    var f = { name: "", enabled: true, topic: "", server: "", token: "", user: "", password: "", user_key: "", app_token: "", device: "", bot_token: "", chat_id: "", events: [], details: true };
+    if (c) {
+      f.name = c.name; f.enabled = c.enabled; f.topic = c.topic || ""; f.server = c.server || ""; f.user = c.user || ""; f.device = c.device || "";
+      f.chat_id = c.chat_id || ""; f.events = c.events.slice(); f.details = c.details;
+    } else {
+      f.events = ntData.categories.filter(function (k) { return k.default_on; }).map(function (k) { return k.id; });
+    }
+    nt = { c: c, service: c ? c.service : null, f: f, inputs: {} };
+    ntRender();
+    $("notifymodal").classList.remove("hidden"); document.body.classList.add("modal-open");
+  }
+  function ntClose() { $("notifymodal").classList.add("hidden"); document.body.classList.remove("modal-open"); nt = null; }
+  $("nt-backdrop").onclick = ntClose;
+  document.addEventListener("keydown", function (ev) { if (nt && ev.key === "Escape" && !modalResolve) { ev.preventDefault(); ntClose(); } });
+
+  function ntRender() {
+    var b = $("nt-body"), act = $("nt-actions"); b.innerHTML = ""; act.innerHTML = "";
+    nt.inputs = {};
+    if (!nt.service) { ntChoose(b, act); } else { ntForm(b, act); }
+  }
+  function ntButton(text, cls, fn) { var x = el("button", cls || "secondary", text); x.type = "button"; x.onclick = fn; return x; }
+  function ntChoose(b, act) {
+    $("nt-title").textContent = "Add a channel";
+    b.appendChild(el("p", "modal-text", "Where should the messages go? Choose the service you want to use."));
+    NT_SERVICES.forEach(function (s) {
+      var btn = el("button", "secondary nt-choice"); btn.type = "button";
+      btn.appendChild(ntNoI18n(el("span", "nt-choice-title", s[1])));
+      btn.appendChild(el("span", "nt-choice-sub", s[2]));
+      btn.onclick = function () {
+        nt.service = s[0]; nt.f.name = s[1];
+        if (s[0] === "ntfy") {
+          api("GET", "/api/notify/ntfy-topic").then(function (r) { if (nt && !nt.f.topic) { nt.f.topic = r.topic; if (nt.inputs.topic) { nt.inputs.topic.value = r.topic; } } }).catch(function () {});
+        }
+        ntRender();
+      };
+      b.appendChild(btn);
+    });
+    act.appendChild(el("span", "toolbar-spacer"));
+    act.appendChild(ntButton("Cancel", "secondary", ntClose));
+  }
+  // A text field bound to nt.f[key]; a stored secret shows as saved and stays when left empty.
+  function ntField(label, key, o) {
+    o = o || {};
+    var lab = el("label", "nt-field", label), inp = el("input");
+    inp.type = o.secret ? "password" : "text"; inp.autocomplete = "off"; inp.spellcheck = false; inp.autocapitalize = "none";
+    inp.value = nt.f[key] || "";
+    if (o.placeholder) { inp.placeholder = o.placeholder; }
+    inp.oninput = function () { nt.f[key] = inp.value; if (o.oninput) { o.oninput(inp.value); } };
+    lab.appendChild(inp);
+    var saved = o.secret && nt.c && nt.c[key] && nt.c[key].set ? nt.c[key].hint : null;
+    if (saved) { lab.appendChild(ntNoI18n(el("span", "hint muted", ntT("Saved") + " (" + saved + "). " + ntT("Leave it empty to keep it.")))); }
+    if (o.hint) { lab.appendChild(el("span", "hint muted", o.hint)); }
+    nt.inputs[key] = inp;
+    return lab;
+  }
+  function ntStep(list, text, extra) {
+    var li = el("li"); li.appendChild(el("p", "nt-step-text", text));
+    (extra || []).forEach(function (x) { if (x) { li.appendChild(x); } });
+    list.appendChild(li); return li;
+  }
+  function ntLinks(items) { var d = el("div", "nt-links"); items.forEach(function (i) { d.appendChild(ntLink(i[0], i[1])); }); return d; }
+
+  function ntFormSteps(list) {
+    var f = nt.f;
+    if (nt.service === "ntfy") {
+      ntStep(list, "Install the ntfy app (Android: Google Play or F-Droid; iPhone: App Store), or open ntfy.sh in a browser.", [ntLinks([
+        ["Google Play", "https://play.google.com/store/apps/details?id=io.heckel.ntfy"], ["F-Droid", "https://f-droid.org/packages/io.heckel.ntfy/"],
+        ["App Store", "https://apps.apple.com/app/ntfy/id1625396347"], ["ntfy.sh", "https://ntfy.sh/app"]])]);
+      var tr = el("div", "row nt-row");
+      var fld = ntField("Topic", "topic", { hint: "Anyone who knows a topic on ntfy.sh can read its messages, so keep it to yourself." });
+      var again = ntButton("New name", "secondary", function () {
+        api("GET", "/api/notify/ntfy-topic").then(function (r) { f.topic = r.topic; nt.inputs.topic.value = r.topic; }).catch(function (e) { ntError(e.message); });
+      });
+      var copy = ntButton("Copy", "secondary", function () {
+        var v = nt.inputs.topic.value;
+        if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(v).catch(function () { nt.inputs.topic.select(); }); } else { nt.inputs.topic.select(); }
+      });
+      fld.classList.add("nt-grow"); tr.appendChild(fld); tr.appendChild(again); tr.appendChild(copy);
+      ntStep(list, "Choose a topic. Varsto suggests a name that is hard to guess.", [tr]);
+      ntStep(list, "In the app press +, choose Subscribe to topic and enter the same topic.");
+      var own = el("details", "nt-own"); own.appendChild(el("summary", null, "Use my own ntfy server"));
+      var warn = el("p", "notice warn small hidden", "This address starts with http://, so messages travel unencrypted. Use it only on your own network.");
+      var showWarn = function (v) { warn.classList.toggle("hidden", !/^http:\/\//i.test((v || "").trim())); };
+      own.appendChild(ntField("Server address", "server", { placeholder: "https://ntfy.sh", oninput: showWarn }));
+      own.appendChild(warn);
+      own.appendChild(el("p", "muted small", "If the server needs a login, use an access token (in the ntfy web app: Account → Access tokens, or run ntfy token add on the server) or a user name and password."));
+      own.appendChild(ntField("Access token", "token", { secret: true }));
+      own.appendChild(ntField("User name", "user"));
+      own.appendChild(ntField("Password", "password", { secret: true }));
+      if (nt.c && (nt.c.token || nt.c.user || (nt.c.server && nt.c.server !== "https://ntfy.sh"))) { own.open = true; showWarn(f.server); }
+      ntStep(list, "Optional: use your own ntfy server instead of ntfy.sh.", [own]);
+    } else if (nt.service === "pushover") {
+      ntStep(list, "Make an account at pushover.net and install the Pushover app on your phone.", [ntLinks([["pushover.net", "https://pushover.net/"]])]);
+      ntStep(list, "Copy your User Key from the top of pushover.net after you log in, and paste it here.", [ntField("User Key", "user_key", { secret: true })]);
+      ntStep(list, "Create an application at pushover.net/apps/build (name it Varsto) and paste its API Token here.", [ntLinks([["Create an application", "https://pushover.net/apps/build"]]), ntField("API Token", "app_token", { secret: true })]);
+      ntStep(list, "Optional: a device name, to send only to that device.", [ntField("Device name", "device")]);
+    } else {
+      ntStep(list, "In Telegram open @BotFather, send /newbot, and choose a name and a user name that ends in bot.", [ntLinks([["@BotFather", "https://t.me/BotFather"]])]);
+      ntStep(list, "Paste the token BotFather sends you here. It looks like 123456789:AA…", [ntField("Bot token", "bot_token", { secret: true })]);
+      ntStep(list, "Open your new bot in Telegram and press Start (or send it any message). For a group, add the bot to the group and send a message there.");
+      var found = el("div", "nt-chats");
+      var find = ntButton("Find my chat", "secondary", function () {
+        found.innerHTML = "";
+        var body = f.bot_token.trim() ? { bot_token: f.bot_token.trim() } : { id: nt.c ? nt.c.id : "" };
+        if (!body.bot_token && !body.id) { ntError("Paste the bot token first."); return; }
+        find.disabled = true;
+        api("POST", "/api/notify/telegram/chats", body).then(function (r) {
+          find.disabled = false;
+          if (!r.chats.length) { found.appendChild(el("p", "muted small", "No chats yet. Send a message to your bot in Telegram, then press Find my chat again.")); return; }
+          r.chats.forEach(function (ch) {
+            var x = el("button", "secondary", ch.label); x.type = "button"; x.setAttribute("data-no-i18n", "");
+            x.onclick = function () { f.chat_id = ch.id; nt.inputs.chat_id.value = ch.id; };
+            found.appendChild(x);
+          });
+        }).catch(function (e) { find.disabled = false; ntError(e.message); });
+      });
+      ntStep(list, "Press Find my chat and choose the chat, or type the chat id yourself.", [find, found, ntField("Chat id", "chat_id", { placeholder: "123456789" })]);
+    }
+  }
+  function ntError(msg) { var e = $("nt-error"); if (!e) { return; } e.textContent = msg || ""; e.setAttribute("data-no-i18n", ""); e.classList.toggle("hidden", !msg); }
+  // What the form sends: empty secrets are left out, so the stored ones stay.
+  function ntPayload() {
+    var f = nt.f, p = { service: nt.service, name: f.name, events: f.events, details: f.details };
+    if (nt.c) { p.id = nt.c.id; }
+    var put = function (k) { if ((f[k] || "").trim() !== "") { p[k] = f[k].trim(); } };
+    if (nt.service === "ntfy") { put("topic"); put("server"); put("token"); if (nt.c) { p.user = f.user.trim(); } else { put("user"); } if (f.password) { p.password = f.password; } }
+    else if (nt.service === "pushover") { put("user_key"); put("app_token"); if (nt.c) { p.device = f.device.trim(); } else { put("device"); } }
+    else { put("bot_token"); put("chat_id"); }
+    return p;
+  }
+  function ntForm(b, act) {
+    var f = nt.f;
+    $("nt-title").textContent = nt.c ? "Edit channel" : "Add a channel";
+    var list = el("ol", "nt-steps"); ntFormSteps(list); b.appendChild(list);
+    b.appendChild(ntField("Name", "name", { hint: "Shown in this list. Messages start with the name of this device." }));
+    var test = el("div", "row nt-row"), res = el("span", "small nt-test-result");
+    var send = ntButton("Send a test message", "secondary", function () {
+      res.className = "small nt-test-result muted"; res.textContent = "Sending…"; res.removeAttribute("data-no-i18n"); send.disabled = true;
+      api("POST", "/api/notify/test", ntPayload()).then(function () { send.disabled = false; res.className = "small nt-test-result nt-good"; res.textContent = "The test message was sent. Check your phone."; })
+        .catch(function (e) { send.disabled = false; res.className = "small nt-test-result nt-bad"; res.textContent = e.message; res.setAttribute("data-no-i18n", ""); });
+    });
+    test.appendChild(send); test.appendChild(res); b.appendChild(test);
+    // What the channel receives: alerts first, each with its description.
+    var ev = el("div", "field-group nt-events"); ev.appendChild(el("span", "field-caption", "Send me a message when"));
+    var shown = "";
+    ntData.categories.forEach(function (k) {
+      if (k.level !== shown) { shown = k.level; ev.appendChild(el("p", "nt-group muted small", k.level === "alert" ? "Needs your attention" : "Good to know")); }
+      var cl = el("label", "inline"), cb = el("input"); cb.type = "checkbox"; cb.checked = f.events.indexOf(k.id) >= 0;
+      cb.onchange = function () { f.events = f.events.filter(function (x) { return x !== k.id; }); if (cb.checked) { f.events.push(k.id); } };
+      var tx = el("span", "nt-event"); tx.appendChild(el("span", "nt-event-title", k.title)); tx.appendChild(el("span", "nt-event-desc muted small", k.description));
+      cl.appendChild(cb); cl.appendChild(tx); ev.appendChild(cl);
+    });
+    b.appendChild(ev);
+    var dl = el("label", "inline"), dc = el("input"); dc.type = "checkbox"; dc.checked = f.details;
+    dc.onchange = function () { f.details = dc.checked; };
+    var dt = el("span", "nt-event"); dt.appendChild(el("span", "nt-event-title", "Include names of folders, storages and devices"));
+    dt.appendChild(el("span", "nt-event-desc muted small", "Messages pass through the service's servers unencrypted. Without names a message only says what kind of event it is and asks you to open Varsto."));
+    dl.appendChild(dc); dl.appendChild(dt); b.appendChild(dl);
+    b.appendChild(el("p", "notice warn small hidden", "")).id = "nt-error";
+    act.appendChild(nt.c ? el("span") : ntButton("Back", "secondary", function () { nt.service = null; ntRender(); }));
+    act.appendChild(el("span", "toolbar-spacer"));
+    act.appendChild(ntButton("Cancel", "secondary", ntClose));
+    var save = ntButton("Save", "", function () {
+      ntError(""); save.disabled = true;
+      api("POST", "/api/notify/channel", ntPayload()).then(function () { save.disabled = false; ntClose(); loadNotify(); })
+        .catch(function (e) { save.disabled = false; ntError(e.message); });
+    });
+    save.className = ""; act.appendChild(save);
+  }
+
   function loadLogs() {
     if (document.body.dataset.view !== "app") { return; }
     api("GET", "/api/logs").then(renderLogs).catch(function (e) { $("log-usage").textContent = e.message; });
