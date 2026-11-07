@@ -69,6 +69,9 @@ DOCS = [
     ("TRADEMARK.md", "trademark", "Trademark policy (draft)", "Project"),
     ("data/providers/README.md", "provider-price-data", "Provider price data", "Project"),
     ("docs/testing/mobile.md", "mobile-testing", "Mobile testing guide", "Project"),
+    ("docs/testing/lab.md", "lab-runbook", "VM lab runbook", "Project"),
+    ("docs/testing/benchmarks.md", "benchmarks-howto", "Benchmarks and NAT tests", "Project"),
+    ("BUILDING.md", "building", "Building Varsto", "Project"),
 ]
 
 # Search snippets. The generic "Varsto documentation: <title>" text was what

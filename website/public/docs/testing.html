@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Testing</h1>
-<p class="note">From <code>TESTING.md</code> in the repository, rendered 2026-11-06. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>TESTING.md</code> in the repository, rendered 2026-11-07. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <p>Varsto is tested in layers. The goal is that cheaper AI systems and scripts can run most tests from written instructions, while a human covers what cannot be automated (Windows, macOS, Android and iOS on real devices).</p>
 <blockquote>
 <p>Alpha (0.0.1-alpha.16): the Rust core, the CLI, the background service with tray and web interface, and the Android, macOS and iOS (Simulator) shells exist (<code>crates/</code>, <code>apps/</code>). CI builds and tests all of them on GitHub-hosted runners; the VM levels below are prepared for what CI does not cover.</p>
@@ -80,7 +80,58 @@
 <li>Mobile tests: see <a href="mobile-testing.html">docs/testing/mobile.md</a>. Devices: <a href="./">docs/testing/devices.md</a>.</li>
 <li>Manual tests on Windows, macOS, Android and iOS: see <a href="./">docs/testing/manual</a>.</li>
 </ol>
-<p>The matrix is defined in <a href="./">tests/matrix.yaml</a>.</p>
+<p>The matrix is defined in <a href="./">tests/matrix.yaml</a>. That file is the original plan (a draft from the repository's first commit), not a description of what runs today. What is implemented, as of 0.0.1-alpha.16:</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 Unit and property tests</td>
+<td>Implemented: <code>cargo test --workspace</code> (run by CI on Linux and macOS).</td>
+</tr>
+<tr>
+<td>2 Integration with storage back ends</td>
+<td>Partly: local folder, rclone remotes and an S3 server (<code>rclone serve s3</code>, started by <code>remote_storages.rs</code> and <code>s3_reads.rs</code> and by the lab). MinIO, an SFTP server and an S3 server that emulates storage classes and restore delays are not set up as test fixtures in this repository.</td>
+</tr>
+<tr>
+<td>3 Deterministic simulation with fault injection</td>
+<td>No separate simulation harness. Faults are covered by in-process tests and by lab scenarios (<code>crash-during-push</code>, <code>blackholed-network</code>, <code>storage-outage-and-recovery</code>, <code>clock-two-days-ahead</code>, <code>clock-two-days-behind</code>).</td>
+</tr>
+<tr>
+<td>4 Multi-device scenarios in virtual networks</td>
+<td>Implemented: the VM lab, 59 scenarios. The scenario names in <code>tests/matrix.yaml</code> (<code>lan-only-sync</code>, <code>nat-types</code>, ...) are not the lab's names; the lab's list is <code>scenarios.py --list</code>.</td>
+</tr>
+<tr>
+<td>5 Removable disks</td>
+<td>Implemented as lab scenarios (<code>disk-pool-hotplug</code>, <code>disk-init</code>, <code>disk-fetch-plan</code>, <code>staged-move-to-pool</code>, <code>mailbox-offline-disk</code>, <code>scrub</code>) and core tests (<code>disk_pool.rs</code>, <code>mailbox.rs</code>, ...). <code>disk-pool-hotplug</code> attaches and detaches virtual disks on a running VM. Unplug during a write, a full disk and a cloned disk are not covered by a named lab scenario (not checked in the core tests).</td>
+</tr>
+<tr>
+<td>6 Upgrade, soak, performance</td>
+<td>Partly: <code>upgrade-from-alpha-15</code> (there is no upgrade path from format 2; it checks the refusal) and the scale scenarios in the lab; measurements with <a href="benchmarks-howto.html">docs/testing/benchmarks.md</a>. I found no soak test.</td>
+</tr>
+<tr>
+<td>7 CLI contract tests</td>
+<td>Partly: <code>crates/varsto-cli/tests</code> run the built binary with <code>--json</code>. I found no JSON schema check.</td>
+</tr>
+<tr>
+<td>8 Security</td>
+<td>Partly: <code>cargo audit</code> and <code>cargo deny check</code> in CI. Fuzzing, secret scanning and a reproducible-build comparison are not set up.</td>
+</tr>
+<tr>
+<td>9 Mobile</td>
+<td>CI runs the Android APK in an emulator and the iOS app in the Simulator, with screenshots; see <a href="mobile-testing.html">docs/testing/mobile.md</a>.</td>
+</tr>
+<tr>
+<td>10 Manual</td>
+<td>Checklists exist in <a href="./">docs/testing/manual</a>; the results of real-device runs are not recorded in the repository.</td>
+</tr>
+</tbody>
+</table>
+<p>The distribution list in <code>tests/matrix.yaml</code> is also a plan: only <code>debian-stable</code> on x86_64 has an image in <code>scripts/test</code>, and the lab uses Debian 13.</p>
 <p>The rendezvous service (<a href="./">docs/rendezvous.md</a>) is tested in three places. <code>crates/varsto-rendezvous/tests</code> runs the server in process (<code>Server::spawn_for_tests</code>) against the core client. The core's integration tests (next to <code>tests/nat.rs</code>) run two engines in one process against that server: record publish, fetch and merge, observed address, punch coordination, relayed fetch, relayed pairing, and "service unreachable: LAN and storages still work". The interface side is covered by the translation test (<code>interface_translations_cover_the_page</code>, every new string in fi and sv), the API shape test for <code>/api/p2p</code> (<code>rendezvous</code> and the <code>rendezvous_on</code> / <code>rendezvous_url</code> settings) and <code>node --check crates/varsto-cli/ui/app.js</code>. The screenshot fixtures (<code>scripts/screenshots/example_data.py</code>) show the rendezvous card and a peer <code>relayed via rendezvous</code> with the invented address <code>https://rv.example.org</code>. Lab scenarios run the service on the lab host with the two devices behind two NAT networks; any scenario that must work without it runs with the service off.</p>
 <h2 id="running-tests-linux">Running tests (Linux)</h2>
 <h3 id="rust-levels-1-and-2-no-vm-needed">Rust (levels 1 and 2, no VM needed)</h3>
@@ -99,6 +150,13 @@
 <h3 id="help-page-in-a-browser-scriptstestui-helppy">Help page in a browser (<code>scripts/test/ui-help.py</code>)</h3>
 <p><code>python3 scripts/test/ui-help.py target/debug/varsto &lt;screenshot dir&gt;</code> runs a throwaway vault and service in a temporary directory and drives the interface in Chromium (Playwright): the Help page with no vault, with a vault but no storage, with a storage and a folder, and locked, in English, Finnish and Swedish. It checks the first step, that the step buttons lead to the right form or dialog and that the "?" in the page header opens the page's guide, and saves screenshots.</p>
 <h3 id="vm-lab-scriptstestlab">VM lab (<code>scripts/test/lab</code>)</h3>
+<p>The step-by-step runbook is <a href="lab-runbook.html">docs/testing/lab.md</a>: host prerequisites, every <code>lab.py</code> command and <code>scenarios.py</code> option, the full run from nothing, results, cleanup and troubleshooting. <strong>A release needs every scenario</strong>, not only the ones for changed areas. This section is the summary.</p>
+<p>Quick start:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/lab.py up <span class="kw">&amp;&amp;</span> <span class="ex">python3</span> scripts/test/lab/lab.py build</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/lab.py services <span class="kw">&amp;&amp;</span> <span class="ex">python3</span> scripts/test/lab/lab.py install-bin</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/scenarios.py            <span class="co"># all scenarios; exit code = number that failed</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> scripts/test/lab/lab.py services-stop <span class="kw">&amp;&amp;</span> <span class="ex">python3</span> scripts/test/lab/lab.py down</span></code></pre></div>
+<p>(The rendezvous scenarios also need a host build of <code>varsto-rendezvous</code> in <code>&lt;lab dir&gt;/bin/</code>; see the runbook.)</p>
 <p><code>scripts/test/lab/lab.py up</code> builds a small internet on one Linux host with libvirt: a WAN in a documentation range with an S3 server (<code>rclone serve s3</code>) and STUN, a home network behind a cone NAT router, an office network behind a symmetric NAT router, and a public device. <code>lab.py build</code> compiles a static binary in a build VM, <code>install-bin</code> puts it on every device, and <code>scenarios.py</code> plays 59 scenarios (<code>SCENARIOS</code> in <code>scripts/test/lab/scenarios.py</code>; <code>scenarios.py --list</code> prints them and <code>--check</code> is a self-check that needs no VM) against them, on storage format 3: setup and pairing (six words on both sides), sync and conflicts, selective sync, repair of damaged and missing packs, policies, Strongrooms, organizations and removal, revocation, the approval of joining devices (request, six words, approve, deny, viewer, a service that never approves), recovery escrow (recovery words, a lost owner replaced), removing a participant from a folder and a device from the vault, peer-to-peer on the LAN, through cone and symmetric NAT and during a slow upload, sharing, disk pools and the mailbox for an unplugged disk, no upgrade from the released alpha.15 (its vault is refused with a message to recreate it; a vault of the new format is refused by alpha.15; the way forward works), storage outage, a black-holed network, a crash during a push, clock skew, scale (20 000 files and 1 GiB, and many files in packs of every size class), garbage collection that waits for acknowledgements, a rolled-back ledger on a storage (the rollback warning), backups (restored on another device after an approval, a snapshot expired after the clock moves on), live activity, the bit-rot check, whole drives for disk pools (<code>disk init</code>, the fetch plan), restic, and forwarding (a selective device carries a phone's blocks from the phone to a storage) with the live board, pairing with a wrong address, and ledger loss (a device whose ledger directory was deleted restored from the bucket; the ledger lost from the bucket and both devices rebuilt by the service), torrents and YouTube channels through a spool directory (fake transmission and yt-dlp), and working offline (one of two storages black-holed during a sync and healed afterwards, a home LAN without internet that fetches from a peer of the saved directory, a pairing whose new device cannot reach the storage, a folder approval made offline and uploaded later), and the rendezvous service on the lab host (<code>lab.py services</code> starts <code>&lt;dir&gt;/bin/varsto-rendezvous</code>, a host build of <code>-p varsto-rendezvous</code>; every other scenario runs with <code>VARSTO_RENDEZVOUS=off</code>): both NATs observed, the symmetric NAT reached without a peer relay, the relay when the office router drops UDP, pairing across networks by code and by link (<code>rv=</code>, <code>rvu=</code>), and the server stopped. <code>lab.py release</code> builds the Linux, Windows and Android release packages in the build VM.</p>
 <h4 id="lab-logs">Lab logs</h4>
 <ul>
@@ -107,7 +165,8 @@
 <li>The logs contain file and folder names from the generated test data, device names and storage endpoints, but never keys, passphrases or recovery words.</li>
 <li><code>test-results/</code> is git-ignored, and CI does not upload these logs as artifacts.</li>
 </ul>
-<p>The rest of this section describes the <code>smoke</code> suite. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.</p>
+<h3 id="smoke-suite-provision-vmsh-run-suitesh">Smoke suite (<code>provision-vm.sh</code>, <code>run-suite.sh</code>)</h3>
+<p>This part describes the <code>smoke</code> suite, which is separate from the VM lab. The smoke suite checks that the VM boots, accepts SSH, finished cloud-init, has a sane clock and has no route out of the test network.</p>
 <h3 id="prerequisites">Prerequisites</h3>
 <ul>
 <li>Linux with libvirt and QEMU/KVM (<code>virsh</code>, <code>qemu-img</code>, <code>/dev/kvm</code>), <code>ssh</code>, <code>ssh-keygen</code>, <code>curl</code>, <code>sha512sum</code>.</li>
@@ -153,6 +212,14 @@
 <p><code>destroy-vm.sh</code> exits 0 even if the VM is already gone. If <code>provision-vm.sh</code> fails it cleans up after itself.</p>
 <h3 id="result-format">Result format</h3>
 <p><code>smoke.json</code> has the fields <code>suite</code>, <code>vm</code>, <code>commit</code>, <code>result</code> (<code>pass</code> or <code>fail</code>), <code>started_utc</code>, <code>finished_utc</code> and <code>tests</code> (a list of <code>name</code>, <code>status</code>, <code>seconds</code>, <code>message</code>). <code>smoke.junit.xml</code> is standard JUnit XML.</p>
+<h3 id="other-test-tools">Other test tools</h3>
+<ul>
+<li>Interface tests in Chromium (Playwright; <code>pip install playwright</code> and <code>playwright install chromium</code>, or <code>CHROMIUM=/path/to/chromium</code>): <code>scripts/test/ui-help.py</code>, <code>ui-no-reload.py</code> (the page does not reload when the service restarts), <code>viz-first-paint.py</code> (the visualization page never draws invented content) and <code>qr-scan-browser.py</code> (QR scanner with a fake camera). Each takes a varsto binary and a work directory; read the header of the script for the exact arguments.</li>
+<li>Page rules in plain Node: <code>node scripts/test/import-ui.test.js</code> and <code>node scripts/test/viz-rules.test.js</code>.</li>
+<li><code>scripts/data/validate-providers.sh [--max-age-days N] [--fail-on-stale]</code> validates <code>data/providers/*.json</code> against its schema and warns about stale prices.</li>
+<li>Benchmarks and real-NAT tests on rented machines (<code>scripts/bench</code>, <code>scripts/nat-test</code>): <a href="benchmarks-howto.html">docs/testing/benchmarks.md</a>. They produce numbers, not pass or fail.</li>
+<li>CI runs the Rust gates, the site-tool tests and the screenshot jobs on every pull request and push to <code>main</code>; what each job does is in <a href="building.html">BUILDING.md</a>.</li>
+</ul>
 <h2 id="results-and-reports">Results and reports</h2>
 <p>Use <a href="./">docs/testing/report-template.md</a>. Automated and manual runs use the same fields so reports can be combined.</p>
 <h2 id="release-gates">Release gates</h2>

@@ -1,4 +1,7 @@
 # Test matrix (draft). Every entry must be machine-decidable.
+# This is the original plan, not what runs today: TESTING.md ("Test levels") says
+# which levels are implemented. The lab's scenarios are listed by
+# `scripts/test/lab/scenarios.py --list`, not by the names below.
 version: 1
 limits:
   max_runtime_minutes: 120
