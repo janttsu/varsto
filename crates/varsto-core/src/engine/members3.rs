@@ -1189,4 +1189,15 @@ impl Engine {
         })?;
         self.f3_kit_text(k1)
     }
+
+    /// The recovery kit for `varsto recovery kit`: the recovery words given,
+    /// else this session's copy, else a kit that says in capitals that they
+    /// are missing. With `shares`, each word set is also split 2 of 3.
+    pub fn recovery_kit_text_with(
+        &self,
+        k1: Option<&crate::membership3::RecoveryKey>,
+        shares: bool,
+    ) -> Result<String> {
+        self.f3_kit_text_with(k1.or(self.f3.recovery.as_ref()), shares)
+    }
 }

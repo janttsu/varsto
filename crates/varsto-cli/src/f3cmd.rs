@@ -280,17 +280,42 @@ mod imp {
         })
     }
 
-    pub fn recovery_kit(home: &Path, new: bool) -> Result<()> {
+    /// `recovery kit`: the vault words and the recovery words. The recovery
+    /// words come from `--new-recovery-key` (a fresh key), `--recovery-words`
+    /// (asked for, hidden, or VARSTO_RECOVERY_WORDS or a pipe), the copy
+    /// this session holds (`unlock --with-recovery-key`), or an optional
+    /// prompt on a terminal. Without them the kit says so in capitals: the
+    /// vault words alone restore no content (format 3), so a printout must
+    /// never pass for a complete kit.
+    pub fn recovery_kit(home: &Path, new: bool, ask: bool, shares: bool) -> Result<()> {
         let e = crate::open_engine(home)?;
         let (k1, fresh) = if new {
-            (RecoveryKey::generate(), true)
+            (Some(RecoveryKey::generate()), true)
+        } else if ask {
+            (Some(recovery_words_input(false, None)?), false)
+        } else if e.has_recovery_key() {
+            (None, false)
         } else {
-            (recovery_words_input(false, None)?, false)
+            (
+                recovery_words_optional(
+                    "Recovery words (24) for the kit (Enter: print the vault words only): ",
+                )?,
+                false,
+            )
         };
-        print!("{}", e.f3_kit_text(&k1)?);
+        let missing = k1.is_none() && !e.has_recovery_key();
+        print!("{}", e.recovery_kit_text_with(k1.as_ref(), shares)?);
+        if let Some(note) = crate::restic::kit_note(home) {
+            print!("{note}");
+        }
+        varsto_core::recovery_guide::record_kit_printed(home, e.key_epoch(), shares)?;
         if fresh {
             println!("\nThis recovery key is new and was not stored anywhere. Folders get recovery copies under it with `varsto recovery escrow` (it asks for these words).");
         }
+        if missing {
+            eprintln!("warning: the recovery words are not on this printout; the vault words alone restore no file content. Print the kit with them: `varsto recovery kit --recovery-words`.");
+        }
+        println!("\nThe words alone are not the whole recovery package: `varsto recovery guide` lists what else to keep (storage keys, disks, security keys) and how to restore on a new device.");
         Ok(())
     }
 
@@ -335,16 +360,29 @@ mod imp {
         file: Option<&Path>,
         prompt: bool,
     ) -> Result<Option<RecoveryKey>> {
-        use std::io::IsTerminal;
         if let Some(text) = recovery_words_given(file)? {
             return RecoveryKey::from_words(&text).map(Some);
         }
-        if !prompt || !std::io::stdin().is_terminal() {
+        if !prompt {
             return Ok(None);
         }
-        let text = zeroize::Zeroizing::new(rpassword::prompt_password(
+        recovery_words_optional(
             "Recovery words (24) for the folder's recovery copy (Enter: write it later with `varsto recovery escrow`): ",
-        )?);
+        )
+    }
+
+    /// The recovery words when they are at hand: VARSTO_RECOVERY_WORDS, else
+    /// asked on a terminal with `prompt`, where an empty answer means none.
+    /// Without a terminal and without the variable there are none.
+    fn recovery_words_optional(prompt: &str) -> Result<Option<RecoveryKey>> {
+        use std::io::IsTerminal;
+        if let Some(text) = recovery_words_given(None)? {
+            return RecoveryKey::from_words(&text).map(Some);
+        }
+        if !std::io::stdin().is_terminal() {
+            return Ok(None);
+        }
+        let text = zeroize::Zeroizing::new(rpassword::prompt_password(prompt)?);
         if text.trim().is_empty() {
             return Ok(None);
         }
