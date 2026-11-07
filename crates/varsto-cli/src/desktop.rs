@@ -2587,6 +2587,18 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 .get("paused")
                 .and_then(|b| b.as_bool())
                 .unwrap_or(true);
+            // The user's pause is kept over a restart; a command's own
+            // pause for its duration (`temporary`, `drives::ServicePause`)
+            // is not.
+            let temporary = input
+                .get("temporary")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false);
+            if !temporary {
+                if let Err(e) = service::save_paused(&st.home, paused) {
+                    log::warn!("could not save the pause of the service: {e}");
+                }
+            }
             // A job (a sync) has the service's state out: applied when it
             // hands it back; the summary says so at once.
             if let Some(b) = st.busy.as_mut() {
