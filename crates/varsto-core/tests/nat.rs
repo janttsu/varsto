@@ -59,7 +59,16 @@ fn seed(lab: &Lab, who: &str) -> (Engine, String, Vec<u8>) {
     a.chunker = ChunkerParams::SMALL;
     a.add_storage(lab.storage.clone()).unwrap();
     a.add_folder("docs", &lab.dir(who)).unwrap();
-    let big: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+    // Bytes without repeats (a small LCG): every block is distinct, so the
+    // pull must move all of them over the link instead of copying repeats
+    // it already wrote.
+    let mut x = 0x2545_f491u32;
+    let big: Vec<u8> = (0..200_000u32)
+        .map(|_| {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (x >> 24) as u8
+        })
+        .collect();
     fs::write(lab.dir(who).join("big.bin"), &big).unwrap();
     fs::write(lab.dir(who).join("note.txt"), b"over quic").unwrap();
     a.push("docs").unwrap();
