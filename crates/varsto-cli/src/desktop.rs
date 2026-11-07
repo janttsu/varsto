@@ -3646,14 +3646,16 @@ fn api_unlocked(
             // engine out of the state: the answer comes at once. Asked for
             // by hand: storages resting after failures are tried again.
             engine.retry_storages_now();
+            engine.retry_peers_now();
             service.request_sync();
             Ok(json!({"ok": true, "queued": true}))
         }
         (Method::Post, "/api/sync") => {
             // Runs with the engine taken out of the state (`run_api`):
             // status, pause, lock and quit answer meanwhile. "Sync now": a
-            // storage resting after failures is tried again at once.
+            // storage or peer resting after failures is tried again at once.
             engine.retry_storages_now();
+            engine.retry_peers_now();
             let folder = opt(input, "folder");
             varsto_core::events::publish("sync.started", json!({"reason": "requested", "folder": folder}));
             let reports = engine.sync(folder.as_deref())?;

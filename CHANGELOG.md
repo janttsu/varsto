@@ -25,6 +25,7 @@ spec still names them because sections were written as the work was done.
 - A pull copies the blocks this device already has instead of fetching them: the unchanged blocks of a changed file come from its previous version on disk, a renamed or moved file or directory from the old files (or their trash copies), and duplicate files fetch each distinct block once. Every block read locally is checked against its chunk id; one that does not match is fetched. A directory that a remote deletion or rename leaves empty is removed. The pull report counts the copied blocks in `chunks_reused_local` and `bytes_reused_local`, apart from `chunks_downloaded` (spec section 84).
 - The daily workflow signs with the daily key from the `daily` environment, which GitHub hands only to runs whose workflow ref is `main`: a manual run from another branch runs the build jobs, and GitHub refuses the package job before its first step. The repository's `main` branch is protected by a ruleset (no deletion, no force push, changes only through pull requests, no bypass), so the workflow token cannot push to it. Both settings are made by hand (ops/site/README.md).
 - Website: the alpha warning is marked so a search engine does not quote it. Page titles and descriptions name the product and the document. The home page, the docs index and the older release notes point developers at the GitHub repository.
+- Readers help each other: a device pulling a folder serves each file it has put in place to other devices at once, not only after its sync ends, and block requests are shared between the peers that hold the blocks by their speed and the requests each has in flight, instead of all going to the first one; a peer that lacked the blocks is asked again after a short, growing wait (spec sections 15 and 77.8).
 
 ### Fixed
 
@@ -56,6 +57,9 @@ spec still names them because sections were written as the work was done.
 - In a conflict that another device's version wins, the file here moves to its conflict copy only once the winner is downloaded. A winner that could not be fetched used to leave the path empty, and the next push published a deletion of it.
 - A file that grows or shrinks while the scan reads it is no longer published with a size its blocks do not hold, which made every other device refuse the folder's whole file list; it waits for the next scan.
 - With `permissions` off for a folder, a downloaded file gets this device's default mode instead of the mode recorded in the vault.
+- A large pull from a peer no longer stops part-way after one failed request: the peer rested a minute and every block asked for meanwhile was reported unavailable without asking it. A peer that was answering now rests a second, doubling per failure, and a block no other peer has waits for one more try of it (spec 77.8).
+- A sync right after a peer restarted asks it again instead of reporting every file unavailable: a newer peer record, a LAN beacon from it or an explicit sync ends its rest.
+- Devices that are gone (their records stay in the vault) cost less: one that never answered rests a minute, doubling up to 15 minutes, and the head exchange asks up to eight peers at once, so they cost one timeout together instead of one each.
 
 ## [0.0.1-alpha.16] - 2026-11-04
 

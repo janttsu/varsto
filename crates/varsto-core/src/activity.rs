@@ -949,6 +949,7 @@ mod tests {
                 relay_via: Vec::new(),
                 nat: crate::p2p::stun::Nat::Unknown,
                 reachable: false,
+                seq: 0,
             }],
             None,
         ));

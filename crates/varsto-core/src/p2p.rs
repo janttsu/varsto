@@ -93,9 +93,90 @@ pub struct Snapshot {
     /// The local ledger directory, where the batches proved and handed
     /// over on `/p2p/ledger/` are read from.
     pub ledger_dir: Option<PathBuf>,
+    /// Blocks of files a pull wrote since this snapshot was built, served
+    /// like `pieces` (`FreshPieces`).
+    pub fresh: Arc<FreshPieces>,
 }
 
 crate::redacted_opaque!(Snapshot);
+
+/// Pieces of the files a pull has written since the snapshot was last
+/// built, with the folder keys to seal them: served like the snapshot's
+/// own pieces, so another device pulling the same folder at the same time
+/// can fetch from this one the blocks it already wrote instead of asking
+/// the writer for everything (swarming). The engine adds every file it
+/// puts in place during a pull and empties the set when it builds the
+/// next snapshot, which then covers those files. A piece is checked
+/// against its chunk id when it is read, as the snapshot's are, so a file
+/// changed or moved since is never served.
+#[derive(Default)]
+pub struct FreshPieces {
+    inner: Mutex<FreshInner>,
+}
+
+#[derive(Default)]
+struct FreshInner {
+    pieces: std::collections::HashMap<ObjectName, Piece>,
+    keys: BTreeMap<FolderId, Arc<FolderKeys>>,
+}
+
+crate::redacted_opaque!(FreshPieces);
+
+/// At most this many fresh pieces are kept (about 200 bytes each); past
+/// it, new ones wait for the next snapshot.
+const FRESH_MAX: usize = 1 << 20;
+
+impl FreshPieces {
+    /// Whether the keys of `folder` are held already.
+    pub fn has_keys(&self, folder: &FolderId) -> bool {
+        self.inner.lock().unwrap().keys.contains_key(folder)
+    }
+
+    /// Serve `pieces` of `folder` (keys given once per folder; without
+    /// them, pieces of a folder whose keys were never given are dropped).
+    pub fn add(
+        &self,
+        folder: &FolderId,
+        keys: Option<FolderKeys>,
+        pieces: impl IntoIterator<Item = (ObjectName, Piece)>,
+    ) {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(k) = keys {
+            g.keys.insert(folder.clone(), Arc::new(k));
+        }
+        if !g.keys.contains_key(folder) {
+            return;
+        }
+        for (name, piece) in pieces {
+            if g.pieces.len() >= FRESH_MAX {
+                break;
+            }
+            g.pieces.insert(name, piece);
+        }
+    }
+
+    /// Forget every piece (a new snapshot covers them).
+    pub fn clear(&self) {
+        let mut g = self.inner.lock().unwrap();
+        g.pieces.clear();
+        g.keys.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.lock().unwrap().pieces.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn get(&self, name: &ObjectName) -> Option<(Piece, Arc<FolderKeys>)> {
+        let g = self.inner.lock().unwrap();
+        let piece = g.pieces.get(name)?.clone();
+        let keys = g.keys.get(&piece.folder)?.clone();
+        Some((piece, keys))
+    }
+}
 
 impl Snapshot {
     /// Produce the ciphertext object for `name`, from a stored copy or by
@@ -132,12 +213,28 @@ impl Snapshot {
         if let Some(bytes) = served::get(name) {
             return Ok(Some(bytes.to_vec()));
         }
-        let Some(piece) = self.pieces.get(name) else {
-            return Ok(None);
-        };
-        let Some(fk) = self.folder_keys.get(&piece.folder) else {
-            return Ok(None);
-        };
+        if let Some(piece) = self.pieces.get(name) {
+            if let Some(fk) = self.folder_keys.get(&piece.folder) {
+                if let Some(ct) = self.seal_piece(name, piece, fk)? {
+                    return Ok(Some(ct));
+                }
+            }
+        }
+        // A block of a file a pull wrote after this snapshot was built.
+        match self.fresh.get(name) {
+            Some((piece, fk)) => self.seal_piece(name, &piece, &fk),
+            None => Ok(None),
+        }
+    }
+
+    /// The object of `piece`, read from its file and sealed again; `None`
+    /// when the file no longer holds the chunk there.
+    fn seal_piece(
+        &self,
+        name: &ObjectName,
+        piece: &Piece,
+        fk: &FolderKeys,
+    ) -> Result<Option<Vec<u8>>> {
         let mut f = match std::fs::File::open(&piece.path) {
             Ok(f) => f,
             Err(_) => return Ok(None), // moved or freed since the snapshot
@@ -855,6 +952,9 @@ pub struct PeerInfo {
     pub relay_via: Vec<DeviceId>,
     pub nat: stun::Nat,
     pub reachable: bool,
+    /// The seq of the record this came from: a newer one (the device
+    /// started again, or moved) ends a rest (`Peers::inherit`).
+    pub seq: u64,
 }
 
 impl PeerInfo {
@@ -1063,10 +1163,15 @@ pub struct Peers {
     pub me: DeviceId,
     pub peers: Vec<PeerInfo>,
     quic: Option<Arc<quic::Node>>,
-    /// Per TCP address: did the last attempt answer, and when.
-    state: Mutex<BTreeMap<SocketAddr, (bool, Instant)>>,
+    /// Per TCP address: how the last attempt went (`AddrState`).
+    state: Mutex<BTreeMap<SocketAddr, AddrState>>,
     /// Per device: the last route (or failure), the status it answered, and when.
     routes: Mutex<BTreeMap<DeviceId, Attempt>>,
+    /// Per device: failures in a row, its rest, its last answer (`Health`).
+    health: Mutex<BTreeMap<DeviceId, Health>>,
+    /// Held while `get` tries a resting peer once more (`revive`), so that
+    /// one request does it and the others wait for its outcome.
+    reviving: Mutex<()>,
     pub timeout: Duration,
     /// Where downloads are counted: the QUIC node's counters when it runs.
     traffic: Arc<Traffic>,
@@ -1137,23 +1242,156 @@ struct ObjectStats {
     miss_streak: u32,
     /// Smoothed seconds per successful object request.
     secs: f64,
+    /// Object requests to it in flight now.
+    inflight: u32,
+    /// After a miss: when it is asked first again (`PROBE_BASE`), to see
+    /// whether it holds the objects by now.
+    probe_at: Option<Instant>,
 }
 
 impl ObjectStats {
     /// Lower is asked first. A miss streak outweighs any speed difference;
-    /// within the same streak, faster peers go first; a peer never measured
-    /// sits in the middle so that it gets tried.
-    fn rank(&self) -> (u32, u64) {
-        let speed = if self.secs > 0.0 {
-            (self.secs * 1e6) as u64
-        } else {
-            50_000
-        };
-        (self.miss_streak.min(8), speed)
+    /// among peers with the same streak the one expected to answer first
+    /// goes first: seconds per object times the requests it has in flight
+    /// plus one, so several peers that hold the objects share the requests
+    /// by their speed. A peer whose probe is due (one that lacked the last
+    /// objects, or was never measured) goes first, once per probe.
+    fn rank(&self, now: Instant) -> (u32, u64) {
+        if self.probe_due(now) {
+            return (0, 0);
+        }
+        let secs = if self.secs > 0.0 { self.secs } else { 0.05 };
+        let wait = secs * f64::from(self.inflight.saturating_add(1));
+        (self.miss_streak.min(8), (wait * 1e6) as u64)
+    }
+
+    fn probe_due(&self, now: Instant) -> bool {
+        (self.miss_streak > 0 || self.secs <= 0.0) && self.probe_at.is_none_or(|t| now >= t)
+    }
+
+    /// The wait before the next probe after `miss_streak` misses in a row.
+    fn probe_wait(&self) -> Duration {
+        (PROBE_BASE * (1u32 << self.miss_streak.clamp(1, 8).saturating_sub(1))).min(PROBE_MAX)
     }
 }
 
 const ROUTE_TTL: Duration = Duration::from_secs(60);
+/// A peer that answered less than `ROUTE_TTL` ago and then failed is having
+/// a blip (a restart, a closed connection, one lost handshake), not gone:
+/// it rests this long, doubling per failure in a row up to `ROUTE_TTL`. A
+/// minute's rest after one failed request used to end a pull part-way:
+/// every block asked for in that minute was given up without asking.
+const BLIP_REST: Duration = Duration::from_secs(1);
+/// A peer that never answered rests `ROUTE_TTL` after its first failure,
+/// doubling per failure in a row up to this: a device that left the vault
+/// long ago (its records stay) costs an attempt now and then, not one per
+/// minute. A sign of life, a new record or an explicit sync ends the rest.
+const DEAD_REST_MAX: Duration = Duration::from_secs(15 * 60);
+/// When no peer that is not resting had an object, `Peers::get` tries a
+/// peer that rests after a blip once more, one request at a time, at most
+/// this often (doubling per failure in a row); requests that arrive while
+/// it is tried wait for that answer.
+const REVIVE_GAP: Duration = Duration::from_secs(1);
+/// Failures in a row up to which `Peers::get` waits for the next revival
+/// instead of giving the object up at once, and `Peers::wake` ends the rest
+/// of a peer that never answered.
+const REVIVE_WAIT_FAILURES: u32 = 2;
+/// `REVIVE_WAIT_FAILURES`, for the tests of `v3`.
+#[cfg(test)]
+pub(crate) fn tests_revive_wait_failures() -> u32 {
+    REVIVE_WAIT_FAILURES
+}
+
+/// Requests `Peers::ask_each` has in flight at once.
+const ASK_PARALLEL: usize = 8;
+/// A peer that lacked the objects asked lately is asked first again after
+/// this long, doubling per miss in a row up to `PROBE_MAX`: another device
+/// pulling the same folder holds more of it every second.
+const PROBE_BASE: Duration = Duration::from_millis(250);
+const PROBE_MAX: Duration = Duration::from_secs(30);
+
+/// How reachable one device has been (`Peers::health`).
+#[derive(Clone, Debug, Default)]
+struct Health {
+    /// Not asked before this (unless woken, or revived by `get`).
+    rest_until: Option<Instant>,
+    /// Attempts in a row in which no route reached it.
+    failures: u32,
+    /// When it last answered.
+    last_ok: Option<Instant>,
+    /// When `get` (or a sign of life) last ended or tried its rest.
+    revived: Option<Instant>,
+}
+
+impl Health {
+    fn resting(&self, now: Instant) -> bool {
+        self.rest_until.is_some_and(|t| now < t)
+    }
+
+    fn answered(&mut self) {
+        *self = Health {
+            last_ok: Some(Instant::now()),
+            ..Health::default()
+        };
+    }
+
+    /// Answered within `ROUTE_TTL` of `now`.
+    fn was_live(&self, now: Instant) -> bool {
+        self.last_ok
+            .is_some_and(|t| now.saturating_duration_since(t) < ROUTE_TTL)
+    }
+
+    /// No route reached it: rest by how it has been doing (see
+    /// `BLIP_REST`, `DEAD_REST_MAX`); `refused` (it refused our
+    /// certificate, so it reads our record soon) rests `REFUSED_REST`.
+    fn failed(&mut self, refused: bool) {
+        let now = Instant::now();
+        self.failures = self.failures.saturating_add(1);
+        let doubling = 1u32 << (self.failures.min(11) - 1);
+        let rest = if refused {
+            REFUSED_REST
+        } else if self.was_live(now) {
+            (BLIP_REST * doubling).min(ROUTE_TTL)
+        } else if self.last_ok.is_some() {
+            ROUTE_TTL
+        } else {
+            (ROUTE_TTL * doubling).min(DEAD_REST_MAX)
+        };
+        self.rest_until = Some(now + rest);
+    }
+}
+
+/// Per TCP address: did the last attempt answer, when, and when it last
+/// answered. A failed address rests `ROUTE_TTL`, or `BLIP_REST` when it
+/// answered within `ROUTE_TTL` before the failure.
+#[derive(Clone, Copy, Debug)]
+struct AddrState {
+    ok: bool,
+    at: Instant,
+    last_ok: Option<Instant>,
+}
+
+impl AddrState {
+    fn resting(&self) -> bool {
+        if self.ok {
+            return false;
+        }
+        let blip = self
+            .last_ok
+            .is_some_and(|t| self.at.saturating_duration_since(t) < ROUTE_TTL);
+        self.at.elapsed() < if blip { BLIP_REST } else { ROUTE_TTL }
+    }
+}
+
+/// How one object request to one peer went (`Peers::ask_object`).
+enum Lookup {
+    Got(Vec<u8>),
+    /// It answered that it does not hold the object (404).
+    Lacks,
+    /// No answer, or an answer that is not the object.
+    Failed,
+}
+
 /// What routes are raced with (`Peers::race`): small, and answered by any
 /// device of the vault.
 const RACE_PATH: &str = "/p2p/info";
@@ -1277,6 +1515,8 @@ impl Peers {
             quic,
             state: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(BTreeMap::new()),
+            health: Mutex::default(),
+            reviving: Mutex::new(()),
             timeout: Duration::from_millis(1500),
             traffic,
             objects: Mutex::default(),
@@ -1324,25 +1564,36 @@ impl Peers {
     /// Carry the remembered routes and address states over from the table
     /// this one replaces, so a rebuild (every sync) forgets nothing.
     /// A peer found unreachable whose record has changed since (new
-    /// addresses, or a relay it registered with) is tried again at once
-    /// instead of resting: the new route may be the one that works.
+    /// addresses, a relay it registered with, or a newer record: it
+    /// started again and published) is tried again at once instead of
+    /// resting: the new route may be the one that works.
     pub fn inherit(&self, previous: &Peers) {
-        let mut routes = previous.routes.lock().unwrap().clone();
-        routes.retain(|dev, (route, _, _)| {
-            if route.is_some() {
-                return true;
-            }
+        let changed = |dev: &DeviceId| {
             let old = previous.peers.iter().find(|p| &p.device == dev);
             let new = self.peers.iter().find(|p| &p.device == dev);
             match (old, new) {
                 (Some(o), Some(n)) => {
-                    o.tcp == n.tcp && o.udp == n.udp && o.relay_via == n.relay_via
+                    o.tcp != n.tcp || o.udp != n.udp || o.relay_via != n.relay_via || o.seq != n.seq
                 }
-                _ => true,
+                _ => false,
             }
-        });
+        };
+        let mut routes = previous.routes.lock().unwrap().clone();
+        routes.retain(|dev, (route, _, _)| route.is_some() || !changed(dev));
+        let mut health = previous.health.lock().unwrap().clone();
+        let mut state = previous.state.lock().unwrap().clone();
+        for (dev, h) in health.iter_mut() {
+            if h.rest_until.is_some() && changed(dev) {
+                h.rest_until = None;
+                h.failures = 0;
+                if let Some(p) = self.peers.iter().find(|p| &p.device == dev) {
+                    state.retain(|a, st| st.ok || !p.tcp.contains(a));
+                }
+            }
+        }
         *self.routes.lock().unwrap() = routes;
-        *self.state.lock().unwrap() = previous.state.lock().unwrap().clone();
+        *self.health.lock().unwrap() = health;
+        *self.state.lock().unwrap() = state;
         *self.objects.lock().unwrap() = previous.objects.lock().unwrap().clone();
         *self.selfs.lock().unwrap() = previous.selfs.lock().unwrap().clone();
     }
@@ -1357,31 +1608,153 @@ impl Peers {
         self.selfs.lock().unwrap().contains(&addr)
     }
 
-    /// Peers worth asking now: unreachable ones rest for a minute, the ones
-    /// with a working route go first.
+    /// Peers worth asking now: resting ones are left out (`Health`); the
+    /// ones with a working route go first, then the ones that answered
+    /// most recently, then those that failed fewest times in a row (a
+    /// device that never answered comes last).
     fn ordered(&self) -> Vec<PeerInfo> {
+        let now = Instant::now();
         let routes = self.routes.lock().unwrap();
+        let health = self.health.lock().unwrap();
         let mut v: Vec<PeerInfo> = self
             .peers
             .iter()
-            .filter(|p| match routes.get(&p.device) {
-                Some((None, _, when)) => when.elapsed() > ROUTE_TTL,
-                _ => true,
-            })
+            .filter(|p| !health.get(&p.device).is_some_and(|h| h.resting(now)))
             .cloned()
             .collect();
-        v.sort_by_key(|p| match routes.get(&p.device) {
-            Some((Some(_), _, _)) => 0,
-            _ => 1,
+        v.sort_by_key(|p| {
+            let routed = matches!(routes.get(&p.device), Some((Some(_), _, _)));
+            let h = health.get(&p.device).cloned().unwrap_or_default();
+            (!routed, std::cmp::Reverse(h.last_ok), h.failures)
         });
         v
     }
 
-    fn remember(&self, device: &DeviceId, route: Option<Route>, status: u16) {
+    /// Whether `device` rests now (a failed attempt, `Health`).
+    pub fn is_resting(&self, device: &DeviceId) -> bool {
+        self.health
+            .lock()
+            .unwrap()
+            .get(device)
+            .is_some_and(|h| h.resting(Instant::now()))
+    }
+
+    /// End the rest of `device`'s failed TCP addresses, so that the next
+    /// attempt dials them.
+    fn clear_addr_failures(&self, p: &PeerInfo) {
+        self.state
+            .lock()
+            .unwrap()
+            .retain(|a, st| st.ok || !p.tcp.contains(a));
+    }
+
+    /// Before an explicit sync: end the rest of every peer worth one more
+    /// attempt now, so a sync right after a peer restarted asks it instead
+    /// of giving its blocks up: those that answered before, and those that
+    /// failed at most `REVIVE_WAIT_FAILURES` times in a row (one that never
+    /// answered and failed more keeps resting). Returns how many.
+    pub fn wake(&self) -> usize {
+        let mut woken = Vec::new();
+        {
+            let now = Instant::now();
+            let mut health = self.health.lock().unwrap();
+            for (dev, h) in health.iter_mut() {
+                if h.resting(now) && (h.last_ok.is_some() || h.failures <= REVIVE_WAIT_FAILURES) {
+                    h.rest_until = None;
+                    woken.push(dev.clone());
+                }
+            }
+        }
+        for p in self.peers.iter().filter(|p| woken.contains(&p.device)) {
+            self.clear_addr_failures(p);
+        }
+        woken.len()
+    }
+
+    /// A sign of life from `device` (a signed LAN beacon, a request it
+    /// made to us): a rest it has is ended, at most every `ROUTE_TTL / 2`,
+    /// so a device whose beacons reach us but whose port does not is not
+    /// dialled every few seconds. True when a rest ended.
+    pub fn heard_from(&self, device: &DeviceId) -> bool {
+        let now = Instant::now();
+        {
+            let mut health = self.health.lock().unwrap();
+            let Some(h) = health.get_mut(device) else {
+                return false;
+            };
+            if !h.resting(now)
+                || h.revived
+                    .is_some_and(|t| now.saturating_duration_since(t) < ROUTE_TTL / 2)
+            {
+                return false;
+            }
+            h.rest_until = None;
+            h.revived = Some(now);
+        }
+        if let Some(p) = self.peers.iter().find(|p| &p.device == device) {
+            self.clear_addr_failures(p);
+        }
+        true
+    }
+
+    /// Note the outcome of a request to `device`: the route it answered
+    /// on, or `None` when no route reached it (`refused`: it refused our
+    /// certificate). An answer ends any rest; a failure starts one.
+    fn remember(&self, device: &DeviceId, route: Option<Route>, status: u16, refused: bool) {
+        let ok = route.is_some();
+        let at = if refused {
+            failed_at(REFUSED_REST)
+        } else {
+            Instant::now()
+        };
         self.routes
             .lock()
             .unwrap()
-            .insert(device.clone(), (route, status, Instant::now()));
+            .insert(device.clone(), (route, status, at));
+        let mut health = self.health.lock().unwrap();
+        let h = health.entry(device.clone()).or_default();
+        if ok {
+            h.answered();
+        } else {
+            h.failed(refused);
+        }
+    }
+
+    /// The device answered over the route it already had.
+    fn answered(&self, device: &DeviceId) {
+        self.health
+            .lock()
+            .unwrap()
+            .entry(device.clone())
+            .or_default()
+            .answered();
+    }
+
+    /// Note how a request to the TCP address `addr` went.
+    fn note_addr(&self, addr: SocketAddr, ok: bool, refused: bool) {
+        let mut state = self.state.lock().unwrap();
+        let last_ok = state.get(&addr).and_then(|s| s.last_ok);
+        let now = Instant::now();
+        state.insert(
+            addr,
+            AddrState {
+                ok,
+                at: if refused {
+                    failed_at(REFUSED_REST)
+                } else {
+                    now
+                },
+                last_ok: if ok { Some(now) } else { last_ok },
+            },
+        );
+    }
+
+    fn addr_resting(&self, addr: &SocketAddr) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .get(addr)
+            .is_some_and(|s| s.resting())
     }
 
     fn debug(&self, what: &str) {
@@ -1399,12 +1772,8 @@ impl Peers {
                 Err(e) => format!("error: {e}"),
             }
         ));
-        let ok = result.is_ok();
-        let when = match &result {
-            Err(e) if refused_us(&format!("{e:#}")) => failed_at(REFUSED_REST),
-            _ => Instant::now(),
-        };
-        self.state.lock().unwrap().insert(addr, (ok, when));
+        let refused = matches!(&result, Err(e) if refused_us(&format!("{e:#}")));
+        self.note_addr(addr, result.is_ok(), refused);
         result
     }
 
@@ -1447,11 +1816,9 @@ impl Peers {
     fn over(&self, route: &Route, path: &str, p: &PeerInfo) -> Result<(u16, Vec<u8>)> {
         match route {
             Route::Tcp(a) => {
-                // A TCP address that just failed rests for a minute.
-                if let Some((false, when)) = self.state.lock().unwrap().get(a) {
-                    if when.elapsed() < ROUTE_TTL {
-                        bail!("resting after a failure");
-                    }
+                // A TCP address that just failed rests (`AddrState`).
+                if self.addr_resting(a) {
+                    bail!("resting after a failure");
                 }
                 if self.is_self_addr(*a) {
                     bail!("that address is this device itself");
@@ -1505,10 +1872,8 @@ impl Peers {
     fn not_ready(&self, route: &Route) -> Option<&'static str> {
         match route {
             Route::Tcp(a) => {
-                if let Some((false, when)) = self.state.lock().unwrap().get(a) {
-                    if when.elapsed() < ROUTE_TTL {
-                        return Some("resting after a failure");
-                    }
+                if self.addr_resting(a) {
+                    return Some("resting after a failure");
                 }
                 self.is_self_addr(*a)
                     .then_some("that address is this device itself")
@@ -1602,22 +1967,14 @@ impl Peers {
                 Ok((s, b)) => {
                     done.store(true, std::sync::atomic::Ordering::Relaxed);
                     if let Route::Tcp(a) = r {
-                        self.state
-                            .lock()
-                            .unwrap()
-                            .insert(*a, (true, Instant::now()));
+                        self.note_addr(*a, true, false);
                     }
                     return Some((r.clone(), s, b));
                 }
                 Err(e) => {
                     let msg = format!("{e:#}");
                     if let Route::Tcp(a) = r {
-                        let when = if refused_us(&msg) {
-                            failed_at(REFUSED_REST)
-                        } else {
-                            Instant::now()
-                        };
-                        self.state.lock().unwrap().insert(*a, (false, when));
+                        self.note_addr(*a, false, refused_us(&msg));
                     }
                     tried.push(format!("{}: {msg}", r.describe()));
                 }
@@ -1731,6 +2088,7 @@ impl Peers {
     }
 
     fn fetch_uncounted(&self, p: &PeerInfo, path: &str) -> Option<(u16, Vec<u8>, Route)> {
+        let began = Instant::now();
         let who = if p.name.is_empty() {
             p.device.short().to_string()
         } else {
@@ -1755,6 +2113,8 @@ impl Peers {
                             routes.insert(p.device.clone(), (Some(r.clone()), s, Instant::now()));
                         }
                     }
+                    drop(routes);
+                    self.answered(&p.device);
                     return Some((s, b, r));
                 }
                 Err(e) => log(&format!("{who}: {} lost: {e:#}", r.describe())),
@@ -1791,7 +2151,7 @@ impl Peers {
                 match got {
                     Ok((s, b)) => {
                         log(&format!("{who}: {} answered {s}", r.describe()));
-                        self.remember(&p.device, Some(r.clone()), s);
+                        self.remember(&p.device, Some(r.clone()), s, false);
                         return Some((s, b, r));
                     }
                     Err(e) => tried.push(format!("{}: {e:#}", r.describe())),
@@ -1802,7 +2162,7 @@ impl Peers {
                 match self.over(&r, path, p) {
                     Ok((s, b)) => {
                         log(&format!("{who}: {} answered {s}", r.describe()));
-                        self.remember(&p.device, Some(r.clone()), s);
+                        self.remember(&p.device, Some(r.clone()), s, false);
                         return Some((s, b, r));
                     }
                     Err(e) => tried.push(format!("{}: {e:#}", r.describe())),
@@ -1817,54 +2177,166 @@ impl Peers {
                 tried.join("; ")
             }
         ));
-        if !tried.is_empty() && tried.iter().all(|t| refused_us(t)) {
+        // A request that ran beside this one may have reached it meanwhile
+        // (over the route this one lost, or another): then this failure
+        // says nothing about the device.
+        let reached = self
+            .routes
+            .lock()
+            .unwrap()
+            .get(&p.device)
+            .is_some_and(|(r, _, at)| r.is_some() && *at > began);
+        if !reached {
             // It answered and refused us: it reads our record soon.
-            self.routes
-                .lock()
-                .unwrap()
-                .insert(p.device.clone(), (None, 0, failed_at(REFUSED_REST)));
-        } else {
-            self.remember(&p.device, None, 0);
+            let refused = !tried.is_empty() && tried.iter().all(|t| refused_us(t));
+            self.remember(&p.device, None, 0, refused);
         }
         None
     }
 
-    /// Fetch one object from the first peer that has it. Peers with a
-    /// working route come first (`ordered`), and among them the ones that
-    /// had the objects asked lately and answered fastest: asking a peer
-    /// that lacks the object through a relay before one on the LAN that has
-    /// it would cost a round trip for every block.
+    /// Fetch one object from a peer that has it. Peers with a working
+    /// route come first (`ordered`), and among them the ones that had the
+    /// objects asked lately, ranked by when they are expected to answer
+    /// (`ObjectStats::rank`): asking a peer that lacks the object through a
+    /// relay before one on the LAN that has it would cost a round trip for
+    /// every block, and with two peers that hold the folder (the writer and
+    /// another device pulling it too) the requests are shared between them
+    /// instead of all going to the first. A peer that lacked the objects is
+    /// asked first again now and then (`PROBE_BASE`), as it may hold them
+    /// by now. When no peer that is not resting had the object, a peer that
+    /// rests after a blip is tried once more (`revive`).
     pub fn get(&self, name: &ObjectName) -> Option<(DeviceId, Vec<u8>)> {
         let path = format!("/p2p/object/{name}");
         let mut order = self.ordered();
         {
+            let now = Instant::now();
             let routes = self.routes.lock().unwrap();
-            let stats = self.objects.lock().unwrap();
+            let mut stats = self.objects.lock().unwrap();
             order.sort_by_key(|p| {
                 let routed = matches!(routes.get(&p.device), Some((Some(_), _, _)));
-                let rank = stats.get(&p.device).cloned().unwrap_or_default().rank();
+                let rank = stats.get(&p.device).cloned().unwrap_or_default().rank(now);
                 (!routed, rank)
             });
-        }
-        for p in order {
-            let t = Instant::now();
-            let got = self.fetch(&p, &path);
-            let mut stats = self.objects.lock().unwrap();
-            let e = stats.entry(p.device.clone()).or_default();
-            match got {
-                Some((200, body, _)) if ObjectName::from_bytes(&crypto::hash(&body)) == *name => {
-                    let secs = t.elapsed().as_secs_f64();
-                    e.secs = if e.secs > 0.0 {
-                        e.secs * 0.8 + secs * 0.2
-                    } else {
-                        secs
-                    };
-                    e.miss_streak = 0;
-                    return Some((p.device, body));
+            // A probe that is due is taken by this request: the requests
+            // running beside it do not all ask the same lacking peer.
+            if let Some(first) = order.first() {
+                let st = stats.entry(first.device.clone()).or_default();
+                if st.probe_due(now) {
+                    st.probe_at = Some(now + st.probe_wait());
                 }
-                Some((404, _, _)) => e.miss_streak = e.miss_streak.saturating_add(1),
-                _ => {}
             }
+        }
+        for p in &order {
+            if let Lookup::Got(body) = self.ask_object(p, &path, name) {
+                return Some((p.device.clone(), body));
+            }
+        }
+        // Nobody reachable had it. A peer resting after a blip (it answered
+        // a moment ago, then a request failed: a restart, a lost
+        // connection) is asked once more instead of the block being given
+        // up for the rest of its rest.
+        let mut resting: Vec<(PeerInfo, Health)> = {
+            let now = Instant::now();
+            let health = self.health.lock().unwrap();
+            self.peers
+                .iter()
+                .filter_map(|p| {
+                    let h = health.get(&p.device)?;
+                    (h.resting(now) && h.last_ok.is_some()).then(|| (p.clone(), h.clone()))
+                })
+                .collect()
+        };
+        resting.sort_by_key(|(_, h)| std::cmp::Reverse(h.last_ok));
+        for (p, _) in resting.into_iter().take(2) {
+            if let Some(body) = self.revive(&p, &path, name) {
+                return Some((p.device.clone(), body));
+            }
+        }
+        None
+    }
+
+    /// One object request to `p`, with its bookkeeping (`ObjectStats`).
+    fn ask_object(&self, p: &PeerInfo, path: &str, name: &ObjectName) -> Lookup {
+        self.objects
+            .lock()
+            .unwrap()
+            .entry(p.device.clone())
+            .or_default()
+            .inflight += 1;
+        let t = Instant::now();
+        let got = self.fetch(p, path);
+        let mut stats = self.objects.lock().unwrap();
+        let e = stats.entry(p.device.clone()).or_default();
+        e.inflight = e.inflight.saturating_sub(1);
+        match got {
+            Some((200, body, _)) if ObjectName::from_bytes(&crypto::hash(&body)) == *name => {
+                let secs = t.elapsed().as_secs_f64();
+                e.secs = if e.secs > 0.0 {
+                    e.secs * 0.8 + secs * 0.2
+                } else {
+                    secs
+                };
+                e.miss_streak = 0;
+                e.probe_at = None;
+                Lookup::Got(body)
+            }
+            // An answer that is not the object (404, or a refusal) is a
+            // miss: the peer is asked first again only after its probe wait.
+            Some((status, _, _)) => {
+                e.miss_streak = e.miss_streak.saturating_add(1);
+                e.probe_at = Some(Instant::now() + e.probe_wait());
+                if status == 404 {
+                    Lookup::Lacks
+                } else {
+                    Lookup::Failed
+                }
+            }
+            None => Lookup::Failed,
+        }
+    }
+
+    /// Ask `p`, which rests after failing, for the object once more: one
+    /// request at a time (the others wait here for its outcome and then go
+    /// straight to it when it answered), at most every `REVIVE_GAP`
+    /// doubling per failure in a row. While it failed at most
+    /// `REVIVE_WAIT_FAILURES` times in a row and answered within a
+    /// minute, a request waits for the next try rather than giving the
+    /// object up: a peer that restarts is back within a second or two.
+    fn revive(&self, p: &PeerInfo, path: &str, name: &ObjectName) -> Option<Vec<u8>> {
+        for _ in 0..=REVIVE_WAIT_FAILURES {
+            let one = self.reviving.lock().unwrap_or_else(|e| e.into_inner());
+            let now = Instant::now();
+            let wait = {
+                let mut health = self.health.lock().unwrap();
+                let h = health.entry(p.device.clone()).or_default();
+                if !h.resting(now) {
+                    // Another request revived it meanwhile.
+                    Duration::ZERO
+                } else {
+                    let gap = REVIVE_GAP * (1u32 << h.failures.clamp(1, 7).saturating_sub(1));
+                    let next = h.revived.map(|t| t + gap).unwrap_or(now);
+                    if next <= now {
+                        // It keeps resting for the others until it answers.
+                        h.revived = Some(now);
+                        Duration::ZERO
+                    } else if h.failures <= REVIVE_WAIT_FAILURES && h.was_live(now) {
+                        next - now
+                    } else {
+                        return None;
+                    }
+                }
+            };
+            if wait.is_zero() {
+                self.clear_addr_failures(p);
+                let got = self.ask_object(p, path, name);
+                drop(one);
+                return match got {
+                    Lookup::Got(body) => Some(body),
+                    Lookup::Lacks | Lookup::Failed => None,
+                };
+            }
+            drop(one);
+            std::thread::sleep(wait);
         }
         None
     }
@@ -1887,15 +2359,30 @@ impl Peers {
     }
 
     /// One request to every peer worth asking now: `(device, status, body)`
-    /// of those that answered.
+    /// of those that answered, in the order `ordered` gives. The requests
+    /// run side by side, at most `ASK_PARALLEL` at once, so that peers that
+    /// are gone cost one timeout together instead of one each in turn.
     pub fn ask_each(&self, path: &str) -> Vec<(DeviceId, u16, Vec<u8>)> {
-        self.ordered()
-            .into_iter()
-            .filter_map(|p| {
-                self.fetch(&p, path)
-                    .map(|(s, b, _)| (p.device.clone(), s, b))
-            })
-            .collect()
+        let order = self.ordered();
+        let mut out = Vec::new();
+        for group in order.chunks(ASK_PARALLEL) {
+            let answers: Vec<Option<(u16, Vec<u8>, Route)>> = std::thread::scope(|s| {
+                let running: Vec<_> = group
+                    .iter()
+                    .map(|p| s.spawn(move || self.fetch(p, path)))
+                    .collect();
+                running
+                    .into_iter()
+                    .map(|h| h.join().ok().flatten())
+                    .collect()
+            });
+            for (p, got) in group.iter().zip(answers) {
+                if let Some((status, body, _)) = got {
+                    out.push((p.device.clone(), status, body));
+                }
+            }
+        }
+        out
     }
 
     /// Which peers answer right now, and over which path.
@@ -1976,25 +2463,125 @@ mod tests {
 
     #[test]
     fn peers_that_have_objects_and_answer_fast_rank_first() {
-        let fast = ObjectStats {
-            miss_streak: 0,
-            secs: 0.002,
+        let now = Instant::now();
+        let stats = |miss_streak, secs| ObjectStats {
+            miss_streak,
+            secs,
+            ..ObjectStats::default()
         };
-        let slow = ObjectStats {
-            miss_streak: 0,
-            secs: 0.2,
-        };
-        let lacking = ObjectStats {
-            miss_streak: 3,
-            secs: 0.001,
-        };
-        let unknown = ObjectStats::default();
-        let mut v = [lacking.rank(), slow.rank(), unknown.rank(), fast.rank()];
+        let fast = stats(0, 0.002);
+        let slow = stats(0, 0.2);
+        let mut lacking = stats(3, 0.001);
+        lacking.probe_at = Some(now + Duration::from_secs(5));
+        // Never measured: asked first once (a probe), then in the middle.
+        let mut unknown = ObjectStats::default();
+        assert_eq!(unknown.rank(now), (0, 0));
+        unknown.probe_at = Some(now + Duration::from_secs(5));
+        let mut v = [
+            lacking.rank(now),
+            slow.rank(now),
+            unknown.rank(now),
+            fast.rank(now),
+        ];
         v.sort();
         assert_eq!(
             v,
-            [fast.rank(), unknown.rank(), slow.rank(), lacking.rank()]
+            [
+                fast.rank(now),
+                unknown.rank(now),
+                slow.rank(now),
+                lacking.rank(now)
+            ]
         );
+    }
+
+    #[test]
+    fn two_peers_that_hold_the_objects_share_the_requests_and_a_lacking_one_is_probed() {
+        let now = Instant::now();
+        // Two equally fast holders (the writer and another reader): the one
+        // with fewer requests in flight is asked first, so they share.
+        let writer = ObjectStats {
+            secs: 0.01,
+            inflight: 3,
+            ..ObjectStats::default()
+        };
+        let reader = ObjectStats {
+            secs: 0.01,
+            inflight: 1,
+            ..ObjectStats::default()
+        };
+        assert!(reader.rank(now) < writer.rank(now));
+        // A much slower holder (a relay) does not take requests from a fast
+        // one with a few in flight.
+        let relay = ObjectStats {
+            secs: 0.5,
+            ..ObjectStats::default()
+        };
+        assert!(writer.rank(now) < relay.rank(now));
+        // A peer that lacked the last objects goes last until its probe is
+        // due, then first among equals; the wait doubles per miss.
+        let mut behind = ObjectStats {
+            miss_streak: 1,
+            secs: 0.01,
+            ..ObjectStats::default()
+        };
+        behind.probe_at = Some(now + behind.probe_wait());
+        assert!(behind.rank(now) > writer.rank(now));
+        assert!(behind.rank(now + PROBE_BASE) <= writer.rank(now + PROBE_BASE));
+        behind.miss_streak = 3;
+        assert_eq!(behind.probe_wait(), PROBE_BASE * 4);
+        behind.miss_streak = 100;
+        assert_eq!(behind.probe_wait(), PROBE_MAX);
+    }
+
+    #[test]
+    fn a_peer_that_was_answering_rests_a_second_after_a_failure_a_dead_one_longer() {
+        let now = Instant::now();
+        let mut live = Health::default();
+        live.answered();
+        live.failed(false);
+        let rest = live.rest_until.unwrap() - now;
+        assert!(rest <= BLIP_REST + Duration::from_millis(50), "{rest:?}");
+        live.failed(false);
+        assert!(live.rest_until.unwrap() - now > BLIP_REST);
+        // Never answered: a minute, then doubling, at most 15 minutes.
+        let mut dead = Health::default();
+        dead.failed(false);
+        assert!(dead.rest_until.unwrap() - now >= ROUTE_TTL);
+        dead.failed(false);
+        assert!(dead.rest_until.unwrap() - now >= 2 * ROUTE_TTL);
+        for _ in 0..20 {
+            dead.failed(false);
+        }
+        assert!(dead.rest_until.unwrap() - now <= DEAD_REST_MAX + Duration::from_secs(1));
+        // A refusal of our certificate rests only a few seconds.
+        let mut refused = Health::default();
+        refused.failed(true);
+        assert!(refused.rest_until.unwrap() - now <= REFUSED_REST + Duration::from_millis(50));
+        // An address that answered a moment ago rests a second, not a minute.
+        let t = Instant::now();
+        let blip = AddrState {
+            ok: false,
+            at: t,
+            last_ok: Some(t),
+        };
+        let gone = AddrState {
+            ok: false,
+            at: t,
+            last_ok: None,
+        };
+        assert!(blip.resting() && gone.resting());
+        let later = AddrState {
+            at: t - BLIP_REST,
+            last_ok: Some(t - BLIP_REST),
+            ..blip
+        };
+        assert!(!later.resting());
+        assert!(AddrState {
+            at: t - BLIP_REST,
+            ..gone
+        }
+        .resting());
     }
 
     fn snap(me: &DeviceId) -> Snapshot {
@@ -2009,6 +2596,7 @@ mod tests {
             activity_audience: None,
             heads: Vec::new(),
             ledger_dir: None,
+            fresh: Default::default(),
         }
     }
 
