@@ -22,6 +22,7 @@ spec still names them because sections were written as the work was done.
 
 ### Changed
 
+- A pull copies the blocks this device already has instead of fetching them: the unchanged blocks of a changed file come from its previous version on disk, a renamed or moved file or directory from the old files (or their trash copies), and duplicate files fetch each distinct block once. Every block read locally is checked against its chunk id; one that does not match is fetched. A directory that a remote deletion or rename leaves empty is removed. The pull report counts the copied blocks in `chunks_reused_local` and `bytes_reused_local`, apart from `chunks_downloaded` (spec section 84).
 - The daily workflow signs with the daily key from the `daily` environment, which GitHub hands only to runs whose workflow ref is `main`: a manual run from another branch runs the build jobs, and GitHub refuses the package job before its first step. The repository's `main` branch is protected by a ruleset (no deletion, no force push, changes only through pull requests, no bypass), so the workflow token cannot push to it. Both settings are made by hand (ops/site/README.md).
 - Website: the alpha warning is marked so a search engine does not quote it. Page titles and descriptions name the product and the document. The home page, the docs index and the older release notes point developers at the GitHub repository.
 

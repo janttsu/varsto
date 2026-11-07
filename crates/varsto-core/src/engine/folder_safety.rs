@@ -552,8 +552,14 @@ impl Engine {
         Ok(f)
     }
 
-    /// Move a local file into this device's trash.
-    pub(super) fn move_to_trash(&self, folder: &FolderId, disk: &Path, path: &str) -> Result<()> {
+    /// Move a local file (vault path `path`) into this device's trash;
+    /// returns where it went.
+    pub(super) fn move_to_trash(
+        &self,
+        folder: &FolderId,
+        disk: &Path,
+        path: &str,
+    ) -> Result<PathBuf> {
         let trash = trash_path(&self.home, |r| self.local_rules(r), folder, path)?;
         util::private_dir(&self.home.join("trash"))?;
         if let Some(p) = trash.parent() {
@@ -569,7 +575,7 @@ impl Engine {
                 .map(|_| ())
                 .and_then(|_| fs::remove_file(disk))
         })?;
-        Ok(())
+        Ok(trash)
     }
 
     /// Receive-only: a remote version is about to replace `path`; the

@@ -75,6 +75,7 @@ mod ledger3_ops;
 mod ledger_heads;
 mod ledger_recovery;
 mod ledger_upkeep;
+mod local_blocks;
 mod local_names;
 mod mailbox;
 mod manifest_upkeep;
@@ -370,6 +371,15 @@ pub struct PullReport {
     /// (the rest came from storages).
     #[serde(default)]
     pub bytes_from_peers: u64,
+    /// Blocks copied from files already on this device (the previous
+    /// version of the file, a renamed or moved file, a copy, a block this
+    /// pull fetched before) instead of being fetched. Not counted in
+    /// `chunks_downloaded`.
+    #[serde(default)]
+    pub chunks_reused_local: u64,
+    /// The bytes of those blocks; not counted in `bytes_downloaded`.
+    #[serde(default)]
+    pub bytes_reused_local: u64,
     pub folder: String,
     pub manifests_applied: u64,
     pub files_updated: u64,
@@ -772,6 +782,12 @@ pub struct Engine {
     pack_caches: crate::packs::Caches,
     /// Objects of small files fetched ahead during a pull (see `prefetch_small`).
     prefetched: HashMap<ObjectName, Fetched>,
+    /// Blocks the pull running now can copy from files of the folder on
+    /// this device (`local_blocks`), with the folder they belong to; built
+    /// at the pull's first download or deletion (`ensure_local_blocks`).
+    local_blocks: Option<(FolderId, local_blocks::LocalBlocks)>,
+    /// The folder whose pull is running and may build `local_blocks`.
+    local_blocks_for: Option<FolderId>,
     /// How fast peers and storages answered during recent downloads.
     fetch_stats: std::sync::Arc<FetchStats>,
     /// Strongroom folder keys held in memory until the expiry time (UTC seconds).
@@ -1273,6 +1289,25 @@ fn disk_matches_index(disk: &Path, index: Option<&LocalIndexEntry>) -> bool {
                     md.len() == ix.size
                 }
         }
+    }
+}
+
+/// Remove the directories above `disk` that a deletion left empty, up to
+/// (not including) the folder's directory `root`. Directories are not
+/// synced: the last file of a directory deleted (or the directory renamed)
+/// on another device leaves no empty directory here. A directory that still
+/// holds anything (an ignored file, a placeholder) stays.
+fn remove_empty_parents(root: &Path, disk: &Path) {
+    let mut dir = disk.parent();
+    while let Some(d) = dir {
+        if d == root || !d.starts_with(root) {
+            break;
+        }
+        // Only a real, empty directory goes (a link is not one).
+        if !fs::symlink_metadata(d).is_ok_and(|m| m.is_dir()) || fs::remove_dir(d).is_err() {
+            break;
+        }
+        dir = d.parent();
     }
 }
 
@@ -2052,6 +2087,8 @@ impl Engine {
             pack_write_hook: None,
             pack_caches: Default::default(),
             prefetched: HashMap::new(),
+            local_blocks: None,
+            local_blocks_for: None,
             local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
@@ -2161,6 +2198,8 @@ impl Engine {
             pack_write_hook: None,
             pack_caches: Default::default(),
             prefetched: HashMap::new(),
+            local_blocks: None,
+            local_blocks_for: None,
             local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
@@ -4763,6 +4802,47 @@ impl Engine {
     }
 
     fn pull_inner(&mut self, folder: &str) -> Result<PullReport> {
+        let out = self.pull_folder(folder);
+        // The index of local blocks lives for one pull.
+        self.local_blocks = None;
+        self.local_blocks_for = None;
+        out
+    }
+
+    /// In a pull of `rec`, index the blocks of `state`'s files that are on
+    /// disk as recorded, as sources for its downloads (`local_blocks`).
+    /// Done once, before the pull's first download or deletion changes
+    /// the state: a pull with nothing to fetch never builds it.
+    fn ensure_local_blocks(&mut self, rec: &FolderRecord, root: &Path, state: &FolderState) {
+        if self.local_blocks_for.as_ref() != Some(&rec.folder_id)
+            || self
+                .local_blocks
+                .as_ref()
+                .is_some_and(|(f, _)| *f == rec.folder_id)
+        {
+            return;
+        }
+        let mut lb = local_blocks::LocalBlocks::default();
+        for (path, f) in &state.files {
+            if f.deleted || f.is_symlink() || f.chunks.is_empty() {
+                continue;
+            }
+            // The disk holds this version (as of the scan; every block is
+            // checked again when it is read).
+            if !state
+                .local_index
+                .get(path)
+                .is_some_and(|ix| ix.content_hash == f.content_hash && ix.size == f.size)
+            {
+                continue;
+            }
+            let disk = self.disk_of(root, state, path);
+            lb.add_file(root, &disk, &f.chunks);
+        }
+        self.local_blocks = Some((rec.folder_id.clone(), lb));
+    }
+
+    fn pull_folder(&mut self, folder: &str) -> Result<PullReport> {
         self.ensure_active()?;
         let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
@@ -4787,6 +4867,9 @@ impl Engine {
                 extra: self.scan_extra,
             });
         }
+        self.local_blocks = None;
+        self.local_blocks_for =
+            (!self.mount_is_encrypted(&rec.folder_id)).then(|| rec.folder_id.clone());
         let forks = self.pull_ledger_once()?;
         report.forked_devices = forks.iter().map(|d| d.to_string()).collect();
         if !self.keyring.folders.contains_key(&rec.folder_id) {
@@ -5018,7 +5101,7 @@ impl Engine {
             let mut ahead_from = 0;
             for (i, (path, remote)) in entries.iter().enumerate() {
                 if fetch_ahead && i >= ahead_from {
-                    ahead_from = self.prefetch_small(&entries, i, &state, &storages);
+                    ahead_from = self.prefetch_small(&rec, &root, &entries, i, &state, &storages);
                 }
                 if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
                     continue;
@@ -5092,6 +5175,9 @@ impl Engine {
             }
             Merge::Conflict { winner, loser } => {
                 report.conflicts += 1;
+                if !encrypted_here {
+                    self.ensure_local_blocks(rec, root, state);
+                }
                 // Receive-only: a local change of the file is not one of
                 // the versions; it goes to the trash.
                 self.drop_local_change(rec, root, state, path)?;
@@ -5441,7 +5527,18 @@ impl Engine {
                     state.pending_remote.insert(remote.path.clone(), remote);
                     return Ok(());
                 }
-                self.move_to_trash(&rec.folder_id, &disk, &remote.path)?;
+                self.ensure_local_blocks(rec, root, state);
+                let trashed = self.move_to_trash(&rec.folder_id, &disk, &remote.path)?;
+                // The trash copy still holds the blocks: a file this pull
+                // writes under another name (a rename, a move) copies them
+                // from there.
+                if let Some((f, lb)) = self.local_blocks.as_mut() {
+                    if *f == rec.folder_id {
+                        let dir = self.home.join("trash").join(rec.folder_id.as_str());
+                        lb.moved(&disk, &dir, &trashed);
+                    }
+                }
+                remove_empty_parents(root, &disk);
                 report.files_deleted += 1;
             }
             state.local_names.forget(rules, &remote.path);
@@ -5543,6 +5640,7 @@ impl Engine {
                 Err(anyhow!("changed while syncing; nothing was overwritten"))
             }
         } else {
+            self.ensure_local_blocks(rec, root, state);
             self.download_to_guarded(
                 rec,
                 fk,
@@ -5689,8 +5787,53 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
         guard: PlaceGuard,
-        mut aside: Option<&mut Aside>,
+        aside: Option<&mut Aside>,
     ) -> Result<()> {
+        // The pull's index of the blocks on this device (`local_blocks`);
+        // outside a pull, one of this file only (the blocks it repeats).
+        let pulled = self
+            .local_blocks
+            .as_ref()
+            .is_some_and(|(f, _)| *f == rec.folder_id);
+        let mut local = if pulled {
+            self.local_blocks
+                .take()
+                .map(|(_, lb)| lb)
+                .unwrap_or_default()
+        } else {
+            local_blocks::LocalBlocks::default()
+        };
+        let out = self.download_with(
+            rec, fk, disk, file, storages, report, guard, aside, &mut local,
+        );
+        local.end_temp();
+        if pulled {
+            self.local_blocks = Some((rec.folder_id.clone(), local));
+        }
+        out
+    }
+
+    /// `download_to_guarded` with the blocks of `local` copied instead of
+    /// fetched; the file written becomes a source of `local`.
+    #[allow(clippy::too_many_arguments)]
+    fn download_with(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        disk: &Path,
+        file: &FileState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut PullReport,
+        guard: PlaceGuard,
+        mut aside: Option<&mut Aside>,
+        local: &mut local_blocks::LocalBlocks,
+    ) -> Result<()> {
+        /// One block to write: fetched (checked when opened) or copied from
+        /// this device (checked when read).
+        enum Got {
+            Net(Fetched),
+            Local(Vec<u8>),
+        }
         // Nothing new is written where the disk would keep less free space
         // than its limit; the caller keeps the file for a later sync.
         self.space_for(rec, disk, file.size)?;
@@ -5728,71 +5871,75 @@ impl Engine {
             // time, so a window of chunks of the file (`fetch::fetch_in_order`) is in flight at
             // once; they are still checked, decrypted and written in order.
             // Small files may have been fetched ahead together (`prefetch_small`).
-            // (A file that repeats a block takes the normal way: each cached
-            // object is handed out once.)
-            let distinct = file
+            // Where each block starts in the file.
+            let offsets: Vec<u64> = file
                 .chunks
                 .iter()
-                .map(|c| &c.object)
-                .collect::<HashSet<_>>()
-                .len();
-            let ahead: Option<Vec<Fetched>> = if !file.chunks.is_empty()
-                && distinct == file.chunks.len()
-                && file
-                    .chunks
-                    .iter()
-                    .all(|c| self.prefetched.contains_key(&c.object))
-            {
-                Some(
-                    file.chunks
-                        .iter()
-                        .filter_map(|c| self.prefetched.remove(&c.object))
-                        .collect(),
-                )
-            } else {
-                None
-            };
-            let mut write_chunk = |cref: &ChunkRef, fetched: Fetched| -> Result<()> {
-                let (ct, from_peer) = match fetched {
-                    Fetched::Got { bytes, from_peer } => {
-                        if from_peer {
-                            report.chunks_from_peers += 1;
-                        }
-                        (bytes, from_peer)
-                    }
-                    Fetched::Failed(e) => return Err(e),
-                    Fetched::Missing(needs_disk) => {
-                        let _ = fs::remove_file(&tmp);
-                        if let Some(nd) = needs_disk {
-                            return Err(anyhow::Error::new(nd));
-                        }
-                        bail!(
-                            "chunk {} is not available on any readable storage",
-                            cref.chunk.short()
-                        );
-                    }
-                };
-                let plain = match crate::chunk_seal::open_chunk(
-                    fk,
-                    &self.vault.vault_id,
-                    &cref.chunk,
-                    cref.epoch,
-                    cref.size,
-                    &ct,
-                ) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let _ = fs::remove_file(&tmp);
-                        return Err(e);
+                .scan(0u64, |at, c| {
+                    let o = *at;
+                    *at += c.size;
+                    Some(o)
+                })
+                .collect();
+            // The blocks written so far are sources too (a block the file
+            // repeats is copied from its first place).
+            if let Some(dir) = disk.parent() {
+                local.begin_temp(dir, &tmp);
+            }
+            let mut write_chunk = |cref: &ChunkRef, got: Got| -> Result<()> {
+                let (plain, from_peer, reused) = match got {
+                    Got::Local(plain) => (plain, false, true),
+                    Got::Net(fetched) => {
+                        let (ct, from_peer) = match fetched {
+                            Fetched::Got { bytes, from_peer } => {
+                                if from_peer {
+                                    report.chunks_from_peers += 1;
+                                }
+                                (bytes, from_peer)
+                            }
+                            Fetched::Failed(e) => return Err(e),
+                            Fetched::Missing(needs_disk) => {
+                                let _ = fs::remove_file(&tmp);
+                                if let Some(nd) = needs_disk {
+                                    return Err(anyhow::Error::new(nd));
+                                }
+                                bail!(
+                                    "chunk {} is not available on any readable storage",
+                                    cref.chunk.short()
+                                );
+                            }
+                        };
+                        let plain = match crate::chunk_seal::open_chunk(
+                            fk,
+                            &self.vault.vault_id,
+                            &cref.chunk,
+                            cref.epoch,
+                            cref.size,
+                            &ct,
+                        ) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                let _ = fs::remove_file(&tmp);
+                                return Err(e);
+                            }
+                        };
+                        (plain, from_peer, false)
                     }
                 };
                 out.write_all(&plain)?;
                 progress.advance(plain.len() as u64);
-                report.chunks_downloaded += 1;
-                report.bytes_downloaded += plain.len() as u64;
+                if reused {
+                    report.chunks_reused_local += 1;
+                    report.bytes_reused_local += plain.len() as u64;
+                } else {
+                    report.chunks_downloaded += 1;
+                    report.bytes_downloaded += plain.len() as u64;
+                }
                 if from_peer {
                     report.bytes_from_peers += plain.len() as u64;
                 }
+                // A block copied here counts as held exactly as a
+                // downloaded one.
                 if !rec.is_backup() {
                     self.pending.push(Event::ChunkOnDevice {
                         folder: rec.folder_id.clone(),
@@ -5803,65 +5950,77 @@ impl Engine {
                 }
                 Ok(())
             };
-            match ahead {
-                Some(got) => {
-                    for (cref, fetched) in file.chunks.iter().zip(got) {
-                        write_chunk(cref, fetched)?;
-                    }
+            // In order: a block fetched ahead is taken (it was paid for); a
+            // block this device already has (checked when read) is copied;
+            // a block staged from a pool disk is read from the staging
+            // area; the runs between them are fetched as usual.
+            let staged = |c: &ChunkRef| {
+                if staging.is_empty() {
+                    None
+                } else {
+                    disk_fetch::staged_object(&staging, &c.object)
                 }
-                None if staging.is_empty() => fetch_in_order(
+            };
+            let n = file.chunks.len();
+            let mut i = 0;
+            while i < n {
+                let c = &file.chunks[i];
+                if let Some(fetched) = self.prefetched.remove(&c.object) {
+                    write_chunk(c, Got::Net(fetched))?;
+                    local.wrote(c, offsets[i]);
+                    i += 1;
+                    continue;
+                }
+                if let Some(plain) = local.read(fk, c) {
+                    write_chunk(c, Got::Local(plain))?;
+                    local.wrote(c, offsets[i]);
+                    i += 1;
+                    continue;
+                }
+                if let Some((path, _)) = staged(c) {
+                    let bytes = fs::read(&path)?;
+                    let fetched = if ObjectName::from_bytes(&crypto::hash(&bytes)) == c.object {
+                        Fetched::Got {
+                            bytes,
+                            from_peer: false,
+                        }
+                    } else {
+                        let _ = fs::remove_file(&path);
+                        fetch::fetch_object(peers.as_deref(), &c.object, storages, &stats)
+                    };
+                    write_chunk(c, Got::Net(fetched))?;
+                    local.wrote(c, offsets[i]);
+                    i += 1;
+                    continue;
+                }
+                // A run to fetch: up to the next block that was fetched
+                // ahead, is here, is staged, or repeats one of the run (it
+                // is copied from the run once that is written).
+                let mut run: HashSet<&ChunkId> = HashSet::from([&c.chunk]);
+                let mut j = i + 1;
+                while j < n {
+                    let d = &file.chunks[j];
+                    if run.contains(&d.chunk)
+                        || self.prefetched.contains_key(&d.object)
+                        || local.has(d)
+                        || staged(d).is_some()
+                    {
+                        break;
+                    }
+                    run.insert(&d.chunk);
+                    j += 1;
+                }
+                fetch_in_order(
                     peers.as_deref(),
-                    &file.chunks,
+                    &file.chunks[i..j],
                     storages,
                     &stats,
-                    &mut write_chunk,
-                )?,
-                None => {
-                    // Runs of staged blocks are read from the staging area,
-                    // the runs between them fetched as usual, in order.
-                    let staged = |c: &ChunkRef| disk_fetch::staged_object(&staging, &c.object);
-                    let mut i = 0;
-                    while i < file.chunks.len() {
-                        let here = staged(&file.chunks[i]).is_some();
-                        let mut j = i;
-                        while j < file.chunks.len() && staged(&file.chunks[j]).is_some() == here {
-                            j += 1;
-                        }
-                        if here {
-                            for c in &file.chunks[i..j] {
-                                let Some((path, _)) = staged(c) else {
-                                    continue;
-                                };
-                                let bytes = fs::read(&path)?;
-                                let fetched =
-                                    if ObjectName::from_bytes(&crypto::hash(&bytes)) == c.object {
-                                        Fetched::Got {
-                                            bytes,
-                                            from_peer: false,
-                                        }
-                                    } else {
-                                        let _ = fs::remove_file(&path);
-                                        fetch::fetch_object(
-                                            peers.as_deref(),
-                                            &c.object,
-                                            storages,
-                                            &stats,
-                                        )
-                                    };
-                                write_chunk(c, fetched)?;
-                            }
-                        } else {
-                            fetch_in_order(
-                                peers.as_deref(),
-                                &file.chunks[i..j],
-                                storages,
-                                &stats,
-                                &mut write_chunk,
-                            )?;
-                        }
-                        i = j;
-                    }
+                    |c, f| write_chunk(c, Got::Net(f)),
+                )?;
+                for (c, at) in file.chunks[i..j].iter().zip(&offsets[i..j]) {
+                    local.wrote(c, *at);
                 }
+                i = j;
             }
             // The modification time the writer recorded, as a restore
             // sets it (the index takes what the disk then shows).
@@ -5902,15 +6061,22 @@ impl Engine {
                 return Err(anyhow::Error::new(e)
                     .context(format!("move {} to its conflict copy", a.from.display())));
             }
+            if a.moved {
+                if let Some(dir) = a.to.parent() {
+                    local.moved(&a.from, dir, &a.to);
+                }
+            }
         }
         fsmeta::make_replaceable(disk);
         if let Err(e) = fs::rename(&tmp, disk) {
             if let Some(a) = aside {
                 a.put_back();
             }
+            local.end_temp();
             return Err(e.into());
         }
         cleanup.keep();
+        local.finish_temp(disk);
         if self.share_read_only(rec) {
             share_roles::set_read_only(disk, true);
         }
@@ -5924,6 +6090,8 @@ impl Engine {
     /// looked at.
     fn prefetch_small(
         &mut self,
+        rec: &FolderRecord,
+        root: &Path,
         entries: &[(&String, &FileState)],
         from: usize,
         state: &FolderState,
@@ -5948,8 +6116,15 @@ impl Engine {
             {
                 continue;
             }
+            // A block this device has is copied, not fetched
+            // (`local_blocks`).
+            self.ensure_local_blocks(rec, root, state);
             for c in &remote.chunks {
-                if !self.prefetched.contains_key(&c.object) && seen.insert(c.object.clone()) {
+                let here = self.local_blocks.as_ref().is_some_and(|(_, lb)| lb.has(c));
+                if !here
+                    && !self.prefetched.contains_key(&c.object)
+                    && seen.insert(c.object.clone())
+                {
                     wanted.push(c.clone());
                 }
             }
