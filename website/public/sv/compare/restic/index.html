@@ -29,7 +29,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Hoppa till innehållet</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
 </div>
 <header class="site">
@@ -60,7 +60,7 @@
     <h1>Varsto, restic och BorgBackup</h1>
     <p class="lead">restic och BorgBackup (borg) är säkerhetskopieringsprogram: de tar versioner av kataloger till ett krypterat, deduplicerat arkiv och återställer dem senare. De är inte synkroniseringsverktyg och försöker inte vara det. Varsto gör både synkronisering och egna säkerhetskopior, och dess restic-spegel låter restic säkerhetskopiera ett valv oberoende av Varsto.</p>
 
-    <h2>Så fungerar restic och borg</h2>
+    <h2>restic vs Borg</h2>
     <p><strong>restic</strong> är en enda körbar fil som fungerar utan server. <code>restic backup</code> tar en version av en katalog till ett arkiv och för över bara de delar av filerna som ändrats; <code>restic snapshots</code> listar versionerna, <code>restic restore</code> hämtar tillbaka en och <code>restic check</code> kontrollerar arkivet. Arkiv kan ligga på en lokal disk eller på många lagringstyper, självhostade och onlinetjänster, och allt i dem är krypterat. <strong>borg</strong> är också ett deduplicerande säkerhetskopieringsprogram: filer delas i bitar och en bit som redan finns i arkivet lagras inte igen, data krypteras på klienten (AES-256 med HMAC-SHA256) och komprimeras om du vill, arkiv ligger på lokala diskar eller på vilken värd som helst som nås över SSH, och arkiven kan monteras som ett filsystem för att bläddra och återställa. Ingen av dem håller dina enheter i jämna steg: en säkerhetskopia körs vid en tid du väljer, från en maskin, till ett arkiv, och filerna på maskinen lämnas som de var.</p>
 
     <h2>Sida vid sida</h2>

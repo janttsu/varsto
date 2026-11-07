@@ -599,6 +599,16 @@ impl Engine {
     /// The printable kit with both word sets: the newest vault key and the
     /// recovery key.
     pub fn f3_kit_text(&self, k1: &RecoveryKey) -> Result<String> {
+        self.f3_kit_text_with(Some(k1), false)
+    }
+
+    /// The printable kit with the newest vault key and, when given, the
+    /// recovery key; without it the kit says in capitals that the recovery
+    /// words are missing. With `shares`, each word set is also split 2 of 3.
+    /// The same rule as exporting the vault key: an owner device, and the
+    /// organization allows it.
+    pub fn f3_kit_text_with(&self, k1: Option<&RecoveryKey>, shares: bool) -> Result<String> {
+        self.may_export_vault_key()?;
         let vault = id16(&self.vault.vault_id)
             .ok_or_else(|| anyhow!("the vault id is not 16 bytes of hex"))?;
         let (epoch, k3) = self
@@ -608,7 +618,7 @@ impl Engine {
             .next_back()
             .map(|(e, k)| (*e, k.clone()))
             .ok_or_else(|| anyhow!("no vault key"))?;
-        crate::membership3::escrow::kit_text(&vault, epoch, &k3, k1)
+        crate::membership3::escrow::kit_text_with(&vault, epoch, &k3, k1, shares)
     }
 
     /// Pairing (the offering device, after the person ticked folders for

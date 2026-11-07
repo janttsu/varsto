@@ -22,8 +22,9 @@
 
 - `daily-sync.py` (and `test_daily_sync.py`): the daily channel. The workflow
   `.github/workflows/daily.yml` builds all platforms at 03:00 UTC when `main`
-  has moved, signs the file list with the daily key (repository secret
-  `VARSTO_DAILY_KEY`) and publishes it as the assets of the rolling GitHub
+  has moved, signs the file list with the daily key (secret
+  `VARSTO_DAILY_KEY` of the `daily` environment, which only runs from `main`
+  receive) and publishes it as the assets of the rolling GitHub
   pre-release `daily` (recreated each run, `v*` tags untouched). The server
   pulls it from cron; nothing on GitHub can write to the server:
 
@@ -56,9 +57,17 @@
   path for a build made elsewhere (same layout; sign with
   `scripts/sign-daily.sh`).
 
-  One-time steps: put the private key in the repository secret
-  (`gh secret set VARSTO_DAILY_KEY < ~/.config/varsto-release/daily-key.pem`),
-  install the cron line, then run the workflow by hand once with `publish`
+  One-time steps: make the `daily` environment with a deployment branch
+  policy that allows `main` only (Settings, Environments; or the API:
+  `gh api -X PUT repos/janttsu/varsto/environments/daily` with
+  `deployment_branch_policy: {protected_branches: false, custom_branch_policies: true}`,
+  then `gh api -X POST repos/janttsu/varsto/environments/daily/deployment-branch-policies -f name=main -f type=branch`),
+  put the private key in that environment's secret
+  (`gh secret set VARSTO_DAILY_KEY --env daily < ~/.config/varsto-release/daily-key.pem`;
+  a repository secret of the same name would reach every run, so do not keep one),
+  protect `main` with a ruleset (no deletion, no force push, changes only
+  through pull requests, no bypass: then the workflow token cannot push to
+  `main` either), install the cron line, then run the workflow by hand once with `publish`
   false and once with `publish` true (Actions, Daily builds, Run workflow).
   Tests: `python3 -I -m unittest discover -s ops/site -p 'test_*.py'`
   (needs OpenSSL 3; CI runs them).

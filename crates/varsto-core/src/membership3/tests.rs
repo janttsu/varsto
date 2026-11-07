@@ -524,6 +524,53 @@ fn vault_words_and_recovery_words_restore_every_folder() {
     let kit = escrow::kit_text(&VAULT, newest_epoch, &newest_k3, &k1).unwrap();
     assert!(kit.contains(vault_words.split(' ').next().unwrap()));
     assert!(kit.contains("RECOVERY WORDS"));
+    assert!(!kit.contains(escrow::RECOVERY_WORDS_MISSING));
+    assert!(!kit.contains("Share 1:"));
+    // Without the recovery words the kit says so in capitals and prints no
+    // recovery word; the vault words alone never pass for a complete kit.
+    let partial = escrow::kit_text_with(&VAULT, newest_epoch, &newest_k3, None, false).unwrap();
+    assert!(
+        partial.contains(escrow::RECOVERY_WORDS_MISSING),
+        "{partial}"
+    );
+    assert!(partial.contains("VAULT WORDS"));
+    let k1_words = k1.words().unwrap();
+    for w in k1_words.split(' ') {
+        assert!(
+            !partial.contains(&format!(". {w}")) || vault_words.contains(w),
+            "{partial}"
+        );
+    }
+    assert!(!partial.contains(&k1.key_check().unwrap()));
+    // With shares, both sets are split and either rebuilds its key.
+    let shared = escrow::kit_text_with(&VAULT, newest_epoch, &newest_k3, Some(&k1), true).unwrap();
+    assert!(shared.contains("Vault word shares:") && shared.contains("Recovery word shares:"));
+    assert_eq!(shared.matches("Share 1:").count(), 2, "{shared}");
+    let share_lines = |after: &str| -> Vec<crate::recovery::Share> {
+        let text = &shared[shared.find(after).unwrap()..];
+        (1..=3)
+            .map(|i| {
+                let start =
+                    text.find(&format!("Share {i}:\n")).unwrap() + format!("Share {i}:\n").len();
+                let rows: Vec<&str> = text[start..].lines().take(6).collect();
+                let words: Vec<String> = rows
+                    .iter()
+                    .flat_map(|r| r.split_whitespace())
+                    .filter(|t| !t.ends_with('.'))
+                    .map(|t| t.to_string())
+                    .collect();
+                crate::recovery::Share::decode(&format!("{i}: {}", words.join(" "))).unwrap()
+            })
+            .collect()
+    };
+    let k3_shares = share_lines("Vault word shares:");
+    assert_eq!(
+        *crate::recovery::combine(&k3_shares[..2], 2, None).unwrap(),
+        newest_k3.to_hex()
+    );
+    let k1_shares = share_lines("Recovery word shares:");
+    let back = RecoveryKey::from_shares(&k1_shares[1..], Some(&k1.key_check().unwrap())).unwrap();
+    assert_eq!(back.k2().0, k1.k2().0);
 }
 
 #[test]
@@ -1522,6 +1569,68 @@ fn a_non_admin_cannot_revoke_or_wipe() {
         "the same records count without an organization"
     );
     assert_eq!(open.vault_keys.newest_epoch(), 1);
+}
+
+/// Joining reads the organization. A roster member's revocation is not
+/// adopted when the manifest names someone else as administrator.
+#[test]
+fn joining_a_vault_uses_the_organization_administrators() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let ma = device(&st, &a, &keys, "admin");
+    let mut mb = device(&st, &b, &keys, "member");
+    let _mc = device(&st, &c, &keys, "other");
+    mb.refresh().unwrap();
+    mb.remove_device(&ma.me, 0, true, None)
+        .expect("a modified client can write the epoch");
+    let root = crate::org::root_signer(&SecretKey::random());
+    let vault_id = crate::ids::VaultId::from_bytes(&VAULT);
+    let manifest = crate::org::Manifest {
+        org_id: crate::org::org_id_for(&root.public()),
+        name: "Acme".into(),
+        seq: 1,
+        previous_hash: String::new(),
+        issued_utc: 1,
+        root_pubkey_hex: hex::encode(root.public().to_bytes()),
+        admins: vec![crate::org::Admin {
+            device: crate::ids::DeviceId::from_bytes(&ma.me),
+            name: "hq".into(),
+        }],
+        roster_seq: 0,
+    };
+    let signed = crate::org::SignedManifest::seal(
+        &manifest,
+        &vault_id,
+        0,
+        keys.get(0).unwrap(),
+        &root,
+    )
+    .unwrap();
+    let raw = serde_json::to_vec(&signed).unwrap();
+    s.put_if_absent(&crate::org::SignedManifest::storage_key(1, 0), &raw)
+        .unwrap();
+    let n = Dev::new();
+    let joined = Membership::join_in_vault(
+        VAULT,
+        &vault_id,
+        &st,
+        &n.sign,
+        &n.kem,
+        keys.k3_0().unwrap().clone(),
+    )
+    .unwrap();
+    assert!(
+        !joined.is_revoked(&ma.me),
+        "a member's revocation must not open an organization vault"
+    );
+    assert_eq!(joined.vault_keys.newest_epoch(), 0);
+    let without = Membership::join(VAULT, &st, &n.sign, &n.kem, keys.k3_0().unwrap().clone()).unwrap();
+    assert!(
+        without.is_revoked(&ma.me),
+        "without the organization the same records still count"
+    );
 }
 
 /// A device removed from the vault can remain a participant of a folder

@@ -16,9 +16,29 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Added
+
+- Push notifications to your phone through ntfy, Pushover or Telegram ([docs/notifications.md](docs/notifications.md)). Add a channel in Settings (a guide for each service, a test message, a choice of what it receives, an option to leave folder, storage and device names out) or with `varsto notify`. Alerts (storage problems, low space, fewer copies than a policy asks, damaged data, failed or overdue backups, requests waiting for you) are on by default; finished backups, new files and a daily summary are opt-in. The channels are a device-local file with the tokens (`notify.json`, mode 0600, never synced). Messages are not end-to-end encrypted on their way through the service. Failed sends wait in an outbox and are retried, also after a restart; repeats are dropped for six hours and a channel gets at most 20 an hour. The settings work while the vault is locked.
+
+### Changed
+
+- The daily workflow signs with the daily key from the `daily` environment, which GitHub hands only to runs whose workflow ref is `main`: a manual run from another branch builds and packages but cannot sign. The repository's `main` branch is protected by a ruleset (no deletion, no force push, changes only through pull requests, no bypass), so the workflow token cannot push to it. Both settings are made by hand (ops/site/README.md).
+- Website: the alpha warning is marked so a search engine does not quote it. Page titles and descriptions name the product and the document. The home page, the docs index and the older release notes point developers at the GitHub repository.
+
 ### Fixed
 
 - `varsto share request` keeps the request's private keys (K6, K8) sealed under the device's passphrase (`share-request.enc`, Argon2id as `keys.enc`) instead of in clear in `share-request.json`, where a copy of the device directory taken while the request waited could read them and, once the owner approved, open the shared folder without any passphrase. The command and the interface's "Show my request code" ask for the passphrase, and `share accept` needs the same one. A request left in clear by alpha.16 is sealed and the clear file removed by the next command that reads it.
+- `varsto recovery kit` prints the format 3 kit: the vault words and the recovery words, both word sets. It used to print the format 2 kit, whose text said the 24 vault words "read everything in the vault"; in format 3 they open device and folder names and the storage ledger only, so a person who kept that printout alone could not restore any content. The command asks for the recovery words (or takes VARSTO_RECOVERY_WORDS, or the copy `unlock --with-recovery-key` gave the service); a kit printed without them says RECOVERY WORDS: NOT ON THIS PRINTOUT in capitals and warns on standard error. `--shares` now splits both word sets (it used to split the vault words only, and could not be combined with `--recovery-words`), and `recovery combine` says that the key check tells which set the rebuilt words belong to. The Help page's recovery paragraph and the "Print the recovery kit" dialog say the same.
+- The activity log's "holds no key" line has the same access button as the folder row (request access, show the six words, or sync), so a phone can ask for the folder from that line.
+- The restic mirror root and the folders attached under it are created so only this user can reach them (mode 0700). A plain directory create followed the umask, so another user on the machine could read the plaintext mirror.
+- Joining a vault reads the organization's manifest and adopts vault epochs and revocations only from its administrators. A roster member's revocation no longer opens the vault for a device that is joining.
+- Pausing the background service now stops peer-to-peer as well: the listener, the LAN beacon, the rendezvous, the relay and the router mapping stop until the service is resumed, so a paused phone sends and receives nothing for Varsto. Before, only syncing stopped and peer traffic went on. A pause set by the user also survives a restart of the service (`<home>/service-paused`), as a phone stops and starts the service often; the short pause that `varsto disk` and import commands take for their duration is not saved.
+- Thumbnails in the file list show on phones again: the service answers "busy"
+  (503, with Retry-After) instead of "no thumbnail" when the engine is busy
+  and the page retries; two requests at a time, a memory-only cache for
+  re-rendered lists, no lazy-loading attribute.
+- The default policy no longer reports a folder as violated in a vault without a disk pool or directory storage: the folder gets one warning that there is no copy on your own disks and how to add one (a policy set on purpose that asks for a copy at home is still held to it). The texts say "your own disks" (copies on devices were never counted) and "no copy" instead of "fewer than 1 copies"; on the Visualization page the reason shows under the bar of the "Is it safe?" card, the policy line wraps on phones, and the repair line no longer shows the key epoch.
+
 
 ## [0.0.1-alpha.16] - 2026-11-04
 

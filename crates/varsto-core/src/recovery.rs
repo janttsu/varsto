@@ -162,57 +162,6 @@ pub fn combine(shares: &[Share], threshold: u8, check: Option<&str>) -> Result<Z
     Ok(key_hex)
 }
 
-/// The printable kit.
-pub fn kit_text(vault_id: &str, key_hex: &str, shares: Option<(u8, Vec<Share>)>) -> Result<String> {
-    let words = words_from_key(key_hex)?;
-    let numbered: Vec<String> = words
-        .split(' ')
-        .enumerate()
-        .map(|(i, w)| format!("{:>2}. {w}", i + 1))
-        .collect();
-    let mut t = String::new();
-    t.push_str("VARSTO RECOVERY KIT\n");
-    t.push_str(&format!("Vault {vault_id}\n"));
-    t.push_str(
-        "These 24 words are the vault key. Anyone who has them can read everything in the vault.\n",
-    );
-    t.push_str(
-        "Keep this on paper or metal, in more than one place, never in a photo or a cloud note.\n",
-    );
-    t.push_str("Test it once a year: `varsto join` (it asks for the words) on a spare device.\n\n");
-    for row in numbered.chunks(4) {
-        t.push_str(&row.join("   "));
-        t.push('\n');
-    }
-    t.push_str(&format!(
-        "\nKey check: {}  (a key rebuilt from shares is right when `varsto recovery combine --check` accepts it with this value)\n",
-        key_check(key_hex)?
-    ));
-    if let Some((threshold, shares)) = shares {
-        t.push_str(&format!(
-            "\nSHARES ({threshold} of {} rebuild the key; one alone reveals nothing). Give each to a different place or person.\n",
-            shares.len()
-        ));
-        for s in shares {
-            t.push_str(&format!("\nShare {}:\n", s.index));
-            let n: Vec<String> = s
-                .words
-                .split(' ')
-                .enumerate()
-                .map(|(i, w)| format!("{:>2}. {w}", i + 1))
-                .collect();
-            for row in n.chunks(4) {
-                t.push_str(&row.join("   "));
-                t.push('\n');
-            }
-        }
-        t.push_str(
-            "\nRebuild: varsto recovery combine --check <key check>   (it asks for two shares, one \"<index>: <24 words>\" per line)\n",
-        );
-    }
-    Ok(t)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,9 +195,6 @@ mod tests {
         let enc = shares[0].encode();
         assert_eq!(Share::decode(&enc).unwrap(), shares[0]);
         let check = key_check(&key).unwrap();
-        let text = kit_text("abcd", &key, Some((2, shares))).unwrap();
-        assert!(text.contains("Share 1:") && text.contains("RECOVERY KIT"));
-        assert!(text.contains(&format!("Key check: {check}")), "{text}");
         assert_eq!(check.len(), 8);
         assert!(!key.contains(&check));
     }

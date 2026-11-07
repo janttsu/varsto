@@ -134,6 +134,25 @@ pub fn kit_text(
     k3: &SecretKey,
     k1: &RecoveryKey,
 ) -> Result<String> {
+    kit_text_with(vault, vault_epoch, k3, Some(k1), false)
+}
+
+/// The sentence the kit carries when the recovery words were not at hand,
+/// so that the printout cannot pass for a complete kit.
+pub const RECOVERY_WORDS_MISSING: &str =
+    "RECOVERY WORDS: NOT ON THIS PRINTOUT. The vault words alone restore no file content.";
+
+/// The printable kit of format 3 with the newest vault key and, when at
+/// hand, K1. Without K1 the kit says so in capitals instead of passing
+/// for a complete one. With `shares`, each word set is also split into
+/// three Shamir shares of which any two rebuild it.
+pub fn kit_text_with(
+    vault: &Id16,
+    vault_epoch: u32,
+    k3: &SecretKey,
+    k1: Option<&RecoveryKey>,
+    shares: bool,
+) -> Result<String> {
     let rows = |words: &str| -> String {
         let numbered: Vec<String> = words
             .split(' ')
@@ -147,8 +166,16 @@ pub fn kit_text(
         }
         t
     };
-    let vault_words = recovery::words_from_key(&k3.to_hex())?;
-    let recovery_words = k1.words()?;
+    let share_rows = |list: &[Share]| -> String {
+        let mut t = String::new();
+        for s in list {
+            t.push_str(&format!("\nShare {}:\n", s.index));
+            t.push_str(&rows(&s.words));
+        }
+        t
+    };
+    let k3_hex = Zeroizing::new(k3.to_hex());
+    let vault_words = recovery::words_from_key(&k3_hex)?;
     let mut t = String::new();
     t.push_str("VARSTO RECOVERY KIT\n");
     t.push_str(&format!("Vault {}\n\n", hex::encode(vault)));
@@ -156,17 +183,40 @@ pub fn kit_text(
         "VAULT WORDS (vault key, epoch {vault_epoch}): device names, folder names and the storage ledger, no content.\n"
     ));
     t.push_str(&rows(&vault_words));
-    t.push_str(&format!(
-        "Key check: {}\n\n",
-        recovery::key_check(&k3.to_hex())?
-    ));
+    t.push_str(&format!("Key check: {}\n\n", recovery::key_check(&k3_hex)?));
+    match k1 {
+        Some(k1) => {
+            let recovery_words = k1.words()?;
+            t.push_str(
+                "RECOVERY WORDS: with the vault words, every folder's content. Alone they open nothing.\n",
+            );
+            t.push_str(&rows(&recovery_words));
+            t.push_str(&format!("Key check: {}\n\n", k1.key_check()?));
+        }
+        None => {
+            t.push_str(RECOVERY_WORDS_MISSING);
+            t.push('\n');
+            t.push_str(
+                "Keep the kit that `varsto init` printed, or print this kit again with the recovery words at hand (`varsto recovery kit --recovery-words`, or after `varsto unlock --with-recovery-key`).\n\n",
+            );
+        }
+    }
+    if shares {
+        t.push_str(
+            "SHARES (2 of 3 rebuild a word set; one alone reveals nothing). Give each to a different place or person.\n",
+        );
+        t.push_str("\nVault word shares:\n");
+        t.push_str(&share_rows(&recovery::split(&k3_hex, 2, 3)?));
+        if let Some(k1) = k1 {
+            t.push_str("\nRecovery word shares:\n");
+            t.push_str(&share_rows(&k1.shares()?));
+        }
+        t.push_str(
+            "\nRebuild: varsto recovery combine --check <key check>   (it asks for two shares of the same set, one \"<index>: <24 words>\" per line; the key check says which set they rebuild)\n\n",
+        );
+    }
     t.push_str(
-        "RECOVERY WORDS: with the vault words, every folder's content. Alone they open nothing.\n",
-    );
-    t.push_str(&rows(&recovery_words));
-    t.push_str(&format!("Key check: {}\n\n", k1.key_check()?));
-    t.push_str(
-        "Keep both on paper or metal, in more than one place, never in a photo or a cloud note.\n",
+        "Keep both word sets on paper or metal, in more than one place, never in a photo or a cloud note.\n",
     );
     t.push_str("Removing a device changes the vault words (print a new kit then); the recovery words stay.\n");
     Ok(t)

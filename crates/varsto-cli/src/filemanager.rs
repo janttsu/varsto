@@ -236,7 +236,7 @@ pub fn report_failure(home: &Path, title: &str, body: &str) {
         }
     }
     #[cfg(not(windows))]
-    service::notify(title, body);
+    service::notify(varsto_core::notify::Category::Other, title, body);
 }
 
 /// A double-quoted argument for an Exec line (desktop entries, Nemo

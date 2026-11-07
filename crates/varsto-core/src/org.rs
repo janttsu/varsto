@@ -35,7 +35,7 @@ use crate::kem::{DecapsKey, EncapsKey};
 use crate::util;
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use zeroize::Zeroizing;
 
@@ -268,6 +268,87 @@ impl SignedManifest {
         )?;
         Ok(m)
     }
+}
+
+/// Administrators named by the organization on `storages`, when one exists.
+///
+/// The chain starts at sequence 1 and follows `previous_hash`, and each
+/// manifest must be signed by the root key the first one pins. A vault
+/// with no such manifest returns `None`: every full device may still
+/// write epochs. A joining device uses this so a roster member's vault
+/// epoch is not adopted (spec 27).
+pub fn admins_for_join(
+    storages: &[&dyn crate::storage::Storage],
+    vault: &VaultId,
+    keys: &BTreeMap<u32, SecretKey>,
+) -> Result<Option<BTreeSet<crate::record::Id16>>> {
+    let mut by_seq: BTreeMap<u32, Vec<(String, Vec<u8>)>> = BTreeMap::new();
+    for storage in storages {
+        for key in storage.list(MANIFEST_PREFIX)? {
+            let Some(rest) = key.strip_prefix(MANIFEST_PREFIX) else {
+                continue;
+            };
+            let Some(seq) = seq_from_name(rest) else {
+                continue;
+            };
+            let Some(blob) = storage.get(&key)? else {
+                continue;
+            };
+            by_seq.entry(seq).or_default().push((key, blob));
+        }
+    }
+    for cands in by_seq.values_mut() {
+        cands.sort_by(|a, b| a.0.cmp(&b.0));
+        cands.dedup_by(|a, b| a.1 == b.1);
+    }
+    let mut previous_hash = String::new();
+    let mut root: Option<VerifyingKey> = None;
+    let mut current: Option<Manifest> = None;
+    let mut want = 1u32;
+    loop {
+        let Some(cands) = by_seq.get(&want) else {
+            break;
+        };
+        let mut adopted = false;
+        for (_name, blob) in cands {
+            let Ok(signed) = serde_json::from_slice::<SignedManifest>(blob) else {
+                continue;
+            };
+            if signed.seq != want {
+                continue;
+            }
+            let Some(key) = keys.get(&signed.key_epoch) else {
+                continue;
+            };
+            let Ok(manifest) = signed.open(vault, key, root.as_ref()) else {
+                continue;
+            };
+            if manifest.previous_hash != previous_hash {
+                continue;
+            }
+            if root.is_none() {
+                root = Some(manifest.root_key()?);
+            }
+            previous_hash = hex::encode(crypto::hash(blob));
+            current = Some(manifest);
+            adopted = true;
+            break;
+        }
+        if !adopted {
+            break;
+        }
+        want = want.saturating_add(1);
+    }
+    let Some(manifest) = current else {
+        return Ok(None);
+    };
+    let mut admins = BTreeSet::new();
+    for admin in &manifest.admins {
+        if let Some(id) = crate::record::id16(&admin.device) {
+            admins.insert(id);
+        }
+    }
+    Ok(Some(admins))
 }
 
 // ----- roster ---------------------------------------------------------------------

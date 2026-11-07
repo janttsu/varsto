@@ -627,6 +627,8 @@ pub(crate) fn engine_free(method: &Method, path: &str) -> bool {
                 | "/api/pair/join-status"
                 | "/api/providers"
                 | "/api/logs"
+                | "/api/notify"
+                | "/api/notify/ntfy-topic"
         ),
         Method::Post => matches!(
             path,
@@ -639,6 +641,11 @@ pub(crate) fn engine_free(method: &Method, path: &str) -> bool {
                 | "/api/update/settings"
                 | "/api/pair/join"
                 | "/api/logs/level"
+                | "/api/notify/channel"
+                | "/api/notify/channel/remove"
+                | "/api/notify/test"
+                | "/api/notify/telegram/chats"
+                | "/api/notify/settings"
         ),
         _ => false,
     }
@@ -1399,22 +1406,41 @@ fn handle(fixed: &Fixed, mut request: Request) -> Result<()> {
     if path == "/api/thumb" {
         let (folder, file) = (query_param(&query, "folder"), query_param(&query, "path"));
         // A missing thumbnail may be fetched from a storage: off the lock.
-        // A page full of pictures does not wait for a sync: no picture yet.
-        let bytes = match checkout_within(state, "thumbnail", std::time::Duration::from_secs(2)) {
-            Ok(work) => match (&work.engine, folder, file) {
-                (Some(e), Some(f), Some(p)) => e.thumbnail(&f, &p).unwrap_or(None),
-                _ => None,
-            },
-            Err(_) => None,
-        };
+        // A page full of pictures does not wait for a sync: "busy" (503, try
+        // again in a moment) is not the answer "this file has no thumbnail"
+        // (404), or a phone would give up on every picture for good.
+        let bytes: std::result::Result<Option<Vec<u8>>, u32> =
+            match checkout_within(state, "thumbnail", std::time::Duration::from_secs(2)) {
+                Ok(work) => match (&work.engine, folder, file) {
+                    (Some(e), Some(f), Some(p)) => match e.thumbnail(&f, &p) {
+                        Ok(found) => Ok(found),
+                        Err(err) => {
+                            log::debug!("thumbnail not available now: {err:#}");
+                            Err(5)
+                        }
+                    },
+                    _ => Ok(None),
+                },
+                Err(_) => Err(2),
+            };
         match bytes {
-            Some(b) => request.respond(
+            Ok(Some(b)) => request.respond(
                 Response::from_data(b)
                     .with_header(header("Content-Type", "image/jpeg"))
                     // No decrypted thumbnail in any disk cache.
                     .with_header(header("Cache-Control", "no-store")),
             )?,
-            None => request.respond(api_plain(404, "no thumbnail"))?,
+            Ok(None) => request.respond(api_plain(404, "no thumbnail"))?,
+            Err(retry) => {
+                let msg = if retry == 2 {
+                    "busy"
+                } else {
+                    "not available now"
+                };
+                request.respond(
+                    api_plain(503, msg).with_header(header("Retry-After", &retry.to_string())),
+                )?
+            }
         }
         return Ok(());
     }
@@ -1544,6 +1570,16 @@ fn handle(fixed: &Fixed, mut request: Request) -> Result<()> {
         request.respond(json_response(200, &json!({"ok": true})))?;
         service::request_quit(state);
         return Ok(());
+    }
+    if path == "/api/notify" || path.starts_with("/api/notify/") {
+        // Push channels: a file in the device directory, so no engine and
+        // no state lock (a test message may take 15 seconds). Works while
+        // the vault is locked.
+        let result = crate::notifications::api(&fixed.home, &method, &path, &input);
+        return match result {
+            Ok(v) => Ok(request.respond(json_response(200, &v))?),
+            Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+        };
     }
     let post = method == Method::Post;
     let result = match run_api(fixed, method, &path, &query, &input) {
@@ -2568,6 +2604,18 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 .get("paused")
                 .and_then(|b| b.as_bool())
                 .unwrap_or(true);
+            // The user's pause is kept over a restart; a command's own
+            // pause for its duration (`temporary`, `drives::ServicePause`)
+            // is not.
+            let temporary = input
+                .get("temporary")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false);
+            if !temporary {
+                if let Err(e) = service::save_paused(&st.home, paused) {
+                    log::warn!("could not save the pause of the service: {e}");
+                }
+            }
             // A job (a sync) has the service's state out: applied when it
             // hands it back; the summary says so at once.
             if let Some(b) = st.busy.as_mut() {
@@ -4622,6 +4670,15 @@ mod f3_api {
                 varsto_core::events::publish(
                     "pair.ask",
                     json!({"name": j.name, "fingerprint": j.fingerprint}),
+                );
+                // The person has five minutes to answer: tell their phone.
+                crate::service::push_only(
+                    varsto_core::notify::Category::Requests,
+                    "Varsto pairing request",
+                    &format!(
+                        "{} asks to pair with this device. Open Varsto to answer.",
+                        j.name
+                    ),
                 );
                 let deadline = std::time::Instant::now() + ANSWER_WITHIN;
                 let answer = loop {
