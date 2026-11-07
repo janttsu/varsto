@@ -16,6 +16,10 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Fixed
+
+- `varsto share request` keeps the request's private keys (K6, K8) sealed under the device's passphrase (`share-request.enc`, Argon2id as `keys.enc`) instead of in clear in `share-request.json`, where a copy of the device directory taken while the request waited could read them and, once the owner approved, open the shared folder without any passphrase. The command and the interface's "Show my request code" ask for the passphrase, and `share accept` needs the same one. A request left in clear by alpha.16 is sealed and the clear file removed by the next command that reads it.
+
 ## [0.0.1-alpha.16] - 2026-11-04
 
 Spec sections 72 to 83. Storage format 3: vaults of alpha.15 and earlier are not read and must be recreated; every device must run alpha.16 (alpha.15 refuses a format 3 vault with a message). This is still an alpha: not for production data. The Android package is now release-signed under a new key, so an installed debug build (alpha.15 or an older daily) must be uninstalled before the new APK is installed.

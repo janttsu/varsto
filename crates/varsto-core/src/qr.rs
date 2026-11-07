@@ -641,7 +641,9 @@ mod tests {
 
     fn request(name: &str) -> (tempfile::TempDir, String) {
         let d = tempfile::tempdir().unwrap();
-        let code = ShareRequest::code_for_named(d.path(), Some(name)).unwrap();
+        let code =
+            ShareRequest::code_for_named(d.path(), Some(name), "correct horse battery staple")
+                .unwrap();
         (d, code)
     }
 

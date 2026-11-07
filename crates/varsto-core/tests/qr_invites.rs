@@ -52,8 +52,8 @@ fn a_share_through_qr_links() {
     // public keys, more than one code holds); the owner scans them in any
     // order.
     let home = root.join("robin-home");
-    let code = ShareRequest::code_for_named(&home, Some("Robin")).unwrap();
-    let words = ShareRequest::fingerprint_for(&home).unwrap();
+    let code = ShareRequest::code_for_named(&home, Some("Robin"), PASS).unwrap();
+    let words = ShareRequest::fingerprint_for(&home, PASS).unwrap();
     let req_link = Link::from_text(&code).unwrap();
     let parts = req_link.to_uris(qr::PART_CHARS, qr::PART_CHARS).unwrap();
     assert!(parts.len() > 1);

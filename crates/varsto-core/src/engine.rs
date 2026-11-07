@@ -7873,6 +7873,7 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
         "devices.json",
         "clock.json",
         "mcp-grants.json",
+        "share-request.enc",
         "share-request.json",
         "software-security-key",
         "service.log",

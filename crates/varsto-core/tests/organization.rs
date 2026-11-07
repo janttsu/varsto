@@ -83,7 +83,7 @@ fn three_devices(lab: &Lab) -> (Engine, Engine, Engine, String) {
 /// Share "docs" with a request code made in a fresh directory.
 fn try_share(lab: &Lab, e: &mut Engine) -> anyhow::Result<()> {
     let home = tempfile::tempdir_in(&lab.root).unwrap();
-    let code = varsto_core::vault::ShareRequest::code_for(home.path()).unwrap();
+    let code = varsto_core::vault::ShareRequest::code_for(home.path(), PASS).unwrap();
     e.share_add("docs", &code, None, varsto_core::share::ShareRole::Editor)
         .map(|_| ())
 }

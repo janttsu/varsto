@@ -376,7 +376,7 @@ fn shared_folder_between_two_users() {
     fs::write(lab.a_dir.join("plan.txt"), b"shared plan").unwrap();
     a.sync(None).unwrap();
     // User C asks with a request code; A adds it and tells its own words.
-    let code = varsto_core::vault::ShareRequest::code_for(&lab.b_home).unwrap();
+    let code = varsto_core::vault::ShareRequest::code_for(&lab.b_home, PASS).unwrap();
     let added = a
         .share_add(
             "project",
@@ -602,7 +602,7 @@ fn a_share_opens_only_on_the_requesting_device() {
     owner.push("docs").unwrap();
 
     // Recipient creates a request code before it has any vault.
-    let code = ShareRequest::code_for(&lab.b_home).unwrap();
+    let code = ShareRequest::code_for(&lab.b_home, PASS).unwrap();
     assert!(code.starts_with("vsr1."));
     let added = owner
         .share_add("docs", &code, None, varsto_core::share::ShareRole::Editor)
@@ -624,8 +624,8 @@ fn a_share_opens_only_on_the_requesting_device() {
 
     // A different device (another request) finds nothing shared with it.
     let other = tempfile::tempdir().unwrap();
-    ShareRequest::code_for(other.path()).unwrap();
-    assert!(Engine::share_offers(other.path(), &lab.storage, None)
+    ShareRequest::code_for(other.path(), PASS).unwrap();
+    assert!(Engine::share_offers(other.path(), PASS, &lab.storage, None)
         .unwrap()
         .is_empty());
     assert!(Engine::accept_share(
@@ -910,7 +910,7 @@ fn strongroom_folder_needs_the_security_key_on_every_device() {
     assert!(
         a.share_add(
             "taxes",
-            &varsto_core::vault::ShareRequest::code_for(&lab.b_home.with_file_name("x-home"))
+            &varsto_core::vault::ShareRequest::code_for(&lab.b_home.with_file_name("x-home"), PASS)
                 .unwrap(),
             None,
             varsto_core::share::ShareRole::Editor
