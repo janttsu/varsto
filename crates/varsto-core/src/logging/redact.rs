@@ -339,6 +339,11 @@ fn cut_assignments(s: &str) -> String {
             let (vs, ve) = if k < bytes.len() && bytes[k] == b'"' {
                 let close = s[k + 1..].find('"').map(|e| k + 1 + e).unwrap_or(s.len());
                 (k + 1, close)
+            } else if let Some(len) = wrapped_value_len(&s[k..]) {
+                // `Some("x")`, `Command("pass show x")`: how `Debug` prints
+                // an `Option<String>` or a tuple variant. The value goes
+                // through its closing parenthesis.
+                (k, k + len)
             } else {
                 let end = s[k..]
                     .find(|c: char| {
@@ -359,6 +364,45 @@ fn cut_assignments(s: &str) -> String {
         }
     }
     apply_cuts(s, cuts)
+}
+
+/// The length of a value `Debug` wraps in a variant at the start of `t`:
+/// an identifier, `(`, and everything up to the matching `)` (quoted text
+/// and its escapes skipped; to the end of `t` when unclosed). `None` when
+/// `t` does not start like that.
+fn wrapped_value_len(t: &str) -> Option<usize> {
+    let b = t.as_bytes();
+    if !b
+        .first()
+        .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_')
+    {
+        return None;
+    }
+    let mut i = 0;
+    while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+        i += 1;
+    }
+    if i >= b.len() || b[i] != b'(' {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut quoted = false;
+    while i < b.len() {
+        match b[i] {
+            b'\\' if quoted => i += 1,
+            b'"' => quoted = !quoted,
+            b'(' if !quoted => depth += 1,
+            b')' if !quoted => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    Some(b.len())
 }
 
 fn apply_cuts(s: &str, mut cuts: Vec<(usize, usize)>) -> String {
@@ -603,6 +647,36 @@ mod tests {
         );
         // Names that only resemble a marker stay.
         assert_eq!(scrub("key_epoch=3 tokenizer"), "key_epoch=3 tokenizer");
+    }
+
+    #[test]
+    fn debug_wrapped_values_are_cut_whole() {
+        // How `Debug` prints an `Option<String>` and a tuple variant.
+        for (line, want) in [
+            (
+                r#"settings RpcSettings { url: "u", password: Some("hunter2-secret") }"#,
+                r#"settings RpcSettings { url: "u", password: [redacted] }"#,
+            ),
+            (
+                r#"job token: Some("arbitrary-token-1"), next"#,
+                "job token: [redacted], next",
+            ),
+            (
+                r#"restic password: Command("pass show x"), ok"#,
+                "restic password: [redacted], ok",
+            ),
+            (
+                r#"password: Some(Command("a \"(quoted)\" b")) end"#,
+                "password: [redacted] end",
+            ),
+        ] {
+            assert_eq!(scrub(line), want, "{line}");
+        }
+        // An unclosed value is cut to the end of the line.
+        let s = scrub(r#"password: Some("hunter2-secret"#);
+        assert!(!s.contains("hunter2"), "{s}");
+        // `None` is prose, not a value.
+        assert_eq!(scrub("password: None"), "password: None");
     }
 
     #[test]

@@ -543,6 +543,8 @@ impl Keys {
         device: &DeviceId,
     ) -> Result<()> {
         crypto::check_passphrase(passphrase)?;
+        crate::logging::register_secret(passphrase);
+        self.register_for_log();
         let params = PassphraseParams::new();
         let wrap = crypto::passphrase_key(passphrase, &params)?;
         let material = KeyMaterial {
@@ -561,6 +563,9 @@ impl Keys {
     }
 
     pub fn load(home: &Path, passphrase: &str, vault: &VaultId, device: &DeviceId) -> Result<Self> {
+        // Every unlock passes here (CLI, service, interface): the passphrase
+        // is cut from the log from now on, however it was given.
+        crate::logging::register_secret(passphrase);
         let kf: KeyFile = util::read_json(&home.join("keys.enc"))?;
         let blob = hex::decode(&kf.blob_hex)?;
         let aad = Self::keyfile_aad(vault, device);
@@ -578,15 +583,25 @@ impl Keys {
         let plain =
             Zeroizing::new(opened.context("unlock failed: wrong passphrase or damaged key file")?);
         let material: KeyMaterial = serde_json::from_slice(&plain)?;
-        // Cut from the log should a hex form ever reach it (by hash only).
-        if let Ok(raw) = hex::decode(&material.master_hex) {
-            crate::logging::register_key(&raw);
-        }
-        log::debug!("device keys unlocked");
-        Ok(Keys {
+        let keys = Keys {
             master: SecretKey::from_hex(&material.master_hex)?,
             signer: SigningKey::from_bytes(&hex::decode(&material.signing_hex)?)?,
-        })
+        };
+        keys.register_for_log();
+        log::debug!("device keys unlocked");
+        Ok(keys)
+    }
+
+    /// Cut the device keys from the log should a hex form ever reach it (by
+    /// hash only): the master key, and the signing key whole and as its
+    /// Ed25519 and ML-DSA seeds.
+    fn register_for_log(&self) {
+        crate::logging::register_key(self.master.as_bytes());
+        let signing = Zeroizing::new(self.signer.to_bytes());
+        crate::logging::register_key(signing.as_slice());
+        for part in signing.chunks(32) {
+            crate::logging::register_key(part);
+        }
     }
 }
 
@@ -849,6 +864,7 @@ impl FolderKeys {
         for k in epochs.values() {
             crate::logging::register_key(k.as_bytes());
         }
+        crate::logging::register_key(k11.as_bytes());
         let (epoch, meta) = match epochs.iter().next_back() {
             Some((e, k)) => (*e, derive3(k, "folder-metadata", &[&fb])),
             None => bail!("no key of folder {folder} is held here"),
