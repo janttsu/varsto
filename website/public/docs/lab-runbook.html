@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VM lab runbook: Varsto</title>
-<meta name="description" content="Varsto documentation: VM lab runbook">
+<meta name="description" content="VM lab runbook">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/docs/lab-runbook.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="VM lab runbook: Varsto">
-<meta property="og:description" content="Varsto documentation: VM lab runbook">
+<meta property="og:description" content="VM lab runbook">
 <meta property="og:url" content="https://varsto.net/docs/lab-runbook.html">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -54,7 +54,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>VM lab runbook</h1>
-<p class="note">From <code>docs/testing/lab.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>docs/testing/lab.md</code> in the repository, rendered 2026-11-07. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <p>The lab is a small internet made of virtual machines on one Linux host. It plays the multi-device scenarios that need real networks: pairing, peer-to-peer through NAT, storage outages, clock skew, scale and more. This page tells how to bring it up, run every scenario, read the results and tear it down, from nothing. It is written from <code>scripts/test/lab/lab.py</code> and <code>scripts/test/lab/scenarios.py</code>; if the two disagree with this page, the scripts are right and this page needs a fix.</p>
 <p>For the other test levels see <a href="testing.html">TESTING.md</a>. For building binaries see <a href="building.html">BUILDING.md</a>.</p>
 <p><strong>A release needs every scenario.</strong> Run the whole list (<code>scenarios.py</code> with no <code>--only</code>) against the exact binary that is to be released, not only the scenarios of the areas that changed. A change in one area breaks others in ways nobody predicts. <a href="./">HANDOVER.md</a> says when the last full run was done.</p>

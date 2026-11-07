@@ -27,7 +27,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -54,6 +54,7 @@
 <main id="main">
   <div class="wrap">
 <article class="prose"><h1>Alpha.14: a security review, its fixes, and everything merged since alpha.13</h1><p class="note"><time datetime="2026-10-14">2026-10-14</time></p>
+<p>The current release is <a href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">0.0.1-alpha.16</a>. This note describes an older release. <a href="https://varsto.net/downloads/">Downloads</a> serve alpha.16, and the source is on <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
 <p>Alpha.14 is the largest release so far. It carries two things: the backlog of features that landed on the main branch after alpha.13, and the first round of fixes from a security review that read every line of the program with a hostile storage, a hostile network and a hostile fellow device in mind.</p>
 <h2 id="the-security-review">The security review</h2>
 <p>The review found the cryptographic primitives sound and the authorization around them lacking. Alpha.14 closes the parts that could be closed without changing the storage format:</p>
