@@ -115,6 +115,12 @@ jobs:
     needs: [check, ci, ipa]
     if: needs.check.outputs.build == 'true'
     runs-on: ubuntu-24.04
+    # The daily key is a secret of the `daily` environment, which GitHub
+    # hands only to runs whose workflow ref is main (its deployment branch
+    # policy). A manual run started from another branch builds and
+    # packages, but cannot sign: the secret is empty there and the step
+    # stops. The settings are made by hand (ops/site/README.md).
+    environment: daily
     permissions:
       contents: write
     env:
@@ -153,7 +159,7 @@ jobs:
         env:
           DAILY_KEY_PEM: ${{ secrets.VARSTO_DAILY_KEY }}
         run: |
-          [ -n "$DAILY_KEY_PEM" ] || { echo "::error::the repository secret VARSTO_DAILY_KEY is not set (ops/site/README.md)"; exit 1; }
+          [ -n "$DAILY_KEY_PEM" ] || { echo "::error::the secret VARSTO_DAILY_KEY of the daily environment is not set, or this run's ref is not main (ops/site/README.md)"; exit 1; }
           umask 077
           keydir="$(mktemp -d)"
           trap 'rm -rf "$keydir"' EXIT

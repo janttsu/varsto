@@ -92,13 +92,16 @@ native viewer). They need rework on top of `main` before any merge.
   re-checked: CRYPTO-1 (the recovery kit text of format 2), imports-1 (restic
   mirror umask), logging-1/-4 (scrubber gaps), CLI-3/-4 (`current_exe()` after
   an update), QUALITY-1/-2 (mutex `unwrap()` in service.rs, `set_var`).
-- Notification channels (ntfy, Pushover, Telegram; branch `feat/notify-channels`,
-  docs/notifications.md) are written but not compiled or tested yet: build,
-  run the unit tests of `varsto_core::notify`, and try a real ntfy topic, a
-  Pushover application and a Telegram bot once. The external API calls and the
-  store links in the setup guide are from memory.
-- GitHub settings the workflows cannot make: branch protection on `main` and
-  a protected environment for the daily key.
+- Notification channels (ntfy, Pushover, Telegram; PR #112 merged on
+  2026-11-07 without a build or a test, docs/notifications.md): build, run
+  the unit tests of `varsto_core::notify`, and try a real ntfy topic, a
+  Pushover application and a Telegram bot once. The external API calls and
+  the store links in the setup guide are from memory.
+- GitHub settings, made 2026-11-07: the ruleset "protect main" (no deletion,
+  no force push, changes only through pull requests, no bypass) and the
+  `daily` environment (deployment branch policy: `main` only) that holds the
+  secret `VARSTO_DAILY_KEY`; the repository secret of the same name is
+  deleted. The daily workflow's package job names the environment.
 - A full lab run (`scripts/test/lab`, every scenario) with the alpha.16
   binary has not been done since the review fixes.
 - Android: the APK is signed with a new release key. An installation of an
@@ -121,7 +124,8 @@ native viewer). They need rework on top of `main` before any merge.
 - Building every platform, the CI workflows, the Scaleway fallback, screenshots, the daily channel and the website: [BUILDING.md](BUILDING.md). Releases and signing: [RELEASING.md](RELEASING.md). CI builds
   every platform on GitHub-hosted runners (Linux about 1 h 45 min, macOS about
   1 h 10 min); the maintainer signs offline. The daily workflow signs in CI
-  with the repository secret `VARSTO_DAILY_KEY`; the Android release signing
+  with the secret `VARSTO_DAILY_KEY` of the `daily` environment (runs from
+  `main` only); the Android release signing
   uses the `VARSTO_ANDROID_*` secrets. The private keys live only on the
   maintainer's machine (`~/.config/varsto-release/`, mode 600) and are never
   printed or committed.

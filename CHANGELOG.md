@@ -22,6 +22,7 @@ spec still names them because sections were written as the work was done.
 
 ### Changed
 
+- The daily workflow signs with the daily key from the `daily` environment, which GitHub hands only to runs whose workflow ref is `main`: a manual run from another branch builds and packages but cannot sign. The repository's `main` branch is protected by a ruleset (no deletion, no force push, changes only through pull requests, no bypass), so the workflow token cannot push to it. Both settings are made by hand (ops/site/README.md).
 - Website: the alpha warning is marked so a search engine does not quote it. Page titles and descriptions name the product and the document. The home page, the docs index and the older release notes point developers at the GitHub repository.
 
 ### Fixed
