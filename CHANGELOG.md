@@ -42,6 +42,9 @@ spec still names them because sections were written as the work was done.
   and the page retries; two requests at a time, a memory-only cache for
   re-rendered lists, no lazy-loading attribute.
 - The default policy no longer reports a folder as violated in a vault without a disk pool or directory storage: the folder gets one warning that there is no copy on your own disks and how to add one (a policy set on purpose that asks for a copy at home is still held to it). The texts say "your own disks" (copies on devices were never counted) and "no copy" instead of "fewer than 1 copies"; on the Visualization page the reason shows under the bar of the "Is it safe?" card, the policy line wraps on phones, and the repair line no longer shows the key epoch.
+- In a conflict that another device's version wins, the file here moves to its conflict copy only once the winner is downloaded. A winner that could not be fetched used to leave the path empty, and the next push published a deletion of it.
+- A file that grows or shrinks while the scan reads it is no longer published with a size its blocks do not hold, which made every other device refuse the folder's whole file list; it waits for the next scan.
+- With `permissions` off for a folder, a downloaded file gets this device's default mode instead of the mode recorded in the vault.
 
 ## [0.0.1-alpha.16] - 2026-11-04
 

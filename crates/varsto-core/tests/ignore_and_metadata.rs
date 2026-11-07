@@ -319,6 +319,45 @@ fn settings_off_means_not_synced() {
     assert!(a.list_files("docs").unwrap()[0].owner.is_some());
 }
 
+/// ENGINE-6: with permissions off, a file whose content is downloaded gets
+/// the mode a new file gets here, not the vault's (which the step before
+/// the rename used to set).
+#[cfg(unix)]
+#[test]
+fn permissions_off_applies_no_vault_mode_to_downloaded_content() {
+    let (lab, mut a, mut b) = two(&[("f.txt", b"x")]);
+    b.set_folder_settings(
+        "docs",
+        MetaSettings {
+            permissions: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // Execute bits: a mode no umask default can give.
+    fs::write(lab.a_dir.join("f.txt"), b"new content from a").unwrap();
+    chmod(&lab.a_dir.join("f.txt"), 0o700);
+    write(&lab.a_dir, "g.sh", b"#!/bin/sh\n");
+    chmod(&lab.a_dir.join("g.sh"), 0o700);
+    a.push("docs").unwrap();
+    let pull = b.pull("docs").unwrap();
+    assert_eq!(pull.files_updated, 2, "{pull:?}");
+    let here = varsto_core::util::default_file_mode();
+    for p in ["f.txt", "g.sh"] {
+        assert_eq!(
+            fs::read(lab.b_dir.join(p)).unwrap(),
+            fs::read(lab.a_dir.join(p)).unwrap()
+        );
+        assert_eq!(mode(&lab.b_dir.join(p)), here, "{p}");
+    }
+    // The vault keeps A's mode.
+    assert!(b
+        .list_files("docs")
+        .unwrap()
+        .iter()
+        .all(|f| f.mode == Some(0o700)));
+}
+
 #[cfg(unix)]
 #[test]
 fn symbolic_links_round_trip_and_are_never_followed() {
