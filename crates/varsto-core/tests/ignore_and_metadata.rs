@@ -215,6 +215,29 @@ fn local_rules_stay_on_the_device_and_incoming_files_are_skipped() {
     assert!(!a.ignore_remove("docs", "*.bak", false).unwrap());
 }
 
+/// A pulled file has the modification time its writer recorded, not the
+/// time of the download, and the receiving device sees no change in it.
+#[test]
+fn pulled_files_keep_their_modification_time() {
+    let (lab, mut a, mut b) = two(&[("first.txt", b"first")]);
+    write(&lab.a_dir, "old/photo.jpg", b"taken long ago");
+    // 2020-01-01 00:00:00 UTC.
+    let then = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_577_836_800);
+    fs::File::options()
+        .write(true)
+        .open(lab.a_dir.join("old/photo.jpg"))
+        .unwrap()
+        .set_modified(then)
+        .unwrap();
+    a.push("docs").unwrap();
+    b.pull("docs").unwrap();
+    let got = lab.b_dir.join("old/photo.jpg");
+    assert_eq!(fs::read(&got).unwrap(), b"taken long ago");
+    assert_eq!(fs::metadata(&got).unwrap().modified().unwrap(), then);
+    // The local index took the time on disk: nothing to publish.
+    assert_eq!(b.push("docs").unwrap().files_changed, 0);
+}
+
 #[cfg(unix)]
 fn mode(p: &Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;

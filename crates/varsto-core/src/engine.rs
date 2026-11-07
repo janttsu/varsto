@@ -1285,6 +1285,39 @@ fn reserved_name(name: &str) -> bool {
     name.starts_with(".varsto") && name != ignore_rules::IGNORE_FILE
 }
 
+/// How long one of Varsto's temporary files in a folder may go unwritten
+/// before a scan removes it. A download or a write through the engine
+/// writes its file continually and renames or removes it when done, so one
+/// this old was left by a process that stopped (a crash, a power cut).
+const STALE_TEMP_SECS: u64 = 24 * 3600;
+
+/// Remove `entry` when it is one of Varsto's own temporary files
+/// (`util::is_folder_temp_name`): a regular file not written for
+/// `STALE_TEMP_SECS`. Anything else with a reserved name stays.
+fn remove_stale_temp(entry: &walkdir::DirEntry) {
+    if !entry.file_type().is_file()
+        || !util::is_folder_temp_name(&entry.file_name().to_string_lossy())
+    {
+        return;
+    }
+    let stale = entry
+        .metadata()
+        .ok()
+        .and_then(|md| md.modified().ok())
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age.as_secs() >= STALE_TEMP_SECS);
+    if !stale {
+        return;
+    }
+    match fs::remove_file(entry.path()) {
+        Ok(()) => log::info!(
+            "removed {}, a temporary file left by an interrupted transfer",
+            entry.path().display()
+        ),
+        Err(e) => log::debug!("{}: {e}", entry.path().display()),
+    }
+}
+
 /// `path` is an unreadable entry, or lies inside an unreadable directory.
 /// An empty entry in `unreadable` means the folder directory itself.
 fn unreadable_covers(unreadable: &BTreeSet<String>, path: &str) -> bool {
@@ -3284,7 +3317,7 @@ impl Engine {
     /// Switch selective sync on or off for an attached folder.
     pub fn set_selective(&mut self, name_or_id: &str, selective: bool) -> Result<()> {
         crate::logged_op_plain!("set selective", name_or_id, {
-            self.set_selective_inner(name_or_id, selective)
+            self.exclusive(|e| e.set_selective_inner(name_or_id, selective))
         })
     }
 
@@ -3621,7 +3654,16 @@ impl Engine {
         let mut walker = walkdir::WalkDir::new(root)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|e| e.depth() == 0 || !reserved_name(&e.file_name().to_string_lossy()));
+            .filter_entry(|e| {
+                if e.depth() == 0 || !reserved_name(&e.file_name().to_string_lossy()) {
+                    return true;
+                }
+                // A backup's source is only read.
+                if !backup {
+                    remove_stale_temp(e);
+                }
+                false
+            });
         while let Some(entry) = walker.next() {
             let entry = match entry {
                 Ok(e) => e,
@@ -5525,6 +5567,8 @@ impl Engine {
         }
         let (tmp, tmp_file) = util::temp_beside(disk, "tmp")
             .with_context(|| format!("create a temporary file for {}", disk.display()))?;
+        // Any error from here on removes the partly written file.
+        let mut cleanup = util::RemoveOnDrop::new(&tmp);
         if let Some(log) = &self.download_log {
             log.lock().unwrap().push(file.path.clone());
         }
@@ -5681,6 +5725,12 @@ impl Engine {
                     }
                 }
             }
+            // The modification time the writer recorded, as a restore
+            // sets it (the index takes what the disk then shows).
+            if file.mtime > 0 {
+                let t = std::time::UNIX_EPOCH + std::time::Duration::from_nanos(file.mtime as u64);
+                let _ = out.set_modified(t);
+            }
             out.sync_all()?;
             // The mode the folder records, set on the open file before it
             // becomes visible under its name (the metadata step after the
@@ -5699,6 +5749,7 @@ impl Engine {
         }
         fsmeta::make_replaceable(disk);
         fs::rename(&tmp, disk)?;
+        cleanup.keep();
         if self.share_read_only(rec) {
             share_roles::set_read_only(disk, true);
         }
@@ -5804,7 +5855,7 @@ impl Engine {
     /// Download a placeholder file of a selective folder and keep it here.
     pub fn fetch_file(&mut self, folder: &str, path: &str) -> Result<PullReport> {
         crate::logged_op!("fetch file", format!("{folder}/{path}"), {
-            self.fetch_file_inner(folder, path)
+            self.exclusive(|e| e.fetch_file_inner(folder, path))
         })
     }
 
@@ -5911,7 +5962,7 @@ impl Engine {
     /// and unless the file on disk is the version that was synced.
     pub fn free_file(&mut self, folder: &str, path: &str) -> Result<()> {
         crate::logged_op_plain!("free file", format!("{folder}/{path}"), {
-            self.free_file_inner(folder, path)
+            self.exclusive(|e| e.free_file_inner(folder, path))
         })
     }
 
@@ -6775,17 +6826,22 @@ impl Engine {
         size: Option<u64>,
     ) -> Result<PushReport> {
         block_cache::check_rel_path(path)?;
+        // The content is read outside the home lock (an upload can take
+        // long); the state is written inside it.
         if let Some(writer) = self.block_writer(folder)? {
             let staged = writer.write_sized(reader, size)?;
-            return self.commit_staged(folder, path, staged);
+            return self.exclusive(|e| e.commit_staged(folder, path, staged));
         }
         let (rec, root) = self.resolve_for_write(folder)?;
         // The file's local name (mapped where this filesystem needs it) is
         // recorded before the scan of the push finds it.
         self.ensure_share_writable(&rec)?;
-        let mut state = self.load_state(&rec.folder_id)?;
-        let disk = self.place(&root, &mut state, path, None)?;
-        self.save_state(&rec.folder_id, &state)?;
+        let disk = self.exclusive(|e| {
+            let mut state = e.load_state(&rec.folder_id)?;
+            let disk = e.place(&root, &mut state, path, None)?;
+            e.save_state(&rec.folder_id, &state)?;
+            Ok(disk)
+        })?;
         if placeholder_path(&disk).exists() {
             bail!("{path} is a placeholder here; fetch it before overwriting");
         }
@@ -6794,6 +6850,7 @@ impl Engine {
         }
         let (tmp, tmp_file) = util::temp_beside(&disk, "upload")
             .with_context(|| format!("write {}", disk.display()))?;
+        let mut cleanup = util::RemoveOnDrop::new(&tmp);
         let written = (|| -> Result<()> {
             let mut out = tmp_file;
             std::io::copy(&mut { reader }, &mut out)?;
@@ -6802,10 +6859,10 @@ impl Engine {
             Ok(())
         })();
         if let Err(e) = written {
-            let _ = fs::remove_file(&tmp);
             return Err(e.context(format!("write {}", disk.display())));
         }
         fs::rename(&tmp, &disk).with_context(|| format!("write {}", disk.display()))?;
+        cleanup.keep();
         self.push_after_local(folder)
     }
 
@@ -6850,7 +6907,14 @@ impl Engine {
     }
 
     /// Record that `path` was used now (open, read, export) on this device.
+    /// Left out while another process holds the device directory (a sync):
+    /// a read does not wait for it.
     pub fn touch_access(&mut self, folder: &str, path: &str) -> Result<()> {
+        self.exclusive_if_free(|e| e.touch_access_inner(folder, path))
+            .map(|_| ())
+    }
+
+    fn touch_access_inner(&mut self, folder: &str, path: &str) -> Result<()> {
         let (rec, _) = self.resolve_folder(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         if !state.files.get(path).is_some_and(|f| !f.deleted) {
@@ -6899,7 +6963,7 @@ impl Engine {
     /// folder root), then push so other devices see the move.
     pub fn move_file(&mut self, folder: &str, from: &str, to: &str) -> Result<PushReport> {
         crate::logged_op!("move file", format!("{folder}/{from} -> {to}"), {
-            self.move_file_inner(folder, from, to)
+            self.exclusive(|e| e.move_file_inner(folder, from, to))
         })
     }
 

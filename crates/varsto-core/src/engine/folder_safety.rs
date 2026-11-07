@@ -617,6 +617,10 @@ impl Engine {
 
     /// Set the folder's mode on this device.
     pub fn set_folder_mode(&mut self, folder: &str, mode: FolderMode) -> Result<()> {
+        self.exclusive(|e| e.set_folder_mode_inner(folder, mode))
+    }
+
+    fn set_folder_mode_inner(&mut self, folder: &str, mode: FolderMode) -> Result<()> {
         let (rec, _) = self.resolve_folder(folder)?;
         if mode == FolderMode::SendOnly && self.share_read_only(&rec) {
             bail!(
@@ -643,6 +647,14 @@ impl Engine {
 
     /// Set (or with None reset to the default) the folder's mass-deletion guard.
     pub fn set_deletion_guard(&mut self, folder: &str, guard: Option<DeletionGuard>) -> Result<()> {
+        self.exclusive(|e| e.set_deletion_guard_inner(folder, guard))
+    }
+
+    fn set_deletion_guard_inner(
+        &mut self,
+        folder: &str,
+        guard: Option<DeletionGuard>,
+    ) -> Result<()> {
         let (rec, _) = self.resolve_folder(folder)?;
         for m in self
             .config
@@ -660,6 +672,10 @@ impl Engine {
     /// device's are applied here (the files go to the trash). Returns the
     /// number of files deleted.
     pub fn confirm_deletions(&mut self, folder: &str) -> Result<u64> {
+        self.exclusive(|e| e.confirm_deletions_inner(folder))
+    }
+
+    fn confirm_deletions_inner(&mut self, folder: &str) -> Result<u64> {
         let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let Some(held) = state.held.take() else {
@@ -713,6 +729,10 @@ impl Engine {
     /// are kept here and published as the newest version, so every device
     /// gets them back. Files that cannot be restored now stay held.
     pub fn discard_deletions(&mut self, folder: &str) -> Result<DiscardReport> {
+        self.exclusive(|e| e.discard_deletions_inner(folder))
+    }
+
+    fn discard_deletions_inner(&mut self, folder: &str) -> Result<DiscardReport> {
         let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let Some(mut held) = state.held.take() else {
@@ -798,6 +818,10 @@ impl Engine {
     /// file (its content, or its absence), published with the next sync.
     /// Returns the number of files.
     pub fn override_remote(&mut self, folder: &str) -> Result<u64> {
+        self.exclusive(|e| e.override_remote_inner(folder))
+    }
+
+    fn override_remote_inner(&mut self, folder: &str) -> Result<u64> {
         let (rec, _) = self.resolve_folder(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         if state.not_applied.is_empty() {
@@ -822,6 +846,10 @@ impl Engine {
     /// Receive-only: replace this device's local changes with the vault's
     /// versions. Changed and added files go to the trash first.
     pub fn revert_local(&mut self, folder: &str) -> Result<RevertReport> {
+        self.exclusive(|e| e.revert_local_inner(folder))
+    }
+
+    fn revert_local_inner(&mut self, folder: &str) -> Result<RevertReport> {
         let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
         let mut report = RevertReport {

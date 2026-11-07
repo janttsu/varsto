@@ -237,6 +237,57 @@ pub fn temp_beside(target: &Path, kind: &str) -> std::io::Result<(PathBuf, fs::F
     Err(last.unwrap_or_else(|| std::io::Error::other("no free temporary name")))
 }
 
+/// Removes a temporary file when dropped, unless [`RemoveOnDrop::keep`]
+/// was called: any error between creating the file and renaming it into
+/// place leaves nothing behind.
+pub struct RemoveOnDrop(Option<PathBuf>);
+
+impl RemoveOnDrop {
+    pub fn new(path: &Path) -> RemoveOnDrop {
+        RemoveOnDrop(Some(path.to_path_buf()))
+    }
+
+    /// The file has its final name now: nothing to remove.
+    pub fn keep(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        if let Some(p) = self.0.take() {
+            let _ = fs::remove_file(p);
+        }
+    }
+}
+
+/// The kinds of [`temp_beside`] files Varsto writes into a folder: a
+/// download, a write through the engine, an import.
+pub const FOLDER_TEMP_KINDS: &[&str] = &["tmp", "upload", "import"];
+
+/// Whether `name` is a temporary file Varsto writes beside a folder's
+/// files: `.varsto-<kind>-<pid>-<16 hex digits>` ([`temp_beside`], the
+/// import's copy) for a kind of [`FOLDER_TEMP_KINDS`], or a scrub's
+/// `.varsto-scrub-<16 hex digits>`. Nothing else matches, so a sweep of
+/// these never removes a file of the user's.
+pub fn is_folder_temp_name(name: &str) -> bool {
+    let hex16 = |s: &str| s.len() == 16 && s.bytes().all(|b| b.is_ascii_hexdigit());
+    let Some(rest) = name.strip_prefix(".varsto-") else {
+        return false;
+    };
+    if let Some(r) = rest.strip_prefix("scrub-") {
+        return hex16(r);
+    }
+    FOLDER_TEMP_KINDS.iter().any(|kind| {
+        rest.strip_prefix(*kind)
+            .and_then(|r| r.strip_prefix('-'))
+            .and_then(|r| r.split_once('-'))
+            .is_some_and(|(pid, r)| {
+                !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()) && hex16(r)
+            })
+    })
+}
+
 /// What a file created without a mode of its own gets here: `0666` less the
 /// umask.
 #[cfg(unix)]
@@ -438,5 +489,43 @@ mod tests {
             safe_join(&root, "new/dir/file").is_ok(),
             "missing parents are fine"
         );
+    }
+
+    #[test]
+    fn only_varstos_own_temporary_names_count_as_folder_temporaries() {
+        let tmp = tempfile::tempdir().unwrap();
+        for kind in FOLDER_TEMP_KINDS {
+            let (p, _f) = temp_beside(&tmp.path().join("file.txt"), kind).unwrap();
+            let name = p.file_name().unwrap().to_string_lossy().to_string();
+            assert!(is_folder_temp_name(&name), "{name}");
+        }
+        assert!(is_folder_temp_name(".varsto-scrub-00000000deadbeef"));
+        for not in [
+            ".varsto-tmp-",
+            ".varsto-tmp-1234",
+            ".varsto-tmp-1234-abc",
+            ".varsto-tmp-x1-0123456789abcdef",
+            ".varsto-tmp-1234-0123456789abcdef.txt",
+            ".varsto-link-1234",
+            ".varsto-folder",
+            ".varsto-scrub-notes",
+            "varsto-tmp-1234-0123456789abcdef",
+            "report.txt",
+        ] {
+            assert!(!is_folder_temp_name(not), "{not}");
+        }
+    }
+
+    #[test]
+    fn a_temporary_file_goes_unless_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (gone, _f) = temp_beside(&tmp.path().join("a"), "tmp").unwrap();
+        drop(RemoveOnDrop::new(&gone));
+        assert!(!gone.exists());
+        let (kept, _f) = temp_beside(&tmp.path().join("b"), "tmp").unwrap();
+        let mut guard = RemoveOnDrop::new(&kept);
+        guard.keep();
+        drop(guard);
+        assert!(kept.exists());
     }
 }
