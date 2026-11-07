@@ -18,6 +18,7 @@ Varsto is an end-to-end encrypted file sync, sharing and backup app that **uses 
 - **No tracker, no account, no vendor cloud.** Devices find each other on the local network, and through a rendezvous record in your own storage (there is no DHT). Designed to avoid single points of failure.
 - **Fast, block-level sync.** Files are split into blocks whose size follows the file; only changed blocks move, and the blocks of small files travel together in packs, so a folder of thousands of notes is a few objects on the storage, not thousands. Peer-to-peer transfer between your own devices, also offline over a LAN, with the cloud brought up to date when you are back online.
 - **Safety nets.** Version history, trash (optionally on cold storage), a marker in every synced folder so an unmounted disk never reads as "everything deleted", a mass-deletion guard that holds large deletions until you confirm them, send-only and receive-only folders per device, encrypted off-site backups of any directory (read-only snapshots kept on your storages only, each for the days you choose), durability policies with alerts, peer-to-peer transfer between your devices on the LAN and over the internet, zstd compression before encryption, Strongroom folders that open only with a FIDO2 security key (libfido2 tools), a printable recovery kit (24 words, 2-of-3 shares) with a personal recovery package checklist ([docs/recovery.md](docs/recovery.md)), place labels on storages and disk groups (geographic sites are planned), and provider-independent recovery. What the design tolerates, and what it does not, is listed in [docs/failure-model.md](docs/failure-model.md).
+- **Alerts on your phone.** Push notifications through ntfy (also your own server), Pushover or Telegram when a storage fails, a disk fills or a backup does not run, with a choice of what each channel receives and an option to keep names out of the messages ([docs/notifications.md](docs/notifications.md)).
 - **Clients.** Linux, Windows (the installer is the only download; it has its own window, icons, start at login and automatic updates: [docs/windows.md](docs/windows.md)), macOS, Android, and iOS as a Simulator build and an unsigned `.ipa` for sideloading ([docs/ios-build.md](docs/ios-build.md); not run on a real device yet); a command line on Linux, macOS and Windows; an MCP server so you can manage and organize files by talking to a language model that runs on your own machine; nothing leaves your devices ([docs/mcp.md](docs/mcp.md)).
 
 None of this is finished. See [docs/architecture](docs/architecture/README.md) for the design principles and [docs/spec](docs/spec/README.md) for the status of the format and protocol specifications.
@@ -63,8 +64,9 @@ varsto --home ~/.varsto-desk sync
 varsto --home ~/.varsto-desk status --json
 varsto --home ~/.varsto-desk fsck --verify
 
-# recovery kit: the vault key as 24 words (and 2-of-3 shares) for paper or metal; `init` printed the
-# recovery words too (they never change; `recovery escrow` writes the copies a folder lacks)
+# recovery kit: the vault words and the recovery words, 24 each (and 2-of-3 shares of each), for paper
+# or metal; it asks for the recovery words that `init` printed (they never change; `recovery escrow`
+# writes the copies a folder lacks), and says in capitals when they are missing from the printout
 varsto --home ~/.varsto-laptop recovery kit --shares
 # what else to keep if every device is lost (storage keys, disks, security keys) and the restore steps
 varsto --home ~/.varsto-laptop recovery guide --format html --output recovery-guide.html   # new in 0.0.1-alpha.14
@@ -83,7 +85,7 @@ varsto --home ~/.varsto-laptop p2p rendezvous status   # the optional meeting-po
 
 # a durability policy: two cloud copies, one at home, verified within 30 days; exit code 0/1/2/3.
 # A folder without its own policy uses the default: 1 copy on any storage, 1 in external storage,
-# 1 on your own devices or disks, verified by another device within 30 days.
+# 1 on your own disks (a directory storage or a disk pool), verified by another device within 30 days.
 varsto --home ~/.varsto-laptop policy set docs --min-copies 2 --place cloud=2 --place home=1 --verified-within-days 30
 varsto --home ~/.varsto-laptop policy check
 
@@ -141,12 +143,13 @@ Test data only. Keep your own backups.
 
 | Path | Purpose |
 |---|---|
-| `crates/` | Rust workspace: `varsto-core` (library), `varsto-cli` (the `varsto` binary: CLI, service, tray, desktop interface), `varsto-ffi` (C ABI for mobile) |
+| `crates/` | Rust workspace: `varsto-core` (library), `varsto-cli` (the `varsto` binary: CLI, service, tray, desktop interface), `varsto-ffi` (C ABI for iOS), `varsto-window` (the Windows window), `varsto-rendezvous` (the optional meeting-point service) |
 | `apps/` | `macos` (menu-bar app, Swift), `android` (foreground service + WebView), `ios` (SwiftUI shell, build on a Mac) |
-| `docs/` | Architecture, specifications, testing guides |
+| `docs/` | Architecture, specifications, testing guides ([lab runbook](docs/testing/lab.md), [benchmarks](docs/testing/benchmarks.md)) |
 | `tests/` | Test matrix and shared test assets |
-| `scripts/test/` | Scripts used by the testing instructions |
-| `website/` | Static project website (template) |
+| `scripts/` | `test/` (test scripts and the VM lab), `cloud-build/` (Scaleway fallback builds), `screenshots/`, `bench/` and `nat-test/` (measurements), signing helpers; see [BUILDING.md](BUILDING.md) |
+| `installer/`, `ops/` | The Windows installer; scripts for the web server (screenshot and daily-channel sync) |
+| `website/` | The static project website, its build and deploy scripts |
 | `brand/` | Product name and brand settings in one place |
 
 ## Licence
@@ -158,3 +161,6 @@ Varsto is **source-available, not open source**. It is licensed under the [PolyF
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
 - [TESTING.md](TESTING.md)
+- [BUILDING.md](BUILDING.md) (every platform, CI, screenshots, daily channel, website)
+- [RELEASING.md](RELEASING.md)
+- [HANDOVER.md](HANDOVER.md) (current state)

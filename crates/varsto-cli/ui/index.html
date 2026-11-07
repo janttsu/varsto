@@ -37,6 +37,7 @@
   <symbol id="i-org" viewBox="0 0 20 20"><circle cx="10" cy="5" r="2.2"/><circle cx="4.5" cy="14" r="2.2"/><circle cx="15.5" cy="14" r="2.2"/><path d="M10 7.2v3M10 10.2l-3.8 2M10 10.2l3.8 2"/></symbol>
   <symbol id="i-device" viewBox="0 0 20 20"><rect x="2.5" y="4" width="15" height="10" rx="1.5"/><path d="M7 17h6"/></symbol>
   <symbol id="i-activity" viewBox="0 0 20 20"><path d="M2.5 10h3l2-5 4 10 2-5h4"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 20 20"><path d="M5 14V9a5 5 0 0 1 10 0v5l1.5 1.5h-13z"/><path d="M8.4 17.5a1.7 1.7 0 0 0 3.2 0"/></symbol>
   <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></symbol>
   <symbol id="i-key" viewBox="0 0 20 20"><circle cx="7" cy="12" r="3.5"/><path d="m9.5 9.5 6.5-6.5M13.5 5.5l2 2M11.5 7.5l2 2"/></symbol>
   <symbol id="i-power" viewBox="0 0 20 20"><path d="M10 3v6"/><path d="M6 6.2a5.8 5.8 0 1 0 8 0"/></symbol>
@@ -963,6 +964,14 @@
         <p class="muted small">An organization adds administrators who approve devices, remove people with every device of theirs at once, set what members may do, and keep a signed log of it. Nothing changes for a vault without one.</p>
         <div class="actions"><button id="orgcreate" type="button" class="secondary">Set up an organization…</button></div>
       </details>
+      <div class="card" id="notifycard">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-bell"/></svg>Notifications</h2>
+        <p class="muted small">Get a message on your phone when something needs you: a storage that stops answering, a failed backup, a full disk. This device sends the messages itself, straight to the service you choose.</p>
+        <ul id="notify-list" class="list compact-list"></ul>
+        <p id="notify-empty" class="muted small hidden"></p>
+        <div class="actions"><button id="notify-add" type="button" class="secondary"><svg class="icon"><use href="#i-plus"/></svg>Add a channel</button></div>
+        <div id="notify-summary-row" class="row nt-summary hidden"><label class="nt-summary-label">Daily summary at <select id="notify-hour"></select></label></div>
+      </div>
       <div class="cols">
         <div class="card">
           <h2 class="card-title">Appearance</h2>
@@ -1138,6 +1147,14 @@
     </div>
   </div>
 </div>
+<div id="notifymodal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="nt-title">
+  <div class="modal-backdrop" id="nt-backdrop"></div>
+  <div class="modal-card nt-card">
+    <h2 id="nt-title" class="modal-title"></h2>
+    <div id="nt-body"></div>
+    <div class="modal-actions" id="nt-actions"></div>
+  </div>
+</div>
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
   <div class="modal-backdrop" id="modal-backdrop"></div>
   <form class="modal-card" id="modalform" novalidate>
@@ -1200,7 +1217,7 @@
   </details>
   <details class="guide" data-guide="policies">
     <summary>Policies, checks and repair</summary>
-    <p>A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy at home, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.</p>
+    <p>A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy on your own disks, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.</p>
     <p>Verification reads copies back now and then; the bit-rot check re-hashes copies and files on this device; repair replaces a damaged copy with a good one. All three run by themselves and can be started on the Policies page.</p>
   </details>
   <details class="guide" data-guide="disks">
@@ -1210,7 +1227,7 @@
   </details>
   <details class="guide" data-guide="recovery">
     <summary>Recovery</summary>
-    <p>The vault key opens everything. The recovery kit prints it as 24 words: keep them on paper, away from your devices. With them and one storage you can restore every file on a new device, even if every device is lost.</p>
+    <p>The recovery kit is two sets of 24 words. The vault words open the vault's bookkeeping, and with the recovery words every folder's content: keep both on paper, away from your devices. With them and one storage you can restore every file on a new device, even if every device is lost.</p>
     <p>The Recovery package page lists everything else to keep with the words, such as storage credentials and security keys, and the steps to restore.</p>
     <p class="guide-more"><a href="https://varsto.net/docs/recovery.html" target="_blank" rel="noopener">Recovery on the website</a></p>
   </details>

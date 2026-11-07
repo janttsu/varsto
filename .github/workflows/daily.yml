@@ -4,7 +4,7 @@
 # v* tag is touched). The web server pulls it (ops/site/daily-sync.py, from
 # cron) and checks the signature before it serves anything under /daily/.
 # Nothing on GitHub writes to the server. The stable updater never reads this
-# channel. Setup and rehearsal: ops/site/README.md and docs/daily-channel.md.
+# channel. Setup and rehearsal: ops/site/README.md and RELEASING.md (Daily builds).
 #
 # Manual run (Actions, Daily builds, Run workflow):
 #   ref      branch, tag or commit to build (default main)

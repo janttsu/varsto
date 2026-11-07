@@ -35,6 +35,10 @@ description: Varsto: end-to-end encrypted sync, sharing and backup on storage yo
     <h2 id="teams">For teams</h2>
     <p>An organization adds the layer a company needs on top of a vault: administrators approve devices for named people after comparing a six-word fingerprint with them, remove a person with every device of theirs in one step (the remaining devices get new keys), set what members may do on their own, and keep a log of it that is signed by their devices and chained. The root key that appoints administrators is 24 words on paper, never on a device. A vault without an organization sees none of it. <a href="features/#organizations">Organizations</a>.</p>
 
+    <h2 id="developers">For developers</h2>
+    <p>Varsto is a Rust workspace on <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>. <code>varsto-core</code> is the engine and the storage format, <code>varsto-cli</code> is the command line, the service and the web interface, and <code>varsto-ffi</code> is what the Swift and Kotlin shells call. The format is written down, and a lab of virtual machines runs the scenarios. The licence is <a href="docs/licence.html">PolyForm Shield 1.0.0</a>: source-available, not an OSI open-source licence. Issues labelled <code>help wanted</code> and <code>good first issue</code> are the place to start when any are open. A bug report or a small documentation fix is welcome when the list is empty.</p>
+    <p><a class="button" href="contribute/">How to contribute</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issues</a> <a class="button secondary" href="docs/contributing.html">Contribution rules</a> <a class="button secondary" href="docs/alpha-0-format.html">Storage format</a></p>
+
     <h2 id="next">New in {{RELEASED}}</h2>
     <p class="note">Storage format 3 and what comes with it. Vaults made by 0.0.1-alpha.15 or earlier must be recreated:</p>
     <ul>

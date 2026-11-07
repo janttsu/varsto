@@ -26,12 +26,21 @@ pub struct Policy {
     pub verified_within_days: Option<u32>,
 }
 
+/// "no copy" for a minimum of one, "fewer than N copies" otherwise.
+fn too_few_copies(min: u32) -> String {
+    if min == 1 {
+        "no copy".to_string()
+    } else {
+        format!("fewer than {min} copies")
+    }
+}
+
 /// How a place reads in sentences: the two default places by what they
 /// are (a directory or disk pool is "home", S3 and rclone are "cloud"),
 /// other labels as given.
 pub fn place_phrase(place: &str) -> String {
     match place {
-        "home" => "on your own devices and disks".to_string(),
+        "home" => "on your own disks".to_string(),
         "cloud" => "in external storage (S3 and the like)".to_string(),
         other => format!("in place '{other}'"),
     }
@@ -40,8 +49,9 @@ pub fn place_phrase(place: &str) -> String {
 impl Policy {
     /// The policy of every folder that never had one set: one copy on any
     /// storage, one in external storage (S3 and the like), one on your own
-    /// devices and disks, and every block checked by another device within
-    /// 30 days. Clearing a folder's policy stores an empty one instead.
+    /// disks (a directory storage or a disk pool; copies on devices are not
+    /// counted), and every block checked by another device within 30 days.
+    /// Clearing a folder's policy stores an empty one instead.
     pub fn folder_default() -> Policy {
         Policy {
             min_copies: 1,
@@ -198,7 +208,62 @@ pub fn evaluate_with_grace(
     now_utc: i64,
     grace_secs: i64,
 ) -> PolicyReport {
+    evaluate_inner(
+        folder,
+        policy,
+        false,
+        chunks,
+        unreadable_places,
+        storages_unknown,
+        now_utc,
+        grace_secs,
+    )
+}
+
+/// The report a user sees for a folder. `home_unavailable` is true for a
+/// folder on the default policy in a vault without any storage in the place
+/// "home" (a directory storage or a disk pool): that rule cannot be met by
+/// anything the folder's owner did wrong, so a shortage in "home" is one
+/// warning for the folder instead of a violation. A policy set on purpose
+/// is always held to what it says.
+pub fn evaluate_for_report(
+    folder: &str,
+    policy: &Policy,
+    home_unavailable: bool,
+    chunks: &[ChunkFacts],
+    unreadable_places: &BTreeMap<String, Vec<String>>,
+    storages_unknown: &[String],
+    now_utc: i64,
+) -> PolicyReport {
+    evaluate_inner(
+        folder,
+        policy,
+        home_unavailable,
+        chunks,
+        unreadable_places,
+        storages_unknown,
+        now_utc,
+        NEW_DATA_GRACE_SECS,
+    )
+}
+
+/// The warning for a default policy that asks for a copy on your own disks
+/// in a vault that has none.
+pub const NO_OWN_DISK_WARNING: &str = "No copy on your own disks: this vault has no disk pool or directory storage. Add one, or change the folder's policy on the Policies page.";
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_inner(
+    folder: &str,
+    policy: &Policy,
+    waive_home: bool,
+    chunks: &[ChunkFacts],
+    unreadable_places: &BTreeMap<String, Vec<String>>,
+    storages_unknown: &[String],
+    now_utc: i64,
+    grace_secs: i64,
+) -> PolicyReport {
     let mut pending = 0u64;
+    let mut home_waived = false;
     let mut short_copies = 0u64;
     let mut short_place: BTreeMap<String, u64> = BTreeMap::new();
     let mut unverified = 0u64;
@@ -223,7 +288,11 @@ pub fn evaluate_with_grace(
         for (place, n) in &policy.min_per_place {
             let have = c.copies.iter().filter(|(_, p, _, _)| p == place).count() as u32;
             if have < *n {
-                *short_place.entry(place.clone()).or_default() += 1;
+                if waive_home && place == "home" {
+                    home_waived = true;
+                } else {
+                    *short_place.entry(place.clone()).or_default() += 1;
+                }
             }
         }
         if let Some(w) = window {
@@ -256,14 +325,19 @@ pub fn evaluate_with_grace(
     let mut warnings = Vec::new();
     if short_copies > 0 {
         reasons.push(format!(
-            "{short_copies} chunks have fewer than {} copies",
-            policy.min_copies
+            "{short_copies} chunks have {}{}",
+            too_few_copies(policy.min_copies),
+            if policy.min_copies == 1 {
+                " on any storage"
+            } else {
+                ""
+            }
         ));
     }
     for (place, n) in &short_place {
         reasons.push(format!(
-            "{n} chunks have fewer than {} copies {}",
-            policy.min_per_place[place],
+            "{n} chunks have {} {}",
+            too_few_copies(policy.min_per_place[place]),
             place_phrase(place)
         ));
     }
@@ -272,6 +346,9 @@ pub fn evaluate_with_grace(
             "{unverified} chunks were not verified by another device within {} days",
             policy.verified_within_days.unwrap_or(0)
         ));
+    }
+    if home_waived {
+        warnings.push(NO_OWN_DISK_WARNING.to_string());
     }
     if ageing > 0 {
         warnings.push(format!(
@@ -427,6 +504,143 @@ mod tests {
         );
         assert_eq!(r.state, PolicyState::Unknown);
         assert_eq!(parse_place_spec("cloud=2"), Some(("cloud".to_string(), 2)));
+    }
+
+    #[test]
+    fn default_policy_without_a_home_storage_warns_instead_of_violating() {
+        let now = 2_000_000_000;
+        let day = 86_400;
+        let none = BTreeMap::new();
+        // Verified copy on the only storage, an S3 bucket: nothing is wrong
+        // that the owner of the folder did, but the "home" rule cannot be met.
+        let facts = [chunk(&[("s3", "cloud", true, now - day)])];
+        let r = evaluate_for_report(
+            "f",
+            &Policy::folder_default(),
+            true,
+            &facts,
+            &none,
+            &[],
+            now,
+        );
+        assert_eq!(r.state, PolicyState::AtRisk, "{:?}", r.reasons);
+        assert!(r.reasons.is_empty(), "{:?}", r.reasons);
+        assert_eq!(r.warnings, vec![NO_OWN_DISK_WARNING.to_string()]);
+        assert_eq!(
+            r.warnings[0],
+            "No copy on your own disks: this vault has no disk pool or directory storage. Add one, or change the folder's policy on the Policies page."
+        );
+        assert!(r.chunks_short_per_place.is_empty());
+        // Several short chunks still give one warning for the folder.
+        let facts = [
+            chunk(&[("s3", "cloud", true, now - day)]),
+            chunk(&[("s3", "cloud", true, now - 2 * day)]),
+        ];
+        let r = evaluate_for_report(
+            "f",
+            &Policy::folder_default(),
+            true,
+            &facts,
+            &none,
+            &[],
+            now,
+        );
+        assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+        // The other clauses stay reasons: no cloud copy at all is a violation.
+        let facts = [chunk(&[("box", "other", true, now - day)])];
+        let r = evaluate_for_report(
+            "f",
+            &Policy::folder_default(),
+            true,
+            &facts,
+            &none,
+            &[],
+            now,
+        );
+        assert_eq!(r.state, PolicyState::Violated);
+        assert_eq!(
+            r.reasons,
+            vec!["1 chunks have no copy in external storage (S3 and the like)".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_missing_home_copy_is_a_violation_when_the_vault_has_a_home_storage() {
+        let now = 2_000_000_000;
+        let day = 86_400;
+        let none = BTreeMap::new();
+        // Default policy, a home storage exists, but this chunk is only in the cloud.
+        let facts = [chunk(&[("s3", "cloud", true, now - day)])];
+        let r = evaluate_for_report(
+            "f",
+            &Policy::folder_default(),
+            false,
+            &facts,
+            &none,
+            &[],
+            now,
+        );
+        assert_eq!(r.state, PolicyState::Violated);
+        assert_eq!(
+            r.reasons,
+            vec!["1 chunks have no copy on your own disks".to_string()]
+        );
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        assert_eq!(r.chunks_short_per_place["home"], 1);
+        // No copy anywhere reads "no copy on any storage".
+        let r = evaluate_for_report(
+            "f",
+            &Policy {
+                min_copies: 1,
+                ..Policy::default()
+            },
+            false,
+            &[chunk(&[])],
+            &none,
+            &[],
+            now,
+        );
+        assert_eq!(
+            r.reasons,
+            vec!["1 chunks have no copy on any storage".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_explicit_policy_asking_for_home_keeps_its_violation() {
+        let now = 2_000_000_000;
+        let day = 86_400;
+        let none = BTreeMap::new();
+        let policy = Policy {
+            min_copies: 1,
+            min_per_place: [("home".to_string(), 2)].into_iter().collect(),
+            verified_within_days: Some(30),
+        };
+        let facts = [chunk(&[("box", "home", true, now - day)])];
+        let r = evaluate_for_report("f", &policy, false, &facts, &none, &[], now);
+        assert_eq!(r.state, PolicyState::Violated);
+        assert_eq!(
+            r.reasons,
+            vec!["1 chunks have fewer than 2 copies on your own disks".to_string()]
+        );
+        // The same through the plain evaluator.
+        let r = evaluate("f", &policy, &facts, &none, &[], now);
+        assert_eq!(r.reasons.len(), 1);
+        assert!(r.reasons[0].ends_with("fewer than 2 copies on your own disks"));
+        // A general minimum of two reads "fewer than 2 copies".
+        let two = Policy {
+            min_copies: 2,
+            ..Policy::default()
+        };
+        let r = evaluate("f", &two, &facts, &none, &[], now);
+        assert_eq!(
+            r.reasons,
+            vec!["1 chunks have fewer than 2 copies".to_string()]
+        );
+        assert_eq!(
+            Policy::folder_default().describe(),
+            "at least 1 copy, 1 in external storage (S3 and the like), 1 on your own disks, verified within 30 days"
+        );
     }
 
     #[test]
