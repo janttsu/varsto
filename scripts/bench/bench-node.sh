@@ -11,6 +11,14 @@
 #   bench-node.sh timed-sync <home> <folder>  POST /api/sync for one folder, timed
 #   bench-node.sh proc <home>                 CPU ticks and peak memory of the service
 #   bench-node.sh hashes <dir> <out>          sorted sha256 list of every file
+# For resilio-vs-varsto.py:
+#   bench-node.sh iface                       the interface of the default route
+#   bench-node.sh dropcaches                  write back and drop the page cache
+#   bench-node.sh acct <ip> ...               iptables chain BENCHACCT counting traffic with these addresses
+#   bench-node.sh netem-on <qdisc args>       the same netem on the default interface's incoming
+#                                             traffic (through ifb0), where a pull's data arrives
+#   bench-node.sh netem-off
+#   bench-node.sh rsl-install <url>           Resilio Sync into /bench/rslsync; prints its version
 set -euo pipefail
 B=/bench/varsto
 export VARSTO_PASSPHRASE=${VARSTO_PASSPHRASE:-bench-passphrase}
@@ -33,8 +41,47 @@ case "$1" in
   setup)
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null
-    apt-get install -y -qq iperf3 rclone time python3 openssl >/dev/null
+    apt-get install -y -qq iperf3 rclone time python3 openssl iptables >/dev/null
     mkdir -p /bench
+    ;;
+  iface)
+    ip route get 1.1.1.1 | grep -oP 'dev \K\S+'
+    ;;
+  dropcaches)
+    sync; echo 3 > /proc/sys/vm/drop_caches
+    ;;
+  acct)
+    shift
+    iptables -N BENCHACCT 2>/dev/null || iptables -F BENCHACCT
+    iptables -C INPUT -j BENCHACCT 2>/dev/null || iptables -I INPUT -j BENCHACCT
+    iptables -C OUTPUT -j BENCHACCT 2>/dev/null || iptables -I OUTPUT -j BENCHACCT
+    for ip in "$@"; do iptables -A BENCHACCT -s "$ip"; iptables -A BENCHACCT -d "$ip"; done
+    iptables -L BENCHACCT -vnx | tail -n +3 | wc -l
+    ;;
+  netem-on)
+    shift
+    dev=$(ip route get 1.1.1.1 | grep -oP 'dev \K\S+')
+    modprobe ifb numifbs=1 2>/dev/null || true
+    ip link show ifb0 >/dev/null 2>&1 || ip link add ifb0 type ifb
+    ip link set ifb0 up
+    tc qdisc del dev "$dev" ingress 2>/dev/null || true
+    tc qdisc del dev ifb0 root 2>/dev/null || true
+    tc qdisc add dev "$dev" handle ffff: ingress
+    tc filter add dev "$dev" parent ffff: protocol all u32 match u32 0 0 action mirred egress redirect dev ifb0
+    tc qdisc add dev ifb0 root netem "$@"
+    tc qdisc show dev ifb0
+    ;;
+  netem-off)
+    dev=$(ip route get 1.1.1.1 | grep -oP 'dev \K\S+')
+    tc qdisc del dev "$dev" ingress 2>/dev/null || true
+    tc qdisc del dev ifb0 root 2>/dev/null || true
+    tc qdisc show dev "$dev"
+    ;;
+  rsl-install)
+    mkdir -p /bench/rsl-dl && cd /bench/rsl-dl
+    curl -fsSL -o rsl.tgz "$2" && tar xzf rsl.tgz && install -m 755 rslsync /bench/rslsync
+    sha256sum rsl.tgz | cut -c1-64
+    /bench/rslsync --help 2>&1 | grep -m1 'Resilio Sync' || true
     ;;
   svc-start)
     home=$2
