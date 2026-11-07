@@ -1687,6 +1687,22 @@ impl<'a> Membership<'a> {
             .get(folder)
             .cloned()
             .ok_or_else(|| anyhow!("no folder {}", hex::encode(folder)))?;
+        // A device removed from the vault that still takes part (its
+        // remover could not re-key this folder) is removed here as well,
+        // with its revocation's cut-off: the epoch record and the denied
+        // entries say so, and member devices learn it from them.
+        let mut remove = remove.to_vec();
+        for p in st.participants() {
+            if self.revoked.contains(&p.device)
+                && !ep.removed_at(&p.device, current)
+                && !remove.iter().any(|r| r.device == p.device)
+            {
+                remove.push(Removed {
+                    device: p.device,
+                    cutoff: self.revocations.get(&p.device).map_or(0, |r| r.cutoff_seq),
+                });
+            }
+        }
         let gone: BTreeSet<Id16> = remove.iter().map(|r| r.device).collect();
         let stay: Vec<Participant> = st
             .participants()
@@ -2024,6 +2040,49 @@ impl<'a> Membership<'a> {
         Ok(report)
     }
 
+    /// Start a folder epoch in every folder that still lists a device
+    /// removed from the vault, where this device is an owner holding the
+    /// current key (`start_folder_epoch` removes the device there). The
+    /// remover re-keys only the folders it owns and holds; any other
+    /// folder of the removed device went on writing under a key that
+    /// device holds until some owner started an epoch for another reason.
+    /// Returns the folders re-keyed with their new epochs; one that fails
+    /// is logged and tried again at the next read.
+    pub fn rekey_after_removals(&mut self, k1: Option<&RecoveryKey>) -> Result<Vec<(Id16, u32)>> {
+        if self.own_revocation.is_some() || !self.unresolved_vault_forks().is_empty() {
+            return Ok(Vec::new());
+        }
+        let due: Vec<Id16> = self
+            .registry
+            .folders
+            .iter()
+            .filter(|&(f, st)| {
+                let ep = self.folder_epochs(f);
+                let current = ep.current();
+                !st.is_removed()
+                    && ep.unresolved().is_empty()
+                    && ep.newest_seen() <= current
+                    && self.registry.is_owner(&self.me, f, current)
+                    && self.granted.holds(f, current)
+                    && st.participants().iter().any(|p| {
+                        self.revoked.contains(&p.device) && !ep.removed_at(&p.device, current)
+                    })
+            })
+            .map(|(f, _)| *f)
+            .collect();
+        let mut done = Vec::new();
+        for folder in due {
+            match self.start_folder_epoch(&folder, &[], k1) {
+                Ok(start) => done.push((folder, start.epoch)),
+                Err(err) => log::warn!(
+                    "folder {} still lists a device removed from the vault and was not re-keyed: {err:#}",
+                    hex::encode(folder)
+                ),
+            }
+        }
+        Ok(done)
+    }
+
     fn write_vault_grant(&self, epoch: u32, k3: &SecretKey, recipient: Id16) -> Result<()> {
         let body = VaultGrantRecord {
             epoch,
@@ -2048,14 +2107,20 @@ impl<'a> Membership<'a> {
             .unwrap_or(&[])
     }
 
-    /// Highest signed seq of each `folder`, `grant` and `escrow` stream of
-    /// `device` (junk under the name does not count). Captured at removal
-    /// so a record the device writes afterwards is past the cut-off.
+    /// The cut-off of each `folder`, `grant` and `escrow` stream of
+    /// `device`: the end of the run of seqs from 1 that each hold a signed
+    /// record of it (junk under the name does not count). Captured at
+    /// removal so a record the device writes afterwards is past the
+    /// cut-off. A seq the run skips stays empty for good: the device could
+    /// fill it after its removal, so the cut-off ends below the first gap
+    /// and a signed record above that gap does not count either (a device
+    /// numbers its streams without gaps; one appears only when a record
+    /// never reached a storage, or a name above it was planted).
     fn signed_stream_cuts(&self, device: Id16) -> Result<Vec<StreamCut>> {
         let Some(pk) = self.devices.signing_key(&device) else {
             return Ok(Vec::new());
         };
-        let mut best: BTreeMap<(u8, Id16, u32, Id16), u64> = BTreeMap::new();
+        let mut found: BTreeMap<(u8, Id16, u32, Id16), BTreeSet<u64>> = BTreeMap::new();
         for storage in self.storages {
             for prefix in ["vault/folders/", "vault/grants/", "vault/escrow/"] {
                 for name in storage.list(prefix)? {
@@ -2092,19 +2157,26 @@ impl<'a> Membership<'a> {
                         n.epoch.unwrap_or(0),
                         n.recipient.unwrap_or([0u8; 16]),
                     );
-                    let slot = best.entry(key).or_insert(0);
-                    *slot = (*slot).max(n.seq);
+                    found.entry(key).or_default().insert(n.seq);
                 }
             }
         }
-        Ok(best
+        Ok(found
             .into_iter()
-            .map(|((kind, scope, epoch, recipient), seq)| StreamCut {
-                kind,
-                scope,
-                epoch,
-                recipient,
-                seq,
+            .filter_map(|((kind, scope, epoch, recipient), seqs)| {
+                // Seqs start at 1; `seq` ends the run without a gap.
+                let seq = seqs
+                    .iter()
+                    .zip(1u64..)
+                    .take_while(|(s, want)| **s == *want)
+                    .count() as u64;
+                (seq > 0).then_some(StreamCut {
+                    kind,
+                    scope,
+                    epoch,
+                    recipient,
+                    seq,
+                })
             })
             .collect())
     }

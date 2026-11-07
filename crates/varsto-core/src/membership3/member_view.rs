@@ -19,11 +19,14 @@
 //! directory. A grant counts when its issuer is that device or an owner
 //! that an already accepted directory lists with its keys, and when the
 //! issuer's signature verifies against the K6 the directory gives
-//! (BLAKE3 of it must be the issuer's id). From the directory the member
-//! builds the same registries a device of the vault holds
-//! ([`DeviceRegistry`] of the owner's devices, a [`FolderRegistry`] of the
-//! one folder, a [`MemberRegistry`] of the other members), so that every
-//! record of the folder is judged by the same `Trust` and section 9's rows.
+//! (BLAKE3 of it must be the issuer's id). An owner that an applied folder
+//! epoch removed is left out again (`MemberView::read`): the member reads
+//! no revocation, so that record is the removal it can see. From the
+//! directory the member builds the same registries a device of the vault
+//! holds ([`DeviceRegistry`] of the owner's devices, a [`FolderRegistry`]
+//! of the one folder, a [`MemberRegistry`] of the other members), so that
+//! every record of the folder is judged by the same `Trust` and section
+//! 9's rows.
 
 use super::devices::{DeviceRecord, DeviceRegistry};
 use super::epochs::{FolderEpochRecord, FolderEpochs};
@@ -199,6 +202,19 @@ impl MemberView {
 
     /// Read the folder as member `me`, trusting grants that lead back to
     /// the owner device `anchor`.
+    ///
+    /// A device a folder epoch removed (from the owner's vault, or from the
+    /// folder) still holds its signing key and the older folder keys, so it
+    /// can go on writing grants to this device, with a directory under a
+    /// stamp of its choosing that names itself, or a device of its making,
+    /// an owner. A device of the vault refuses those by the removed
+    /// device's registry cut-off (spec 77.20); a member reads no
+    /// revocation, so the folder epoch record that removed the device is
+    /// where it learns the removal. Once an applied epoch removed an owner
+    /// whose grants counted, the folder is read again without that
+    /// device's grants: trust starts from the anchor and the owners the
+    /// epoch records keep, directories of the removed device name no one,
+    /// and it starts no later epoch.
     pub fn read(
         storages: &[&dyn Storage],
         vault: Id16,
@@ -208,6 +224,62 @@ impl MemberView {
         anchor: Id16,
     ) -> Result<MemberView> {
         let cands = Self::candidates(storages, vault, me, kem, Some(folder))?;
+        let none = BTreeSet::new();
+        let first = Self::read_from(
+            storages,
+            vault,
+            me,
+            kem,
+            folder,
+            &cands,
+            BTreeSet::from([anchor]),
+            &none,
+            &none,
+        )?;
+        let Some(ep) = first.registry.epochs.get(&folder) else {
+            return Ok(first);
+        };
+        let current = ep.current();
+        let removed: BTreeSet<Id16> = ep
+            .applied
+            .values()
+            .flat_map(|r| r.removed.iter().map(|x| x.device))
+            .filter(|d| ep.removed_at(d, current))
+            .collect();
+        let earlier: BTreeSet<Id16> = first.owners.intersection(&removed).copied().collect();
+        if earlier.is_empty() {
+            return Ok(first);
+        }
+        let trusted: BTreeSet<Id16> = ep
+            .applied
+            .values()
+            .flat_map(|r| r.participants.iter())
+            .filter(|p| p.role == Role::Owner)
+            .map(|p| p.device)
+            .chain(std::iter::once(anchor))
+            .filter(|d| !removed.contains(d))
+            .collect();
+        Self::read_from(
+            storages, vault, me, kem, folder, &cands, trusted, &removed, &earlier,
+        )
+    }
+
+    /// `read` over the grants `cands`: trust starts from `trusted`, the
+    /// grants of `removed` devices are left out (and no directory makes
+    /// them trusted), and `earlier` (removed owners) may still have written
+    /// the epoch records before the one that removed them.
+    #[allow(clippy::too_many_arguments)]
+    fn read_from(
+        storages: &[&dyn Storage],
+        vault: Id16,
+        me: Id16,
+        kem: &DecapsKey,
+        folder: Id16,
+        cands: &[Candidate],
+        mut trusted: BTreeSet<Id16>,
+        removed: &BTreeSet<Id16>,
+        earlier: &BTreeSet<Id16>,
+    ) -> Result<MemberView> {
         let empty = VaultKeys::default();
         let mut ring = KeyRing::vault_only(me, &empty);
         ring.kem = Some(kem);
@@ -215,13 +287,16 @@ impl MemberView {
             folder,
             ..MemberView::default()
         };
-        let mut trusted: BTreeSet<Id16> = BTreeSet::from([anchor]);
         let mut accepted = vec![false; cands.len()];
         let mut keys: Option<FolderKeys> = None;
         loop {
             let mut changed = false;
             for (i, c) in cands.iter().enumerate() {
-                if accepted[i] || !trusted.contains(&c.issuer) || c.body.folder != folder {
+                if accepted[i]
+                    || removed.contains(&c.issuer)
+                    || !trusted.contains(&c.issuer)
+                    || c.body.folder != folder
+                {
                     continue;
                 }
                 let Some(d) = &c.body.directory else { continue };
@@ -280,7 +355,11 @@ impl MemberView {
                     v.directory = Some(d.clone());
                 }
                 for o in &d.entries {
-                    if o.full && o.role() == Some(Role::Owner) && o.id_matches() {
+                    if o.full
+                        && o.role() == Some(Role::Owner)
+                        && o.id_matches()
+                        && !removed.contains(&o.device)
+                    {
                         trusted.insert(o.device);
                     }
                 }
@@ -303,7 +382,7 @@ impl MemberView {
             v.granted.add(k);
         }
         v.build(&dir);
-        v.read_epochs(storages, vault, me)?;
+        v.read_epochs(storages, vault, me, earlier)?;
         Ok(v)
     }
 
@@ -375,7 +454,15 @@ impl MemberView {
     }
 
     /// The folder epoch records this device holds the keys of, in order.
-    fn read_epochs(&mut self, storages: &[&dyn Storage], vault: Id16, me: Id16) -> Result<()> {
+    /// A record counts from an owner (or one of `earlier`, owners an epoch
+    /// removed since) that no epoch applied before it removed.
+    fn read_epochs(
+        &mut self,
+        storages: &[&dyn Storage],
+        vault: Id16,
+        me: Id16,
+        earlier: &BTreeSet<Id16>,
+    ) -> Result<()> {
         let folder = self.folder;
         let prefix = FolderEpochRecord::stream(folder, [0u8; 16])
             .prefix()
@@ -401,7 +488,12 @@ impl MemberView {
             }
             let owners: Vec<&store::Numbered> = cands
                 .iter()
-                .filter(|n| self.owners.contains(&n.device) || self.is_owner(&n.device))
+                .filter(|n| {
+                    (self.owners.contains(&n.device)
+                        || earlier.contains(&n.device)
+                        || self.is_owner(&n.device))
+                        && !ep.removed_at(&n.device, ep.current())
+                })
                 .collect();
             if owners.is_empty() {
                 continue;

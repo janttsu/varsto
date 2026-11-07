@@ -119,9 +119,19 @@ two branches added functions at the same place (both kept).
   APK, and the run was cancelled before packaging; its four artifacts were
   deleted and nothing was published. Clippy and the test suites have not
   run on the merged code yet.
-- Membership (from the review, not fixed): a gap that stays below the
-  sequence cap, a member of another vault does not apply the roster cap, and
-  a folder key already shared cannot be revoked (spec 21). Medium findings
+- Membership gaps the review left open are fixed on `fix/membership-gaps`
+  (not merged, not compiled or tested): the registry cut-off ends below
+  the first sequence number a removed device left empty; a member of
+  another vault applies a removal from the folder epoch record (the
+  removed owner's grants, directories and later epochs do not count); a
+  folder the remover could not re-key is re-keyed at the next sync of an
+  owner device holding its key (`rekey_after_removals`). What remains is
+  inherent and in spec 77.20: a key already held cannot be recalled, so
+  the removed device reads what was written under its keys, including a
+  not re-keyed folder until such an owner syncs (never, while all of its
+  owners are removed and nobody recovered it); a member cannot learn that
+  an owner was removed from the vault before a folder epoch says so; old
+  data is not re-encrypted. Medium findings
   of the review still not re-checked: logging-1/-4 (scrubber gaps), CLI-3/-4
   (`current_exe()` after an update), QUALITY-1/-2 (mutex `unwrap()` in
   service.rs, `set_var`), imports-2 (retention can delete the last

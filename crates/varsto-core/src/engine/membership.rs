@@ -355,7 +355,9 @@ pub struct RevokeReport {
     /// Folders that got a new folder epoch (new content uses new keys).
     pub folders_rekeyed: Vec<String>,
     /// Folders the removed device took part in that this device cannot
-    /// rotate (it is not an owner there, or holds no key of them).
+    /// rotate (it is not an owner there, or holds no key of them). An owner
+    /// device of each that holds its key re-keys it at its next read of the
+    /// membership (`Membership::rekey_after_removals`).
     pub folders_not_rekeyed: Vec<String>,
 }
 

@@ -1814,3 +1814,183 @@ fn an_old_revocation_without_registry_cuts_still_decodes() {
     back.take_tail(tail).unwrap();
     assert_eq!(back.registry_cuts, Some(vec![cut]));
 }
+
+/// The registry cut-off ends below the first number a removed device left
+/// empty in a stream. Otherwise it could leave a gap below its highest seq
+/// before the removal and fill it afterwards with a backdated record that
+/// still lies under the cut-off.
+#[test]
+fn a_removed_device_cannot_fill_a_gap_below_its_cut_off() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b) = (Dev::new(), Dev::new());
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let f = mb.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    mb.approve(&f, &ma.me, Role::Owner).unwrap();
+    let writer = Writer {
+        vault: VAULT,
+        storages: &st,
+        local: None,
+        device: mb.me,
+        key: &b.sign,
+    };
+    // Before its removal the device writes a harmless record at seq 5,
+    // leaving 3 and 4 empty in its folder-record stream.
+    let early = Stamp {
+        lamport: 1,
+        device: mb.me,
+    };
+    let harmless = FolderRecord {
+        id: f,
+        name: "Docs".into(),
+        settings: mb.registry.get(&f).unwrap().settings.clone(),
+        stamp: early,
+        creation: None,
+        participants: vec![],
+        denied: vec![],
+        members: vec![],
+        removed: None,
+    };
+    writer
+        .write(
+            &mb.record_keys(),
+            &FolderRegistry::stream(f, mb.me),
+            Some(5),
+            &KeyId::Registry(0),
+            &harmless,
+        )
+        .unwrap();
+    ma.refresh().unwrap();
+    ma.observe_lamport(100);
+    ma.remove_device(&mb.me, 0, false, None).unwrap();
+    let cut = ma.revocations[&mb.me].registry_cuts.as_ref().and_then(|c| {
+        c.iter()
+            .find(|c| c.kind == Kind::Folder.code() && c.scope == f)
+            .map(|c| c.seq)
+    });
+    assert_eq!(cut, Some(2), "the cut-off ends below the gap");
+    // After the removal it fills seq 3 with a record stamped before it.
+    let stamp = Stamp {
+        lamport: 50,
+        device: mb.me,
+    };
+    let attack = FolderRecord {
+        id: f,
+        name: "Taken".into(),
+        settings: BTreeMap::new(),
+        stamp,
+        creation: None,
+        participants: vec![Participant {
+            device: mb.me,
+            role: Role::Owner,
+            stamp,
+        }],
+        denied: vec![Denied {
+            device: ma.me,
+            stamp,
+        }],
+        members: vec![],
+        removed: None,
+    };
+    writer
+        .write(
+            &mb.record_keys(),
+            &FolderRegistry::stream(f, mb.me),
+            Some(3),
+            &KeyId::Registry(0),
+            &attack,
+        )
+        .unwrap();
+    ma.refresh().unwrap();
+    let folder = ma.registry.get(&f).expect("the folder survives");
+    assert_eq!(folder.name, "Docs");
+    assert_eq!(folder.role(&ma.me), Some(Role::Owner));
+    assert_eq!(folder.role(&mb.me), None, "the removal stands");
+    assert!(ma.refused.get(Kind::Folder) >= 1);
+}
+
+/// A member device of another vault reads no revocation, so it must take
+/// the removal from the folder epoch that made it: a grant the removed
+/// owner writes afterwards, with a directory under a larger stamp that
+/// still names it owner, does not count.
+#[test]
+fn a_member_ignores_the_grants_of_an_owner_a_folder_epoch_removed() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, d, friend) = (Dev::new(), Dev::new(), Dev::new());
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut md = device(&st, &d, &keys, "desktop");
+    ma.refresh().unwrap();
+    let f = ma.create_folder("Shared", BTreeMap::new(), None).unwrap();
+    ma.approve(&f, &md.me, Role::Owner).unwrap();
+    let m = ma
+        .add_member(
+            &f,
+            "friend's phone",
+            &friend.sign.public().to_bytes(),
+            &friend.kem.public().to_bytes(),
+            Role::Editor,
+        )
+        .unwrap();
+    md.refresh().unwrap();
+    let report = ma.remove_device(&md.me, 0, false, None).unwrap();
+    assert_eq!(report.folder_epochs, vec![(f, 1)]);
+    // The removed device, still holding K9₀ and its K6, writes the member
+    // a grant whose directory says it is an owner, stamped above anything
+    // the remaining owner wrote.
+    md.observe_lamport(1_000_000);
+    md.issue_grant(&f, 0, &m, Role::Editor)
+        .expect("the removed device still holds the old folder key");
+    let view = MemberView::read(&st, VAULT, m, &friend.kem, f, ma.me).unwrap();
+    let dir = view.directory.as_ref().expect("a directory counts");
+    assert_eq!(
+        dir.stamp.device, ma.me,
+        "the removed owner's directory counts"
+    );
+    assert_eq!(dir.get(&md.me).and_then(|e| e.role()), None);
+    assert!(!view.owners.contains(&md.me));
+    assert_eq!(view.registry.get(&f).and_then(|s| s.role(&md.me)), None);
+    assert_eq!(view.registry.epochs[&f].current(), 1);
+    assert!(view.granted.holds(&f, 1));
+    assert!(!view.access_lost);
+}
+
+/// A device removed from the vault by a device that is not an owner of one
+/// of its folders stays a participant there. The first owner device that
+/// holds the folder's key and reads the membership re-keys it, and the
+/// epoch record names the device as removed with its revocation's cut-off.
+#[test]
+fn an_owner_re_keys_a_folder_the_remover_could_not() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let mut ma = device(&st, &a, &keys, "laptop");
+    let mut mb = device(&st, &b, &keys, "phone");
+    let mut mc = device(&st, &c, &keys, "owner");
+    let f = mc.create_folder("Docs", BTreeMap::new(), None).unwrap();
+    mc.approve(&f, &mb.me, Role::Editor).unwrap();
+    ma.refresh().unwrap();
+    let report = ma.remove_device(&mb.me, 7, false, None).unwrap();
+    assert!(report.folders_not_rotated.contains(&f));
+    // The remover holds no key of the folder: nothing for it to do.
+    assert!(ma.rekey_after_removals(None).unwrap().is_empty());
+    mc.refresh().unwrap();
+    assert_eq!(mc.rekey_after_removals(None).unwrap(), vec![(f, 1)]);
+    let epochs = mc.folder_epochs(&f);
+    let rec = &epochs.applied[&1];
+    assert!(rec.removed.contains(&Removed {
+        device: mb.me,
+        cutoff: 7
+    }));
+    assert!(rec.participants.iter().all(|p| p.device != mb.me));
+    assert!(mc.registry.get(&f).unwrap().is_denied(&mb.me));
+    assert!(mc.read_my_grants().holds(&f, 1));
+    mb.refresh().unwrap();
+    assert!(!mb.read_my_grants().holds(&f, 1));
+    // Done once: the folder no longer lists the removed device.
+    assert!(mc.rekey_after_removals(None).unwrap().is_empty());
+}
