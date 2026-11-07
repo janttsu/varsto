@@ -27,6 +27,7 @@ spec still names them because sections were written as the work was done.
 
 ### Fixed
 
+- `varsto org request` keeps the request's private keys (the key-exchange key and the device signing key) sealed under the device's passphrase (`org-request.enc`) instead of in clear in `org-request.json`, as `share request` now does. The command and the setup card's "Show my request code" ask for the passphrase, and `org join` needs the same one. A request left in clear by alpha.16 is sealed and the clear file removed by the next command that reads it.
 - The import check that decides when a source may be removed applies the same "no own disk" waiver as the folder report: a folder on the default policy in a vault without a directory storage or disk pool no longer waits for ever for a copy on your own disks.
 - `varsto recovery kit` no longer records the kit as printed when the printout lacks the recovery words or carries a fresh key no folder is escrowed under, so the recovery guide does not report a complete kit.
 - Push notifications: when a channel fails, its queued messages wait together for the channel's backoff instead of one attempt per message per second.

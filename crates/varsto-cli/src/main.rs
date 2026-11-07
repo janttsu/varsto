@@ -719,6 +719,8 @@ enum OrgCmd {
     /// Administrators, people and their devices, the policy, devices waiting to be added.
     Status,
     /// (New device) Print a request code and its six-word fingerprint for an administrator.
+    /// Asks for the passphrase this device will have: the request's keys wait sealed
+    /// under it, and `org join` needs the same one.
     Request {
         /// Name of this device, bound to the code.
         /// Name of this device (default: the computer's name).
@@ -2860,8 +2862,11 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
     };
     match cmd {
         OrgCmd::Request { name } => {
-            let code = OrgRequest::code_for(home, Some(name))?;
-            let words = OrgRequest::fingerprint_for(home)?;
+            // The passphrase this device gets when it joins: the request's
+            // keys wait sealed under it.
+            let pass = passphrase()?;
+            let code = OrgRequest::code_for(home, Some(name), &pass)?;
+            let words = OrgRequest::fingerprint_for(home, &pass)?;
             if cli.json {
                 println!(
                     "{}",

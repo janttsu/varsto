@@ -4029,7 +4029,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   $("orgrequest").onclick = function () {
     var nm = $("orgjoin").querySelector("input[name=name]");
     if (!nm.value.trim()) { nm.focus(); return alertBox("Give the device a name first: it is part of the code and the fingerprint."); }
-    api("POST", "/api/org/request", { name: nm.value.trim() }).then(function (r) {
+    var pw = $("orgjoin").querySelector("input[name=passphrase]");
+    if (!pw || pw.value.length < 12) { if (pw) { pw.focus(); } return alertBox("Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and joining needs the same one."); }
+    api("POST", "/api/org/request", { name: nm.value.trim(), passphrase: pw.value }).then(function (r) {
       $("orgrequestout").textContent = r.request_code + "\n\nFingerprint: " + r.fingerprint + "\nThe administrator sees the same six words for this code. Read them to each other over a call or in person before they approve.";
       $("orgrequestout").classList.remove("hidden");
     }).catch(function (e) { alertBox(e.message); });

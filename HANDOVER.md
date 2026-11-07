@@ -93,8 +93,9 @@ two branches added functions at the same place (both kept).
   keys are sealed under the device passphrase (`share-request.enc`;
   review CRYPTO-2). `share request` asks for the passphrase and `share
   accept` needs the same one; a clear `share-request.json` of alpha.16 is
-  sealed and removed by the next read. `OrgRequest` (`org.rs`) still keeps
-  its KEM private key in clear the same way.
+  sealed and removed by the next read. The organization request
+  (`org.rs`, `org-request.enc`) is sealed the same way on the branch
+  `fix/org-request-sealed`.
 
 ## Open
 
