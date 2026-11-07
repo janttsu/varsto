@@ -164,3 +164,57 @@ fn concurrent_syncs_of_two_engines_on_one_home_stay_consistent() {
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
     assert_consistent(&lab, &words, &names);
 }
+
+/// The counter every holder of `state/home.lock` bumps when it is done.
+fn home_generation(home: &Path) -> u64 {
+    fs::read_to_string(home.join("state").join("home.gen"))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// The short operations that rewrite a folder's state or the configuration
+/// run under the home lock as a sync does. Each one marks the device
+/// directory written, so the service's engine reads it again before its
+/// next sync instead of saving over it from what it read before.
+#[test]
+fn state_writes_outside_a_sync_take_the_home_lock() {
+    use varsto_core::vault::FolderMode;
+    let (lab, _words) = lab();
+    let mut cli = open(&lab.home);
+    let mut last = home_generation(&lab.home);
+    let mut under_the_lock = |what: &str| {
+        let now = home_generation(&lab.home);
+        assert!(now > last, "{what} did not take the home lock");
+        last = now;
+    };
+    cli.set_folder_mode("docs", FolderMode::ReceiveOnly)
+        .unwrap();
+    under_the_lock("set_folder_mode");
+    cli.set_folder_mode("docs", FolderMode::Normal).unwrap();
+    under_the_lock("set_folder_mode");
+    cli.set_deletion_guard("docs", None).unwrap();
+    under_the_lock("set_deletion_guard");
+    cli.touch_access("docs", "first.bin").unwrap();
+    under_the_lock("touch_access");
+    cli.free_file("docs", "first.bin").unwrap();
+    under_the_lock("free_file");
+    assert!(!lab.dir.join("first.bin").exists());
+    cli.fetch_file("docs", "first.bin").unwrap();
+    under_the_lock("fetch_file");
+    assert_eq!(
+        fs::read(lab.dir.join("first.bin")).unwrap(),
+        data(40_000, 1)
+    );
+    cli.set_selective("docs", false).unwrap();
+    under_the_lock("set_selective");
+    // Nothing waits for a decision here: refused, but under the lock.
+    assert!(cli.confirm_deletions("docs").is_err());
+    under_the_lock("confirm_deletions");
+    assert!(cli.discard_deletions("docs").is_err());
+    under_the_lock("discard_deletions");
+    assert!(cli.revert_local("docs").is_err());
+    under_the_lock("revert_local");
+    assert!(cli.override_remote("docs").is_err());
+    under_the_lock("override_remote");
+}

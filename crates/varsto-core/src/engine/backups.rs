@@ -17,7 +17,9 @@
 //! A snapshot fixes its expiry when it is taken (retention in days). Expired
 //! snapshots are expired by the source device after a grace period, or by
 //! any device once the backup is stopped, its source is removed from the
-//! vault, or two days have passed. The expiry is sealed and pushed before
+//! vault, or two days have passed. The newest live snapshot of a backup
+//! that is not stopped is never expired, whatever its age (also when the
+//! source directory is gone). The expiry is sealed and pushed before
 //! any record is deleted; a base stays while an unexpired differential
 //! names it. The blocks only expired snapshots used are collected by
 //! garbage collection, which counts the unexpired snapshots of a backup as
@@ -1157,9 +1159,12 @@ impl Engine {
                     || source_gone
                     || now >= r.expires_utc + OTHERS_EXPIRE_AFTER_SECS)
         };
+        // The newest live snapshot stays until the backup is stopped,
+        // whatever its age: retention never leaves a backup without one.
+        let keep = snapshot3::reader::kept_newest(&view, &fb);
         let due: Vec<(Id16, u64)> = rows
             .iter()
-            .filter(|(_, r)| may_expire(r))
+            .filter(|(k, r)| may_expire(r) && keep != Some(*k))
             .map(|(k, _)| *k)
             .collect();
         let mut cache = self.load_backup_cache(&rec.folder_id);

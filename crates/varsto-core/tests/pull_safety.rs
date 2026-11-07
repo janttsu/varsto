@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
 //! A pull must not destroy a local edit that landed after the scan, and one
 //! bad file must not stop the rest of the folder (ENGINE-1, ENGINE-2, ENGINE-3).
+//! A conflict whose winner cannot be fetched keeps the local file, and a file
+//! that grows during the scan does not spoil the manifest (ENGINE-4, ENGINE-5).
 
 mod common;
 
@@ -370,4 +372,124 @@ fn an_unreadable_file_or_directory_does_not_stop_sync() {
         b"new secret"
     );
     assert_eq!(fs::read(lab.b_dir.join("sub/a.txt")).unwrap(), b"aaa");
+}
+
+/// Append to `name` once, when the scan has stated it and is about to read it.
+fn hook_append(name: &str, bytes: &'static [u8]) -> Arc<dyn Fn(&Path) + Send + Sync> {
+    let name = name.to_string();
+    let once = Arc::new(AtomicBool::new(false));
+    Arc::new(move |disk: &Path| {
+        if disk.ends_with(&name) && !once.swap(true, Ordering::SeqCst) {
+            use std::io::Write;
+            let mut f = fs::OpenOptions::new().append(true).open(disk).unwrap();
+            f.write_all(bytes).unwrap();
+        }
+    })
+}
+
+/// ENGINE-5: a file that grows between the scan's stat and its read is not
+/// published with a size its chunks do not hold (which every other device
+/// refuses, with the rest of the manifest); the next scan takes it.
+#[test]
+fn a_file_that_grows_while_it_is_scanned_does_not_spoil_the_manifest() {
+    let lab = lab();
+    fs::write(lab.a_dir.join("log.txt"), b"line 1\n").unwrap();
+    let (mut a, mut b) = pair(&lab);
+    a.push("docs").unwrap();
+    b.pull("docs").unwrap();
+    assert_eq!(fs::read(lab.b_dir.join("log.txt")).unwrap(), b"line 1\n");
+
+    fs::write(lab.a_dir.join("log.txt"), b"line 1\nline 2\n").unwrap();
+    fs::write(lab.a_dir.join("other.txt"), b"other").unwrap();
+    a.set_scan_read_hook(Some(hook_append("log.txt", b"line 3\n")));
+    a.push("docs").unwrap();
+    a.set_scan_read_hook(None);
+    for f in a.list_files("docs").unwrap() {
+        assert_ne!(
+            f.size, 14,
+            "published with the size from before the read: {f:?}"
+        );
+    }
+
+    // B applies the manifest: the other change arrives, the growing file
+    // keeps its last published version.
+    let pull = b.pull("docs").unwrap();
+    assert_eq!(
+        fs::read(lab.b_dir.join("other.txt")).ok().as_deref(),
+        Some(&b"other"[..]),
+        "{pull:?}"
+    );
+    assert_eq!(fs::read(lab.b_dir.join("log.txt")).unwrap(), b"line 1\n");
+
+    // The next scan reads it again and publishes it whole.
+    a.push("docs").unwrap();
+    b.pull("docs").unwrap();
+    assert_eq!(
+        fs::read(lab.b_dir.join("log.txt")).unwrap(),
+        b"line 1\nline 2\nline 3\n"
+    );
+}
+
+/// ENGINE-4: in a conflict this device loses, its file becomes the conflict
+/// copy only once the winner is here. A winner that cannot be fetched
+/// leaves the file where it is, and the next push publishes no deletion.
+#[test]
+fn a_conflict_whose_winner_is_unavailable_keeps_the_local_file() {
+    let lab = lab();
+    fs::write(lab.a_dir.join("report.txt"), b"v1").unwrap();
+    let (mut a, mut b) = pair(&lab);
+    a.push("docs").unwrap();
+    b.pull("docs").unwrap();
+
+    // Both edit offline; A's clock is ahead, so A's version wins. A's
+    // blocks are then lost, so B cannot fetch the winner.
+    fs::write(lab.b_dir.join("report.txt"), b"edited on B").unwrap();
+    b.push("docs").unwrap();
+    for _ in 0..50 {
+        a.tick_clock().unwrap();
+    }
+    let before = common::object_names(&lab.storage_path);
+    fs::write(lab.a_dir.join("report.txt"), b"edited on A").unwrap();
+    a.push("docs").unwrap();
+    let added: Vec<String> = common::object_names(&lab.storage_path)
+        .difference(&before)
+        .cloned()
+        .collect();
+    assert!(!added.is_empty(), "A's edit stored nothing");
+    for object in &added {
+        common::lose_object(&lab.storage_path, object);
+    }
+    drop(a);
+
+    let pull = b.pull("docs").unwrap();
+    assert_eq!(pull.conflicts, 1, "{pull:?}");
+    assert!(
+        pull.files_unavailable
+            .iter()
+            .any(|s| s.starts_with("report.txt:")),
+        "{pull:?}"
+    );
+    // Not renamed away to the conflict copy: the path still holds B's file.
+    assert_eq!(
+        contents(&lab.b_dir),
+        vec![("report.txt".to_string(), b"edited on B".to_vec())]
+    );
+
+    // B's next push publishes no deletion of the path.
+    b.push("docs").unwrap();
+    let files = b.list_files("docs").unwrap();
+    assert!(files.iter().any(|f| f.path == "report.txt"), "{files:?}");
+    let mut a = Engine::open(&lab.a_home, PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    let pulled = a.pull("docs").unwrap();
+    assert_eq!(pulled.files_deleted, 0, "{pulled:?}");
+    assert_eq!(
+        fs::read(lab.a_dir.join("report.txt")).unwrap(),
+        b"edited on A"
+    );
+    assert!(
+        has_bytes(&lab.a_dir, b"edited on B"),
+        "{:?}",
+        contents(&lab.a_dir)
+    );
 }

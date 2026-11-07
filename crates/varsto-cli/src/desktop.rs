@@ -2773,10 +2773,13 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         // Organization: a request code for this device, and joining with an approval token.
         (Method::Post, "/api/org/request") => {
             let name = s(input, "name")?;
-            let code = varsto_core::org::OrgRequest::code_for(&st.home, Some(&name))?;
+            // The passphrase of the join form: the request's keys wait sealed
+            // under it, and /api/org/join opens them with it.
+            let pass = s(input, "passphrase")?;
+            let code = varsto_core::org::OrgRequest::code_for(&st.home, Some(&name), &pass)?;
             Ok(json!({
                 "request_code": code,
-                "fingerprint": varsto_core::org::OrgRequest::fingerprint_for(&st.home)?,
+                "fingerprint": varsto_core::org::OrgRequest::fingerprint_for(&st.home, &pass)?,
             }))
         }
         (Method::Post, "/api/org/join") => {
@@ -6268,8 +6271,10 @@ mod tests {
             "*.tmp",
             "https://varsto.net/rv",
             "Android",
+            "App Store",
             "DEEP_ARCHIVE, GLACIER_IR, STANDARD_IA",
             "Documents",
+            "Google Play",
             "Linux",
             "OK",
             "Varsto",

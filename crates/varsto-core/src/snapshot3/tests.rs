@@ -6,7 +6,7 @@
 use super::reader::{deletable, delete_records, expiry_due};
 use super::record::SnapHeader;
 use super::*;
-use crate::ledger3::events::{Event, SnapshotExpired, SnapshotTaken};
+use crate::ledger3::events::{BackupStopped, Event, SnapshotExpired, SnapshotTaken};
 use crate::ledger3::EventScope;
 use crate::manifest3::{Chunk3, FileEntry};
 use crate::record::{Kind, RecordsRefused};
@@ -98,6 +98,17 @@ fn expire(w: &mut World, i: usize, device: Id16, seq: u64) {
             device,
             seq,
         })],
+        Vec::new(),
+        EventScope::Full,
+    );
+}
+
+/// Stop the backup as device `i`: its newest snapshot is no longer kept
+/// past its time.
+fn stop(w: &mut World, i: usize) {
+    w.batch(
+        i,
+        vec![Event::BackupStopped(BackupStopped { backup: BACKUP })],
         Vec::new(),
         EventScope::Full,
     );
@@ -528,7 +539,15 @@ fn a_snapshot_expires_by_its_time_without_a_mark_and_the_owner_owes_the_mark() {
             seq: 1
         }]
     );
-    assert_eq!(expiry_due(&view, &BACKUP, &a, 900).len(), 2);
+    assert_eq!(
+        expiry_due(&view, &BACKUP, &a, 900),
+        vec![SnapshotExpired {
+            backup: BACKUP,
+            device: a,
+            seq: 1
+        }],
+        "the newest snapshot is kept past its time"
+    );
     assert!(
         expiry_due(&view, &BACKUP, &b, 900).is_empty(),
         "only the owner's own"
@@ -541,8 +560,18 @@ fn a_snapshot_expires_by_its_time_without_a_mark_and_the_owner_owes_the_mark() {
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].seq, 2);
     assert_eq!(bs.retained_bases(&view, 600), vec![(a, 1)]);
+    // Past 900 snapshot 2 is still listed and referenced: it is the
+    // backup's newest, and the backup is not stopped. Its base stays.
+    let seqs: Vec<u64> = bs.list(&view, 1000).iter().map(|s| s.seq).collect();
+    assert_eq!(seqs, vec![2]);
+    assert!(deletable(&view, &BACKUP, &a, 1000).is_empty());
+    assert!(!bs.reference_set(&view, 1000).is_empty());
+    assert_eq!(bs.forget_expired(&view, 1000), 0);
+    // Once the backup is stopped the newest ends by its time too.
+    stop(&mut w, 0);
+    let view = w.trust.view.borrow().clone();
+    assert_eq!(expiry_due(&view, &BACKUP, &a, 900).len(), 2);
     assert!(bs.list(&view, 1000).is_empty());
-    // Past 900 the ledger would also show both deletable.
     assert_eq!(deletable(&view, &BACKUP, &a, 1000), vec![1, 2]);
     assert_eq!(bs.forget_expired(&view, 1000), 2);
     assert!(bs.is_empty());
@@ -571,6 +600,9 @@ fn references_include_unexpired_snapshots_and_exclude_expired_ones() {
     cur.insert(replaced3.clone(), file(&mut rng, &replaced3, a));
     let listing3 = cur.clone();
     take(&mut w, &mut sw, 0, &cur, 2, 10 * DAY); // 3: differential
+
+    // Stopped, so that the newest (3) also ends by its time.
+    stop(&mut w, 0);
     let mut bs = BackupSnapshots::new(BACKUP);
     pull(&w, &mut bs, 5);
     let refs_at =

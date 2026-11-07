@@ -748,7 +748,8 @@ impl Engine {
             Ok(_) => {}
             Err(e) => log::warn!("membership changes not uploaded: {e:#}"),
         }
-        self.with_enrolled(|m| {
+        let k1 = self.f3.recovery.clone();
+        let rekeyed = self.with_enrolled(|m| {
             // Requests and recovery copies are read here once, so that the
             // pages and `status` answer from this device's copy.
             if let Err(e) = m.read_all_requests() {
@@ -757,8 +758,18 @@ impl Engine {
             if let Err(e) = m.missing_escrows() {
                 log::debug!("recovery copies not read: {e:#}");
             }
-            Ok(())
+            // A folder that still lists a device removed from the vault
+            // (its remover could not re-key it) is re-keyed by the first
+            // owner device holding its key that reads the membership.
+            Ok(m.rekey_after_removals(k1.as_ref()).unwrap_or_else(|e| {
+                log::warn!("folders that list a removed device were not re-keyed: {e:#}");
+                Vec::new()
+            }))
         })?;
+        if rekeyed.is_some_and(|r| !r.is_empty()) {
+            // New content of those folders uses the new keys from now on.
+            self.reset_view();
+        }
         // The organization's manifest, roster and log (`org_ops`), judged
         // with the devices just read; a device its policy allows again gets
         // the vault key it was held back from.

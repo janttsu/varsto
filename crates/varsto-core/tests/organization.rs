@@ -151,8 +151,8 @@ fn create_approve_and_remove_a_user() {
     assert!(b.org_approve("vor1.junk", "x", None).is_err());
 
     // A new device D asks to join; A approves it for "dana".
-    let code = OrgRequest::code_for(&lab.home("d"), Some("d-laptop")).unwrap();
-    let fp = OrgRequest::fingerprint_for(&lab.home("d")).unwrap();
+    let code = OrgRequest::code_for(&lab.home("d"), Some("d-laptop"), PASS).unwrap();
+    let fp = OrgRequest::fingerprint_for(&lab.home("d"), PASS).unwrap();
     assert!(
         a.org_approve(&code, "dana", Some("wrong words here"))
             .is_err(),
@@ -176,7 +176,7 @@ fn create_approve_and_remove_a_user() {
     assert!(sd.this_device_listed);
     assert_eq!(sd.this_user.as_deref(), Some("dana"));
     assert!(
-        !OrgRequest::fingerprint_for(&lab.home("d")).is_ok(),
+        !OrgRequest::fingerprint_for(&lab.home("d"), PASS).is_ok(),
         "the request is cleared"
     );
 
@@ -325,7 +325,7 @@ fn policy_lets_admins_open_things_up_and_only_admins_write_rosters() {
     assert_eq!(a.org_summary().unwrap().roster_seq, next - 1);
     a.org_add_device("nobody", "x").unwrap_err();
     // The admin's real roster goes to the next free attempt and is adopted.
-    let code = OrgRequest::code_for(&lab.home("x"), Some("x")).unwrap();
+    let code = OrgRequest::code_for(&lab.home("x"), Some("x"), PASS).unwrap();
     a.org_approve(&code, "xenia", None).unwrap();
     assert_eq!(a.org_summary().unwrap().roster_seq, next);
     assert!(dir.join(format!("{next:08}-005.json")).exists());
@@ -380,7 +380,7 @@ fn a_dismissed_admin_cannot_write_rosters_but_its_earlier_ones_stay_valid() {
     a.org_admin_add("b", &created.root_words).unwrap();
     b.sync(None).unwrap();
     // B writes rosters while C is offline; then the root dismisses B.
-    let code = OrgRequest::code_for(&lab.home("d"), Some("d")).unwrap();
+    let code = OrgRequest::code_for(&lab.home("d"), Some("d"), PASS).unwrap();
     b.org_approve(&code, "dana", None).unwrap();
     b.org_set_policy(OrgPolicy {
         members_may_share: true,
@@ -504,7 +504,7 @@ fn junk_epoch_objects_are_skipped() {
     );
     a.org_add_device("d", "alice").unwrap();
     // A second removal after the junk above the current epoch takes number 5.
-    let code = OrgRequest::code_for(&lab.home("f"), Some("f")).unwrap();
+    let code = OrgRequest::code_for(&lab.home("f"), Some("f"), PASS).unwrap();
     let approved = a.org_approve(&code, "fred", None).unwrap();
     let (mut f, _, _) = Engine::org_join(&lab.home("f"), "f", PASS, &approved.token).unwrap();
     f.sync(None).unwrap();

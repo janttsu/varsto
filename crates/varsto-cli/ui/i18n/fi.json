@@ -1,5 +1,7 @@
 {
  "strings": {
+  "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and joining needs the same one.": "Anna ensin tämän laitteen salasana (vähintään 12 merkkiä): pyynnön avaimet säilytetään sinetöityinä sen alla, ja liittyminen vaatii saman salasanan.",
+  "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and accepting needs the same one.": "Anna ensin tämän laitteen salasana (vähintään 12 merkkiä): pyynnön avaimet säilytetään sinetöityinä sen alla, ja hyväksyminen vaatii saman salasanan.",
   "You can give another person one folder, and nothing else of your vault. They send you a request code from their device, you compare a six-word fingerprint with them over a call or in person, and you share the folder with that device. They accept it through a storage you both reach, after comparing the six words of your device.": "Voit antaa toiselle henkilölle yhden kansion etkä mitään muuta holvistasi. Hän lähettää sinulle pyyntökoodin laitteeltaan, vertaatte kuuden sanan sormenjälkeä puhelussa tai kasvokkain, ja jaat kansion sille laitteelle. Hän hyväksyy sen tallennuspaikan kautta, jonka molemmat tavoitatte, verrattuaan laitteesi kuusi sanaa.",
   "Choose Accept a shared folder, send the owner your request code, and accept once they shared the folder with it.": "Valitse Hyväksy jaettu kansio, lähetä omistajalle pyyntökoodisi ja hyväksy, kun hän on jakanut kansion sille.",
   "This cannot be undone; share again with a new request code.": "Tätä ei voi perua; jaa uudelleen uudella pyyntökoodilla.",
@@ -376,7 +378,7 @@
   "Start over on this device": "Aloita alusta tällä laitteella",
   "State": "Tila",
   "Status": "Tila",
-  "Step 1: send an administrator the request code from this device. Step 2: read its six-word fingerprint to them over a call or in person; they see the same words. Step 3: paste the approval token they send back.": "Vaihe 1: lähetä ylläpitäjälle tämän laitteen pyyntökoodi. Vaihe 2: lue sen kuuden sanan sormenjälki hänelle puhelussa tai kasvokkain; hän näkee samat sanat. Vaihe 3: liitä hyväksyntätunniste, jonka hän lähettää takaisin.",
+  "Step 1: give the device a name and a passphrase, then send an administrator the request code from this device (its keys wait sealed under the passphrase). Step 2: read its six-word fingerprint to them over a call or in person; they see the same words. Step 3: paste the approval token they send back and join with the same passphrase.": "Vaihe 1: anna laitteelle nimi ja salasana ja lähetä sitten ylläpitäjälle pyyntökoodi tältä laitteelta (sen avaimet odottavat sinetöityinä salasanan alla). Vaihe 2: lue sen kuuden sanan sormenjälki hänelle puhelimessa tai kasvokkain; hän näkee samat sanat. Vaihe 3: liitä hänen lähettämänsä hyväksyntätunniste ja liity samalla salasanalla.",
   "Still working…": "Työ on yhä käynnissä…",
   "Stop syncing here": "Lopeta synkronointi täällä",
   "Storage both of you can reach": "Tallennuspaikka, jonka te molemmat tavoitatte",

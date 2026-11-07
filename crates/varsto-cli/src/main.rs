@@ -719,6 +719,8 @@ enum OrgCmd {
     /// Administrators, people and their devices, the policy, devices waiting to be added.
     Status,
     /// (New device) Print a request code and its six-word fingerprint for an administrator.
+    /// Asks for the passphrase this device will have: the request's keys wait sealed
+    /// under it, and `org join` needs the same one.
     Request {
         /// Name of this device, bound to the code.
         /// Name of this device (default: the computer's name).
@@ -2860,8 +2862,11 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
     };
     match cmd {
         OrgCmd::Request { name } => {
-            let code = OrgRequest::code_for(home, Some(name))?;
-            let words = OrgRequest::fingerprint_for(home)?;
+            // The passphrase this device gets when it joins: the request's
+            // keys wait sealed under it.
+            let pass = passphrase()?;
+            let code = OrgRequest::code_for(home, Some(name), &pass)?;
+            let words = OrgRequest::fingerprint_for(home, &pass)?;
             if cli.json {
                 println!(
                     "{}",
@@ -5200,7 +5205,7 @@ fn run(cli: &Cli) -> Result<()> {
                         if r.keys_sent_to.is_empty() { "(no other device)".to_string() } else { r.keys_sent_to.join(", ") },
                         if r.keys_pending_for.is_empty() { String::new() } else { format!("\nwaiting for (they get it once they publish a key-exchange key): {}", r.keys_pending_for.join(", ")) },
                         if r.folders_rekeyed.is_empty() { "none".to_string() } else { r.folders_rekeyed.join(", ") },
-                        if r.folders_not_rekeyed.is_empty() { String::new() } else { format!("\nkept their key (shared or Strongroom): {}", r.folders_not_rekeyed.join(", ")) },
+                        if r.folders_not_rekeyed.is_empty() { String::new() } else { format!("\nnot re-keyed here (an owner device of each re-keys it at its next sync): {}", r.folders_not_rekeyed.join(", ")) },
                     )
                 })?;
             }

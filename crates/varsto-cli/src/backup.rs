@@ -84,6 +84,7 @@ pub enum BackupCmd {
     },
     /// Expire the snapshots past their retention now and delete from the
     /// storages what only they used (the background service does this too).
+    /// The newest snapshot of a backup that is not stopped is kept.
     Expire,
 }
 

@@ -27,6 +27,16 @@ spec still names them because sections were written as the work was done.
 
 ### Fixed
 
+- `varsto org request` keeps the request's private keys (the key-exchange key and the device signing key) sealed under the device's passphrase (`org-request.enc`) instead of in clear in `org-request.json`, as `share request` now does. The command and the setup card's "Show my request code" ask for the passphrase, and `org join` needs the same one. A request left in clear by alpha.16 is sealed and the clear file removed by the next command that reads it.
+- Backup retention never removes the newest snapshot of a backup, whatever its age: with a lost source directory (or a device that took no newer snapshot) the last snapshot used to expire on time and its blocks were collected, leaving nothing to restore. Stopping the backup lets the last snapshot expire as before (spec sections 31 and 77).
+- The log scrubber cuts a secret the way `Debug` prints an optional or wrapped value (`password: Some("…")`, `password: Command("…")`); it used to cut only up to the quote and leave the value in the line. The transmission RPC settings no longer print their password in `Debug`.
+- The passphrase the device keys are unlocked or saved with is registered with the log scrubber on every path (the service unlocking from the system keyring, the interface's unlock, init and join), and so are the device signing key and the folder K11 keys (by keyed hash) and `VARSTO_RECOVERY_WORDS`, `VARSTO_MCP_KEY` and `VARSTO_TRANSMISSION_PASSWORD` from the environment. Before, the service ran for days with no passphrase registered.
+- Files that arrive from another device keep the modification time their writer recorded; they used to be dated when they were downloaded, so tools that go by the date (make, photo managers, backups) saw every pulled file as new.
+- A download or a write through the engine that fails no longer leaves its `.varsto-tmp-…` or `.varsto-upload-…` file with part of the content in the folder, and a scan removes such files that a stopped process left once they are a day old (only Varsto's own temporary names, never in a backup's source).
+- Fetching, freeing, writing and moving a file, the folder mode, selective sync, the deletion guard, confirming or discarding held deletions, reverting and overriding take the device directory's lock as a sync does, so a command and the background service no longer undo each other's changes to a folder's state or the configuration. Recording that a file was opened is left out while a sync of another process runs, instead of waiting for it.
+- Membership: a removed device's folder records, grants and escrow count only up to the first sequence number it had left empty, so it can no longer fill a gap below its cut-off with a backdated record after the removal.
+- Membership: a member device of another vault applies a removal from the folder epoch record: grants and directories of an owner device that epoch removed, and the devices those name, no longer count, and that device starts no later epoch.
+- Membership: a folder the remover could not re-key is re-keyed at the next sync of an owner device that holds its key, and every folder epoch lists a removed device that still takes part as removed. What the removed device already holds it keeps (spec 77.20).
 - The import check that decides when a source may be removed applies the same "no own disk" waiver as the folder report: a folder on the default policy in a vault without a directory storage or disk pool no longer waits for ever for a copy on your own disks.
 - `varsto recovery kit` no longer records the kit as printed when the printout lacks the recovery words or carries a fresh key no folder is escrowed under, so the recovery guide does not report a complete kit.
 - Push notifications: when a channel fails, its queued messages wait together for the channel's backoff instead of one attempt per message per second.
@@ -42,6 +52,9 @@ spec still names them because sections were written as the work was done.
   and the page retries; two requests at a time, a memory-only cache for
   re-rendered lists, no lazy-loading attribute.
 - The default policy no longer reports a folder as violated in a vault without a disk pool or directory storage: the folder gets one warning that there is no copy on your own disks and how to add one (a policy set on purpose that asks for a copy at home is still held to it). The texts say "your own disks" (copies on devices were never counted) and "no copy" instead of "fewer than 1 copies"; on the Visualization page the reason shows under the bar of the "Is it safe?" card, the policy line wraps on phones, and the repair line no longer shows the key epoch.
+- In a conflict that another device's version wins, the file here moves to its conflict copy only once the winner is downloaded. A winner that could not be fetched used to leave the path empty, and the next push published a deletion of it.
+- A file that grows or shrinks while the scan reads it is no longer published with a size its blocks do not hold, which made every other device refuse the folder's whole file list; it waits for the next scan.
+- With `permissions` off for a folder, a downloaded file gets this device's default mode instead of the mode recorded in the vault.
 
 ## [0.0.1-alpha.16] - 2026-11-04
 

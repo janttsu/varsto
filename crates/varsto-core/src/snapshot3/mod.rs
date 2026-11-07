@@ -22,7 +22,8 @@
 //! - A snapshot has no `prev`: it never chains. A reader checks that the
 //!   base a differential names is a base the same device announced.
 //! - A snapshot is unexpired while the ledger has no `snapshot_expired`
-//!   for it and `now < expires_utc` of its signed body.
+//!   for it and `now < expires_utc` of its signed body, or while it is the
+//!   newest live snapshot of a backup that is not stopped.
 //! - Records are never pruned; only expiry deletes them.
 
 pub mod reader;

@@ -93,11 +93,34 @@ two branches added functions at the same place (both kept).
   keys are sealed under the device passphrase (`share-request.enc`;
   review CRYPTO-2). `share request` asks for the passphrase and `share
   accept` needs the same one; a clear `share-request.json` of alpha.16 is
-  sealed and removed by the next read. `OrgRequest` (`org.rs`) still keeps
-  its KEM private key in clear the same way.
+  sealed and removed by the next read. The organization request
+  (`org.rs`, `org-request.enc`) is sealed the same way on the branch
+  `fix/org-request-sealed`.
 
 ## Open
 
+- **Branch `integrate/review-20261107`** (pushed, no pull request, not
+  compiled or tested; builds are on hold and the `Daily builds` workflow is
+  disabled with `gh workflow disable daily.yml`, re-enable it with `gh
+  workflow enable daily.yml -R janttsu/varsto`): `main` plus five fix
+  branches made on 2026-11-07, merged with only CHANGELOG conflicts.
+  `fix/org-request-sealed` (the organization request sealed under the
+  passphrase, like CRYPTO-2), `fix/imports2-logging` (imports-2: the
+  newest snapshot of a backup is never expired by age while the backup
+  runs; logging-1/-4: optional and wrapped secrets are cut, the
+  passphrase, device keys, K11 and secret environment variables are
+  registered), `fix/engine-review-4-9` (ENGINE-4…9: the conflict winner is
+  secured before the local file moves, a file that changes while scanned
+  waits for the next scan, `permissions: off` is honoured, pulled files
+  keep their mtime, temporary files are removed on error and stale ones
+  by the scan, short state writes take the home lock) and
+  `fix/membership-gaps` (below). One pull request from this branch is
+  enough; its CI is the first test of all of it. Open points the
+  sub-branches name: automatic re-keying from every owner's sync can fork
+  a folder epoch when two owners sync at the same moment; the 24-hour age
+  for stale temporary files is a guess; about 44 other configuration
+  writes still skip the home lock; devices on older builds still expire
+  the last snapshot by time.
 - Build and test everything above: let one CI run finish, run the unit
   tests, and try the notification channels, the thumbnails on a phone and
   the pause on a phone. Until then no daily or release should be trusted.
@@ -118,9 +141,19 @@ two branches added functions at the same place (both kept).
   APK, and the run was cancelled before packaging; its four artifacts were
   deleted and nothing was published. Clippy and the test suites have not
   run on the merged code yet.
-- Membership (from the review, not fixed): a gap that stays below the
-  sequence cap, a member of another vault does not apply the roster cap, and
-  a folder key already shared cannot be revoked (spec 21). Medium findings
+- Membership gaps the review left open are fixed on `fix/membership-gaps`
+  (not merged, not compiled or tested): the registry cut-off ends below
+  the first sequence number a removed device left empty; a member of
+  another vault applies a removal from the folder epoch record (the
+  removed owner's grants, directories and later epochs do not count); a
+  folder the remover could not re-key is re-keyed at the next sync of an
+  owner device holding its key (`rekey_after_removals`). What remains is
+  inherent and in spec 77.20: a key already held cannot be recalled, so
+  the removed device reads what was written under its keys, including a
+  not re-keyed folder until such an owner syncs (never, while all of its
+  owners are removed and nobody recovered it); a member cannot learn that
+  an owner was removed from the vault before a folder epoch says so; old
+  data is not re-encrypted. Medium findings
   of the review still not re-checked: logging-1/-4 (scrubber gaps), CLI-3/-4
   (`current_exe()` after an update), QUALITY-1/-2 (mutex `unwrap()` in
   service.rs, `set_var`), imports-2 (retention can delete the last

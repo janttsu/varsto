@@ -183,7 +183,7 @@
         <h3 class="card-title"><svg class="icon accent"><use href="#i-org"/></svg>Join your organization</h3>
         <label>Name for this device <input name="name" placeholder="work-laptop" required></label>
         <label>Passphrase for this device <input name="passphrase" type="password" minlength="12" placeholder="At least 12 characters" required></label>
-        <p class="muted small">Step 1: send an administrator the request code from this device. Step 2: read its six-word fingerprint to them over a call or in person; they see the same words. Step 3: paste the approval token they send back.</p>
+        <p class="muted small">Step 1: give the device a name and a passphrase, then send an administrator the request code from this device (its keys wait sealed under the passphrase). Step 2: read its six-word fingerprint to them over a call or in person; they see the same words. Step 3: paste the approval token they send back and join with the same passphrase.</p>
         <div class="row"><button type="button" id="orgrequest" class="secondary">Show my request code</button></div>
         <pre id="orgrequestout" class="hidden"></pre>
         <label>Approval token <input name="token" required autocapitalize="none" autocomplete="off"></label>
