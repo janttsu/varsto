@@ -835,6 +835,10 @@ pub struct Engine {
     /// deletes it (`set_replace_hook`), so an edit during the download can
     /// be simulated.
     replace_hook: Option<ReplaceHook>,
+    /// Tests: called with a changed file's path after the scan has stated
+    /// it and before it reads it (`set_scan_read_hook`), so a file that
+    /// changes while it is scanned can be simulated.
+    scan_read_hook: Option<ReplaceHook>,
     /// Tests: the next pull fails with this message after the scan
     /// (`fail_next_pull_for_tests`).
     pull_fault: Option<String>,
@@ -1277,6 +1281,38 @@ fn disk_matches_index(disk: &Path, index: Option<&LocalIndexEntry>) -> bool {
 enum PlaceGuard {
     No,
     Check(Option<LocalIndexEntry>),
+}
+
+/// A conflict this device's version loses: the local file `from` becomes
+/// the conflict copy `to` only when the winner is complete and about to
+/// take its place, so a winner that cannot be fetched leaves it where it
+/// is (ENGINE-4). `moved` says whether it went.
+struct Aside {
+    from: PathBuf,
+    to: PathBuf,
+    moved: bool,
+}
+
+impl Aside {
+    /// Move the local file to the conflict copy. A file that is no longer
+    /// there (deleted meanwhile) is nothing to move.
+    fn move_away(&mut self) -> std::io::Result<()> {
+        match fs::rename(&self.from, &self.to) {
+            Ok(()) => {
+                self.moved = true;
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Undo `move_away` when the winner did not take the place after all.
+    fn put_back(&mut self) {
+        if self.moved && fs::rename(&self.to, &self.from).is_ok() {
+            self.moved = false;
+        }
+    }
 }
 
 /// Names Varsto keeps for itself inside folders (`.varsto*`), except the
@@ -2047,6 +2083,7 @@ impl Engine {
             hold_exempt: None,
             download_log: None,
             replace_hook: None,
+            scan_read_hook: None,
             pull_fault: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
@@ -2157,6 +2194,7 @@ impl Engine {
             hold_exempt: None,
             download_log: None,
             replace_hook: None,
+            scan_read_hook: None,
             pull_fault: None,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
@@ -3851,6 +3889,9 @@ impl Engine {
                 continue;
             }
             // Changed or new: chunk, hash, (upload).
+            if let Some(hook) = self.scan_read_hook.clone() {
+                hook(entry.path());
+            }
             let file = match fs::File::open(entry.path()) {
                 Ok(f) => f,
                 Err(_) => {
@@ -3923,6 +3964,25 @@ impl Engine {
                 // Not a version: the blocks read so far are not offered.
                 self.pending.truncate(events_before);
                 state.unreadable.insert(path.clone());
+                continue;
+            }
+            // Grew, shrank or was written while it was read: the size from
+            // the stat before the read is not what the chunks hold, and
+            // every other device refuses a manifest with such an entry. Not
+            // a version this round; the index keeps what it had, so the
+            // next scan reads the file again (as `scan_cached` does).
+            let read: u64 = chunks.iter().map(|c| c.size).sum();
+            let still = fs::symlink_metadata(entry.path())
+                .is_ok_and(|now| now.len() == size && mtime_ns_of(&now) == mtime);
+            if read != size || !still {
+                self.pending.truncate(events_before);
+                if let Some(e) = state.local_index.get(&path) {
+                    new_index.insert(path.clone(), e.clone());
+                }
+                log::debug!(
+                    folder = rec.name.as_str();
+                    "scan: {path} changed while it was read; taken by a later scan"
+                );
                 continue;
             }
             let content_hash = hex::encode(hasher.finalize());
@@ -5024,7 +5084,6 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
-        let me = self.vault.device_id.clone();
         let encrypted_here = self.mount_is_encrypted(&rec.folder_id);
         match manifest::merge(state.files.get(path), remote) {
             Merge::KeepLocal => {}
@@ -5036,6 +5095,7 @@ impl Engine {
                 // Receive-only: a local change of the file is not one of
                 // the versions; it goes to the trash.
                 self.drop_local_change(rec, root, state, path)?;
+                let mut aside: Option<(String, FileState, Aside)> = None;
                 if let (true, Some(loser)) = (encrypted_here, &loser) {
                     self.conflict_copy_cached(rec, fk, state, path, loser, storages, report)?;
                 } else if let Some(loser) = loser {
@@ -5051,48 +5111,42 @@ impl Engine {
                         fs::create_dir_all(parent)?;
                     }
                     let local = self.disk_of(root, state, path);
-                    let mut copied = true;
                     if local_is_loser && present(&local) {
-                        fs::rename(&local, &disk)?;
-                    } else if let Some(target) = loser.symlink() {
-                        fsmeta::write_link(&disk, target)?;
-                    } else if let Err(e) =
-                        self.download_to(rec, fk, &disk, &loser, storages, report)
-                    {
-                        // The losing version could not be fetched. That must
-                        // not drop the winner or the rest of the pull; the
-                        // copy is retried from pending.
-                        report.files_unavailable.push(format!("{cpath}: {e}"));
-                        let mut pending = loser.clone();
-                        pending.path = cpath.clone();
-                        state.pending_remote.insert(cpath.clone(), pending);
-                        copied = false;
-                    }
-                    if copied {
-                        // The conflict copy is a new local file: it gets its own version.
-                        let clock = self.tick()?;
-                        let mut cstate = loser.clone();
-                        cstate.path = cpath.clone();
-                        cstate.version = BTreeMap::from([(me.clone(), clock)]);
-                        cstate.modified_by = me.clone();
-                        cstate.modified_clock = clock;
-                        let seen = self.settle_meta(
-                            &rec.folder_id,
-                            &disk,
-                            &cstate,
-                            &mut report.metadata_problems,
-                        );
-                        let md = fs::symlink_metadata(&disk)?;
-                        state.local_index.insert(
-                            cpath.clone(),
-                            LocalIndexEntry {
-                                size: md.len(),
-                                mtime: mtime_ns_of(&md),
-                                content_hash: cstate.content_hash.clone(),
-                                meta_seen: seen,
+                        // The local file becomes the conflict copy when the
+                        // winner takes its place (below), not before: a
+                        // winner that cannot be fetched now must not leave
+                        // the path empty (the next scan would publish a
+                        // deletion).
+                        aside = Some((
+                            cpath,
+                            loser,
+                            Aside {
+                                from: local,
+                                to: disk,
+                                moved: false,
                             },
-                        );
-                        state.files.insert(cpath, cstate);
+                        ));
+                    } else {
+                        let copied = if let Some(target) = loser.symlink() {
+                            fsmeta::write_link(&disk, target)?;
+                            true
+                        } else if let Err(e) =
+                            self.download_to(rec, fk, &disk, &loser, storages, report)
+                        {
+                            // The losing version could not be fetched. That
+                            // must not drop the winner or the rest of the
+                            // pull; the copy is retried from pending.
+                            report.files_unavailable.push(format!("{cpath}: {e}"));
+                            let mut pending = loser.clone();
+                            pending.path = cpath.clone();
+                            state.pending_remote.insert(cpath.clone(), pending);
+                            false
+                        } else {
+                            true
+                        };
+                        if copied {
+                            self.record_conflict_copy(rec, state, cpath, &loser, &disk, report)?;
+                        }
                     }
                 }
                 let local_has_winner = state
@@ -5123,10 +5177,61 @@ impl Engine {
                     }
                     state.files.insert(path.to_string(), winner);
                 } else {
-                    self.apply_remote(rec, fk, root, state, winner, storages, report)?;
+                    let applied = self.apply_remote_aside(
+                        rec,
+                        fk,
+                        root,
+                        state,
+                        winner,
+                        storages,
+                        report,
+                        aside.as_mut().map(|(_, _, a)| a),
+                    );
+                    // Only a local file that made room for the winner is a
+                    // conflict copy; otherwise it stays as this device's
+                    // version and the conflict is merged again next pull.
+                    if let Some((cpath, loser, a)) = aside {
+                        if a.moved {
+                            self.record_conflict_copy(rec, state, cpath, &loser, &a.to, report)?;
+                        }
+                    }
+                    applied?;
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Record the conflict copy `cpath` of `loser`, now on `disk`: a new
+    /// local file with its own version.
+    fn record_conflict_copy(
+        &mut self,
+        rec: &FolderRecord,
+        state: &mut FolderState,
+        cpath: String,
+        loser: &FileState,
+        disk: &Path,
+        report: &mut PullReport,
+    ) -> Result<()> {
+        let me = self.vault.device_id.clone();
+        let clock = self.tick()?;
+        let mut cstate = loser.clone();
+        cstate.path = cpath.clone();
+        cstate.version = BTreeMap::from([(me.clone(), clock)]);
+        cstate.modified_by = me;
+        cstate.modified_clock = clock;
+        let seen = self.settle_meta(&rec.folder_id, disk, &cstate, &mut report.metadata_problems);
+        let md = fs::symlink_metadata(disk)?;
+        state.local_index.insert(
+            cpath.clone(),
+            LocalIndexEntry {
+                size: md.len(),
+                mtime: mtime_ns_of(&md),
+                content_hash: cstate.content_hash.clone(),
+                meta_seen: seen,
+            },
+        );
+        state.files.insert(cpath, cstate);
         Ok(())
     }
 
@@ -5279,6 +5384,23 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
+        self.apply_remote_aside(rec, fk, root, state, remote, storages, report, None)
+    }
+
+    /// `apply_remote`; with `aside`, the local file moves to its conflict
+    /// copy just before the remote version takes its place (and only then).
+    #[allow(clippy::too_many_arguments)]
+    fn apply_remote_aside(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        root: &Path,
+        state: &mut FolderState,
+        remote: FileState,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut PullReport,
+        mut aside: Option<&mut Aside>,
+    ) -> Result<()> {
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.apply_remote_cached(rec, fk, state, remote, storages, report);
         }
@@ -5340,6 +5462,15 @@ impl Engine {
                 return Ok(());
             }
             let _ = fs::remove_file(placeholder_path(&disk));
+            if let Some(a) = aside.as_deref_mut() {
+                if let Err(e) = a.move_away() {
+                    report
+                        .files_unavailable
+                        .push(format!("{}: {e}", remote.path));
+                    state.pending_remote.insert(remote.path.clone(), remote);
+                    return Ok(());
+                }
+            }
             match fsmeta::write_link(&disk, target) {
                 Ok(fsmeta::LinkOutcome::Link) => {
                     let seen = self.settle_meta(
@@ -5364,6 +5495,9 @@ impl Engine {
                     state.local_index.remove(&remote.path);
                 }
                 Err(e) => {
+                    if let Some(a) = aside {
+                        a.put_back();
+                    }
                     report
                         .files_unavailable
                         .push(format!("{}: {e}", remote.path));
@@ -5417,6 +5551,7 @@ impl Engine {
                 storages,
                 report,
                 PlaceGuard::Check(indexed),
+                aside,
             )
         };
         match fetched {
@@ -5537,11 +5672,13 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
     ) -> Result<()> {
-        self.download_to_guarded(rec, fk, disk, file, storages, report, PlaceGuard::No)
+        self.download_to_guarded(rec, fk, disk, file, storages, report, PlaceGuard::No, None)
     }
 
     /// `download_to`, optionally refusing to replace a file that no longer
-    /// matches the index from the scan (`PlaceGuard::Check`).
+    /// matches the index from the scan (`PlaceGuard::Check`), and moving
+    /// the local file to its conflict copy (`aside`) only once the new
+    /// content is complete.
     #[allow(clippy::too_many_arguments)]
     fn download_to_guarded(
         &mut self,
@@ -5552,6 +5689,7 @@ impl Engine {
         storages: &[(StorageSpec, Box<dyn Storage>)],
         report: &mut PullReport,
         guard: PlaceGuard,
+        mut aside: Option<&mut Aside>,
     ) -> Result<()> {
         // Nothing new is written where the disk would keep less free space
         // than its limit; the caller keeps the file for a later sync.
@@ -5734,8 +5872,16 @@ impl Engine {
             out.sync_all()?;
             // The mode the folder records, set on the open file before it
             // becomes visible under its name (the metadata step after the
-            // rename sets it again and reports a failure).
-            util::set_final_mode(&out, file.meta.as_ref().and_then(|m| m.mode));
+            // rename sets it again and reports a failure). With permissions
+            // off here (or no mode bits on this system) the vault's mode is
+            // not applied: the file gets the mode a new file gets here.
+            let settings = self.meta_settings(&rec.folder_id);
+            let mode = if settings.permissions && self.meta_caps.mode == fsmeta::ModeCap::Full {
+                file.meta.as_ref().and_then(|m| m.mode)
+            } else {
+                None
+            };
+            util::set_final_mode(&out, mode);
         }
         if let PlaceGuard::Check(index) = &guard {
             // The scan that chose this download is already over. An edit
@@ -5747,8 +5893,23 @@ impl Engine {
                 bail!("changed while syncing; nothing was overwritten");
             }
         }
+        // A conflict this device lost: its file becomes the conflict copy
+        // now that the winner is complete, and comes back if the winner
+        // cannot take the place.
+        if let Some(a) = aside.as_deref_mut() {
+            if let Err(e) = a.move_away() {
+                let _ = fs::remove_file(&tmp);
+                return Err(anyhow::Error::new(e)
+                    .context(format!("move {} to its conflict copy", a.from.display())));
+            }
+        }
         fsmeta::make_replaceable(disk);
-        fs::rename(&tmp, disk)?;
+        if let Err(e) = fs::rename(&tmp, disk) {
+            if let Some(a) = aside {
+                a.put_back();
+            }
+            return Err(e.into());
+        }
         cleanup.keep();
         if self.share_read_only(rec) {
             share_roles::set_read_only(disk, true);
@@ -6624,6 +6785,13 @@ impl Engine {
     #[doc(hidden)]
     pub fn set_replace_hook(&mut self, hook: Option<ReplaceHook>) {
         self.replace_hook = hook;
+    }
+
+    /// Tests: run after the scan has stated a changed file, before it
+    /// reads it.
+    #[doc(hidden)]
+    pub fn set_scan_read_hook(&mut self, hook: Option<ReplaceHook>) {
+        self.scan_read_hook = hook;
     }
 
     /// Tests: the next pull fails with `message` before it merges.
