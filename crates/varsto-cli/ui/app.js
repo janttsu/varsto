@@ -5053,7 +5053,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   };
   // The kit holds the vault key: it is printed on the command line, which asks for the passphrase.
   $("rg-kit").onclick = function () {
-    dialog({ title: "Print the recovery kit", text: "The kit is the vault key as 24 words, and with storage format 3 also the recovery words as a second set of 24. For safety it is printed on the command line of this computer, which asks for your passphrase: run a command below and print or copy the words by hand. With --shares it also prints three shares, any two of which rebuild the key.", code: "varsto recovery kit\nvarsto recovery kit --shares\nvarsto recovery kit --recovery-words\nvarsto recovery kit --new-recovery-key", ok: "Close", cancel: false }).then(function () { loadGuide(); });
+    dialog({ title: "Print the recovery kit", text: "The kit is two sets of 24 words: the vault words (names and bookkeeping only) and the recovery words (with them, every folder's content). For safety it is printed on the command line of this computer, which asks for your passphrase and the recovery words: run a command below and print or copy the words by hand. With --shares it also prints three shares of each set, any two of which rebuild it.", code: "varsto recovery kit\nvarsto recovery kit --shares\nvarsto recovery kit --recovery-words\nvarsto recovery kit --new-recovery-key", ok: "Close", cancel: false }).then(function () { loadGuide(); });
   };
   // Traffic view (Peers page): /api/p2p/traffic every second while the page is shown.
   // The service answers it without waiting for a sync, so it stays live during long transfers.

@@ -16,6 +16,10 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Fixed
+
+- `varsto recovery kit` prints the format 3 kit: the vault words and the recovery words, both word sets. It used to print the format 2 kit, whose text said the 24 vault words "read everything in the vault"; in format 3 they open device and folder names and the storage ledger only, so a person who kept that printout alone could not restore any content. The command asks for the recovery words (or takes VARSTO_RECOVERY_WORDS, or the copy `unlock --with-recovery-key` gave the service); a kit printed without them says RECOVERY WORDS: NOT ON THIS PRINTOUT in capitals and warns on standard error. `--shares` now splits both word sets (it used to split the vault words only, and could not be combined with `--recovery-words`), and `recovery combine` says that the key check tells which set the rebuilt words belong to. The Help page's recovery paragraph and the "Print the recovery kit" dialog say the same.
+
 ## [0.0.1-alpha.16] - 2026-11-04
 
 Spec sections 72 to 83. Storage format 3: vaults of alpha.15 and earlier are not read and must be recreated; every device must run alpha.16 (alpha.15 refuses a format 3 vault with a message). This is still an alpha: not for production data. The Android package is now release-signed under a new key, so an installed debug build (alpha.15 or an older daily) must be uninstalled before the new APK is installed.

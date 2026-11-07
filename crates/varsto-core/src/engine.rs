@@ -6199,16 +6199,23 @@ impl Engine {
         f.facts
     }
 
-    /// The vault key (hex) for the recovery kit. Only an unlocked owner
-    /// device can produce it; members hold no vault key.
-    pub fn export_vault_key(&self) -> Result<String> {
+    /// Whether this device may print the recovery kit or export the vault
+    /// key: an unlocked owner device, and the organization allows it.
+    /// Members hold no vault key.
+    pub fn may_export_vault_key(&self) -> Result<()> {
         if self.vault.member {
             bail!("a member device holds folder keys only, not the vault key");
         }
         self.org_allows(
             |p| p.members_may_add_devices,
             "print the recovery kit or export the vault key",
-        )?;
+        )
+    }
+
+    /// The vault key (hex) for the recovery kit. Only an unlocked owner
+    /// device can produce it; members hold no vault key.
+    pub fn export_vault_key(&self) -> Result<String> {
+        self.may_export_vault_key()?;
         // The current epoch's key: it opens the older epochs through the
         // epoch records, while a key from before a revocation opens nothing new.
         Ok(self.current_vault_key().to_hex())

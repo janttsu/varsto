@@ -524,6 +524,53 @@ fn vault_words_and_recovery_words_restore_every_folder() {
     let kit = escrow::kit_text(&VAULT, newest_epoch, &newest_k3, &k1).unwrap();
     assert!(kit.contains(vault_words.split(' ').next().unwrap()));
     assert!(kit.contains("RECOVERY WORDS"));
+    assert!(!kit.contains(escrow::RECOVERY_WORDS_MISSING));
+    assert!(!kit.contains("Share 1:"));
+    // Without the recovery words the kit says so in capitals and prints no
+    // recovery word; the vault words alone never pass for a complete kit.
+    let partial = escrow::kit_text_with(&VAULT, newest_epoch, &newest_k3, None, false).unwrap();
+    assert!(
+        partial.contains(escrow::RECOVERY_WORDS_MISSING),
+        "{partial}"
+    );
+    assert!(partial.contains("VAULT WORDS"));
+    let k1_words = k1.words().unwrap();
+    for w in k1_words.split(' ') {
+        assert!(
+            !partial.contains(&format!(". {w}")) || vault_words.contains(w),
+            "{partial}"
+        );
+    }
+    assert!(!partial.contains(&k1.key_check().unwrap()));
+    // With shares, both sets are split and either rebuilds its key.
+    let shared = escrow::kit_text_with(&VAULT, newest_epoch, &newest_k3, Some(&k1), true).unwrap();
+    assert!(shared.contains("Vault word shares:") && shared.contains("Recovery word shares:"));
+    assert_eq!(shared.matches("Share 1:").count(), 2, "{shared}");
+    let share_lines = |after: &str| -> Vec<crate::recovery::Share> {
+        let text = &shared[shared.find(after).unwrap()..];
+        (1..=3)
+            .map(|i| {
+                let start =
+                    text.find(&format!("Share {i}:\n")).unwrap() + format!("Share {i}:\n").len();
+                let rows: Vec<&str> = text[start..].lines().take(6).collect();
+                let words: Vec<String> = rows
+                    .iter()
+                    .flat_map(|r| r.split_whitespace())
+                    .filter(|t| !t.ends_with('.'))
+                    .map(|t| t.to_string())
+                    .collect();
+                crate::recovery::Share::decode(&format!("{i}: {}", words.join(" "))).unwrap()
+            })
+            .collect()
+    };
+    let k3_shares = share_lines("Vault word shares:");
+    assert_eq!(
+        *crate::recovery::combine(&k3_shares[..2], 2, None).unwrap(),
+        newest_k3.to_hex()
+    );
+    let k1_shares = share_lines("Recovery word shares:");
+    let back = RecoveryKey::from_shares(&k1_shares[1..], Some(&k1.key_check().unwrap())).unwrap();
+    assert_eq!(back.k2().0, k1.k2().0);
 }
 
 #[test]

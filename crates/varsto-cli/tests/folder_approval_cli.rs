@@ -278,6 +278,38 @@ fn escrow_writes_the_missing_copies_and_status_stops_warning() {
 
     let k1 = varsto_core::membership3::RecoveryKey::generate();
     let words = k1.words().unwrap().to_string();
+    // The default kit (no words at hand, no terminal) still names the
+    // recovery words: in capitals, as missing, so the printout cannot pass
+    // for a complete kit; and it warns on standard error.
+    let kit = run(&v.a, &["recovery", "kit"]);
+    assert!(kit.status.success(), "{}", text(&kit.stderr));
+    let kit_text = text(&kit.stdout);
+    assert!(kit_text.contains("VAULT WORDS"), "{kit_text}");
+    assert!(
+        kit_text.contains("RECOVERY WORDS: NOT ON THIS PRINTOUT"),
+        "{kit_text}"
+    );
+    assert!(text(&kit.stderr).contains("recovery words are not on this printout"));
+    // With the words in the environment, --shares splits both sets.
+    let kit = run_with(
+        &v.a,
+        &["recovery", "kit", "--shares"],
+        None,
+        &[("VARSTO_RECOVERY_WORDS", words.as_str())],
+    );
+    assert!(kit.status.success(), "{}", text(&kit.stderr));
+    let kit_text = text(&kit.stdout);
+    assert!(
+        kit_text.contains("RECOVERY WORDS: with the vault words"),
+        "{kit_text}"
+    );
+    assert!(!kit_text.contains("NOT ON THIS PRINTOUT"), "{kit_text}");
+    assert!(kit_text.contains("Vault word shares:"), "{kit_text}");
+    assert!(kit_text.contains("Recovery word shares:"), "{kit_text}");
+    assert!(
+        kit_text.contains(words.split(' ').next().unwrap()),
+        "{kit_text}"
+    );
     // Without the words nothing is written (no terminal, no input).
     let o = run(&v.a, &["recovery", "escrow", "docs"]);
     assert!(!o.status.success());

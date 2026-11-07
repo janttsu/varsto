@@ -63,8 +63,9 @@ varsto --home ~/.varsto-desk sync
 varsto --home ~/.varsto-desk status --json
 varsto --home ~/.varsto-desk fsck --verify
 
-# recovery kit: the vault key as 24 words (and 2-of-3 shares) for paper or metal; `init` printed the
-# recovery words too (they never change; `recovery escrow` writes the copies a folder lacks)
+# recovery kit: the vault words and the recovery words, 24 each (and 2-of-3 shares of each), for paper
+# or metal; it asks for the recovery words that `init` printed (they never change; `recovery escrow`
+# writes the copies a folder lacks), and says in capitals when they are missing from the printout
 varsto --home ~/.varsto-laptop recovery kit --shares
 # what else to keep if every device is lost (storage keys, disks, security keys) and the restore steps
 varsto --home ~/.varsto-laptop recovery guide --format html --output recovery-guide.html   # new in 0.0.1-alpha.14

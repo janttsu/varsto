@@ -459,7 +459,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PairCmd,
     },
-    /// Recovery kit: the vault key as 24 words, optionally split into shares.
+    /// Recovery kit: the vault words and the recovery words (24 each), optionally split into shares.
     Recovery {
         #[command(subcommand)]
         cmd: RecoveryCmd,
@@ -629,19 +629,22 @@ enum PairCmd {
 
 #[derive(Subcommand)]
 enum RecoveryCmd {
-    /// Print the printable kit (24 words; with --shares also 3 shares of which 2 rebuild the key).
+    /// Print the printable kit: the vault words (bookkeeping only) and the
+    /// recovery words (with them, every folder's content). The recovery words
+    /// are asked for (hidden) or taken from VARSTO_RECOVERY_WORDS or this
+    /// session's copy; without them the kit says so in capitals.
     Kit {
+        /// Also print 3 shares of each word set, of which any 2 rebuild it.
         #[arg(long)]
         shares: bool,
-        /// Storage format 3: print the recovery words too, as the second word
-        /// set of the kit. The words are read from VARSTO_RECOVERY_WORDS, a
-        /// pipe, or asked for (hidden); they are never taken from the command line.
-        #[arg(long, conflicts_with = "shares")]
+        /// Require the recovery words: read from VARSTO_RECOVERY_WORDS, a
+        /// pipe, or asked for (hidden); they are never taken from the command
+        /// line. Without this flag an empty answer prints the vault words only.
+        #[arg(long)]
         recovery_words: bool,
-        /// Storage format 3: make a new recovery key and print it as the
-        /// second word set. Folders get recovery copies under it with
-        /// `varsto recovery escrow`.
-        #[arg(long, conflicts_with_all = ["shares", "recovery_words"])]
+        /// Make a new recovery key and print it as the second word set.
+        /// Folders get recovery copies under it with `varsto recovery escrow`.
+        #[arg(long, conflicts_with = "recovery_words")]
         new_recovery_key: bool,
     },
     /// Storage format 3: write the recovery copies that folders lack, so
@@ -658,10 +661,11 @@ enum RecoveryCmd {
         #[arg(long, value_name = "FILE")]
         recovery_file: Option<PathBuf>,
     },
-    /// Rebuild the vault key from shares (`<index>: <24 words>`, one per line).
-    /// The shares are read from the files given with --file, else from standard
-    /// input when it is not a terminal, else asked for (hidden); they are never
-    /// taken from the command line.
+    /// Rebuild a word set of the kit (the vault words or the recovery words)
+    /// from its shares (`<index>: <24 words>`, one per line). The shares are
+    /// read from the files given with --file, else from standard input when it
+    /// is not a terminal, else asked for (hidden); they are never taken from
+    /// the command line.
     Combine {
         /// A file with one or more shares, one per line (repeatable).
         #[arg(long = "file", value_name = "FILE")]
@@ -5407,34 +5411,10 @@ fn run(cli: &Cli) -> Result<()> {
                 recovery_file.as_deref(),
             )?,
             RecoveryCmd::Kit {
+                shares,
                 recovery_words,
                 new_recovery_key,
-                ..
-            } if *recovery_words || *new_recovery_key => {
-                f3cmd::recovery_kit(&home, *new_recovery_key)?
-            }
-            RecoveryCmd::Kit { shares, .. } => {
-                let engine = open_engine(&home)?;
-                let key = engine.export_vault_key()?;
-                let sh = if *shares {
-                    Some((2u8, varsto_core::recovery::split(&key, 2, 3)?))
-                } else {
-                    None
-                };
-                print!(
-                    "{}",
-                    varsto_core::recovery::kit_text(&engine.vault_id().to_string(), &key, sh)?
-                );
-                if let Some(note) = restic::kit_note(&home) {
-                    print!("{note}");
-                }
-                varsto_core::recovery_guide::record_kit_printed(
-                    &home,
-                    engine.key_epoch(),
-                    *shares,
-                )?;
-                println!("\nThe words alone are not the whole recovery package: `varsto recovery guide` lists what else to keep (storage keys, disks, security keys) and how to restore on a new device.");
-            }
+            } => f3cmd::recovery_kit(&home, *new_recovery_key, *recovery_words, *shares)?,
             RecoveryCmd::Guide { format, output } => {
                 let engine = Engine::open(&home, &passphrase()?)?;
                 let guide = engine.recovery_guide();
@@ -5471,13 +5451,13 @@ fn run(cli: &Cli) -> Result<()> {
                     bail_usage::<()>("give at least two shares")?;
                 }
                 let key = varsto_core::recovery::combine(&parsed, 2, check.as_deref())?;
-                println!("vault key: {}", key.as_str());
+                println!("key: {}", key.as_str());
                 println!(
                     "words: {}",
                     varsto_core::recovery::words_from_key(&key)?.as_str()
                 );
                 println!(
-                    "key check: {} (compare with the kit)",
+                    "key check: {} (compare with the kit: it says whether these are the vault words or the recovery words)",
                     varsto_core::recovery::key_check(&key)?
                 );
             }
