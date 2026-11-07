@@ -1621,11 +1621,15 @@ fn joining_a_vault_uses_the_organization_administrators() {
         "a member's revocation must not open an organization vault"
     );
     assert_eq!(joined.vault_keys.newest_epoch(), 0);
-    let without =
-        Membership::join(VAULT, &st, &n.sign, &n.kem, keys.k3_0().unwrap().clone()).unwrap();
+    // Without the organization the same records count: the member's vault
+    // epoch is adopted, so the epoch-0 key is out of date and joining with
+    // it is refused.
+    let without = Membership::join(VAULT, &st, &n.sign, &n.kem, keys.k3_0().unwrap().clone())
+        .err()
+        .expect("without the organization the member's epoch counts");
     assert!(
-        without.is_revoked(&ma.me),
-        "without the organization the same records still count"
+        format!("{without:#}").contains("out of date"),
+        "{without:#}"
     );
 }
 
