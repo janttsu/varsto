@@ -99,6 +99,28 @@ two branches added functions at the same place (both kept).
 
 ## Open
 
+- **Branch `integrate/review-20261107`** (pushed, no pull request, not
+  compiled or tested; builds are on hold and the `Daily builds` workflow is
+  disabled with `gh workflow disable daily.yml`, re-enable it with `gh
+  workflow enable daily.yml -R janttsu/varsto`): `main` plus five fix
+  branches made on 2026-11-07, merged with only CHANGELOG conflicts.
+  `fix/org-request-sealed` (the organization request sealed under the
+  passphrase, like CRYPTO-2), `fix/imports2-logging` (imports-2: the
+  newest snapshot of a backup is never expired by age while the backup
+  runs; logging-1/-4: optional and wrapped secrets are cut, the
+  passphrase, device keys, K11 and secret environment variables are
+  registered), `fix/engine-review-4-9` (ENGINE-4…9: the conflict winner is
+  secured before the local file moves, a file that changes while scanned
+  waits for the next scan, `permissions: off` is honoured, pulled files
+  keep their mtime, temporary files are removed on error and stale ones
+  by the scan, short state writes take the home lock) and
+  `fix/membership-gaps` (below). One pull request from this branch is
+  enough; its CI is the first test of all of it. Open points the
+  sub-branches name: automatic re-keying from every owner's sync can fork
+  a folder epoch when two owners sync at the same moment; the 24-hour age
+  for stale temporary files is a guess; about 44 other configuration
+  writes still skip the home lock; devices on older builds still expire
+  the last snapshot by time.
 - Build and test everything above: let one CI run finish, run the unit
   tests, and try the notification channels, the thumbnails on a phone and
   the pause on a phone. Until then no daily or release should be trusted.
