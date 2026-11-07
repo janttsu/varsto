@@ -123,7 +123,9 @@ h3 { font-size: 1.12rem; margin: 2rem 0 .5rem; letter-spacing: -.01em; font-weig
 .platforms { display: flex; flex-wrap: wrap; justify-content: center; gap: .3rem 1.4rem; margin-top: 1.6rem; font: 400 .82rem var(--mono); }
 .platforms a { color: var(--faint); text-decoration: none; }
 .platforms a:hover { color: var(--text); }
-.field { position: absolute; inset: auto -12vw -1.5rem; height: clamp(7.5rem, 13vw, 10.5rem); width: calc(100% + 24vw); z-index: -1; pointer-events: none; opacity: .9; -webkit-mask-image: linear-gradient(180deg, transparent, #000 35%, #000 70%, transparent); mask-image: linear-gradient(180deg, transparent, #000 35%, #000 70%, transparent); }
+.platforms a.here { color: var(--text); }
+.platforms a.here::before { content: ""; display: inline-block; width: .38rem; height: .38rem; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 10px var(--accent-2); margin-right: .45rem; vertical-align: .12rem; }
+.field { position: absolute; top: -3rem; bottom: -2rem; left: -12vw; width: calc(100% + 24vw); height: calc(100% + 5rem); z-index: -1; pointer-events: none; -webkit-mask-image: linear-gradient(180deg, transparent, #000 18%, #000 82%, transparent), linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); -webkit-mask-composite: source-in; mask-image: linear-gradient(180deg, transparent, #000 18%, #000 82%, transparent), linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask-composite: intersect; }
 .hero::before { content: ""; position: absolute; inset: -8rem -20vw auto; height: 34rem; z-index: -2; background: radial-gradient(50% 55% at 50% 30%, var(--glow), transparent 70%), radial-gradient(30% 35% at 72% 60%, var(--glow-2), transparent 70%); pointer-events: none; }
 
 /* A product window with a glow under it. */
@@ -166,7 +168,7 @@ footer.site { border-top: 1px solid var(--border); padding: 3.5rem 0 0; color: v
 .foot-grid nav a:hover { color: var(--text); }
 .foot-lines { display: flex; flex-direction: column; gap: .35rem; padding-top: 2rem; margin-top: 2.5rem; border-top: 1px solid var(--border); color: var(--faint); font-size: .84rem; }
 .foot-lines a { color: var(--muted); }
-.foot-mark { font: 700 clamp(5rem, 21vw, 17rem)/.8 var(--font); letter-spacing: -.07em; text-align: center; margin: 2rem 0 -1.2rem; background: linear-gradient(180deg, color-mix(in srgb, var(--text) 9%, transparent), transparent 85%); -webkit-background-clip: text; background-clip: text; color: transparent; user-select: none; }
+.foot-mark { position: relative; font: 700 clamp(5rem, 24vw, 21rem)/.82 var(--font); letter-spacing: -.07em; text-align: center; margin: 2rem 0 -1.2rem; background: linear-gradient(180deg, color-mix(in srgb, var(--text) 9%, transparent), transparent 85%); -webkit-background-clip: text; background-clip: text; color: transparent; user-select: none; }
 @media (max-width: 48rem) { .foot-grid { grid-template-columns: 1fr 1fr; } .foot-grid > :first-child { grid-column: 1 / -1; } }
 @media (prefers-reduced-motion: no-preference) { a, button { transition: background-color .15s, color .15s, border-color .15s, transform .15s, box-shadow .2s; } }
 
@@ -289,3 +291,35 @@ a.card:hover { border-color: var(--accent, currentColor); }
 .daily-warn { margin: 1rem 0; padding: .75rem 1rem; border-left: 4px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-text); border-radius: 0 8px 8px 0; }
 .daily-warn p, .daily-warn ul { margin: .4rem 0; }
 .daily-warn a { color: inherit; text-decoration: underline; }
+
+/* ---- Motion (motion.js adds .motion; without it, or with reduced motion, nothing moves) ---- */
+.dc-w { display: inline-block; white-space: nowrap; }
+.dc { display: inline-block; text-align: center; }
+.dc-g { color: var(--accent-2); -webkit-text-fill-color: var(--accent-2); font-family: var(--mono); font-weight: 400; opacity: .85; }
+.motion .rise { opacity: 0; transform: translateY(26px) scale(.985); transition: opacity .9s cubic-bezier(.2,.7,.2,1), transform 1s cubic-bezier(.2,.7,.2,1); transition-delay: calc(var(--i, 0) * 90ms); }
+.motion .rise.in { opacity: 1; transform: none; }
+.motion .stage.rise { transform: translateY(46px) scale(.97); }
+.motion .stage::before { opacity: 0; transition: opacity 1.8s ease .3s; }
+.motion .stage.in::before { opacity: 1; }
+
+/* The light that runs round the product window. */
+@property --beam { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+.stage .window { position: relative; }
+.stage .window::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1.5px; pointer-events: none;
+  background: conic-gradient(from var(--beam), transparent 0 62%, color-mix(in srgb, var(--accent-2) 0%, transparent) 68%, color-mix(in srgb, var(--accent-2) 85%, transparent) 78%, var(--text) 79.5%, transparent 81%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  opacity: 0; transition: opacity 1.2s ease; animation: beam 8s linear infinite paused; }
+.motion .stage.in .window::after { opacity: 1; animation-play-state: running; }
+@keyframes beam { to { --beam: 360deg; } }
+
+/* The spotlight under the cursor on the cards. */
+.home .grid .card { overflow: hidden; }
+.home .grid .card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity .3s;
+  background: radial-gradient(22rem circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--accent) 13%, transparent), transparent 60%); }
+.home .grid .card:hover::after { opacity: 1; }
+.home .grid .card > * { position: relative; z-index: 1; }
+
+/* The footer wordmark as a glyph field (field.js); the text stays for no-JS. */
+.foot-mark.live { color: transparent; background: none; -webkit-text-fill-color: transparent; }
+.foot-mark canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+@media (prefers-reduced-motion: reduce) { .stage .window::after { display: none; } }

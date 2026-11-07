@@ -309,7 +309,10 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
     short_version = RELEASED_VERSION.removeprefix("0.0.1-")
     robots_meta = f'<meta name="robots" content="{html.escape(robots)}">\n' if robots else ""
     is_home = nav == "Project" and rel in ("", "index.html")
-    home_script = f'<script src="{p}assets/js/field.js?v={asset_version("assets/js/field.js")}" defer></script>\n' if is_home else ""
+    home_script = "".join(
+        f'<script src="{p}assets/js/{js}?v={asset_version("assets/js/" + js)}" defer></script>\n'
+        for js in ("field.js", "motion.js")
+    )
     if is_home and lang == "fi":
         # "Varsto" alone is also a Finnish company. The title says this is the app.
         full_title = "Varsto-sovellus: salattu synkronointi ja varmuuskopio omaan tallennustilaan"
@@ -382,7 +385,7 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
   <div class="wrap foot-lines">
 {footer}
   </div>
-  <div class="foot-mark" aria-hidden="true">varsto</div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
 {home_script}</body>
 </html>
