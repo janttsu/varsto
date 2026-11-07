@@ -4,9 +4,16 @@ nav: Project
 output: index.html
 description: Varsto: end-to-end-krypterad synkronisering, delning och säkerhetskopiering på lagring du redan äger, med hybrid postkvantkryptografi och en signerad förteckning över var varje kopia finns. Alfa, arbetsnamn.
 ---
-    <h1>Ta med din egen lagring. Behåll dina egna nycklar. Vet var varje block finns.</h1>
-    <p class="lead">End-to-end-krypterad synkronisering, delning och säkerhetskopiering mellan dina enheter, med hybrid postkvantkryptografi och en bokföring du kan granska. Ingen server, inget konto, ingen leverantör att lita på.</p>
-    <p><a class="button" href="{{L}}downloads/">Ladda ner alfaversionen</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Snabbstart</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Källkoden på GitHub</a></p>
+    <section class="hero">
+      <canvas class="field" id="field" aria-hidden="true"></canvas>
+      <h1>Ta med din egen lagring. Behåll dina egna nycklar. Vet var varje block finns.</h1>
+      <p class="lead">End-to-end-krypterad synkronisering, delning och säkerhetskopiering mellan dina enheter, med hybrid postkvantkryptografi och en bokföring du kan granska. Ingen server, inget konto, ingen leverantör att lita på.</p>
+      <div class="cta"><a class="button" href="{{L}}downloads/">Ladda ner alfaversionen</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Snabbstart</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Källkoden på GitHub</a></div>
+      <nav class="platforms" aria-label="Nedladdningar"><a href="{{L}}downloads/">Linux</a> <a href="{{L}}downloads/">Windows</a> <a href="{{L}}downloads/">macOS</a> <a href="{{L}}downloads/">Android</a> <a href="{{L}}downloads/">iOS</a></nav>
+    </section>
+    <figure class="stage"><div class="window"><div class="window-bar"><i></i><i></i><i></i><span>varsto</span></div><picture class="theme-dark"><img src="{{P}}assets/img/screenshots/desktop-where-dark.png" alt="Var dina data finns: Varsto följer varje mapp till de lagringsplatser och enheter som har dess block och räknar hur många kopior varje block har." width="976" height="669"></picture><picture class="theme-light"><img src="{{P}}assets/img/screenshots/desktop-where-light.png" alt="Var dina data finns: Varsto följer varje mapp till de lagringsplatser och enheter som har dess block och räknar hur många kopior varje block har." width="976" height="669" loading="lazy"></picture></div></figure>
+
+    <div class="home">
 
     <h2>Därför är Varsto annorlunda</h2>
     <div class="grid">
@@ -67,3 +74,4 @@ description: Varsto: end-to-end-krypterad synkronisering, delning och säkerhets
 
     <h2>Senaste från bloggen</h2>
     {{POSTS}}
+    </div>

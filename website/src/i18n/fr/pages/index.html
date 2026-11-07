@@ -4,9 +4,16 @@ nav: Project
 output: index.html
 description: Varsto : synchronisation, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.
 ---
-    <h1>Apportez votre propre stockage. Gardez vos propres clés. Sachez où se trouve chaque bloc.</h1>
-    <p class="lead">Synchronisation, partage et sauvegarde chiffrés de bout en bout entre vos appareils, avec une cryptographie hybride post-quantique et une comptabilité que vous pouvez auditer. Pas de serveur, pas de compte, aucun fournisseur auquel se fier.</p>
-    <p><a class="button" href="{{L}}downloads/">Télécharger l’alpha</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Démarrage rapide</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Le code source sur GitHub</a></p>
+    <section class="hero">
+      <canvas class="field" id="field" aria-hidden="true"></canvas>
+      <h1>Apportez votre propre stockage. Gardez vos propres clés. Sachez où se trouve chaque bloc.</h1>
+      <p class="lead">Synchronisation, partage et sauvegarde chiffrés de bout en bout entre vos appareils, avec une cryptographie hybride post-quantique et une comptabilité que vous pouvez auditer. Pas de serveur, pas de compte, aucun fournisseur auquel se fier.</p>
+      <div class="cta"><a class="button" href="{{L}}downloads/">Télécharger l’alpha</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Démarrage rapide</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Le code source sur GitHub</a></div>
+      <nav class="platforms" aria-label="Téléchargements"><a href="{{L}}downloads/">Linux</a> <a href="{{L}}downloads/">Windows</a> <a href="{{L}}downloads/">macOS</a> <a href="{{L}}downloads/">Android</a> <a href="{{L}}downloads/">iOS</a></nav>
+    </section>
+    <figure class="stage"><div class="window"><div class="window-bar"><i></i><i></i><i></i><span>varsto</span></div><picture class="theme-dark"><img src="{{P}}assets/img/screenshots/desktop-where-dark.png" alt="Où sont vos données : Varsto suit chaque dossier jusqu’aux stockages et aux appareils qui en détiennent les blocs, et compte les copies de chaque bloc." width="976" height="669"></picture><picture class="theme-light"><img src="{{P}}assets/img/screenshots/desktop-where-light.png" alt="Où sont vos données : Varsto suit chaque dossier jusqu’aux stockages et aux appareils qui en détiennent les blocs, et compte les copies de chaque bloc." width="976" height="669" loading="lazy"></picture></div></figure>
+
+    <div class="home">
 
     <h2>Ce qui distingue Varsto</h2>
     <div class="grid">
@@ -67,3 +74,4 @@ description: Varsto : synchronisation, partage et sauvegarde chiffrés de bout 
 
     <h2>Dernières nouvelles du blog</h2>
     {{POSTS}}
+    </div>

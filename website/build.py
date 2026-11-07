@@ -47,6 +47,23 @@ FOOTER = [
     "No cookies, no tracking. The web server keeps a standard access log for at most seven days.",
     '<a href="{p}docs/security-policy.html">Security policy</a> · <a href="{p}docs/licence.html">Licence</a> · <a href="{p}docs/trademark.html">Trademark</a>',
 ]
+# The header shows these; the menu (narrow screens) and the footer show all of NAV.
+NAV_PRIMARY = ["Features", "How it works", "Compare", "Docs", "Blog"]
+FOOT_COLUMNS = [
+    ("Product", ["Project", "Features", "Use cases", "Screenshots", "Downloads"]),
+    ("Learn", ["How it works", "Compare", "Docs", "Blog"]),
+    ("Community", ["Forum", "Contribute", "GitHub"]),
+]
+UI_I18N = {
+    "en": {"Menu": "Menu", "Language": "Language", "Product": "Product", "Learn": "Learn", "Community": "Community", "Download": "Download", "Main": "Main"},
+    "fi": {"Menu": "Valikko", "Language": "Kieli", "Product": "Tuote", "Learn": "Opi", "Community": "Yhteisö", "Download": "Lataa", "Main": "Päävalikko"},
+    "sv": {"Menu": "Meny", "Language": "Språk", "Product": "Produkt", "Learn": "Lär dig", "Community": "Gemenskap", "Download": "Ladda ner", "Main": "Huvudmeny"},
+    "fr": {"Menu": "Menu", "Language": "Langue", "Product": "Produit", "Learn": "Découvrir", "Community": "Communauté", "Download": "Télécharger", "Main": "Menu principal"},
+}
+SVG_GH = '<svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>'
+SVG_MOON = '<svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>'
+SVG_SUN = '<svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg>'
+SVG_MENU = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg>'
 NAV = [("Project", ""), ("Features", "features/"), ("Use cases", "use-cases/"), ("Compare", "compare/"), ("How it works", "how-it-works/"), ("Screenshots", "screenshots/"), ("Docs", "docs/"), ("Downloads", "downloads/"), ("Blog", "blog/"), ("Forum", "forum/"), ("Contribute", "contribute/"), ("GitHub", REPO)]
 
 # Repository documents rendered under docs/: (source path, slug, title, group)
@@ -132,6 +149,17 @@ def asset_version(rel: str) -> str:
     import hashlib
     f = OUT / rel
     return hashlib.sha256(f.read_bytes()).hexdigest()[:10] if f.exists() else "0"
+
+
+def dark_first(body: str) -> str:
+    """Dark is the default theme: in a theme pair the dark picture loads at
+    once and the light one lazily (the hidden one is not fetched)."""
+    def swap(m: re.Match) -> str:
+        block = m.group(0)
+        if m.group(1) == "dark":
+            return block.replace(' loading="lazy"', "")
+        return block if 'loading="lazy"' in block else block.replace("<img ", '<img loading="lazy" ', 1)
+    return re.sub(r'<picture class="theme-(dark|light)">.*?</picture>', swap, body, flags=re.S)
 
 
 def version_images(body: str) -> str:
@@ -228,7 +256,7 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
     the hreflang links), e.g. "features/index.html"; `extra_head`: page-specific
     structured data."""
     p = "../" * depth
-    body = version_images(body)
+    body = version_images(dark_first(body))
     labels = NAV_I18N.get(lang, {})
     lang_root = p if lang == "en" else p + lang + "/"
 
@@ -251,18 +279,40 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
             alternates.append(f'<link rel="alternate" hreflang="x-default" href="{absolute(code, page_rel)}">')
         cur = ' aria-current="true"' if code == lang else ""
         switch.append(f'<a href="{href or "./"}" hreflang="{code}" lang="{code}"{cur}>{label}</a>')
-    lang_switch = ('    <nav class="langs" aria-label="Language">' + " ".join(switch) + "</nav>\n") if len(switch) > 1 else ""
+    ui = UI_I18N[lang]
+    lang_switch = (
+        f'      <details class="pop langs-menu"><summary class="iconbtn" aria-label="{ui["Language"]}">{lang.upper()}</summary>\n'
+        f'        <nav class="pop-body langs" aria-label="{ui["Language"]}">' + "".join(switch) + "</nav></details>\n"
+    ) if len(switch) > 1 else ""
     if not rel:  # the 404 page and others without a fixed address
         alternates = []
     alternates_html = "\n".join(alternates)
     alpha = ALPHA_I18N.get(lang, ALPHA)
     footer_lines = FOOTER_I18N.get(lang, FOOTER)
-    nav_html = "\n".join(
-        f'      <a href="{nav_href(href)}"{" aria-current=\"page\"" if name == nav else ""}{" rel=\"noopener\"" if href.startswith("http") else ""}>{labels.get(name, name)}</a>' for name, href in NAV
+    hrefs = dict(NAV)
+
+    def link(name: str) -> str:
+        href = hrefs[name]
+        cur = ' aria-current="page"' if name == nav else ""
+        ext = ' rel="noopener"' if href.startswith("http") else ""
+        return f'<a href="{nav_href(href)}"{cur}{ext}>{labels.get(name, name)}</a>'
+
+    nav_html = "\n".join(f"      {link(name)}" for name in NAV_PRIMARY)
+    menu_html = "".join(link(name) for name, _ in NAV)
+    foot_cols = "\n".join(
+        f'    <div><h2>{ui[title]}</h2><nav aria-label="{ui[title]}">' + "".join(link(n) for n in names) + "</nav></div>"
+        for title, names in FOOT_COLUMNS
     )
     footer = "\n".join(f"    <span>{line.format(p=p)}</span>" for line in footer_lines)
+    home_href = lang_root if (depth or lang != "en") else "./"
+    downloads_href = nav_href("downloads/")
+    short_version = RELEASED_VERSION.removeprefix("0.0.1-")
     robots_meta = f'<meta name="robots" content="{html.escape(robots)}">\n' if robots else ""
     is_home = nav == "Project" and rel in ("", "index.html")
+    home_script = "".join(
+        f'<script src="{p}assets/js/{js}?v={asset_version("assets/js/" + js)}" defer></script>\n'
+        for js in ("field.js", "motion.js")
+    )
     if is_home and lang == "fi":
         # "Varsto" alone is also a Finnish company. The title says this is the app.
         full_title = "Varsto-sovellus: salattu synkronointi ja varmuuskopio omaan tallennustilaan"
@@ -309,12 +359,17 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
 </div>
 <header class="site">
   <div class="wrap">
-    <a class="brand" href="{lang_root if (depth or lang != 'en') else './'}"><img src="{p}assets/img/logo.svg" alt="" width="28" height="28"><span>{BRAND}</span></a>
-{lang_switch}
-    <nav class="main" aria-label="Main">
+    <a class="brand" href="{home_href}"><img src="{p}assets/img/logo.svg" alt="" width="26" height="26"><span>{BRAND}</span></a>
+    <a class="ver" href="{p}blog/" title="{RELEASED_VERSION}">{short_version}</a>
+    <nav class="main" aria-label="{ui["Main"]}">
 {nav_html}
-      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
+    <div class="tools">
+{lang_switch}      <a class="iconbtn gh" href="{REPO}" rel="noopener" aria-label="GitHub">{SVG_GH}<span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme">{SVG_MOON}{SVG_SUN}</button>
+      <a class="button small" href="{downloads_href}">{ui["Download"]}</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="{ui["Menu"]}">{SVG_MENU}</summary><nav class="pop-body" aria-label="{ui["Menu"]}">{menu_html}</nav></details>
+    </div>
   </div>
 </header>
 <main id="main">
@@ -323,11 +378,16 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
   </div>
 </main>
 <footer class="site">
-  <div class="wrap">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="{home_href}"><img src="{p}assets/img/logo.svg" alt="" width="26" height="26"><span>{BRAND}</span></a><p>{TAGLINE[lang].capitalize()}.</p></div>
+{foot_cols}
+  </div>
+  <div class="wrap foot-lines">
 {footer}
   </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
-</body>
+{home_script}</body>
 </html>
 """
 

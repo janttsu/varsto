@@ -25,8 +25,8 @@
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/">
 <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv","fr"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/","description":"Varsto: end-to-end encrypted sync, sharing and backup on storage you already own, with post-quantum hybrid cryptography and a signed record of where every copy is. Alpha, working name.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android, iOS","softwareVersion":"0.0.1-alpha.16","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.16","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="blog/feed.xml">
-<link rel="stylesheet" href="assets/css/site.css?v=e9308487f1">
-<script src="assets/js/theme.js?v=0951491269"></script>
+<link rel="stylesheet" href="assets/css/site.css?v=d5294ff1cc">
+<script src="assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -35,31 +35,37 @@
 </div>
 <header class="site">
   <div class="wrap">
-    <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
-    <nav class="langs" aria-label="Language"><a href="./" hreflang="en" lang="en" aria-current="true">English</a> <a href="fi/" hreflang="fi" lang="fi">Suomi</a> <a href="sv/" hreflang="sv" lang="sv">Svenska</a> <a href="fr/" hreflang="fr" lang="fr">Français</a></nav>
-
+    <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="blog/" title="0.0.1-alpha.16">alpha.16</a>
     <nav class="main" aria-label="Main">
-      <a href="" aria-current="page">Project</a>
       <a href="features/">Features</a>
-      <a href="use-cases/">Use cases</a>
-      <a href="compare/">Compare</a>
       <a href="how-it-works/">How it works</a>
-      <a href="screenshots/">Screenshots</a>
+      <a href="compare/">Compare</a>
       <a href="docs/">Docs</a>
-      <a href="downloads/">Downloads</a>
       <a href="blog/">Blog</a>
-      <a href="forum/">Forum</a>
-      <a href="contribute/">Contribute</a>
-      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
-      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Language">EN</summary>
+        <nav class="pop-body langs" aria-label="Language"><a href="./" hreflang="en" lang="en" aria-current="true">English</a><a href="fi/" hreflang="fi" lang="fi">Suomi</a><a href="sv/" hreflang="sv" lang="sv">Svenska</a><a href="fr/" hreflang="fr" lang="fr">Français</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="downloads/">Download</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menu"><a href="" aria-current="page">Project</a><a href="features/">Features</a><a href="use-cases/">Use cases</a><a href="compare/">Compare</a><a href="how-it-works/">How it works</a><a href="screenshots/">Screenshots</a><a href="docs/">Docs</a><a href="downloads/">Downloads</a><a href="blog/">Blog</a><a href="forum/">Forum</a><a href="contribute/">Contribute</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
   </div>
 </header>
 <main id="main">
   <div class="wrap">
-    <h1>Bring your own storage. Keep your own keys. Know where every block is.</h1>
-    <p class="lead">End-to-end encrypted sync, sharing and backup across your devices, with post-quantum hybrid cryptography and bookkeeping you can audit. No server, no account, no provider to trust.</p>
-    <p><a class="button" href="downloads/">Download the alpha</a> <a class="button secondary" href="docs/quick-start.html">Quick start</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Source on GitHub</a></p>
+    <section class="hero">
+      <canvas class="field" id="field" aria-hidden="true"></canvas>
+      <h1>Bring your own storage. Keep your own keys. Know where every block is.</h1>
+      <p class="lead">End-to-end encrypted sync, sharing and backup across your devices, with post-quantum hybrid cryptography and bookkeeping you can audit. No server, no account, no provider to trust.</p>
+      <div class="cta"><a class="button" href="downloads/">Download the alpha</a> <a class="button secondary" href="docs/quick-start.html">Quick start</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Source on GitHub</a></div>
+      <nav class="platforms" aria-label="Downloads"><a href="downloads/">Linux</a> <a href="downloads/">Windows</a> <a href="downloads/">macOS</a> <a href="downloads/">Android</a> <a href="downloads/">iOS</a></nav>
+    </section>
+    <figure class="stage"><div class="window"><div class="window-bar"><i></i><i></i><i></i><span>varsto</span></div><picture class="theme-dark"><img src="assets/img/screenshots/desktop-where-dark.png?v=2cf4181b0d" alt="Where your data is: Varsto follows every folder to the storages and devices that hold its blocks, and counts how many copies each block has." width="976" height="669"></picture><picture class="theme-light"><img src="assets/img/screenshots/desktop-where-light.png?v=8adbba14cc" alt="Where your data is: Varsto follows every folder to the storages and devices that hold its blocks, and counts how many copies each block has." width="976" height="669" loading="lazy"></picture></div></figure>
+
+    <div class="home">
 
     <h2>Why Varsto is different</h2>
     <div class="grid">
@@ -73,7 +79,7 @@
 
     <h2 id="where">Where your data can live</h2>
     <p>Any directory this device can reach, a NAS or network share, any S3-compatible bucket with your own keys (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO and others), any rclone remote (SFTP, WebDAV, Google Drive and the rest), cold archive classes that are written but never read without your confirmation, and pools of removable disks on a shelf. Use several at once; each carries a place label and a price, so a policy can ask for one copy outside the house and the app can show what every folder costs a month. Files are cut into blocks, compressed and encrypted on your device, so a storage ever sees only opaque objects and their sizes, never file names, plaintext hashes or content.</p>
-    <figure class="hero"><picture class="theme-light"><source type="image/webp" srcset="assets/img/hero.webp?v=f2481e59f5"><img src="assets/img/hero.png?v=6d41c5852e" alt="Diagram: your keys in the centre, connected by encrypted links to an S3 bucket, a cold archive, hard drives on a shelf, a NAS, a laptop and a phone; every place holds only locked, encrypted blocks." width="1200" height="600"></picture><picture class="theme-dark"><source type="image/webp" srcset="assets/img/hero-dark.webp?v=9d1431c50e"><img src="assets/img/hero-dark.png?v=e46b35baa4" alt="Diagram: your keys in the centre, connected by encrypted links to an S3 bucket, a cold archive, hard drives on a shelf, a NAS, a laptop and a phone; every place holds only locked, encrypted blocks." width="1200" height="600" loading="lazy"></picture><figcaption>Copies wherever you decide: a bucket, a cold archive, old disks on a shelf, your own machines. Every copy is ciphertext; the keys stay with you.</figcaption></figure>
+    <figure class="hero"><picture class="theme-light"><source type="image/webp" srcset="assets/img/hero.webp?v=f2481e59f5"><img loading="lazy" src="assets/img/hero.png?v=6d41c5852e" alt="Diagram: your keys in the centre, connected by encrypted links to an S3 bucket, a cold archive, hard drives on a shelf, a NAS, a laptop and a phone; every place holds only locked, encrypted blocks." width="1200" height="600"></picture><picture class="theme-dark"><source type="image/webp" srcset="assets/img/hero-dark.webp?v=9d1431c50e"><img src="assets/img/hero-dark.png?v=e46b35baa4" alt="Diagram: your keys in the centre, connected by encrypted links to an S3 bucket, a cold archive, hard drives on a shelf, a NAS, a laptop and a phone; every place holds only locked, encrypted blocks." width="1200" height="600"></picture><figcaption>Copies wherever you decide: a bucket, a cold archive, old disks on a shelf, your own machines. Every copy is ciphertext; the keys stay with you.</figcaption></figure>
 
     <h2 id="security">Security, honestly</h2>
     <ul>
@@ -107,7 +113,7 @@
 
     <h2 id="status">Honest status</h2>
     <ul>
-      <li>Released version: 0.0.1-alpha.16. The alpha is a vertical slice: core library, command line, background service, tray and menu-bar shells, Android shell, about 234 000 lines of Rust, 1233 automated tests and a lab of 59 scenarios on virtual machines behind home and office NAT: offline convergence, conflicts, a restored-device fence, replicas, sharing, policies, peers, Strongrooms, disk pools, backups and more. Use it with test data only.</li>
+      <li>Released version: 0.0.1-alpha.16. The alpha is a vertical slice: core library, command line, background service, tray and menu-bar shells, Android shell, about 238 000 lines of Rust, 1263 automated tests and a lab of 59 scenarios on virtual machines behind home and office NAT: offline convergence, conflicts, a restored-device fence, replicas, sharing, policies, peers, Strongrooms, disk pools, backups and more. Use it with test data only.</li>
       <li>The cryptographic design has not been reviewed or audited. The <a href="docs/threat-model.html">threat model</a> and the <a href="docs/failure-model.html">failure model</a> say what the design intends and where it stops.</li>
       <li>The source is public at <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under the <a href="docs/licence.html">PolyForm Shield License 1.0.0</a> (source-available, not open source); bugs and questions go to the issue tracker there. The storage format is <a href="docs/alpha-0-format.html">documented</a> so that your data stays recoverable.</li>
       <li>Varsto is written in Rust, with Swift and Kotlin shells and a plain web interface. Security review, platform work, network and storage testing, packaging and translations are all welcome: <a href="contribute/">how to contribute</a>.</li>
@@ -135,15 +141,25 @@ sha256sum -c --ignore-missing SHA256SUMS</code></pre><p><code>varsto update</cod
 <li><time datetime="2026-10-09">2026-10-09</time> <a href="blog/2026-10-09-alpha-7-pairing-and-finder.html">Alpha.7: pair devices with a code, Finder actions, and a real NAT path</a><br><span class="note">Devices now pair from the interface with a one-time code, Finder can download a placeholder or free up space with a right-click, the macOS app installs from a disk image, devices reach each other through NAT, and removable disks can form a pool.</span></li>
 <li><time datetime="2026-10-09">2026-10-09</time> <a href="blog/2026-10-09-alpha-6-source-on-github.html">Alpha.6: the source is public, and every platform builds in the cloud</a><br><span class="note">The repository is now public on GitHub under the PolyForm Shield licence, the native macOS and iOS apps build on GitHub Actions, Linux, Windows and Android build on short-lived cloud machines, and the interface was redone around a file view.</span></li>
 <li><time datetime="2026-10-08">2026-10-08</time> <a href="blog/2026-10-08-alpha-0.html">Alpha-0: the first vertical slice</a><br><span class="note">A command-line tool that encrypts, stores and syncs a folder between two devices through storage you own, with a signed ledger you can check.</span></li></ul>
+    </div>
 
   </div>
 </main>
 <footer class="site">
-  <div class="wrap">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Encrypted file sync and backup on your own storage.</p></div>
+    <div><h2>Product</h2><nav aria-label="Product"><a href="" aria-current="page">Project</a><a href="features/">Features</a><a href="use-cases/">Use cases</a><a href="screenshots/">Screenshots</a><a href="downloads/">Downloads</a></nav></div>
+    <div><h2>Learn</h2><nav aria-label="Learn"><a href="how-it-works/">How it works</a><a href="compare/">Compare</a><a href="docs/">Docs</a><a href="blog/">Blog</a></nav></div>
+    <div><h2>Community</h2><nav aria-label="Community"><a href="forum/">Forum</a><a href="contribute/">Contribute</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
     <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
     <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
     <span><a href="docs/security-policy.html">Security policy</a> · <a href="docs/licence.html">Licence</a> · <a href="docs/trademark.html">Trademark</a></span>
   </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
+<script src="assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="assets/js/motion.js?v=3d2ea09340" defer></script>
 </body>
 </html>
