@@ -7889,6 +7889,7 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
         "mcp-grants.json",
         "share-request.enc",
         "share-request.json",
+        crate::org::LEGACY_REQUEST_FILE,
         "software-security-key",
         "service.log",
         membership::RESET_EXTRA[0],

@@ -902,8 +902,9 @@ impl Engine {
         passphrase: &str,
         token: &str,
     ) -> Result<(Engine, Vec<String>, Approval)> {
-        let (approval, signer) = org::open_approval(home, token)?;
         crate::crypto::check_passphrase(passphrase)?;
+        // The request's keys open with the passphrase given to `org request`.
+        let (approval, signer) = org::open_approval(home, token, passphrase)?;
         crate::names::check_display_name(device_name)?;
         super::ensure_no_vault(home)?;
         // Pin the organization before anything is read from the storages:

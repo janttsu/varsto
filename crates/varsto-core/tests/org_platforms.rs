@@ -113,7 +113,8 @@ fn approval_refuses_platforms_the_policy_does_not_allow() {
     assert_eq!(s.policy.allowed_platforms, vec!["linux", "macos"]);
 
     // The request code names the platform, and the fingerprint covers it.
-    let code = OrgRequest::code_for_platform(&lab.home("d"), Some("d-phone"), "android").unwrap();
+    let code =
+        OrgRequest::code_for_platform(&lab.home("d"), Some("d-phone"), "android", PASS).unwrap();
     assert!(code.starts_with("vor2."));
     let info = OrgRequest::parse(&code).unwrap();
     assert_eq!(info.platform, "android");
@@ -135,7 +136,8 @@ fn approval_refuses_platforms_the_policy_does_not_allow() {
     assert!(format!("{err:#}").contains("platform"), "{err:#}");
 
     // A Linux device is approved, and the roster records its platform.
-    let code = OrgRequest::code_for_platform(&lab.home("e"), Some("e-laptop"), "linux").unwrap();
+    let code =
+        OrgRequest::code_for_platform(&lab.home("e"), Some("e-laptop"), "linux", PASS).unwrap();
     let approved = a.org_approve(&code, "erin", None).unwrap();
     let (e, _, _) = Engine::org_join(&lab.home("e"), "e-laptop", PASS, &approved.token).unwrap();
     let mut e = small(e);

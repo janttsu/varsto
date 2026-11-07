@@ -53,7 +53,10 @@ pub const REQUEST_PREFIX_V2: &str = "vor2.";
 pub const TOKEN_PREFIX: &str = "vot1.";
 
 /// The local, non-secret request file of a device waiting for approval.
-pub const REQUEST_FILE: &str = "org-request.json";
+pub const REQUEST_FILE: &str = "org-request.enc";
+/// The request as 0.0.1-alpha.16 and earlier wrote it, in clear: read once
+/// with the passphrase, sealed into `REQUEST_FILE` and removed.
+pub const LEGACY_REQUEST_FILE: &str = "org-request.json";
 /// The local cache of the organization as this device last verified it.
 pub const STATE_FILE: &str = "org-state.json";
 
@@ -959,7 +962,9 @@ impl OrgState {
 /// The local file of a device waiting for approval: its key-exchange key and
 /// the signing key it will join with (both made here, so the device id in
 /// the request code is the id the device gets). It is secret until the
-/// device joins and is kept owner-readable only.
+/// device joins: sealed under the passphrase the device will have
+/// (Argon2id, as `keys.enc`) and owner-readable only, so a copy of the
+/// directory taken while the request waits holds no usable key.
 #[derive(Serialize, Deserialize)]
 pub struct OrgRequest {
     pub kem_alg: String,
@@ -970,6 +975,13 @@ pub struct OrgRequest {
     /// The platform the code names (bound to the fingerprint).
     #[serde(default)]
     pub platform: String,
+}
+
+/// `org-request.enc`: the request, sealed under the passphrase.
+#[derive(Serialize, Deserialize)]
+struct SealedRequest {
+    params: crypto::PassphraseParams,
+    blob_hex: String,
 }
 
 /// A parsed request code.
@@ -1000,26 +1012,37 @@ impl OrgRequest {
     fn path(home: &Path) -> std::path::PathBuf {
         home.join(REQUEST_FILE)
     }
+    /// Whether `home` holds a pending request (sealed or legacy).
+    pub fn exists(home: &Path) -> bool {
+        Self::path(home).exists() || home.join(LEGACY_REQUEST_FILE).exists()
+    }
     /// Load or create the request of `home`; `name` (the device name) is
-    /// bound to the code and so to the fingerprint.
-    pub fn code_for(home: &Path, name: Option<&str>) -> Result<String> {
-        Self::code_for_platform(home, name, &this_platform())
+    /// bound to the code and so to the fingerprint. `passphrase` seals a new
+    /// request and opens an existing one; `org join` needs the same one.
+    pub fn code_for(home: &Path, name: Option<&str>, passphrase: &str) -> Result<String> {
+        Self::code_for_platform(home, name, &this_platform(), passphrase)
     }
 
     /// `code_for` naming another platform (tests, and shells that know
     /// better than the build target).
-    pub fn code_for_platform(home: &Path, name: Option<&str>, platform: &str) -> Result<String> {
+    pub fn code_for_platform(
+        home: &Path,
+        name: Option<&str>,
+        platform: &str,
+        passphrase: &str,
+    ) -> Result<String> {
         std::fs::create_dir_all(home)?;
-        let path = Self::path(home);
-        let mut r: OrgRequest = if path.exists() {
-            serde_json::from_slice(&std::fs::read(&path)?)?
-        } else {
-            OrgRequest {
-                kem_alg: crate::kem::KEM_ALG.to_string(),
-                kem_secret_hex: hex::encode(DecapsKey::generate().to_bytes()),
-                signer_hex: hex::encode(SigningKey::generate().to_bytes()),
-                name: String::new(),
-                platform: String::new(),
+        let mut r = match Self::load_opt(home, passphrase)? {
+            Some(r) => r,
+            None => {
+                crypto::check_passphrase(passphrase)?;
+                OrgRequest {
+                    kem_alg: crate::kem::KEM_ALG.to_string(),
+                    kem_secret_hex: hex::encode(DecapsKey::generate().to_bytes()),
+                    signer_hex: hex::encode(SigningKey::generate().to_bytes()),
+                    name: String::new(),
+                    platform: String::new(),
+                }
             }
         };
         let platform = platform_id(platform);
@@ -1035,24 +1058,51 @@ impl OrgRequest {
             crate::names::check_display_name(n)?;
             r.name = n.to_string();
         }
-        // Holds the device's signing key until the approval arrives: owner
-        // readable only, from the first byte.
-        let tmp = path.with_extension("json.tmp");
-        {
-            let mut opts = std::fs::OpenOptions::new();
-            opts.write(true).create(true).truncate(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                opts.mode(0o600);
-            }
-            use std::io::Write as _;
-            let mut f = opts.open(&tmp)?;
-            f.write_all(&serde_json::to_vec_pretty(&r)?)?;
-            f.sync_all()?;
-        }
-        std::fs::rename(&tmp, &path)?;
+        r.save(home, passphrase)?;
         r.code()
+    }
+    fn aad() -> Vec<u8> {
+        crypto::aad("org-request", &[])
+    }
+    /// Seal the request under `passphrase` (fresh Argon2id parameters and
+    /// salt on every write; `write_json` creates the file mode 0600).
+    fn save(&self, home: &Path, passphrase: &str) -> Result<()> {
+        let params = crypto::PassphraseParams::new();
+        let wrap = crypto::passphrase_key(passphrase, &params)?;
+        let plain = Zeroizing::new(serde_json::to_vec(self)?);
+        let blob = crypto::encrypt(&wrap, &Self::aad(), &plain)?;
+        util::write_json(
+            &Self::path(home),
+            &SealedRequest {
+                params,
+                blob_hex: hex::encode(blob),
+            },
+        )
+    }
+    /// The pending request of `home`, if any. One that an earlier version
+    /// left in clear is sealed under `passphrase` and the clear file
+    /// removed.
+    fn load_opt(home: &Path, passphrase: &str) -> Result<Option<OrgRequest>> {
+        let path = Self::path(home);
+        if path.exists() {
+            let f: SealedRequest = util::read_json(&path)?;
+            let blob = hex::decode(&f.blob_hex)?;
+            let wrap = crypto::passphrase_key(passphrase, &f.params)?;
+            let plain = Zeroizing::new(crypto::decrypt(&wrap, &Self::aad(), &blob).map_err(|_| {
+                anyhow!("the organization request did not open: wrong passphrase (the one given to `varsto org request`) or damaged file")
+            })?);
+            return Ok(Some(serde_json::from_slice(&plain)?));
+        }
+        let legacy = home.join(LEGACY_REQUEST_FILE);
+        if legacy.exists() {
+            let bytes = Zeroizing::new(std::fs::read(&legacy)?);
+            let r: OrgRequest = serde_json::from_slice(&bytes)?;
+            crypto::check_passphrase(passphrase)?;
+            r.save(home, passphrase)?;
+            std::fs::remove_file(&legacy)?;
+            return Ok(Some(r));
+        }
+        Ok(None)
     }
     fn code(&self) -> Result<String> {
         let dk = DecapsKey::from_bytes(&hex::decode(&self.kem_secret_hex)?)?;
@@ -1078,19 +1128,17 @@ impl OrgRequest {
         }
         Ok(code)
     }
-    fn load(home: &Path) -> Result<OrgRequest> {
-        let path = Self::path(home);
-        if !path.exists() {
-            bail!(
+    fn load(home: &Path, passphrase: &str) -> Result<OrgRequest> {
+        Self::load_opt(home, passphrase)?.ok_or_else(|| {
+            anyhow!(
                 "no organization request in {}: run `varsto org request` there first and give its code to an administrator",
                 home.display()
-            );
-        }
-        Ok(serde_json::from_slice(&std::fs::read(&path)?)?)
+            )
+        })
     }
     /// The six words both sides compare.
-    pub fn fingerprint_for(home: &Path) -> Result<String> {
-        let r = Self::load(home)?;
+    pub fn fingerprint_for(home: &Path, passphrase: &str) -> Result<String> {
+        let r = Self::load(home, passphrase)?;
         Ok(Self::parse(&r.code()?)?.fingerprint)
     }
     /// Key, device id, bound name and fingerprint of a request code.
@@ -1133,17 +1181,22 @@ impl OrgRequest {
             fingerprint,
         })
     }
-    /// The keys of the pending request: (KEM private key, signing key).
-    pub fn keys(home: &Path) -> Result<(DecapsKey, SigningKey, String)> {
-        let r = Self::load(home)?;
+    /// The keys of the request: (KEM private key, signing key).
+    fn keys_of(&self) -> Result<(DecapsKey, SigningKey)> {
         Ok((
-            DecapsKey::from_bytes(&hex::decode(&r.kem_secret_hex)?)?,
-            SigningKey::from_bytes(&hex::decode(&r.signer_hex)?)?,
-            r.name,
+            DecapsKey::from_bytes(&hex::decode(&self.kem_secret_hex)?)?,
+            SigningKey::from_bytes(&hex::decode(&self.signer_hex)?)?,
         ))
+    }
+    /// The keys of the pending request: (KEM private key, signing key).
+    pub fn keys(home: &Path, passphrase: &str) -> Result<(DecapsKey, SigningKey, String)> {
+        let r = Self::load(home, passphrase)?;
+        let (dk, signer) = r.keys_of()?;
+        Ok((dk, signer, r.name))
     }
     pub fn clear(home: &Path) {
         let _ = std::fs::remove_file(Self::path(home));
+        let _ = std::fs::remove_file(home.join(LEGACY_REQUEST_FILE));
     }
 }
 
@@ -1237,9 +1290,9 @@ impl SealedApproval {
 
 /// Open an approval token with the request kept in `home`, checking the
 /// fingerprint the admin confirmed against this device's own.
-pub fn open_approval(home: &Path, token: &str) -> Result<(Approval, SigningKey)> {
-    let r = OrgRequest::load(home)?;
-    let (dk, signer, _) = OrgRequest::keys(home)?;
+pub fn open_approval(home: &Path, token: &str, passphrase: &str) -> Result<(Approval, SigningKey)> {
+    let r = OrgRequest::load(home, passphrase)?;
+    let (dk, signer) = r.keys_of()?;
     let a = SealedApproval::decode(token)?.open(&dk)?;
     let device = crate::ledger::device_id_for(&signer.public());
     let mine = request_fingerprint(&dk.public(), &device, &r.platform, &r.name);
@@ -1281,12 +1334,13 @@ pub fn root_kit_text(org_name: &str, org_id: &str, root_hex: &str) -> Result<Str
 
 #[cfg(test)]
 mod tests {
+    const PASS: &str = "correct horse battery staple";
     use super::*;
 
     #[test]
     fn request_names_with_control_or_direction_characters_are_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let code = OrgRequest::code_for_platform(dir.path(), Some("Desk"), "linux").unwrap();
+        let code = OrgRequest::code_for_platform(dir.path(), Some("Desk"), "linux", PASS).unwrap();
         assert_eq!(OrgRequest::parse(&code).unwrap().name, "Desk");
         for bad in ["x\u{1b}[2Ay", "a\u{202e}b", "a\u{200b}b"] {
             // A changed code, as a hostile sender would make it.
@@ -1294,7 +1348,7 @@ mod tests {
             let forged = format!("{head}.{bad}");
             assert!(OrgRequest::parse(&forged).is_err(), "{bad:?}");
             let other = tempfile::tempdir().unwrap();
-            assert!(OrgRequest::code_for_platform(other.path(), Some(bad), "linux").is_err());
+            assert!(OrgRequest::code_for_platform(other.path(), Some(bad), "linux", PASS).is_err());
         }
     }
 
@@ -1403,16 +1457,16 @@ mod tests {
     fn request_code_and_approval_round_trip() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("new");
-        let code = OrgRequest::code_for(&home, Some("phone")).unwrap();
+        let code = OrgRequest::code_for(&home, Some("phone"), PASS).unwrap();
         let info = OrgRequest::parse(&code).unwrap();
         assert_eq!(info.name, "phone");
         assert_eq!(info.fingerprint.split(' ').count(), 6);
         assert_eq!(
-            OrgRequest::fingerprint_for(&home).unwrap(),
+            OrgRequest::fingerprint_for(&home, PASS).unwrap(),
             info.fingerprint
         );
         // The same request, renamed: same device id, other fingerprint.
-        let code2 = OrgRequest::code_for(&home, Some("tablet")).unwrap();
+        let code2 = OrgRequest::code_for(&home, Some("tablet"), PASS).unwrap();
         let info2 = OrgRequest::parse(&code2).unwrap();
         assert_eq!(info2.device, info.device);
         assert_ne!(info2.fingerprint, info.fingerprint);
@@ -1433,17 +1487,64 @@ mod tests {
         };
         let token = SealedApproval::seal(&a, &info2.key).unwrap().encode();
         assert!(SealedApproval::is_token(&token));
-        let (opened, signer) = open_approval(&home, &token).unwrap();
+        let (opened, signer) = open_approval(&home, &token, PASS).unwrap();
         assert_eq!(opened.user, "dana");
         assert_eq!(crate::ledger::device_id_for(&signer.public()), info.device);
         // A token for another request does not open here.
         let other = tempfile::tempdir().unwrap();
-        OrgRequest::code_for(other.path(), Some("x")).unwrap();
-        assert!(open_approval(other.path(), &token).is_err());
+        OrgRequest::code_for(other.path(), Some("x"), PASS).unwrap();
+        assert!(open_approval(other.path(), &token, PASS).is_err());
         // A token whose fingerprint names another request is refused.
         let mut b = a.clone();
         b.fingerprint = info.fingerprint.clone();
         let t2 = SealedApproval::seal(&b, &info2.key).unwrap().encode();
-        assert!(open_approval(&home, &t2).is_err());
+        assert!(open_approval(&home, &t2, PASS).is_err());
+    }
+
+    #[test]
+    fn an_organization_request_is_sealed_under_the_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        assert!(OrgRequest::code_for(home, Some("desk"), "short").is_err());
+        assert!(!OrgRequest::exists(home));
+        let code = OrgRequest::code_for(home, Some("desk"), PASS).unwrap();
+        assert!(home.join(REQUEST_FILE).exists());
+        let (dk, signer, name) = OrgRequest::keys(home, PASS).unwrap();
+        assert_eq!(name, "desk");
+        let on_disk = std::fs::read_to_string(home.join(REQUEST_FILE)).unwrap();
+        assert!(!on_disk.contains(&hex::encode(dk.to_bytes())));
+        assert!(!on_disk.contains(&hex::encode(signer.to_bytes())));
+        assert!(on_disk.contains("argon2"), "{on_disk}");
+        assert_eq!(
+            OrgRequest::code_for(home, Some("desk"), PASS).unwrap(),
+            code
+        );
+        let e = OrgRequest::fingerprint_for(home, "another passphrase here")
+            .err()
+            .unwrap();
+        assert!(format!("{e:#}").contains("wrong passphrase"), "{e:#}");
+        // A clear request of an earlier version is sealed by the first read.
+        let legacy = home.join("legacy");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let r = OrgRequest {
+            kem_alg: crate::kem::KEM_ALG.to_string(),
+            kem_secret_hex: hex::encode(dk.to_bytes()),
+            signer_hex: hex::encode(signer.to_bytes()),
+            name: "desk".into(),
+            platform: this_platform(),
+        };
+        std::fs::write(
+            legacy.join(LEGACY_REQUEST_FILE),
+            serde_json::to_vec(&r).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            OrgRequest::fingerprint_for(&legacy, PASS).unwrap(),
+            OrgRequest::fingerprint_for(home, PASS).unwrap()
+        );
+        assert!(!legacy.join(LEGACY_REQUEST_FILE).exists());
+        assert!(legacy.join(REQUEST_FILE).exists());
+        OrgRequest::clear(home);
+        assert!(!OrgRequest::exists(home));
     }
 }

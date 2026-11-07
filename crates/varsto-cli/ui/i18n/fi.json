@@ -376,7 +376,7 @@
   "Start over on this device": "Aloita alusta tällä laitteella",
   "State": "Tila",
   "Status": "Tila",
-  "Step 1: send an administrator the request code from this device. Step 2: read its six-word fingerprint to them over a call or in person; they see the same words. Step 3: paste the approval token they send back.": "Vaihe 1: lähetä ylläpitäjälle tämän laitteen pyyntökoodi. Vaihe 2: lue sen kuuden sanan sormenjälki hänelle puhelussa tai kasvokkain; hän näkee samat sanat. Vaihe 3: liitä hyväksyntätunniste, jonka hän lähettää takaisin.",
+  "Step 1: give the device a name and a passphrase, then send an administrator the request code from this device (its keys wait sealed under the passphrase). Step 2: read its six-word fingerprint to them over a call or in person; they see the same words. Step 3: paste the approval token they send back and join with the same passphrase.": "Vaihe 1: anna laitteelle nimi ja salasana ja lähetä sitten ylläpitäjälle pyyntökoodi tältä laitteelta (sen avaimet odottavat sinetöityinä salasanan alla). Vaihe 2: lue sen kuuden sanan sormenjälki hänelle puhelimessa tai kasvokkain; hän näkee samat sanat. Vaihe 3: liitä hänen lähettämänsä hyväksyntätunniste ja liity samalla salasanalla.",
   "Still working…": "Työ on yhä käynnissä…",
   "Stop syncing here": "Lopeta synkronointi täällä",
   "Storage both of you can reach": "Tallennuspaikka, jonka te molemmat tavoitatte",
