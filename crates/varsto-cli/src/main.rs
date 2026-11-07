@@ -29,6 +29,7 @@ mod import_jobs_cmd;
 mod logcmd;
 mod mcp;
 mod mcp_keys;
+mod notifications;
 mod placing;
 mod readcache;
 mod remember;
@@ -248,6 +249,13 @@ enum Cmd {
     Trash {
         #[command(subcommand)]
         cmd: trash::TrashCmd,
+    },
+    /// Push notifications to your phone through ntfy, Pushover or Telegram:
+    /// add a channel, choose what it receives, send a test. Works without
+    /// the vault being unlocked; see docs/notifications.md.
+    Notify {
+        #[command(subcommand)]
+        cmd: notifications::NotifyCmd,
     },
     /// Earlier versions of overwritten files: `varsto history <folder>
     /// <path>` lists them; restore, set and status. Kept on a thinning
@@ -4089,6 +4097,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Cmd::Backup { cmd } => backup::run(cli, &home, cmd)?,
         Cmd::Trash { cmd } => trash::run(cli, &home, cmd)?,
+        Cmd::Notify { cmd } => notifications::run(cli, &home, cmd)?,
         Cmd::History(args) => history::run(cli, &home, args)?,
         Cmd::Move { cmd: Some(cmd), .. } => placing::move_cmd(cli, &home, cmd)?,
         Cmd::Move {

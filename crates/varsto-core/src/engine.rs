@@ -1460,8 +1460,9 @@ impl Engine {
         // keys down to K3₀ (an out-of-date key is refused).
         let vault_keys = {
             let refs: Vec<&dyn Storage> = vec![backend.as_ref()];
-            let m = crate::membership3::Membership::join(
+            let m = crate::membership3::Membership::join_in_vault(
                 members3::bin(&meta.vault_id)?,
+                &meta.vault_id,
                 &refs,
                 &signer,
                 &kem,
@@ -1676,8 +1677,9 @@ impl Engine {
                 .next_back()
                 .cloned()
                 .ok_or_else(|| anyhow!("this device holds no vault key"))?;
-            let m = crate::membership3::Membership::join(
+            let m = crate::membership3::Membership::join_in_vault(
                 members3::bin(&meta.vault_id)?,
+                &meta.vault_id,
                 &refs,
                 &self.keys.signer,
                 kem,
@@ -6050,11 +6052,15 @@ impl Engine {
         F: Fn(&FolderId) -> Result<std::borrow::Cow<'s, FolderState>>,
     {
         let mut ctx = self.policy_ctx();
+        // Without a directory storage or a disk pool the default policy's
+        // "home" rule cannot be met: it is a warning, not a violation.
+        let has_home_storage = ctx.places.values().any(|(place, _)| place == "home");
         let mut reports = Vec::new();
         for (rec, _) in self.folders() {
             let Some(policy) = rec.effective_policy() else {
                 continue;
             };
+            let home_unavailable = rec.policy.is_none() && !has_home_storage;
             let state = state_of(&rec.folder_id)?;
             let mut seen: BTreeMap<ObjectName, u64> = BTreeMap::new();
             let mut facts = Vec::new();
@@ -6075,9 +6081,10 @@ impl Engine {
                     }
                 }
             }
-            let mut report = crate::policy::evaluate(
+            let mut report = crate::policy::evaluate_for_report(
                 &rec.name,
                 &policy,
+                home_unavailable,
                 &facts,
                 &ctx.unreadable_places,
                 &ctx.unknown,

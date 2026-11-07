@@ -1513,7 +1513,7 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
                 t0("The folder's policy asks for a copy in each of these places, and you have no storage there yet."),
             )
             .how(t0("For the cloud, add an S3 bucket or an rclone remote. For home, add a directory on a disk or NAS, or a pool of disks."))
-            .how(t0("The default policy asks for one copy at home and one in the cloud, checked by another device within 30 days. You can change it on the Policies page."))
+            .how(t0("The default policy asks for one copy on your own disks and one in the cloud, checked by another device within 30 days. You can change it on the Policies page."))
             .act("storages", Some("addstorage"), "Add a storage")
             .cmd(if missing_places.iter().any(|p| p == "home") {
                 "varsto storage add-local <name> <path>"
@@ -1922,7 +1922,7 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
         );
     }
     tips.push(
-        StepB::new("tip:policies", "tip", t0("Choose how many copies each folder needs"), t0("Every folder follows a policy: by default one copy at home and one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short."))
+        StepB::new("tip:policies", "tip", t0("Choose how many copies each folder needs"), t0("Every folder follows a policy: by default one copy on your own disks and one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short."))
             .act("policies", Some("policylist"), "Open Policies")
             .cmd("varsto policy show")
             .guide("policies")

@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FIDO2 hmac-secret and PRF platform support: Varsto</title>
-<meta name="description" content="Varsto documentation: FIDO2 hmac-secret and PRF platform support">
+<meta name="description" content="FIDO2 hmac-secret and WebAuthn PRF on Windows, macOS, Linux, Android and iOS: which APIs expose them, and which points are not verified. Research for Varsto Strongroom.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/docs/fido2-platform-support.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="FIDO2 hmac-secret and PRF platform support: Varsto">
-<meta property="og:description" content="Varsto documentation: FIDO2 hmac-secret and PRF platform support">
+<meta property="og:description" content="FIDO2 hmac-secret and WebAuthn PRF on Windows, macOS, Linux, Android and iOS: which APIs expose them, and which points are not verified. Research for Varsto Strongroom.">
 <meta property="og:url" content="https://varsto.net/docs/fido2-platform-support.html">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -54,7 +54,8 @@
   <div class="wrap">
 <article class="prose">
 <h1>FIDO2 hmac-secret and PRF platform support</h1>
-<p class="note">From <code>docs/research/fido2-platform-support.md</code> in the repository, rendered 2026-11-04. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>docs/research/fido2-platform-support.md</code> in the repository, rendered 2026-11-07. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p>Varsto's <a href="https://varsto.net/features/#strongroom">Strongroom</a> folders wrap a folder key with a secret that a FIDO2 security key produces after a touch (CTAP2 hmac-secret, called PRF on the web). The table below is what published sources say about that on Windows, macOS, Linux, Android and iOS, and which points are not verified. The source of Varsto is a Rust workspace on <a href="https://github.com/janttsu/varsto">GitHub</a>; the <a href="https://varsto.net/docs/contributing.html">contributing guide</a> says how to build it and send a change.</p>
 <blockquote>
 <p><strong>Research note, design stage.</strong> This document records what the cited sources say about using a FIDO2 security key to derive secrets (CTAP2 <code>hmac-secret</code>, exposed to web and platform APIs as the WebAuthn <code>prf</code> extension) from a native application. It is not a decision. No hardware was tested for this note. Anything the sources did not state is marked "not verified".</p>
 <p>All sources were read on <strong>2026-10-08</strong> (UTC). Source numbers in tables refer to the list at the end.</p>

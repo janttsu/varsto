@@ -49,6 +49,10 @@ Alpha-0-format.md sections 76 and 77.20. Commands, local API routes, event-strea
 4. Update this table before publishing each storage format version, with the release number and reader status.
 5. Once the product launches (first public release), every subsequent format change requires forward compatibility for at least one previous version.
 
+## Notification channels (storage format unchanged)
+
+Two device-local files in the device directory, never synced and never read from a storage: `notify.json` (the push channels with their tokens, keys and passwords, and the summary hour; mode 0600) and `notify-outbox.json` (messages waiting for the network, the alerts of the last 24 hours for the daily summary and the day the summary was sent for; mode 0600). See [docs/notifications.md](../notifications.md). Nothing is written to a storage or to the ledger, so devices of any version work together.
+
 ## YouTube jobs (alpha-0-format.md section 82; storage format unchanged)
 
 The import book (section 42, sealed in `vault/imports/<folder>/<device>/<utc>.enc`) gets the optional field `youtube` (video id to the paths in the folder, left out when empty; books merge it by union), a new `kind` `youtube` with content ids `youtube:<video id>:<suffix>` and identity `youtube:<canonical address>`, and books with an empty `kind` that hold only that index (`varsto import youtube-scan` of a folder). Device-local only: `state/youtube/<job id>.json`, `<job id>.lock` and `known.json`. No ledger event or storage object changes. Earlier builds ignore the field; they list a `youtube` book in `varsto import status` like any other and an index-only book with an empty kind.
