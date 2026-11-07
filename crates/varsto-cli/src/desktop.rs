@@ -627,6 +627,8 @@ pub(crate) fn engine_free(method: &Method, path: &str) -> bool {
                 | "/api/pair/join-status"
                 | "/api/providers"
                 | "/api/logs"
+                | "/api/notify"
+                | "/api/notify/ntfy-topic"
         ),
         Method::Post => matches!(
             path,
@@ -639,6 +641,11 @@ pub(crate) fn engine_free(method: &Method, path: &str) -> bool {
                 | "/api/update/settings"
                 | "/api/pair/join"
                 | "/api/logs/level"
+                | "/api/notify/channel"
+                | "/api/notify/channel/remove"
+                | "/api/notify/test"
+                | "/api/notify/telegram/chats"
+                | "/api/notify/settings"
         ),
         _ => false,
     }
@@ -1563,6 +1570,16 @@ fn handle(fixed: &Fixed, mut request: Request) -> Result<()> {
         request.respond(json_response(200, &json!({"ok": true})))?;
         service::request_quit(state);
         return Ok(());
+    }
+    if path == "/api/notify" || path.starts_with("/api/notify/") {
+        // Push channels: a file in the device directory, so no engine and
+        // no state lock (a test message may take 15 seconds). Works while
+        // the vault is locked.
+        let result = crate::notifications::api(&fixed.home, &method, &path, &input);
+        return match result {
+            Ok(v) => Ok(request.respond(json_response(200, &v))?),
+            Err(e) => Ok(request.respond(json_response(400, &json!({"error": format!("{e:#}")})))?),
+        };
     }
     let post = method == Method::Post;
     let result = match run_api(fixed, method, &path, &query, &input) {
@@ -4649,6 +4666,15 @@ mod f3_api {
                 varsto_core::events::publish(
                     "pair.ask",
                     json!({"name": j.name, "fingerprint": j.fingerprint}),
+                );
+                // The person has five minutes to answer: tell their phone.
+                crate::service::push_only(
+                    varsto_core::notify::Category::Requests,
+                    "Varsto pairing request",
+                    &format!(
+                        "{} asks to pair with this device. Open Varsto to answer.",
+                        j.name
+                    ),
                 );
                 let deadline = std::time::Instant::now() + ANSWER_WITHIN;
                 let answer = loop {

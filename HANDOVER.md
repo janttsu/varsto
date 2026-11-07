@@ -92,6 +92,11 @@ native viewer). They need rework on top of `main` before any merge.
   re-checked: CRYPTO-1 (the recovery kit text of format 2), imports-1 (restic
   mirror umask), logging-1/-4 (scrubber gaps), CLI-3/-4 (`current_exe()` after
   an update), QUALITY-1/-2 (mutex `unwrap()` in service.rs, `set_var`).
+- Notification channels (ntfy, Pushover, Telegram; branch `feat/notify-channels`,
+  docs/notifications.md) are written but not compiled or tested yet: build,
+  run the unit tests of `varsto_core::notify`, and try a real ntfy topic, a
+  Pushover application and a Telegram bot once. The external API calls and the
+  store links in the setup guide are from memory.
 - GitHub settings the workflows cannot make: branch protection on `main` and
   a protected environment for the daily key.
 - A full lab run (`scripts/test/lab`, every scenario) with the alpha.16

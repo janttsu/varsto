@@ -16,6 +16,10 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Added
+
+- Push notifications to your phone through ntfy, Pushover or Telegram ([docs/notifications.md](docs/notifications.md)). Add a channel in Settings (a guide for each service, a test message, a choice of what it receives, an option to leave folder, storage and device names out) or with `varsto notify`. Alerts (storage problems, low space, fewer copies than a policy asks, damaged data, failed or overdue backups, requests waiting for you) are on by default; finished backups, new files and a daily summary are opt-in. The channels are a device-local file with the tokens (`notify.json`, mode 0600, never synced). Messages are not end-to-end encrypted on their way through the service. Failed sends wait in an outbox and are retried, also after a restart; repeats are dropped for six hours and a channel gets at most 20 an hour. The settings work while the vault is locked.
+
 ### Changed
 
 - Website: the alpha warning is marked so a search engine does not quote it. Page titles and descriptions name the product and the document. The home page, the docs index and the older release notes point developers at the GitHub repository.

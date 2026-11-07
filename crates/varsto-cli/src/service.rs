@@ -24,9 +24,13 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use varsto_core::engine::{PullReport, PushReport};
+use varsto_core::notify::Category;
 use varsto_core::Engine;
 
 static QUIT: AtomicBool = AtomicBool::new(false);
+
+/// New files in one folder are pushed to a phone at most this often.
+const FILES_NEW_PUSH_EVERY: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ServiceFile {
@@ -45,6 +49,8 @@ pub struct ServiceState {
     /// Storage format 3: folder requests already announced to the page
     /// (`folder.request`), as `<folder>/<device>/<words>`.
     pub seen_requests: std::collections::BTreeSet<String>,
+    /// When a push message about new files in a folder was sent last.
+    pub files_new_pushed: std::collections::BTreeMap<String, Instant>,
     pub running: bool,
     pub paused: bool,
     pub interval_secs: u64,
@@ -240,6 +246,7 @@ impl ServiceState {
                             }),
                         );
                         notify(
+                            Category::Requests,
                             "Varsto folder request",
                             &format!("{} asks for folder {}", r.device, r.folder),
                         );
@@ -263,7 +270,7 @@ impl ServiceState {
             Ok(s) => {
                 if let Some(msg) = engine.disk_overdue_reminder(&s, varsto_core::util::now_utc()) {
                     log::info!("{msg}");
-                    notify("Varsto disk check due", &msg);
+                    notify(Category::Disks, "Varsto disk check due", &msg);
                 }
                 self.disk_suggest = Some(s);
             }
@@ -293,6 +300,7 @@ impl ServiceState {
             }
             match (&r.job.state, &r.job.waiting) {
                 (varsto_core::staged_move::JobState::Done, _) => notify(
+                    Category::Folders,
                     "Varsto",
                     &format!(
                         "The move of {} to {} is finished ({}).",
@@ -304,7 +312,11 @@ impl ServiceState {
                 (varsto_core::staged_move::JobState::Open, Some(w))
                     if before.and_then(|b| b.waiting.as_ref()) != Some(w) =>
                 {
-                    notify("Varsto move", &format!("{}: {}", r.job.folder, w.text));
+                    notify(
+                        Category::Folders,
+                        "Varsto move",
+                        &format!("{}: {}", r.job.folder, w.text),
+                    );
                 }
                 _ => {}
             }
@@ -335,7 +347,7 @@ impl ServiceState {
                 changed = true;
                 let msg = format!("{} {ev}", d.label);
                 log::info!("disk {msg}");
-                notify("Varsto disk", &msg);
+                notify(Category::Disks, "Varsto disk", &msg);
                 if ev == "attached" {
                     self.sync_requested = true;
                 }
@@ -391,7 +403,7 @@ impl ServiceState {
         self.policies = reports;
         for a in alerts {
             log::info!("{a}");
-            notify("Varsto durability policy", &a);
+            notify(Category::Durability, "Varsto durability policy", &a);
         }
     }
     /// Run automatic verification when the schedule says it is due (called
@@ -412,7 +424,7 @@ impl ServiceState {
                             r.missing.len()
                         );
                         log::info!("{msg}");
-                        notify("Varsto verification", &msg);
+                        notify(Category::Integrity, "Varsto verification", &msg);
                     }
                 }
                 Err(e) => log::warn!("automatic verification failed: {e:#}"),
@@ -441,7 +453,7 @@ impl ServiceState {
                             if copies == 1 { "y is" } else { "ies are" }
                         );
                         log::info!("{msg}");
-                        notify("Varsto bit-rot check", &msg);
+                        notify(Category::Integrity, "Varsto bit-rot check", &msg);
                     }
                     for d in &r.damaged_files {
                         let msg = match (&d.moved_to, d.restored) {
@@ -455,7 +467,7 @@ impl ServiceState {
                             ),
                         };
                         log::info!("{msg}");
-                        notify("Varsto bit-rot check", &msg);
+                        notify(Category::Integrity, "Varsto bit-rot check", &msg);
                     }
                     for d in &r.disks_away {
                         log::warn!("disk not seen for long: {d}");
@@ -491,7 +503,7 @@ impl ServiceState {
                             why.join("; ")
                         );
                         log::info!("{msg}");
-                        notify("Varsto repair", &msg);
+                        notify(Category::Durability, "Varsto repair", &msg);
                     }
                 }
                 Err(e) => log::warn!("automatic repair failed: {e:#}"),
@@ -525,6 +537,7 @@ impl ServiceState {
                     worked = r.staged + r.delivered > 0;
                     if r.delivered > 0 {
                         notify(
+                            Category::Disks,
                             "Varsto mailbox",
                             &format!(
                                 "Wrote {} staged object(s) ({}) to {}.",
@@ -592,7 +605,7 @@ impl ServiceState {
                 .unwrap_or(&[]);
             for w in h.warnings.iter().filter(|w| !before.contains(w)) {
                 if w.contains("withholding") {
-                    notify("Varsto ledger", w);
+                    notify(Category::Integrity, "Varsto ledger", w);
                 }
             }
         }
@@ -628,7 +641,7 @@ impl ServiceState {
                     );
                 }
                 log::info!("{msg}");
-                notify("Varsto ledger", &msg);
+                notify(Category::Integrity, "Varsto ledger", &msg);
                 self.ledger_failed = None;
             }
             Err(e) => {
@@ -636,7 +649,7 @@ impl ServiceState {
                 log::warn!("{msg}");
                 self.last_error = Some(msg.clone());
                 if self.ledger_failed.as_deref() != Some(msg.as_str()) {
-                    notify("Varsto ledger", &msg);
+                    notify(Category::Integrity, "Varsto ledger", &msg);
                 }
                 self.ledger_failed = Some(msg);
             }
@@ -655,6 +668,7 @@ impl ServiceState {
                     }
                     if r.drained && self.drain_notified.insert(format!("done:{name}")) {
                         notify(
+                            Category::Other,
                             "Varsto",
                             &if r.removed {
                                 format!("Storage {name} is empty and was removed.")
@@ -671,7 +685,7 @@ impl ServiceState {
                     {
                         let msg = format!("Draining {name} cannot go on: {}", r.kept.join("; "));
                         log::warn!("{msg}");
-                        notify("Varsto", &msg);
+                        notify(Category::Storage, "Varsto", &msg);
                     }
                     if r.blocks_dropped > 0 {
                         self.drain_notified.remove(&format!("stuck:{name}"));
@@ -706,6 +720,7 @@ impl ServiceState {
                     log::info!("torrent job {} is complete", j.short());
                     self.torrent_notified.remove(&j.hash);
                     notify(
+                        Category::Other,
                         "Varsto torrent",
                         &format!(
                             "{} is complete: every file is in folder {}.",
@@ -716,6 +731,7 @@ impl ServiceState {
                 varsto_core::engine::JobState::WaitingSpace => {
                     if self.torrent_notified.insert(j.hash.clone()) {
                         notify(
+                            Category::Space,
                             "Varsto torrent",
                             &format!("{} waits for disk space: {}", j.name, j.text),
                         );
@@ -741,6 +757,7 @@ impl ServiceState {
                     if now.state == varsto_core::engine::YtState::WaitingSpace {
                         if self.youtube_notified.insert(now.id.clone()) {
                             notify(
+                                Category::Space,
                                 "Varsto YouTube",
                                 &format!("{} waits for disk space: {}", now.label, now.text),
                             );
@@ -787,6 +804,7 @@ impl ServiceState {
                         "backup",
                         json!({"name": name, "ok": true, "text": msg}),
                     );
+                    push_only(Category::BackupsDone, "Varsto backup", &msg);
                     self.backup_last = Some(msg);
                     self.backup_errors.remove(&name);
                 }
@@ -799,7 +817,11 @@ impl ServiceState {
                     );
                     // Once per new reason, not on every retry.
                     if self.backup_errors.get(&name) != Some(&why) {
-                        notify("Varsto backup", &format!("{name}: {why}"));
+                        notify(
+                            Category::BackupsFailed,
+                            "Varsto backup",
+                            &format!("{name}: {why}"),
+                        );
                     }
                     self.backup_errors.insert(name, why);
                 }
@@ -826,6 +848,11 @@ impl ServiceState {
                     );
                     if status.success() {
                         log::info!("scheduled restic backup done");
+                        push_only(
+                            Category::BackupsDone,
+                            "Varsto restic backup",
+                            "The scheduled backup finished.",
+                        );
                     } else {
                         let why = ResticState::load(&home)
                             .last_run
@@ -836,6 +863,7 @@ impl ServiceState {
                         self.restic_not_before_utc =
                             varsto_core::util::now_utc() + varsto_core::restic::RETRY_SECS;
                         notify(
+                            Category::BackupsFailed,
                             "Varsto restic backup",
                             &format!("The scheduled backup failed: {why}"),
                         );
@@ -854,7 +882,7 @@ impl ServiceState {
             self.restic_warned_utc = Some(now);
             let msg = "The last good restic snapshot is older than its schedule allows; see `varsto restic status`";
             log::info!("{msg}");
-            notify("Varsto restic backup", msg);
+            notify(Category::BackupsFailed, "Varsto restic backup", msg);
         }
         self.restic_text = Some(match (&st.last_success, st.next_run_utc(cfg)) {
             (Some(r), Some(n)) => format!(
@@ -935,6 +963,7 @@ impl ServiceState {
             );
             log::info!("{msg}");
             varsto_core::events::publish("space.ok", json!({"place": back.place.key, "text": msg}));
+            push_only(Category::Space, "Varsto disk space", &msg);
             self.low_space_notified.remove(&back.place.key);
             self.sync_requested = true;
         }
@@ -946,7 +975,7 @@ impl ServiceState {
                     json!({"place": l.place.key, "text": l.text}),
                 );
                 log::warn!("{}", l.text);
-                notify("Varsto disk space", &l.text);
+                notify(Category::Space, "Varsto disk space", &l.text);
             }
         }
         // A place no longer short without a recheck (a check found room).
@@ -985,7 +1014,7 @@ impl ServiceState {
                         "folder.paused",
                         json!({"folder": p.folder, "text": p.message}),
                     );
-                    notify("Varsto folder paused", &p.message);
+                    notify(Category::Folders, "Varsto folder paused", &p.message);
                 }
                 paused.insert(p.folder.clone(), p.message.clone());
             }
@@ -995,6 +1024,29 @@ impl ServiceState {
                     "files.new",
                     json!({"folder": pl.folder, "count": pl.files_updated}),
                 );
+                // At most one push message per folder every 15 minutes.
+                let due = self
+                    .files_new_pushed
+                    .get(&pl.folder)
+                    .is_none_or(|t| t.elapsed() >= FILES_NEW_PUSH_EVERY);
+                if due {
+                    self.files_new_pushed
+                        .insert(pl.folder.clone(), Instant::now());
+                    push_only(
+                        Category::FilesNew,
+                        "Varsto new files",
+                        &format!(
+                            "{} new or changed {} arrived in folder {}.",
+                            pl.files_updated,
+                            if pl.files_updated == 1 {
+                                "file"
+                            } else {
+                                "files"
+                            },
+                            pl.folder
+                        ),
+                    );
+                }
             }
             if pl.files_deleted > 0 {
                 varsto_core::events::publish(
@@ -1036,7 +1088,7 @@ impl ServiceState {
         // A storage at its quota: blocks go elsewhere or wait here; say so once.
         for f in full.iter().filter(|f| !self.quota_full.contains(f)) {
             log::info!("{f}");
-            notify("Varsto", &format!("{f}. New blocks go to the other storages or wait on this device; raise the quota or add a storage."));
+            notify(Category::Space, "Varsto", &format!("{f}. New blocks go to the other storages or wait on this device; raise the quota or add a storage."));
         }
         if !full.is_empty() {
             self.last_result += &format!("; {}", full.join("; "));
@@ -1057,13 +1109,18 @@ impl ServiceState {
             Some(format!("not synced: {}", not_synced.join("; ")))
         };
         for s in left_out.difference(&self.storage_problems) {
-            varsto_core::events::publish(
-                "storage.problem",
-                json!({"storage": s, "text": format!("{s} was left out of the last sync (no disk attached, full, or no room)")}),
-            );
+            let text =
+                format!("{s} was left out of the last sync (no disk attached, full, or no room)");
+            varsto_core::events::publish("storage.problem", json!({"storage": s, "text": text}));
+            push_only(Category::Storage, "Varsto storage", &text);
         }
         for s in self.storage_problems.difference(&left_out) {
             varsto_core::events::publish("storage.ok", json!({ "storage": s }));
+            push_only(
+                Category::Storage,
+                "Varsto storage",
+                &format!("{s} is part of the sync again."),
+            );
         }
         self.storage_problems = left_out;
         varsto_core::events::publish(
@@ -2044,6 +2101,12 @@ impl Drop for P2p {
     }
 }
 
+/// Send a message to the push channels only, for events that have no
+/// desktop popup (the page shows them as they happen).
+pub fn push_only(cat: Category, title: &str, body: &str) {
+    varsto_core::notify::notifier().push(varsto_core::notify::Message::new(cat, title, body));
+}
+
 /// The pause of the service outlives a restart: a phone stops and starts
 /// the service often, and a pause that ended by itself would start syncing
 /// and peer-to-peer again without the user knowing.
@@ -2066,8 +2129,12 @@ pub fn save_paused(home: &std::path::Path, paused: bool) -> std::io::Result<()> 
 }
 
 /// Best-effort desktop notification; silent where no notifier exists.
-pub fn notify(title: &str, body: &str) {
+///
+/// The message also goes to the push channels the user set up (ntfy,
+/// Pushover, Telegram) when their events include `cat`.
+pub fn notify(cat: Category, title: &str, body: &str) {
     varsto_core::events::publish("notification", json!({"title": title, "body": body}));
+    push_only(cat, title, body);
     #[cfg(target_os = "linux")]
     {
         let _ = std::process::Command::new("notify-send")
@@ -2306,6 +2373,14 @@ pub fn run(opts: Options) -> Result<()> {
     if exports > 0 {
         log::info!("removed {exports} decrypted copies made for other apps");
     }
+    // Push notifications (ntfy, Pushover, Telegram) start with the service.
+    // The device name is known once the vault is open; until then the
+    // computer's name stands in, and the disk check below sets the real one.
+    let device = engine
+        .as_ref()
+        .map(|e| e.own_device_name().to_string())
+        .unwrap_or_else(crate::default_device_name);
+    varsto_core::notify::notifier().init(&opts.home, &device);
     let state: Shared = Arc::new(Mutex::new(State {
         home: opts.home.clone(),
         engine,
@@ -2345,9 +2420,11 @@ pub fn run(opts: Options) -> Result<()> {
     // is the only way in.
     {
         let restart_state = state.clone();
-        crate::update::spawn_auto_update(opts.home.clone(), notify, move |_| {
-            restart_state.lock().unwrap().service.restart_requested = true
-        });
+        crate::update::spawn_auto_update(
+            opts.home.clone(),
+            |title: &str, body: &str| notify(Category::Updates, title, body),
+            move |_| restart_state.lock().unwrap().service.restart_requested = true,
+        );
     }
 
     // Peer-to-peer: serve our chunks, announce on the LAN, learn peers.
@@ -2409,6 +2486,7 @@ pub fn run(opts: Options) -> Result<()> {
             if let Some(e) = st.engine.as_ref() {
                 // Who this device is in `/api/activity` (also while p2p is off).
                 varsto_core::activity::set_identity(e.device_id(), e.own_device_name());
+                varsto_core::notify::notifier().set_device(e.own_device_name());
             }
             let listed = st.engine.as_mut().map(|e| e.disks());
             match listed {
