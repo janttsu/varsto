@@ -7,7 +7,8 @@ Thanks for your interest. Varsto is alpha (0.0.1-alpha.16) and the contribution 
 - **Language:** everything in this repository is written in English: code comments, identifiers, commit messages, issues, pull requests and documentation.
 - **No personal data.** Never commit real personal data, real file names, real device or server names, credentials, keys or addresses. Test fixtures must be invented and generic (for example `IMG_0001.jpg`, `laptop`, `usb-a`, `cloud`).
 - **No secrets.** Do not commit credentials, tokens, private keys or recovery phrases.
-- **Tests.** New behaviour needs tests. See [TESTING.md](TESTING.md).
+- **Tests.** New behaviour needs tests. See [TESTING.md](TESTING.md) (the multi-device VM lab: [docs/testing/lab.md](docs/testing/lab.md)).
+- **Builds.** How to build every platform locally, what CI builds and which workflow runs when: [BUILDING.md](BUILDING.md). CI runs on pushes to `main`, on tags and on pull requests; a branch without a pull request starts nothing.
 - **Security first.** Do not implement your own cryptographic primitives. Use reviewed libraries and document every choice.
 - **Logging.** Never log secrets, keys, file names or paths in clear text. Use the sanctioned logging macros and the secret wrapper types; see [docs/architecture/logging.md](docs/architecture/logging.md).
 - **One name in one place.** The product name lives in `brand/brand.toml`; do not hard-code it where it can be avoided, because the working name may change.

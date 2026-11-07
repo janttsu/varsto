@@ -1,14 +1,16 @@
 ---
-title: Téléchargements
+title: Télécharger Varsto pour Linux, Windows, macOS et Android
 nav: Downloads
 output: downloads/index.html
-description: Téléchargez l’alpha de Varsto pour Linux, macOS, Windows, Android et iOS (non signé), ou le code source, et vérifiez les sommes de contrôle.
+description: Téléchargez Varsto pour Linux, Windows, macOS et Android, ou l’ipa iOS non signé qu’AltStore, SideStore ou Sideloadly signe avec votre propre identifiant Apple. Les sommes de contrôle sont signées.
 ---
     <h1>Téléchargements</h1>
     <p class="note">Consultez les <a href="{{L}}screenshots/">captures d’écran</a> pour voir à quoi ressemble l’alpha.</p>
     <p class="note">Vous voulez la version de développement la plus récente ? Les <a href="{{L}}daily/">versions quotidiennes</a> ne sont pas signées et ne conviennent pas à des données de production.</p>
     <p class="lead">Un paquet par plateforme, avec le service en arrière-plan, l’interface et la même ligne de commande à l’intérieur ; sous Linux et macOS, le service démarre à l’ouverture de session (une unité utilisateur systemd ou un launch agent), sous Windows il est lancé par l’application de la zone de notification. Sous Linux et Windows, l’interface s’ouvre dans votre navigateur ; sous macOS, l’application native a sa propre fenêtre. Alpha : à utiliser uniquement avec des données de test, en conservant vos propres sauvegardes.</p>
-    <p class="note"><strong>Android.</strong> L’APK est signé pour la publication avec une nouvelle clé, de sorte que les versions suivantes s’installent par-dessus comme une mise à jour. Un ancien APK de débogage (alpha.15 ou une version quotidienne plus ancienne) ne peut pas être mis à jour vers celui-ci : désinstallez d’abord l’ancienne application, ce qui supprime la copie du coffre de cet appareil, donc assurez-vous que le coffre existe sur un autre appareil ou un stockage, puis installez le nouvel APK. Le <code>.ipa</code> iOS n’est pas signé et est destiné à AltStore, SideStore ou Sideloadly.</p>
+    <p class="note"><strong>Android.</strong> L’APK est signé pour la publication avec une nouvelle clé, de sorte que les versions suivantes s’installent par-dessus comme une mise à jour. Un ancien APK de débogage (alpha.15 ou une version quotidienne plus ancienne) ne peut pas être mis à jour vers celui-ci : désinstallez d’abord l’ancienne application, ce qui supprime la copie du coffre de cet appareil, donc assurez-vous que le coffre existe sur un autre appareil ou un stockage, puis installez le nouvel APK.</p>
+    <h2>iOS : ipa non signé, AltStore, SideStore et Sideloadly</h2>
+    <p>Le paquet iOS est un <code>.ipa</code> non signé. Il ne s’installe pas à partir du seul fichier. AltStore, SideStore ou Sideloadly le signe avec votre propre identifiant Apple et l’installe. Varsto n’a pas de signature de développeur Apple. Une erreur Sideloadly sur la signature, un identifiant Apple qui ne peut plus signer d’applications, une installation expirée ou un appareil qui ne fait pas confiance au développeur vient de cet outil ou d’Apple, pas d’un paquet cassé. C’est ce fichier que ces outils installent. L’application a été compilée en CI et n’a pas été exécutée sur un vrai appareil. Le code de la coque est dans <code>apps/ios</code> sur <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>.</p>
     <p class="note">La liste des téléchargements est en anglais.</p>
     {{DOWNLOADS}}
     <h2>Installer et vérifier</h2>

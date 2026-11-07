@@ -29,7 +29,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -60,7 +60,7 @@
     <h1>Varsto, restic and BorgBackup</h1>
     <p class="lead">restic and BorgBackup (borg) are backup programs: they take snapshots of directories into an encrypted, deduplicated repository and restore them later. They are not sync tools and do not try to be. Varsto does both sync and backups of its own, and its restic mirror lets restic back up a vault independently of Varsto.</p>
 
-    <h2>How restic and borg work</h2>
+    <h2>restic vs Borg</h2>
     <p><strong>restic</strong> is a single executable that runs without a server. <code>restic backup</code> takes a snapshot of a directory into a repository, transferring only the parts of files that changed; <code>restic snapshots</code> lists them, <code>restic restore</code> brings one back, and <code>restic check</code> verifies the repository. Repositories can live on a local disk or on many storage types, self-hosted and online, and everything in them is encrypted. <strong>borg</strong> is a deduplicating backup program as well: files are split into chunks and a chunk already in the repository is not stored again, data is encrypted on the client (AES-256 with HMAC-SHA256) and optionally compressed, repositories live on local disks or on any host reachable over SSH, and archives can be mounted as a file system to browse and restore. Neither keeps your devices in step: a backup runs at a time you choose, from one machine, into one repository, and the files on the machine are left as they were.</p>
 
     <h2>Side by side</h2>

@@ -3,6 +3,8 @@ title: Alpha.15: storage format 2, a Windows installer and a daily channel
 date: 2026-10-16
 summary: A new storage format that fixes two findings of the security review, so existing vaults must be recreated; Windows gets a setup program, a native window and automatic updates; and a signed daily build channel.
 ---
+The current release is [0.0.1-alpha.16](https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html). This note describes an older release. [Downloads](https://varsto.net/downloads/) serve alpha.16, and the source is on [GitHub](https://github.com/janttsu/varsto).
+
 Alpha.15 changes the storage format. That is the main thing to know before updating: vaults made by alpha.14 or earlier cannot be opened by this version and have to be recreated. The rest of the release is a long list of fixes and interface work, a proper Windows installation, and a daily build channel for people who want to test the newest code.
 
 ## Format 2 and what it means

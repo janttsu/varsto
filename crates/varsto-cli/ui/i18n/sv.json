@@ -114,7 +114,7 @@
   "Copies in place '": "Kopior på platsen '",
   "Copies on any storage": "Kopior på valfri lagringsplats",
   "Copies on disks in different places": "Kopior på diskar på olika platser",
-  "Copies on own devices and disks": "Kopior på egna enheter och diskar",
+  "Copies on own disks": "Kopior på egna diskar",
   "Could not create the organization": "Det gick inte att skapa organisationen",
   "Could not remove the device": "Det gick inte att ta bort enheten",
   "Could not remove the user": "Det gick inte att ta bort användaren",
@@ -1124,7 +1124,7 @@
   "Keep a copy of {folder} in another place: {places}": "Förvara en kopia av {folder} på en annan plats: {places}",
   "The folder's policy asks for a copy in each of these places, and you have no storage there yet.": "Mappens lagringsregel kräver en kopia på var och en av dessa platser, och du har ingen lagringsplats där ännu.",
   "For the cloud, add an S3 bucket or an rclone remote. For home, add a directory on a disk or NAS, or a pool of disks.": "För molnet, lägg till en S3-bucket eller en rclone-fjärr. För hemmet, lägg till en katalog på en disk eller NAS, eller en pool med diskar.",
-  "The default policy asks for one copy at home and one in the cloud, checked by another device within 30 days. You can change it on the Policies page.": "Standardregeln kräver en kopia hemma och en i molnet, kontrollerade av en annan enhet inom 30 dagar. Du kan ändra den på sidan Lagringsregler.",
+  "The default policy asks for one copy on your own disks and one in the cloud, checked by another device within 30 days. You can change it on the Policies page.": "Standardregeln kräver en kopia på dina egna diskar och en i molnet, kontrollerade av en annan enhet inom 30 dagar. Du kan ändra den på sidan Lagringsregler.",
   "Give {folder} the copies its policy asks for": "Ge {folder} de kopior som dess lagringsregel kräver",
   "The policy says how many copies the folder needs and where; some blocks do not have them now.": "Lagringsregeln anger hur många kopior mappen behöver och var; vissa block saknar dem nu.",
   "The policy asks for {min} copies, but there are only {have} storages. Add a storage, or lower the number in the policy.": "Regeln kräver {min} kopior, men det finns bara {have} lagringsplatser. Lägg till en lagringsplats eller sänk antalet i regeln.",
@@ -1187,7 +1187,7 @@
   "Keep snapshots of a directory": "Spara versioner av en katalog",
   "A backup keeps read-only snapshots, for example of a project folder, for as many days as you choose.": "En säkerhetskopia sparar skrivskyddade versioner, till exempel av en projektmapp, så många dagar som du väljer.",
   "Choose how many copies each folder needs": "Välj hur många kopior varje mapp behöver",
-  "Every folder follows a policy: by default one copy at home and one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short.": "Varje mapp följer en lagringsregel: som standard en kopia hemma och en i molnet, kontrollerade av en annan enhet inom 30 dagar. Varsto varnar dig när en mapp inte uppfyller den.",
+  "Every folder follows a policy: by default one copy on your own disks and one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short.": "Varje mapp följer en lagringsregel: som standard en kopia på dina egna diskar och en i molnet, kontrollerade av en annan enhet inom 30 dagar. Varsto varnar dig när en mapp inte uppfyller den.",
   "Deleted files are kept {days} days": "Raderade filer sparas {days} dagar",
   "Files deleted on any device go to the trash first. You can restore them or change how long they are kept.": "Filer som raderas på någon enhet hamnar först i papperskorgen. Du kan återställa dem eller ändra hur länge de sparas.",
   "Share a folder with someone": "Dela en mapp med någon",
@@ -1269,7 +1269,7 @@
   "Backups on the website": "Säkerhetskopior på webbplatsen",
   "A file deleted on any device goes to the trash first and is kept there for a number of days (30 unless you change it). From the Trash page you can restore it to where it was, or delete it for good.": "En fil som raderas på någon enhet hamnar först i papperskorgen och sparas där ett antal dagar (30 om du inte ändrar det). Från sidan Papperskorg kan du återställa den dit den var eller radera den för gott.",
   "Policies, checks and repair": "Lagringsregler, kontroller och reparation",
-  "A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy at home, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.": "En lagringsregel anger hur många kopior en mapp behöver, på vilka platser och hur ofta en annan enhet måste kontrollera dem. Varje mapp börjar med standardregeln: en kopia hemma, en i molnet, kontrollerade av en annan enhet inom 30 dagar. Varsto varnar dig när en mapp inte uppfyller den och berättar vad som saknas.",
+  "A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy on your own disks, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.": "En lagringsregel anger hur många kopior en mapp behöver, på vilka platser och hur ofta en annan enhet måste kontrollera dem. Varje mapp börjar med standardregeln: en kopia på dina egna diskar, en i molnet, kontrollerade av en annan enhet inom 30 dagar. Varsto varnar dig när en mapp inte uppfyller den och berättar vad som saknas.",
   "Verification reads copies back now and then; the bit-rot check re-hashes copies and files on this device; repair replaces a damaged copy with a good one. All three run by themselves and can be started on the Policies page.": "Verifieringen läser tillbaka kopior då och då; kontrollen av bitröta beräknar om kontrollsummor för kopior och filer på den här enheten; reparationen ersätter en skadad kopia med en hel. Alla tre körs av sig själva och kan startas på sidan Lagringsregler.",
   "Disk pools": "Diskpooler",
   "Eject a disk on the Storages page before you unplug it.": "Mata ut en disk på sidan Lagringsplatser innan du kopplar ur den.",
@@ -1634,6 +1634,8 @@
   "policy met": "regeln uppfylls",
   "at risk": "i riskzonen",
   "violated": "bruten",
+  "no own disk": "ingen egen disk",
+  "No copy on your own disks: this vault has no disk pool or directory storage. Add one, or change the folder's policy on the Policies page.": "Ingen kopia på dina egna diskar: det här valvet har varken en diskpool eller en katalog som lagringsplats. Lägg till en, eller ändra mappens regel på sidan Lagringsregler.",
   "stored, not yet verified": "lagrat, ännu inte verifierat",
   "stored, verification pending": "lagrat, verifiering väntar",
   "only on this device": "bara på den här enheten",
@@ -2779,8 +2781,8 @@
    "$1 i extern lagring (S3 m.fl.)"
   ],
   [
-   "(\\d+) on your own devices and disks",
-   "$1 på dina egna enheter och diskar"
+   "(\\d+) on your own disks",
+   "$1 på dina egna diskar"
   ],
   [
    "verified within (\\d+) days",
@@ -2799,8 +2801,24 @@
    "$1 block har färre än $2 kopior i extern lagring (S3 m.fl.)"
   ],
   [
-   "(\\d+) chunks have fewer than (\\d+) copies on your own devices and disks",
-   "$1 block har färre än $2 kopior på dina egna enheter och diskar"
+   "(\\d+) chunks have fewer than (\\d+) copies on your own disks",
+   "$1 block har färre än $2 kopior på dina egna diskar"
+  ],
+  [
+   "(\\d+) chunks have no copy on your own disks",
+   "$1 block har ingen kopia på dina egna diskar"
+  ],
+  [
+   "(\\d+) chunks have no copy in external storage \\(S3 and the like\\)",
+   "$1 block har ingen kopia i extern lagring (S3 m.fl.)"
+  ],
+  [
+   "(\\d+) chunks have no copy on any storage",
+   "$1 block har ingen kopia på någon lagringsplats"
+  ],
+  [
+   "(\\d+) chunks have fewer than (\\d+) copies",
+   "$1 block har färre än $2 kopior"
   ],
   [
    "(\\d+) chunks were not verified by another device within (\\d+) days",

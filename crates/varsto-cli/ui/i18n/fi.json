@@ -115,7 +115,7 @@
   "Copies in place '": "Kopiot paikassa '",
   "Copies on any storage": "Kopiot missä tahansa tallennuspaikassa",
   "Copies on disks in different places": "Kopiot levyillä eri paikoissa",
-  "Copies on own devices and disks": "Kopiot omilla laitteilla ja levyillä",
+  "Copies on own disks": "Kopiot omilla levyillä",
   "Could not create the organization": "Organisaation luominen epäonnistui",
   "Could not remove the device": "Laitteen poistaminen epäonnistui",
   "Could not remove the user": "Käyttäjän poistaminen epäonnistui",
@@ -1131,7 +1131,7 @@
   "Keep a copy of {folder} in another place: {places}": "Säilytä kansiosta {folder} kopio toisessa paikassa: {places}",
   "The folder's policy asks for a copy in each of these places, and you have no storage there yet.": "Kansion säilytyssääntö vaatii kopion jokaiseen näistä paikoista, eikä sinulla ole siellä vielä tallennuspaikkaa.",
   "For the cloud, add an S3 bucket or an rclone remote. For home, add a directory on a disk or NAS, or a pool of disks.": "Pilveä varten lisää S3-säilö tai rclone-etäkohde. Kotia varten lisää hakemisto levyltä tai NAS-laitteesta tai levyvarasto.",
-  "The default policy asks for one copy at home and one in the cloud, checked by another device within 30 days. You can change it on the Policies page.": "Oletussääntö vaatii yhden kopion kotona ja yhden pilvessä, ja toisen laitteen on tarkistettava ne 30 päivän välein. Voit muuttaa sääntöä Säilytyssäännöt-sivulla.",
+  "The default policy asks for one copy on your own disks and one in the cloud, checked by another device within 30 days. You can change it on the Policies page.": "Oletussääntö vaatii yhden kopion omilla levyillä ja yhden pilvessä, ja toisen laitteen on tarkistettava ne 30 päivän välein. Voit muuttaa sääntöä Säilytyssäännöt-sivulla.",
   "Give {folder} the copies its policy asks for": "Anna kansiolle {folder} sen säilytyssäännön vaatimat kopiot",
   "The policy says how many copies the folder needs and where; some blocks do not have them now.": "Säilytyssääntö kertoo, montako kopiota kansio tarvitsee ja missä; osalta lohkoista ne nyt puuttuvat.",
   "The policy asks for {min} copies, but there are only {have} storages. Add a storage, or lower the number in the policy.": "Sääntö vaatii {min} kopiota, mutta tallennuspaikkoja on vain {have}. Lisää tallennuspaikka tai pienennä säännön lukua.",
@@ -1194,7 +1194,7 @@
   "Keep snapshots of a directory": "Säilytä hakemistosta versioita",
   "A backup keeps read-only snapshots, for example of a project folder, for as many days as you choose.": "Varmuuskopio säilyttää vain luku -versioita esimerkiksi projektikansiosta niin monta päivää kuin haluat.",
   "Choose how many copies each folder needs": "Valitse, montako kopiota kukin kansio tarvitsee",
-  "Every folder follows a policy: by default one copy at home and one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short.": "Jokaisella kansiolla on säilytyssääntö: oletuksena yksi kopio kotona ja yksi pilvessä, ja toinen laite tarkistaa ne 30 päivän välein. Varsto varoittaa, jos kansio jää vajaaksi.",
+  "Every folder follows a policy: by default one copy on your own disks and one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short.": "Jokaisella kansiolla on säilytyssääntö: oletuksena yksi kopio omilla levyillä ja yksi pilvessä, ja toinen laite tarkistaa ne 30 päivän välein. Varsto varoittaa, jos kansio jää vajaaksi.",
   "Deleted files are kept {days} days": "Poistettuja tiedostoja säilytetään {days} päivää",
   "Files deleted on any device go to the trash first. You can restore them or change how long they are kept.": "Millä tahansa laitteella poistetut tiedostot menevät ensin roskakoriin. Voit palauttaa ne tai muuttaa, kuinka kauan niitä säilytetään.",
   "Share a folder with someone": "Jaa kansio jonkun kanssa",
@@ -1276,7 +1276,7 @@
   "Backups on the website": "Varmuuskopiot verkkosivuilla",
   "A file deleted on any device goes to the trash first and is kept there for a number of days (30 unless you change it). From the Trash page you can restore it to where it was, or delete it for good.": "Millä tahansa laitteella poistettu tiedosto menee ensin roskakoriin ja säilyy siellä tietyn määrän päiviä (30, ellet muuta sitä). Roskakori-sivulta voit palauttaa sen entiselle paikalleen tai poistaa sen lopullisesti.",
   "Policies, checks and repair": "Säilytyssäännöt, tarkistukset ja korjaus",
-  "A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy at home, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.": "Säilytyssääntö kertoo, montako kopiota kansio tarvitsee, missä paikoissa ja kuinka usein toisen laitteen on tarkistettava ne. Jokainen kansio saa aluksi oletussäännön: yksi kopio kotona, yksi pilvessä, ja toinen laite tarkistaa ne 30 päivän välein. Varsto varoittaa, jos kansio jää vajaaksi, ja kertoo, mitä puuttuu.",
+  "A policy says how many copies a folder needs, in which places, and how often another device must check them. Every folder starts with the default: one copy on your own disks, one in the cloud, checked by another device within 30 days. Varsto warns you when a folder falls short and tells you what is missing.": "Säilytyssääntö kertoo, montako kopiota kansio tarvitsee, missä paikoissa ja kuinka usein toisen laitteen on tarkistettava ne. Jokainen kansio saa aluksi oletussäännön: yksi kopio omilla levyillä, yksi pilvessä, ja toinen laite tarkistaa ne 30 päivän välein. Varsto varoittaa, jos kansio jää vajaaksi, ja kertoo, mitä puuttuu.",
   "Verification reads copies back now and then; the bit-rot check re-hashes copies and files on this device; repair replaces a damaged copy with a good one. All three run by themselves and can be started on the Policies page.": "Tarkistus lukee kopioita takaisin aika ajoin; bittimädän tarkistus laskee kopioiden ja tämän laitteen tiedostojen tiivisteet uudelleen; korjaus korvaa vioittuneen kopion ehjällä. Kaikki kolme toimivat itsestään, ja ne voi käynnistää Säilytyssäännöt-sivulta.",
   "Disk pools": "Levyvarastot",
   "Eject a disk on the Storages page before you unplug it.": "Poista levy asemasta Tallennuspaikat-sivulla ennen kuin irrotat sen.",
@@ -1634,6 +1634,8 @@
   "policy met": "sääntö täyttyy",
   "at risk": "vaarassa",
   "violated": "rikottu",
+  "no own disk": "ei omaa levyä",
+  "No copy on your own disks: this vault has no disk pool or directory storage. Add one, or change the folder's policy on the Policies page.": "Ei kopiota omilla levyillä: tässä holvissa ei ole levyvarastoa eikä hakemistotallennuspaikkaa. Lisää sellainen tai muuta kansion sääntöä Säilytyssäännöt-sivulla.",
   "stored, not yet verified": "tallennettu, ei vielä tarkistettu",
   "stored, verification pending": "tallennettu, tarkistus odottaa",
   "only on this device": "vain tällä laitteella",
@@ -2779,8 +2781,8 @@
    "$1 ulkoisessa tallennuspaikassa (S3 ym.)"
   ],
   [
-   "(\\d+) on your own devices and disks",
-   "$1 omilla laitteilla ja levyillä"
+   "(\\d+) on your own disks",
+   "$1 omilla levyillä"
   ],
   [
    "verified within (\\d+) days",
@@ -2799,8 +2801,24 @@
    "$1 lohkolla on alle $2 kopiota ulkoisessa tallennuspaikassa (S3 ym.)"
   ],
   [
-   "(\\d+) chunks have fewer than (\\d+) copies on your own devices and disks",
-   "$1 lohkolla on alle $2 kopiota omilla laitteilla ja levyillä"
+   "(\\d+) chunks have fewer than (\\d+) copies on your own disks",
+   "$1 lohkolla on alle $2 kopiota omilla levyillä"
+  ],
+  [
+   "(\\d+) chunks have no copy on your own disks",
+   "$1 lohkolla ei ole kopiota omilla levyillä"
+  ],
+  [
+   "(\\d+) chunks have no copy in external storage \\(S3 and the like\\)",
+   "$1 lohkolla ei ole kopiota ulkoisessa tallennuspaikassa (S3 ym.)"
+  ],
+  [
+   "(\\d+) chunks have no copy on any storage",
+   "$1 lohkolla ei ole kopiota millään tallennuspaikalla"
+  ],
+  [
+   "(\\d+) chunks have fewer than (\\d+) copies",
+   "$1 lohkolla on alle $2 kopiota"
   ],
   [
    "(\\d+) chunks were not verified by another device within (\\d+) days",
