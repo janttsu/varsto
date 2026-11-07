@@ -25,8 +25,8 @@
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/">
 <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv","fr"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/fi/","description":"Varsto-sovellus: päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android, iOS","softwareVersion":"0.0.1-alpha.16","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.16","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=e9308487f1">
-<script src="../assets/js/theme.js?v=0951491269"></script>
+<link rel="stylesheet" href="../assets/css/site.css?v=469c3ccb27">
+<script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
 <a class="skip" href="#main">Siirry sisältöön</a>
@@ -35,31 +35,37 @@
 </div>
 <header class="site">
   <div class="wrap">
-    <a class="brand" href="../fi/"><img src="../assets/img/logo.svg" alt="" width="28" height="28"><span>Varsto</span></a>
-    <nav class="langs" aria-label="Language"><a href="../" hreflang="en" lang="en">English</a> <a href="../fi/" hreflang="fi" lang="fi" aria-current="true">Suomi</a> <a href="../sv/" hreflang="sv" lang="sv">Svenska</a> <a href="../fr/" hreflang="fr" lang="fr">Français</a></nav>
-
-    <nav class="main" aria-label="Main">
-      <a href="../fi/" aria-current="page">Projekti</a>
+    <a class="brand" href="../fi/"><img src="../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Päävalikko">
       <a href="../fi/features/">Ominaisuudet</a>
-      <a href="../fi/use-cases/">Käyttötapaukset</a>
-      <a href="../fi/compare/">Vertailu</a>
       <a href="../fi/how-it-works/">Miten se toimii</a>
-      <a href="../fi/screenshots/">Kuvakaappaukset</a>
+      <a href="../fi/compare/">Vertailu</a>
       <a href="../docs/">Dokumentaatio (en)</a>
-      <a href="../fi/downloads/">Lataukset</a>
       <a href="../blog/">Blogi (en)</a>
-      <a href="../forum/">Foorumi (en)</a>
-      <a href="../fi/contribute/">Osallistu</a>
-      <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>
-      <button class="theme" id="theme-toggle" type="button" aria-label="Change colour theme">Theme: auto</button>
     </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../" hreflang="en" lang="en">English</a><a href="../fi/" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../sv/" hreflang="sv" lang="sv">Svenska</a><a href="../fr/" hreflang="fr" lang="fr">Français</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../fi/downloads/">Lataa</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Valikko"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Valikko"><a href="../fi/" aria-current="page">Projekti</a><a href="../fi/features/">Ominaisuudet</a><a href="../fi/use-cases/">Käyttötapaukset</a><a href="../fi/compare/">Vertailu</a><a href="../fi/how-it-works/">Miten se toimii</a><a href="../fi/screenshots/">Kuvakaappaukset</a><a href="../docs/">Dokumentaatio (en)</a><a href="../fi/downloads/">Lataukset</a><a href="../blog/">Blogi (en)</a><a href="../forum/">Foorumi (en)</a><a href="../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
   </div>
 </header>
 <main id="main">
   <div class="wrap">
-    <h1>Tuo oma tallennuspaikkasi. Pidä omat avaimesi. Tiedä, missä jokainen lohko on.</h1>
-    <p class="lead">Päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi laitteidesi välillä, jälkikvanttisella hybridikryptografialla ja kirjanpidolla, jonka voit itse tarkastaa. Ei palvelinta, ei tiliä, ei palveluntarjoajaa, johon pitäisi luottaa.</p>
-    <p><a class="button" href="downloads/">Lataa alfa</a> <a class="button secondary" href="../docs/quick-start.html">Pika-aloitus</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Lähdekoodi GitHubissa</a></p>
+    <section class="hero">
+      <canvas class="field" id="field" aria-hidden="true"></canvas>
+      <h1>Tuo oma tallennuspaikkasi. Pidä omat avaimesi. Tiedä, missä jokainen lohko on.</h1>
+      <p class="lead">Päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi laitteidesi välillä, jälkikvanttisella hybridikryptografialla ja kirjanpidolla, jonka voit itse tarkastaa. Ei palvelinta, ei tiliä, ei palveluntarjoajaa, johon pitäisi luottaa.</p>
+      <div class="cta"><a class="button" href="downloads/">Lataa alfa</a> <a class="button secondary" href="../docs/quick-start.html">Pika-aloitus</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Lähdekoodi GitHubissa</a></div>
+      <nav class="platforms" aria-label="Lataukset"><a href="downloads/">Linux</a> <a href="downloads/">Windows</a> <a href="downloads/">macOS</a> <a href="downloads/">Android</a> <a href="downloads/">iOS</a></nav>
+    </section>
+    <figure class="stage"><div class="window"><div class="window-bar"><i></i><i></i><i></i><span>varsto</span></div><picture class="theme-dark"><img src="../assets/img/screenshots/desktop-where-dark.png?v=2cf4181b0d" alt="Missä datasi on: Varsto seuraa jokaisen kansion niihin tallennuspaikkoihin ja laitteisiin, joilla sen lohkot ovat, ja laskee jokaisen lohkon kopiot." width="976" height="669"></picture><picture class="theme-light"><img src="../assets/img/screenshots/desktop-where-light.png?v=8adbba14cc" alt="Missä datasi on: Varsto seuraa jokaisen kansion niihin tallennuspaikkoihin ja laitteisiin, joilla sen lohkot ovat, ja laskee jokaisen lohkon kopiot." width="976" height="669" loading="lazy"></picture></div></figure>
+
+    <div class="home">
 
     <h2>Miksi Varsto on erilainen</h2>
     <div class="grid">
@@ -73,7 +79,7 @@
 
     <h2 id="where">Missä datasi voi olla</h2>
     <p>Mikä tahansa hakemisto, johon tämä laite ylettyy, NAS tai verkkojako, mikä tahansa S3-yhteensopiva bucket omilla avaimillasi (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO ja muut), mikä tahansa rclone-etäkohde (SFTP, WebDAV, Google Drive ja muut), kylmät arkistoluokat, joihin kirjoitetaan mutta joista ei koskaan lueta ilman vahvistustasi, sekä hyllyllä olevista irrotettavista levyistä kootut levyvarastot. Käytä useita yhtä aikaa; jokaisella on sijaintinimiö ja hinta, joten säilytyssääntö voi vaatia yhden kopion kodin ulkopuolelle ja sovellus näyttää, mitä kukin kansio maksaa kuukaudessa. Tiedostot pilkotaan lohkoiksi, pakataan ja salataan laitteellasi, joten tallennuspaikka näkee aina vain läpinäkymättömiä objekteja ja niiden koot, ei koskaan tiedostonimiä, selväkielisten tiedostojen tiivisteitä tai sisältöä.</p>
-    <figure class="hero"><picture class="theme-light"><source type="image/webp" srcset="../assets/img/hero.webp?v=f2481e59f5"><img src="../assets/img/hero.png?v=6d41c5852e" alt="Kaavio: avaimesi keskellä, salatuin yhteyksin kytkettyinä S3-ämpäriin, kylmäarkistoon, hyllyn kiintolevyihin, NAS-laitteeseen, kannettavaan ja puhelimeen; jokaisessa paikassa on vain lukittuja, salattuja lohkoja." width="1200" height="600"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/hero-dark.webp?v=9d1431c50e"><img src="../assets/img/hero-dark.png?v=e46b35baa4" alt="Kaavio: avaimesi keskellä, salatuin yhteyksin kytkettyinä S3-ämpäriin, kylmäarkistoon, hyllyn kiintolevyihin, NAS-laitteeseen, kannettavaan ja puhelimeen; jokaisessa paikassa on vain lukittuja, salattuja lohkoja." width="1200" height="600" loading="lazy"></picture><figcaption>Kopiot sinne, minne itse päätät: ämpäriin, kylmäarkistoon, hyllyn vanhoille levyille, omille koneillesi. Jokainen kopio on salakirjoitusta; avaimet pysyvät sinulla.</figcaption></figure>
+    <figure class="hero"><picture class="theme-light"><source type="image/webp" srcset="../assets/img/hero.webp?v=f2481e59f5"><img loading="lazy" src="../assets/img/hero.png?v=6d41c5852e" alt="Kaavio: avaimesi keskellä, salatuin yhteyksin kytkettyinä S3-ämpäriin, kylmäarkistoon, hyllyn kiintolevyihin, NAS-laitteeseen, kannettavaan ja puhelimeen; jokaisessa paikassa on vain lukittuja, salattuja lohkoja." width="1200" height="600"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/hero-dark.webp?v=9d1431c50e"><img src="../assets/img/hero-dark.png?v=e46b35baa4" alt="Kaavio: avaimesi keskellä, salatuin yhteyksin kytkettyinä S3-ämpäriin, kylmäarkistoon, hyllyn kiintolevyihin, NAS-laitteeseen, kannettavaan ja puhelimeen; jokaisessa paikassa on vain lukittuja, salattuja lohkoja." width="1200" height="600"></picture><figcaption>Kopiot sinne, minne itse päätät: ämpäriin, kylmäarkistoon, hyllyn vanhoille levyille, omille koneillesi. Jokainen kopio on salakirjoitusta; avaimet pysyvät sinulla.</figcaption></figure>
 
     <h2 id="security">Tietoturva, rehellisesti</h2>
     <ul>
@@ -107,7 +113,7 @@
 
     <h2 id="status">Rehellinen tilannekuva</h2>
     <ul>
-      <li>Julkaistu versio: 0.0.1-alpha.16. Alfa on pystysuora läpileikkaus: ydinkirjasto, komentorivi, taustapalvelu, ilmoitusalueen ja valikkorivin kuoret, Android-kuori, noin 234 000 riviä Rustia, 1233 automaattista testiä ja 59 skenaarion testilaboratorio koti- ja toimisto-NATin taakse sijoitetuilla virtuaalikoneilla: offline-yhtenäistyminen, ristiriidat, palautetun laitteen eristys, replikat, jakaminen, säilytyssäännöt, vertaiset, Strongroomit, levyvarastot, varmuuskopiot ja muuta. Käytä sitä vain testidatalla.</li>
+      <li>Julkaistu versio: 0.0.1-alpha.16. Alfa on pystysuora läpileikkaus: ydinkirjasto, komentorivi, taustapalvelu, ilmoitusalueen ja valikkorivin kuoret, Android-kuori, noin 238 000 riviä Rustia, 1263 automaattista testiä ja 59 skenaarion testilaboratorio koti- ja toimisto-NATin taakse sijoitetuilla virtuaalikoneilla: offline-yhtenäistyminen, ristiriidat, palautetun laitteen eristys, replikat, jakaminen, säilytyssäännöt, vertaiset, Strongroomit, levyvarastot, varmuuskopiot ja muuta. Käytä sitä vain testidatalla.</li>
       <li>Kryptografista suunnittelua ei ole katselmoitu eikä auditoitu. <a href="../docs/threat-model.html">Uhkamalli</a> ja <a href="../docs/failure-model.html">vikamalli</a> kertovat, mitä suunnittelulla tavoitellaan ja mihin se päättyy.</li>
       <li>Lähdekoodi on julkisesti osoitteessa <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a> -lisenssillä (lähdekoodi saatavilla, ei avointa lähdekoodia); virheet ja kysymykset kuuluvat siellä olevaan vikaseurantaan. Tallennusmuoto on <a href="../docs/alpha-0-format.html">dokumentoitu</a>, jotta datasi pysyy palautettavissa.</li>
       <li>Varsto on kirjoitettu Rustilla, ja siinä on Swift- ja Kotlin-kuoret sekä tavallinen web-käyttöliittymä. Apu on tervetullutta tietoturvakatselmoinnissa, alustatyössä, verkko- ja tallennustestauksessa, paketoinnissa ja käännöksissä: <a href="contribute/">näin osallistut</a>.</li>
@@ -135,15 +141,24 @@ sha256sum -c --ignore-missing SHA256SUMS</code></pre><p><code>varsto update</cod
 <li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-7-pairing-and-finder.html">Alpha.7: pair devices with a code, Finder actions, and a real NAT path</a><br><span class="note">Devices now pair from the interface with a one-time code, Finder can download a placeholder or free up space with a right-click, the macOS app installs from a disk image, devices reach each other through NAT, and removable disks can form a pool.</span></li>
 <li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-6-source-on-github.html">Alpha.6: the source is public, and every platform builds in the cloud</a><br><span class="note">The repository is now public on GitHub under the PolyForm Shield licence, the native macOS and iOS apps build on GitHub Actions, Linux, Windows and Android build on short-lived cloud machines, and the interface was redone around a file view.</span></li>
 <li><time datetime="2026-10-08">2026-10-08</time> <a href="../blog/2026-10-08-alpha-0.html">Alpha-0: the first vertical slice</a><br><span class="note">A command-line tool that encrypts, stores and syncs a folder between two devices through storage you own, with a signed ledger you can check.</span></li></ul>
+    </div>
 
   </div>
 </main>
 <footer class="site">
-  <div class="wrap">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../fi/"><img src="../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan.</p></div>
+    <div><h2>Tuote</h2><nav aria-label="Tuote"><a href="../fi/" aria-current="page">Projekti</a><a href="../fi/features/">Ominaisuudet</a><a href="../fi/use-cases/">Käyttötapaukset</a><a href="../fi/screenshots/">Kuvakaappaukset</a><a href="../fi/downloads/">Lataukset</a></nav></div>
+    <div><h2>Opi</h2><nav aria-label="Opi"><a href="../fi/how-it-works/">Miten se toimii</a><a href="../fi/compare/">Vertailu</a><a href="../docs/">Dokumentaatio (en)</a><a href="../blog/">Blogi (en)</a></nav></div>
+    <div><h2>Yhteisö</h2><nav aria-label="Yhteisö"><a href="../forum/">Foorumi (en)</a><a href="../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
     <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
     <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
     <span><a href="../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../docs/licence.html">Lisenssi</a> · <a href="../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
   </div>
+  <div class="foot-mark" aria-hidden="true">varsto</div>
 </footer>
+<script src="../assets/js/field.js?v=434aa9efd0" defer></script>
 </body>
 </html>
