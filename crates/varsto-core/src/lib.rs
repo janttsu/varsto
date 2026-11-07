@@ -46,6 +46,7 @@ pub mod media;
 pub mod membership3;
 pub mod names;
 pub mod netif;
+pub mod notify;
 pub mod org;
 pub mod p2p;
 pub mod pack;

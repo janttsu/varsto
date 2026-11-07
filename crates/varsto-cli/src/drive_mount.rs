@@ -35,7 +35,7 @@ pub fn mount_checked(
             let _ = varsto_core::diskconf::record_check(home, &drive.partuuid, &out);
             if let Some(m) = out.message(&drive.label) {
                 eprintln!("warning: {m}");
-                crate::service::notify("Varsto disk", &m);
+                crate::service::notify(varsto_core::notify::Category::Disks, "Varsto disk", &m);
             }
             if !json_out && !out.summary.is_empty() {
                 eprintln!("  {}", out.summary);
@@ -45,7 +45,11 @@ pub fn mount_checked(
         Err(e) => {
             if let Some(stop) = e.downcast_ref::<blockdev::FsckStopped>() {
                 let _ = varsto_core::diskconf::record_check(home, &drive.partuuid, &stop.outcome);
-                crate::service::notify("Varsto disk", &stop.message);
+                crate::service::notify(
+                    varsto_core::notify::Category::Disks,
+                    "Varsto disk",
+                    &stop.message,
+                );
             }
             Err(e)
         }

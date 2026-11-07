@@ -122,8 +122,8 @@ varsto import torrent <file.torrent | 'magnet:?xt=urn:btih:…'> [--folder <name
   inside Varsto's own device directory is refused.
 - The new folder's durability policy is "1 copy on a storage"
   (`--min-copies N` for more). A file leaves the download disk only when the
-  policy holds, and the default policy also asks for a copy on your own
-  devices or disks checked by another device, which a download straight to a
+  policy holds, and the default policy also asks for a copy on your own disks
+  (a directory or a disk pool) checked by another device, which a download straight to a
   bucket never has; `--keep-policy` keeps it anyway (files then wait on the
   disk until it holds).
 - The torrent is added to transmission stopped with every file unwanted. A

@@ -24,3 +24,7 @@ You are an agent asked to run Varsto's tests. Follow this exactly.
 ## What to escalate
 
 Anything involving: keys or secrets appearing in logs, data loss in a test that should not lose data, results that differ between identical runs without a seed explanation, or anything you are not sure is safe.
+
+## Multi-device scenarios (the VM lab)
+
+The steps above are for the single-VM `smoke` suite. The multi-device scenarios (pairing, NAT, outages, scale, offline) run in the VM lab and follow [lab.md](lab.md): bring the lab up, install the binary under test, run **every** scenario for a release, collect `test-results/lab/results.json` and the logs, stop the host services and tear the lab down. The safety rules above apply there too: the lab uses only its own `vl-*` VMs and networks, generated data and the fixed lab credentials; do not point it at anything else. Benchmarks on rented machines ([benchmarks.md](benchmarks.md)) cost money and are not part of a test run unless the task says so.

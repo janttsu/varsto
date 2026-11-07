@@ -199,7 +199,7 @@ impl Engine {
                 FolderChoice::Named(ids)
             }
         };
-        fs::create_dir_all(&cfg.root)
+        util::private_dir(&cfg.root)
             .with_context(|| format!("create the mirror root {}", cfg.root.display()))?;
         cfg.root = canonical(&cfg.root)?;
         if cfg.root.starts_with(&self.home) {
@@ -325,7 +325,7 @@ impl Engine {
                 }
                 continue;
             }
-            fs::create_dir_all(target)?;
+            util::private_dir(target)?;
             self.config.folders.push(FolderMount {
                 folder_id: rec.folder_id.clone(),
                 path: canonical(target)?,
@@ -386,7 +386,7 @@ impl Engine {
                 );
                 continue;
             }
-            if fs::create_dir_all(&target).is_err() {
+            if util::private_dir(&target).is_err() {
                 continue;
             }
             let Ok(path) = canonical(&target) else {

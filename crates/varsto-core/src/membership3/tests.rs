@@ -1524,6 +1524,68 @@ fn a_non_admin_cannot_revoke_or_wipe() {
     assert_eq!(open.vault_keys.newest_epoch(), 1);
 }
 
+/// Joining reads the organization. A roster member's revocation is not
+/// adopted when the manifest names someone else as administrator.
+#[test]
+fn joining_a_vault_uses_the_organization_administrators() {
+    let s = Mem::default();
+    let st: Vec<&dyn Storage> = vec![&s];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let ma = device(&st, &a, &keys, "admin");
+    let mut mb = device(&st, &b, &keys, "member");
+    let _mc = device(&st, &c, &keys, "other");
+    mb.refresh().unwrap();
+    mb.remove_device(&ma.me, 0, true, None)
+        .expect("a modified client can write the epoch");
+    let root = crate::org::root_signer(&SecretKey::random());
+    let vault_id = crate::ids::VaultId::from_bytes(&VAULT);
+    let manifest = crate::org::Manifest {
+        org_id: crate::org::org_id_for(&root.public()),
+        name: "Acme".into(),
+        seq: 1,
+        previous_hash: String::new(),
+        issued_utc: 1,
+        root_pubkey_hex: hex::encode(root.public().to_bytes()),
+        admins: vec![crate::org::Admin {
+            device: crate::ids::DeviceId::from_bytes(&ma.me),
+            name: "hq".into(),
+        }],
+        roster_seq: 0,
+    };
+    let signed = crate::org::SignedManifest::seal(
+        &manifest,
+        &vault_id,
+        0,
+        keys.get(0).unwrap(),
+        &root,
+    )
+    .unwrap();
+    let raw = serde_json::to_vec(&signed).unwrap();
+    s.put_if_absent(&crate::org::SignedManifest::storage_key(1, 0), &raw)
+        .unwrap();
+    let n = Dev::new();
+    let joined = Membership::join_in_vault(
+        VAULT,
+        &vault_id,
+        &st,
+        &n.sign,
+        &n.kem,
+        keys.k3_0().unwrap().clone(),
+    )
+    .unwrap();
+    assert!(
+        !joined.is_revoked(&ma.me),
+        "a member's revocation must not open an organization vault"
+    );
+    assert_eq!(joined.vault_keys.newest_epoch(), 0);
+    let without = Membership::join(VAULT, &st, &n.sign, &n.kem, keys.k3_0().unwrap().clone()).unwrap();
+    assert!(
+        without.is_revoked(&ma.me),
+        "without the organization the same records still count"
+    );
+}
+
 /// A device removed from the vault can remain a participant of a folder
 /// this device could not re-key. The next folder epoch must not hand it
 /// the new key through the stay set.

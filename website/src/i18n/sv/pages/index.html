@@ -35,6 +35,10 @@ description: Varsto: end-to-end-krypterad synkronisering, delning och säkerhets
     <h2 id="teams">För team</h2>
     <p>En organisation lägger till det lager som ett företag behöver ovanpå ett valv: administratörer godkänner enheter för namngivna personer efter att ha jämfört ett fingeravtryck på sex ord med dem, tar bort en person med alla hens enheter i ett steg (de kvarvarande enheterna får nya nycklar), bestämmer vad medlemmar får göra på egen hand och för en logg över allt detta som signeras av deras enheter och kedjas. Rotnyckeln som utser administratörer är 24 ord på papper, aldrig på en enhet. Ett valv utan organisation påverkas inte av något av detta. <a href="{{L}}features/#organizations">Organisationer</a>.</p>
 
+    <h2 id="developers">För utvecklare</h2>
+    <p>Varsto är en Rust-arbetsyta på <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>. <code>varsto-core</code> är motorn och lagringsformatet, <code>varsto-cli</code> är kommandoraden, tjänsten och webbgränssnittet, och <code>varsto-ffi</code> är det som Swift- och Kotlin-skalen anropar. Formatet är nerskrivet, och ett labb med virtuella maskiner kör scenarierna. Licensen är <a href="{{P}}docs/licence.html">PolyForm Shield 1.0.0</a>: källkoden är tillgänglig, och licensen är inte en OSI-licens för öppen källkod. Etiketterna <code>help wanted</code> och <code>good first issue</code> visar var en ny bidragsgivare kan börja när sådana finns. En felrapport eller en liten dokumentationsändring är välkommen när listan är tom.</p>
+    <p><a class="button" href="{{L}}contribute/">Så bidrar du</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Ärenden</a> <a class="button secondary" href="{{P}}docs/contributing.html">Regler (en)</a> <a class="button secondary" href="{{P}}docs/alpha-0-format.html">Lagringsformat</a></p>
+
     <h2 id="next">Nytt i {{RELEASED}}</h2>
     <p class="note">Lagringsformat 3 och det som följer med. Valv som skapats med 0.0.1-alpha.15 eller äldre måste skapas på nytt:</p>
     <ul>
