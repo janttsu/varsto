@@ -308,10 +308,7 @@ pub fn admins_for_join(
     let mut root: Option<VerifyingKey> = None;
     let mut current: Option<Manifest> = None;
     let mut want = 1u32;
-    loop {
-        let Some(cands) = by_seq.get(&want) else {
-            break;
-        };
+    while let Some(cands) = by_seq.get(&want) {
         let mut adopted = false;
         for (_name, blob) in cands {
             let Ok(signed) = serde_json::from_slice::<SignedManifest>(blob) else {
