@@ -22,6 +22,10 @@ spec still names them because sections were written as the work was done.
 
 ### Fixed
 
+- Thumbnails in the file list show on phones again: the service answers "busy"
+  (503, with Retry-After) instead of "no thumbnail" when the engine is busy
+  and the page retries; two requests at a time, a memory-only cache for
+  re-rendered lists, no lazy-loading attribute.
 - The default policy no longer reports a folder as violated in a vault without a disk pool or directory storage: the folder gets one warning that there is no copy on your own disks and how to add one (a policy set on purpose that asks for a copy at home is still held to it). The texts say "your own disks" (copies on devices were never counted) and "no copy" instead of "fewer than 1 copies"; on the Visualization page the reason shows under the bar of the "Is it safe?" card, the policy line wraps on phones, and the repair line no longer shows the key epoch.
 
 

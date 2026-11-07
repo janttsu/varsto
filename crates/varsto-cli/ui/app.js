@@ -18,15 +18,55 @@
   // Pictures and the viewer's links cannot send a header. Thumbnails are
   // fetched with the header and shown from a blob; the links of downloads and
   // the viewer carry a ticket for that one file (POST /api/ticket).
-  var thumbQueue = [], thumbBusy = 0;
+  // The engine serves one request at a time, so two at once are enough. A
+  // "busy" answer (503) is retried later; only 404 (or the last try) shows
+  // the icon. Decoded thumbnails stay in memory only (object URLs, at most
+  // 300, never on disk: the service sends no-store on purpose) so a list that
+  // is drawn again shows them without asking.
+  var thumbQueue = [], thumbBusy = 0, thumbCache = new Map(), THUMB_CACHE_MAX = 300, THUMB_TRIES = 6;
+  function thumbClear() {
+    thumbCache.forEach(function (u) { URL.revokeObjectURL(u); });
+    thumbCache.clear(); thumbQueue.length = 0;
+  }
+  function thumbKeep(url, u) {
+    thumbCache.set(url, u);
+    while (thumbCache.size > THUMB_CACHE_MAX) {
+      var oldest = thumbCache.keys().next().value;
+      URL.revokeObjectURL(thumbCache.get(oldest)); thumbCache.delete(oldest);
+    }
+  }
+  function thumbDone() { thumbBusy--; thumbPump(); }
+  function thumbRetry(job, waitMs) {
+    job.tries = (job.tries || 0) + 1;
+    if (job.tries >= THUMB_TRIES) { if (job.img.onerror) { job.img.onerror(); } thumbDone(); return; }
+    var delay = Math.min(30000, Math.max(waitMs, 500 * Math.pow(2, job.tries - 1)));
+    thumbDone();
+    setTimeout(function () { if (job.img.isConnected) { thumbQueue.push(job); thumbPump(); } }, delay);
+  }
   function thumbFetch(job) {
-    fetch(job.url, { headers: { "X-Varsto-Token": token } }).then(function (r) { if (!r.ok) { throw new Error("no thumbnail"); } return r.blob(); })
-      .then(function (b) { var u = URL.createObjectURL(b); job.img.onload = function () { URL.revokeObjectURL(u); }; job.img.src = u; })
-      .catch(function () { if (job.img.onerror) { job.img.onerror(); } })
-      .then(function () { thumbBusy--; thumbPump(); });
+    if (!job.img.isConnected) { thumbDone(); return; }
+    var hit = thumbCache.get(job.url);
+    if (hit) { job.img.src = hit; thumbDone(); return; }
+    fetch(job.url, { headers: { "X-Varsto-Token": token } }).then(function (r) {
+      if (r.ok) {
+        // A body that breaks off is retried like a network error: the slot is freed either way.
+        return r.blob().then(function (b) {
+          var u = URL.createObjectURL(b); thumbKeep(job.url, u);
+          if (job.img.isConnected) { job.img.src = u; }
+          thumbDone();
+        }, function () { thumbRetry(job, 2000); });
+      }
+      if (r.status === 503) {
+        var ra = parseInt(r.headers.get("Retry-After"), 10);
+        thumbRetry(job, (isNaN(ra) || ra < 0 ? 2 : ra) * 1000);
+      } else {
+        if (job.img.onerror) { job.img.onerror(); }
+        thumbDone();
+      }
+    }, function () { thumbRetry(job, 2000); });
   }
   function thumbPump() {
-    while (thumbBusy < 6 && thumbQueue.length) { thumbBusy++; thumbFetch(thumbQueue.shift()); }
+    while (thumbBusy < 2 && thumbQueue.length) { thumbBusy++; thumbFetch(thumbQueue.shift()); }
   }
   var thumbSeen = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver(function (entries) {
     entries.forEach(function (en) { if (en.isIntersecting) { thumbSeen.unobserve(en.target); thumbQueue.push(en.target.__thumb); } });
@@ -34,7 +74,10 @@
   }, { rootMargin: "200px" });
   function thumbSrc(img, folder, path) {
     var job = { img: img, url: "/api/thumb?folder=" + encodeURIComponent(folder) + "&path=" + encodeURIComponent(path) };
-    if (!thumbSeen) { thumbQueue.push(job); thumbPump(); return; }
+    var hit = thumbCache.get(job.url);
+    if (hit) { img.src = hit; return; }
+    // No observer: ask once the row is in the page (the connected check skips it before).
+    if (!thumbSeen) { setTimeout(function () { thumbQueue.push(job); thumbPump(); }, 0); return; }
     img.__thumb = job; thumbSeen.observe(img);
   }
   function ticketUrl(route, folder, path) {
@@ -186,7 +229,7 @@
     document.querySelectorAll("[data-org-only]").forEach(function (b) { b.classList.add("hidden"); });
     lastStatus = null;
   }
-  function show(section) { if (section === "setup") { clearVaultViews(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); activityWatch(); taskbarSchedule(section === "app" ? 0 : undefined); }
+  function show(section) { if (section === "setup") { clearVaultViews(); } if (section !== "app") { thumbClear(); } ["setup", "unlock", "app"].forEach(function (id) { $(id).classList.toggle("hidden", id !== section); }); $("lock").classList.toggle("hidden", section !== "app"); document.body.dataset.view = section; if (section !== "app") { $("pagetitle").textContent = section === "setup" ? "Welcome" : "Locked"; } else { $("pagetitle").textContent = pageTitle(currentPage); } trafficWatch(); activityWatch(); taskbarSchedule(section === "app" ? 0 : undefined); }
   function fmtBytes(n) { var u = ["B", "KiB", "MiB", "GiB", "TiB"]; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
   function fmtDate(t) { return t ? new Date(t * 1000).toLocaleDateString() : ""; }
   function formData(form) { var o = {}; new FormData(form).forEach(function (v, k) { o[k] = v; }); form.querySelectorAll("input[type=checkbox]").forEach(function (c) { o[c.name] = c.checked; }); return o; }
@@ -3725,7 +3768,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           var cell = document.createElement("td"); var row = el("div", "mrow-in");
           var pick = el("span", "mrow-pick"); pick.setAttribute("aria-hidden", "true"); row.appendChild(pick);
           var media = el("span", "mrow-thumb");
-          if (f.media) { var mi = document.createElement("img"); mi.alt = showName(f.path.split("/").pop()); mi.loading = "lazy"; mi.onerror = function () { mi.replaceWith(icon("image")); }; media.appendChild(mi); thumbSrc(mi, folder, f.path); } else { media.appendChild(icon("files")); }
+          if (f.media) { var mi = document.createElement("img"); mi.alt = showName(f.path.split("/").pop()); mi.onerror = function () { mi.replaceWith(icon("image")); }; media.appendChild(mi); thumbSrc(mi, folder, f.path); } else { media.appendChild(icon("files")); }
           row.appendChild(media);
           var slash = f.path.lastIndexOf("/");
           var body = el("div", "mrow-body");
@@ -3747,7 +3790,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         function td(t, cls, label) { var d = document.createElement("td"); d.textContent = t; if (cls) { d.className = cls; } if (label) { d.dataset.label = label; } tr.appendChild(d); }
         var nameCell = document.createElement("td"); var wrap = el("span", "file-name");
         wrap.appendChild(stateSquare(f));
-        if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = showName(f.path.split("/").pop()); im.loading = "lazy"; im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); thumbSrc(im, folder, f.path); }
+        if (f.media) { var im = document.createElement("img"); im.className = "thumb"; im.alt = showName(f.path.split("/").pop()); im.onerror = function () { var fi = el("span", "file-icon"); fi.appendChild(icon("image")); im.replaceWith(fi); }; wrap.appendChild(im); thumbSrc(im, folder, f.path); }
         else { var fi = el("span", "file-icon"); fi.appendChild(icon("files")); wrap.appendChild(fi); }
         var fname = el("span", null, showName(f.path)); fname.setAttribute("data-no-i18n", ""); wrap.appendChild(fname);
         if (f.analysis) { var ap = pill(f.analysis_stale ? "risk" : "accent", f.analysis_stale ? "Analysis stale" : "Analysed"); ap.title = f.analysis.slice(0, 200); ap.classList.add("analysis-pill"); wrap.appendChild(ap); }
