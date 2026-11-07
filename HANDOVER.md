@@ -38,8 +38,13 @@ English only, no personal data, no secrets.
   re-checked: CRYPTO-1 (the recovery kit text of format 2), imports-1 (restic
   mirror umask), logging-1/-4 (scrubber gaps), CLI-3/-4 (`current_exe()` after
   an update), QUALITY-1/-2 (mutex `unwrap()` in service.rs, `set_var`).
-- GitHub settings the workflows cannot make: branch protection on `main` and
-  a protected environment for the daily key.
+- GitHub settings, made 2026-11-07: the ruleset "protect main" (no deletion,
+  no force push, changes only through pull requests, no bypass) and the
+  `daily` environment (deployment branch policy: `main` only) that holds the
+  secret `VARSTO_DAILY_KEY`. The daily workflow's package job names the
+  environment on the branch `ci/daily-environment`; until that is merged the
+  repository secret of the same name stays, and it is to be deleted after the
+  merge (`gh secret delete VARSTO_DAILY_KEY -R janttsu/varsto`).
 - A full lab run (`scripts/test/lab`, every scenario) with the alpha.16
   binary has not been done since the review fixes.
 - Android: the APK is signed with a new release key. An installation of an
@@ -62,7 +67,8 @@ English only, no personal data, no secrets.
 - Releases and the daily channel: [RELEASING.md](RELEASING.md). CI builds
   every platform on GitHub-hosted runners (Linux about 1 h 45 min, macOS about
   1 h 10 min); the maintainer signs offline. The daily workflow signs in CI
-  with the repository secret `VARSTO_DAILY_KEY`; the Android release signing
+  with the secret `VARSTO_DAILY_KEY` of the `daily` environment (runs from
+  `main` only); the Android release signing
   uses the `VARSTO_ANDROID_*` secrets. The private keys live only on the
   maintainer's machine (`~/.config/varsto-release/`, mode 600) and are never
   printed or committed.
