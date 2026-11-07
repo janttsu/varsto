@@ -16,9 +16,14 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Changed
+
+- Website: the alpha warning is marked so a search engine does not quote it. Page titles and descriptions name the product and the document. The home page, the docs index and the older release notes point developers at the GitHub repository.
+
 ### Fixed
 
 - The default policy no longer reports a folder as violated in a vault without a disk pool or directory storage: the folder gets one warning that there is no copy on your own disks and how to add one (a policy set on purpose that asks for a copy at home is still held to it). The texts say "your own disks" (copies on devices were never counted) and "no copy" instead of "fewer than 1 copies"; on the Visualization page the reason shows under the bar of the "Is it safe?" card, the policy line wraps on phones, and the repair line no longer shows the key epoch.
+
 
 ## [0.0.1-alpha.16] - 2026-11-04
 

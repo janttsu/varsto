@@ -22,7 +22,7 @@
 #
 # The private key is a PEM file (VARSTO_DAILY_KEY, default
 # ~/.config/varsto-release/daily-key.pem) with its 8-byte key id in hex beside
-# it (daily-key.id). It never goes into the repository; see docs/daily-channel.md.
+# it (daily-key.id). It never goes into the repository; see RELEASING.md (Daily builds).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 key="${VARSTO_DAILY_KEY:-$HOME/.config/varsto-release/daily-key.pem}"

@@ -3,6 +3,8 @@ title: Alpha.14: a security review, its fixes, and everything merged since alpha
 date: 2026-10-14
 summary: A code-level security review of the whole program, the fixes it asked for, a much faster sync, resumable moves to a stack of removable disks, and the twenty-odd features that had been waiting on the main branch since alpha.13.
 ---
+The current release is [0.0.1-alpha.16](https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html). This note describes an older release. [Downloads](https://varsto.net/downloads/) serve alpha.16, and the source is on [GitHub](https://github.com/janttsu/varsto).
+
 Alpha.14 is the largest release so far. It carries two things: the backlog of features that landed on the main branch after alpha.13, and the first round of fixes from a security review that read every line of the program with a hostile storage, a hostile network and a hostile fellow device in mind.
 
 ## The security review

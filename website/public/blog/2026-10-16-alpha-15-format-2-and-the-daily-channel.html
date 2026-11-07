@@ -27,7 +27,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="alpha" role="note">
+<div class="alpha" role="note" data-nosnippet>
   <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
 </div>
 <header class="site">
@@ -54,6 +54,7 @@
 <main id="main">
   <div class="wrap">
 <article class="prose"><h1>Alpha.15: storage format 2, a Windows installer and a daily channel</h1><p class="note"><time datetime="2026-10-16">2026-10-16</time></p>
+<p>The current release is <a href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">0.0.1-alpha.16</a>. This note describes an older release. <a href="https://varsto.net/downloads/">Downloads</a> serve alpha.16, and the source is on <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
 <p>Alpha.15 changes the storage format. That is the main thing to know before updating: vaults made by alpha.14 or earlier cannot be opened by this version and have to be recreated. The rest of the release is a long list of fixes and interface work, a proper Windows installation, and a daily build channel for people who want to test the newest code.</p>
 <h2 id="format-2-and-what-it-means">Format 2 and what it means</h2>
 <p>The security review behind alpha.14 found two problems in how blocks were stored that could not be fixed without changing the format. Format 2 fixes them:</p>
