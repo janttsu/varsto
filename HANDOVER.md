@@ -4,7 +4,30 @@ State of the project for whoever (or whatever) picks it up next. Keep this
 file current in every pull request that changes the state it describes.
 English only, no personal data, no secrets.
 
-## State on 2026-11-07
+## State on 2026-11-08
+
+- `main` is the merge of PR #129. Since the 2026-11-07 state: PR #124
+  (the review fixes, now built and tested on every platform), #125/#127
+  (website redesign), #126 (the pull reuses local blocks; p2p: a failed
+  request rests a peer briefly, a rest ends on a new record, a LAN beacon
+  or an explicit sync, readers serve finished files mid-pull and share
+  requests by peer speed, dead peers are probed side by side), #128 (the
+  Resilio Sync benchmark driver and report) and #129 (its results on the
+  website). The published daily is `20261108-c50f260`, signed with the key
+  of the `daily` environment, on <https://varsto.net/daily/> with its
+  screenshots. Everything in it passed CI on Linux, Windows, macOS,
+  Android and iOS, and the whole workspace test suite locally.
+- Benchmark against Resilio Sync 2.8.1 (docs/testing/resilio-vs-varsto-2026-11.md,
+  rendered at <https://varsto.net/docs/resilio-vs-varsto.html>, summarised
+  on /compare/resilio-sync/ and /benchmarks/ in four languages): Varsto is
+  faster on initial syncs of large, compressible or duplicated data and on
+  a lossy link; after a small change it fetches only the changed blocks but
+  still takes 3–5× longer (the writer's all-folders sync and the reader's
+  re-hashing); its writer service uses several times the memory; Resilio
+  Sync is faster on many small files when it does not stall.
+- Open from the benchmark: the time to propagate a change, the writer's
+  memory, and that a paused service no longer serves peers (by design since
+  #113; the driver pauses nothing).
 
 - The repository is <https://github.com/janttsu/varsto>. The old Bitbucket
   repository holds only a commit that points here; do not push to it.
