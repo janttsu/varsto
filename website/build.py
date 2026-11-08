@@ -88,6 +88,7 @@ DOCS = [
     ("docs/testing/mobile.md", "mobile-testing", "Mobile testing guide", "Project"),
     ("docs/testing/lab.md", "lab-runbook", "VM lab runbook", "Project"),
     ("docs/testing/benchmarks.md", "benchmarks-howto", "Benchmarks and NAT tests", "Project"),
+    ("docs/testing/resilio-vs-varsto-2026-11.md", "resilio-vs-varsto", "Measured against Resilio Sync (November 2026)", "Project"),
     ("BUILDING.md", "building", "Building Varsto", "Project"),
 ]
 
@@ -96,6 +97,7 @@ DOCS = [
 # mobile-testing is kept for people who have the link and left out of the
 # index: it was matching unrelated testing queries.
 DOC_DESCRIPTIONS = {
+    "resilio-vs-varsto": "Varsto's peer-to-peer sync measured against Resilio Sync on three rented machines in Paris, Amsterdam and Warsaw: eight scenarios, two builds, times, bytes, CPU and memory, the method, its limits and the raw data.",
     "quick-start": "Install the Varsto alpha on Linux, macOS, Windows or Android and create a vault on storage you already have. The first command is varsto init. Source and issues are on GitHub.",
     "alpha-0-format": "The Varsto storage format and sync model: encrypted blocks in packs, the signed ledger, and what a storage is allowed to see.",
     "format-versions": "Which storage format each Varsto release uses, and which older vaults that release can still open.",
@@ -411,6 +413,9 @@ def rewrite_links(body: str, slug_by_name: dict[str, str], docs_prefix: str = ""
         if target.startswith(("http://", "https://", "mailto:")) or target.endswith((".html", ".xml")):
             return m.group(0)
         name = os.path.basename(target)
+        if target.startswith("data/"):
+            # Raw data next to a document: the file in the repository.
+            return f'href="{REPO}/blob/main/docs/testing/{target}"'
         if name in slug_by_name:
             return f'href="{docs_prefix}{slug_by_name[name]}.html{frag}"'
         return f'href="{docs_prefix}./"'

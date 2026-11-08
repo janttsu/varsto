@@ -24,7 +24,7 @@
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/benchmarks/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/benchmarks/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=6b19e99415">
+<link rel="stylesheet" href="../../assets/css/site.css?v=ab2697617b">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -76,6 +76,7 @@
         <li><a href="#quic">Kokeiltu ja peruttu: QUIC ensin</a></li>
         <li><a href="#bottlenecks">Yhä hidasta, ja miksi</a></li>
         <li><a href="#when">Milloin vertaisyhteys voittaa ja milloin bucket</a></li>
+        <li><a href="#resilio">Mitattu Resilio Synciä vastaan</a></li>
         <li><a href="#cost">Kustannukset</a></li>
         <li><a href="#limits">Mittauksen rajoitukset</a></li>
       </ol>
@@ -367,6 +368,29 @@
       <li><strong>Bucket skaalautuu monille lukijoille</strong> kuluttamatta kenenkään lähetyskaistaa; monia muita palveleva kotilaite on lähetysnopeutensa rajoittama, elleivät lukijat auta toisiaan kuten edellä.</li>
       <li><strong>Vertaisyhteys ei maksa mitään gigatavua kohden eikä jätä kopiota palveluntarjoajalle.</strong> Data kulkee laitteeltasi laitteellesi; bucket tarvitsee lohkot vain niitä laitteita varten, jotka ovat poissa verkosta silloin, kun muut niitä haluavat.</li>
     </ul>
+
+    <h2 id="resilio">Mitattu Resilio Synciä vastaan (marraskuu 2026)</h2>
+    <p>8. marraskuuta 2026 molemmat ohjelmat siirsivät saman datan samojen kolmen vuokrakoneen välillä (kirjoittaja Pariisissa, lukijat Amsterdamissa ja Varsovassa, 2 vCPU kukin), yksi ohjelma kerrallaan, välittäjät ja seurantapalvelimet pois päältä, ja jokainen tiedosto tarkistettiin jälkikäteen SHA-256-tiivisteellä. Varsto oli daily-käännös 20261108-c50f260; Resilio Sync oli versio 2.8.1, koska 3.1.2 ei synkronoinut asetustiedostosta lainkaan. Kahden ajon mediaanit. "Tavut" on se, mitä lukija vaihtoi muiden koneiden kanssa. Menetelmä, sen rajoitukset, raakadata ja toistamiseen tarvittavat skriptit ovat <a href="../../docs/resilio-vs-varsto.html">mittausraportissa</a> (englanniksi).</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Skenaario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td>44 s · 285 MB</td><td>25 s · 310 MB; yksi ajo kahdesta jumittui 5 min</td></tr>
+        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td>43 s · 2 166 MB</td><td>109 s · 2 227 MB</td></tr>
+        <tr><th scope="row">537 MB lokimaista tekstiä</th><td>17 s · 161 MB</td><td>63 s · 558 MB</td></tr>
+        <tr><th scope="row">816 MB, josta puolet kopioita</th><td>13 s · 410 MB</td><td>78 s · 848 MB</td></tr>
+        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>72 s ja 98 s; kirjoittaja lähetti 4 107 MB</td><td>102 s ja 99 s; kirjoittaja lähetti 3 419 MB</td></tr>
+        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>61 s · 22 MB</td><td>15 s · 12 MB</td></tr>
+        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td>38 s · 0,1 MB</td><td>67 s · 1 269 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki (pienet tiedostot)</th><td>335 s · 295 MB</td><td>599 s · 314 MB</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><strong>Varsto on nopeampi</strong> kaikissa isojen, pakkautuvien tai duplikaattia sisältävien aineistojen ensimmäisissä synkronoinneissa sekä hitaalla, hävikkisellä yhteydellä. Teksti vie kolmasosan tavuista, koska lohkot pakataan ennen salausta; uudelleennimetty hakemisto ja kopiotiedostot siirtävät lähes nolla dataa, koska lukijan levyllä jo olevat lohkot käytetään uudelleen.</li>
+      <li><strong>Resilio Sync on nopeampi</strong> monien pienten tiedostojen kanssa silloin, kun se ei jumitu (se jumittui yhdessä ajossa kahdesta), ja pienen muutoksen välittämisessä: Varsto hakee nyt vain muuttuneet lohkot (22 MB, kun edellinen käännös haki koko 1,1 GiB), mutta kestää yhä kolmesta viiteen kertaa kauemmin, koska kirjoittajan oma kaikkien kansioiden synkka ja lukijan omien lohkojen uudelleentiivistys maksavat enemmän kuin siirto.</li>
+      <li><strong>Kaksi lukijaa</strong> valmistuivat suunnilleen samassa ajassa kummallakin ohjelmalla; Varston lukijat syöttivät toisiaan yhdessä ajossa kahdesta, ja sen kirjoittaja lähetti silti enemmän.</li>
+      <li><strong>Muisti:</strong> Varston kirjoittajapalvelu käytti enimmillään 360–800 MiB, Resilio Sync 70–250 MiB.</li>
+    </ul>
+    <p class="note">Yksi päivä, yksi palveluntarjoaja, kaksi ajoa tapausta kohden ja alfa: nämä ovat suuntaa antavia, eivät tuomio. Raportti luettelee kaiken, mikä niitä rajoittaa.</p>
 
     <h2 id="cost">Kustannukset</h2>
     <p>Scalewayn julkinen hinnasto (luettu 9. lokakuuta 2026, Pariisin alue, verottomat hinnat): Object Storage Standard Multi-AZ €0.000022 gigatavutunnilta (noin €0.016 gigatavukuukaudelta), pyynnöt sisältyvät, sisääntuleva liikenne sisältyy, ulosmenevästä liikenteestä ensimmäiset 75 GB kuukaudessa ilmaisia ja sen jälkeen €0.01 gigatavulta. Alueiden väliset siirrot (Pariisi – Amsterdam, Pariisi – Varsova) lasketaan ulosmeneväksi liikenteeksi; alueen sisällä ne ovat ilmaisia.</p>
