@@ -192,6 +192,7 @@ fn snapshot(me: &Dev) -> Snapshot {
         activity_audience: None,
         heads: Vec::new(),
         ledger_dir: None,
+        fresh: Default::default(),
     }
 }
 
@@ -1453,4 +1454,298 @@ fn rollback_warning_after_two_pulls_only_for_a_storage_the_writer_confirmed() {
     assert_eq!(j.suspects.len(), 1);
     j.after_pull(200, &views, &[], &proofs, &names, 200);
     assert!(j.suspects.is_empty());
+}
+
+// ----- rests, revivals and the order blocks are asked in ---------------------------
+
+/// A TLS server of `me` on `addr` serving the objects stored under `root`
+/// (as a block cache holds them), until dropped; dropping it waits until
+/// the port is free again.
+struct ObjectServer {
+    addr: SocketAddr,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for ObjectServer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+fn object_server(
+    me: &Dev,
+    r: Arc<Responder>,
+    addr: SocketAddr,
+    root: &std::path::Path,
+) -> ObjectServer {
+    let server = Server::bind(addr, tls::TcpTls::new(&me.tls, r).unwrap()).unwrap();
+    let addr = server.addr;
+    let mut snap = snapshot(me);
+    snap.local_roots = vec![root.to_path_buf()];
+    let snap = Arc::new(Mutex::new(Some(Arc::new(snap))));
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop2 = stop.clone();
+    let thread = std::thread::spawn(move || server.run(snap, stop2));
+    ObjectServer {
+        addr,
+        stop,
+        thread: Some(thread),
+    }
+}
+
+/// `n` objects stored under `root` as a block cache holds them.
+fn store_objects(root: &std::path::Path, n: usize) -> Vec<crate::ids::ObjectName> {
+    (0..n)
+        .map(|i| {
+            let bytes: Vec<u8> = (0..2048u32)
+                .map(|j| (j as u8) ^ (i as u8) ^ ((i >> 8) as u8))
+                .chain((i as u32).to_le_bytes())
+                .collect();
+            let name = crate::ids::ObjectName::from_bytes(&crate::crypto::hash(&bytes));
+            let dir = root.join("chunks").join(&name.as_str()[..2]);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(name.as_str()), &bytes).unwrap();
+            name
+        })
+        .collect()
+}
+
+/// A record of `d` on loopback at `port`, with `seq`.
+fn record_at(d: &Dev, port: u16, seq: u64) -> PeerBody {
+    let mut body = d.body(port);
+    body.seq = seq;
+    body
+}
+
+#[test]
+fn a_peer_that_was_answering_is_asked_again_a_moment_after_a_failed_request() {
+    let (a, b) = (Dev::new(1), Dev::new(2));
+    let tmp = tempfile::tempdir().unwrap();
+    let names = store_objects(tmp.path(), 4);
+    let r = responder_for(&a, &[&b]);
+    let srv = object_server(&a, r.clone(), "127.0.0.1:0".parse().unwrap(), tmp.path());
+    let addr = srv.addr;
+    let peers = Peers::build_v3(
+        Client::new(b.device(), b.tls.clone()),
+        &dir_with(&b, vec![record_at(&a, addr.port(), 1)]),
+        &[],
+        None,
+    );
+    for n in &names[..2] {
+        assert_eq!(peers.get(n).map(|(d, _)| d), Some(a.device()));
+    }
+    // The peer is away for a moment (it restarts, or the connection is
+    // lost): the requests meanwhile fail. (Its kept connections close
+    // within a second of the stop.)
+    drop(srv);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(peers.get(&names[2]).is_none());
+    let _srv = object_server(&a, r, addr, tmp.path());
+    // Back again: it is asked at once, not left out for a minute (which
+    // gave up every block of a pull asked for in that minute).
+    let t = std::time::Instant::now();
+    assert_eq!(peers.get(&names[2]).map(|(d, _)| d), Some(a.device()));
+    assert_eq!(peers.get(&names[3]).map(|(d, _)| d), Some(a.device()));
+    assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+}
+
+#[test]
+fn a_peer_that_restarted_is_tried_again_on_a_new_record_a_sign_of_life_or_an_explicit_sync() {
+    let (a, b) = (Dev::new(1), Dev::new(2));
+    let tmp = tempfile::tempdir().unwrap();
+    let names = store_objects(tmp.path(), 2);
+    let r = responder_for(&a, &[&b]);
+    // Find a free port, then leave it closed: the peer is restarting.
+    let addr = object_server(&a, r.clone(), "127.0.0.1:0".parse().unwrap(), tmp.path()).addr;
+    let client = Client::new(b.device(), b.tls.clone());
+    let table = |seq| {
+        Peers::build_v3(
+            client.clone(),
+            &dir_with(&b, vec![record_at(&a, addr.port(), seq)]),
+            &[],
+            None,
+        )
+    };
+    let before = table(1);
+    assert!(before.get(&names[0]).is_none());
+    assert!(before.is_resting(&a.device()));
+    let _srv = object_server(&a, r, addr, tmp.path());
+    // It never answered this table: it keeps resting by itself.
+    assert!(before.get(&names[0]).is_none());
+    // Its new record (it published one as it started) ends the rest.
+    let after = table(2);
+    after.inherit(&before);
+    assert_eq!(after.get(&names[0]).map(|(d, _)| d), Some(a.device()));
+    // The same record does not; an explicit sync (`wake`) or a sign of
+    // life (a LAN beacon) does.
+    let same = table(1);
+    same.inherit(&before);
+    assert!(same.is_resting(&a.device()));
+    assert_eq!(same.wake(), 1);
+    assert_eq!(same.get(&names[1]).map(|(d, _)| d), Some(a.device()));
+    let heard = table(1);
+    heard.inherit(&before);
+    assert!(heard.heard_from(&a.device()));
+    assert!(!heard.is_resting(&a.device()));
+    assert!(
+        !heard.heard_from(&a.device()),
+        "not resting: nothing to end"
+    );
+}
+
+/// A port that accepts connections and never answers (a device that is
+/// gone, its address taken by something that does not speak TLS).
+struct BlackHole {
+    addr: SocketAddr,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for BlackHole {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn black_hole() -> BlackHole {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    l.set_nonblocking(true).unwrap();
+    let addr = l.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop2 = stop.clone();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        while !stop2.load(std::sync::atomic::Ordering::SeqCst) {
+            if let Ok((s, _)) = l.accept() {
+                held.push(s);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
+    BlackHole { addr, stop }
+}
+
+#[test]
+fn peers_that_are_gone_cost_one_timeout_together_and_rest_longer_each_time() {
+    let b = Dev::new(2);
+    let a = Dev::new(1);
+    let tmp = tempfile::tempdir().unwrap();
+    let names = store_objects(tmp.path(), 1);
+    let gone: Vec<Dev> = (10..16).map(Dev::new).collect();
+    let holes: Vec<BlackHole> = gone.iter().map(|_| black_hole()).collect();
+    let srv = object_server(
+        &a,
+        responder_for(&a, &[&b]),
+        "127.0.0.1:0".parse().unwrap(),
+        tmp.path(),
+    );
+    let mut bodies: Vec<PeerBody> = gone
+        .iter()
+        .zip(&holes)
+        .map(|(d, h)| record_at(d, h.addr.port(), 1))
+        .collect();
+    bodies.push(record_at(&a, srv.addr.port(), 1));
+    let peers = Peers::build_v3(
+        Client::new(b.device(), b.tls.clone()),
+        &dir_with(&b, bodies),
+        &[],
+        None,
+    );
+    // Each of the six costs a handshake timeout (3 s); in turn that was
+    // 18 s before the live one was even asked.
+    let t = std::time::Instant::now();
+    let answered = peers.ask_each("/p2p/info");
+    assert!(t.elapsed() < Duration::from_secs(8), "{:?}", t.elapsed());
+    assert_eq!(
+        answered
+            .iter()
+            .map(|(d, s, _)| (d.clone(), *s))
+            .collect::<Vec<_>>(),
+        vec![(a.device(), 200)]
+    );
+    // They rest now, the live one first in line; nothing waits on them.
+    for d in &gone {
+        assert!(peers.is_resting(&d.device()));
+    }
+    let t = std::time::Instant::now();
+    assert_eq!(peers.get(&names[0]).map(|(d, _)| d), Some(a.device()));
+    assert_eq!(peers.ask_each("/p2p/info").len(), 1);
+    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    // An explicit sync tries a peer that never answered once or twice
+    // more, then no longer: it stays resting.
+    for _ in 0..crate::p2p::tests_revive_wait_failures() {
+        assert_eq!(peers.wake(), gone.len());
+        peers.ask_each("/p2p/info");
+    }
+    assert_eq!(peers.wake(), 0);
+}
+
+#[test]
+fn a_peer_that_lacked_the_blocks_is_asked_again_once_it_holds_them_and_holders_share() {
+    // A, the writer, holds everything; C, another reader, nothing yet.
+    let (a, b, c) = (Dev::new(1), Dev::new(2), Dev::new(3));
+    let (ta, tc) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let names = store_objects(ta.path(), 64);
+    let any: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let sa = object_server(&a, responder_for(&a, &[&b]), any, ta.path());
+    let sc = object_server(&c, responder_for(&c, &[&b]), any, tc.path());
+    let peers = Arc::new(Peers::build_v3(
+        Client::new(b.device(), b.tls.clone()),
+        &dir_with(
+            &b,
+            vec![
+                record_at(&a, sa.addr.port(), 1),
+                record_at(&c, sc.addr.port(), 1),
+            ],
+        ),
+        &[],
+        None,
+    ));
+    // Both are reached (the head exchange does that before a pull).
+    assert_eq!(peers.ask_each("/p2p/info").len(), 2);
+    for n in &names[..4] {
+        assert_eq!(peers.get(n).map(|(d, _)| d), Some(a.device()));
+    }
+    // C pulls the folder meanwhile and holds the blocks now.
+    for n in &names {
+        let rel = format!("chunks/{}/{}", &n.as_str()[..2], n.as_str());
+        std::fs::create_dir_all(tc.path().join(&rel).parent().unwrap()).unwrap();
+        std::fs::copy(ta.path().join(&rel), tc.path().join(&rel)).unwrap();
+    }
+    // Within a few seconds it is asked again, and has them.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut i = 4;
+    let mut from_c = 0;
+    while from_c == 0 && std::time::Instant::now() < deadline {
+        let (d, _) = peers.get(&names[i % names.len()]).unwrap();
+        if d == c.device() {
+            from_c += 1;
+        }
+        i += 1;
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(from_c > 0, "C was never asked again");
+    // With requests side by side, both holders take a share.
+    let counts = Mutex::new((0usize, 0usize));
+    std::thread::scope(|s| {
+        for t in 0..8 {
+            let (peers, names, counts, a) = (&peers, &names, &counts, &a);
+            s.spawn(move || {
+                for k in 0..16 {
+                    let (d, _) = peers.get(&names[(t * 16 + k) % names.len()]).unwrap();
+                    let mut c = counts.lock().unwrap();
+                    if d == a.device() {
+                        c.0 += 1;
+                    } else {
+                        c.1 += 1;
+                    }
+                }
+            });
+        }
+    });
+    let (from_a, from_c) = *counts.lock().unwrap();
+    assert!(from_a > 0 && from_c > 0, "A {from_a}, C {from_c}");
 }

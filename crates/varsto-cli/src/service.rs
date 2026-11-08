@@ -1170,7 +1170,8 @@ struct P2p {
     /// Latest accepted records of the other devices, for the relay thread.
     records: Arc<Mutex<Vec<varsto_core::p2p::v3::PeerBody>>>,
     nat: Arc<Mutex<NatInfo>>,
-    peers: Mutex<Option<Arc<varsto_core::p2p::Peers>>>,
+    /// The peer table in use (the beacon thread tells it of signs of life).
+    peers: Arc<Mutex<Option<Arc<varsto_core::p2p::Peers>>>>,
     last_record: Mutex<Option<varsto_core::p2p::v3::PeerBody>>,
     last_publish: Mutex<Option<Instant>>,
     /// Set by the relay thread when a registration succeeded: the record
@@ -1338,11 +1339,13 @@ impl P2p {
             Arc::new(Mutex::new(Vec::new()));
         let lan_new = Arc::new(AtomicBool::new(false));
         let beacon_keys: Arc<Mutex<BeaconKeys>> = Arc::new(Mutex::new(keys));
-        let (lan2, stop3, lan_new2, keys2) = (
+        let peers_slot: Arc<Mutex<Option<Arc<varsto_core::p2p::Peers>>>> = Arc::default();
+        let (lan2, stop3, lan_new2, keys2, peers2) = (
             lan_peers.clone(),
             stop.clone(),
             lan_new.clone(),
             beacon_keys.clone(),
+            peers_slot.clone(),
         );
         let made = {
             let st = state.lock().unwrap();
@@ -1364,6 +1367,13 @@ impl P2p {
                             // pinned handshake then checks the device.
                             let key_of = |d: &[u8; 16]| keys2.lock().unwrap().get(d).cloned();
                             for p in beacon.listen(Duration::from_secs(5), &key_of) {
+                                // A signed beacon is a sign of life: a peer
+                                // resting after a failure (it restarted) is
+                                // asked again at once.
+                                let table = peers2.lock().unwrap().clone();
+                                if table.is_some_and(|t| t.heard_from(&p.device)) {
+                                    log::info!("p2p: {} is back on the LAN", p.name);
+                                }
                                 if heard.insert(p.addr, (p, Instant::now())).is_none() {
                                     lan_new2.store(true, Ordering::Relaxed);
                                 }
@@ -1444,7 +1454,7 @@ impl P2p {
             beacon_keys,
             records,
             nat,
-            peers: Mutex::new(None),
+            peers: peers_slot,
             last_record: Mutex::new(None),
             last_publish: Mutex::new(None),
             republish,

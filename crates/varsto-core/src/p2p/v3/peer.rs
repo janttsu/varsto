@@ -145,6 +145,7 @@ impl PeerBody {
                 .collect(),
             nat: self.nat,
             reachable: self.reachable,
+            seq: self.seq,
         }
     }
 
