@@ -59,11 +59,11 @@
   }
 
   // Rise into place: windows, figures, cards (staggered within a grid), list items.
-  var rising = document.querySelectorAll(".stage, .home > h2, .home .grid > .card, .home > figure, .home > ul > li, .home > p, .dl-card");
+  var rising = document.querySelectorAll(".stage, .home > h2, .home .grid > .card, .home > figure, .home > ul > li, .home > p, .dl-card, main .grid > .card, main .feature, main .shot, main .posts > li, main .doclist > li, main figure.hero");
   rising.forEach(function (el) {
     el.classList.add("rise");
     var sib = el.parentElement ? Array.prototype.indexOf.call(el.parentElement.children, el) : 0;
-    if (el.matches(".card, li, .dl-card")) { el.style.setProperty("--i", String(sib % 6)); }
+    if (el.matches(".card, li, .dl-card, .shot")) { el.style.setProperty("--i", String(sib % 6)); }
   });
   var io = new IntersectionObserver(function (entries) {
     entries.forEach(function (e) {
@@ -74,8 +74,8 @@
     });
   }, { rootMargin: "0px 0px -8% 0px", threshold: 0.12 });
   rising.forEach(function (el) { io.observe(el); });
-  var h1 = document.querySelector(".hero h1");
-  if (h1) { decode(h1); }
+  var h1 = document.querySelector(".hero h1") || document.querySelector("main h1");
+  if (h1 && h1.textContent.trim().length <= 90) { decode(h1); }
 
   // The spotlight on the cards follows the cursor.
   document.querySelectorAll(".home .grid > .card").forEach(function (c) {

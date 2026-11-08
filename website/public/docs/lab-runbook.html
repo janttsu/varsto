@@ -21,7 +21,7 @@
 <link rel="alternate" hreflang="en" href="https://varsto.net/docs/lab-runbook.html">
 <link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/lab-runbook.html">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=d5294ff1cc">
+<link rel="stylesheet" href="../assets/css/site.css?v=6b19e99415">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -52,7 +52,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>VM lab runbook</h1>
-<p class="note">From <code>docs/testing/lab.md</code> in the repository, rendered 2026-11-07. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>docs/testing/lab.md</code> in the repository, rendered 2026-11-08. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <p>The lab is a small internet made of virtual machines on one Linux host. It plays the multi-device scenarios that need real networks: pairing, peer-to-peer through NAT, storage outages, clock skew, scale and more. This page tells how to bring it up, run every scenario, read the results and tear it down, from nothing. It is written from <code>scripts/test/lab/lab.py</code> and <code>scripts/test/lab/scenarios.py</code>; if the two disagree with this page, the scripts are right and this page needs a fix.</p>
 <p>For the other test levels see <a href="testing.html">TESTING.md</a>. For building binaries see <a href="building.html">BUILDING.md</a>.</p>
 <p><strong>A release needs every scenario.</strong> Run the whole list (<code>scenarios.py</code> with no <code>--only</code>) against the exact binary that is to be released, not only the scenarios of the areas that changed. A change in one area breaks others in ways nobody predicts. <a href="./">HANDOVER.md</a> says when the last full run was done.</p>
@@ -413,6 +413,6 @@
   <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
 <script src="../assets/js/field.js?v=cd646cd0a5" defer></script>
-<script src="../assets/js/motion.js?v=3d2ea09340" defer></script>
+<script src="../assets/js/motion.js?v=a547492b3b" defer></script>
 </body>
 </html>
