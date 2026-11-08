@@ -334,3 +334,7 @@ main details:not(.pop)[open] > summary { color: var(--text); }
 /* Every page: the first heading settles out of glyphs, cards and figures rise in. */
 .motion main .rise { opacity: 0; transform: translateY(18px); transition: opacity .7s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); transition-delay: calc(var(--i, 0) * 70ms); }
 .motion main .rise.in { opacity: 1; transform: none; }
+/* The measured comparison table on the Resilio Sync and benchmarks pages. */
+.bench-vs th[scope=row] { font-weight: 500; color: var(--text); }
+.bench-vs td:nth-child(2) { color: var(--text); font-variant-numeric: tabular-nums; }
+.bench-vs td:nth-child(3) { color: var(--muted); font-variant-numeric: tabular-nums; }

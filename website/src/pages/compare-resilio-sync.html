@@ -36,6 +36,29 @@ description: Looking for a Resilio Sync alternative with end-to-end encryption o
       </tbody>
     </table>
 
+    <h2 id="measured">Measured against Resilio Sync (November 2026)</h2>
+    <p>On 8 November 2026 both tools moved the same data between the same three rented machines (a writer in Paris, readers in Amsterdam and Warsaw, 2 vCPU each), one tool at a time, with relays and trackers off, and every file was checked by SHA-256 afterwards. Varsto was the daily build 20261108-c50f260; Resilio Sync was 2.8.1, because 3.1.2 did not sync from a configuration file at all. Medians of two runs. "Bytes" is what the reader exchanged with the other machines. The method, its limits, the raw data and the scripts to repeat it are in <a href="{{P}}docs/resilio-vs-varsto.html">the measurement report</a>.</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Scenario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 small files (313 MB)</th><td>44 s · 285 MB</td><td>25 s · 310 MB; one run of two stalled for 5 min</td></tr>
+        <tr><th scope="row">Two 1 GiB files</th><td>43 s · 2 166 MB</td><td>109 s · 2 227 MB</td></tr>
+        <tr><th scope="row">537 MB of log-like text</th><td>17 s · 161 MB</td><td>63 s · 558 MB</td></tr>
+        <tr><th scope="row">816 MB, half of it copies</th><td>13 s · 410 MB</td><td>78 s · 848 MB</td></tr>
+        <tr><th scope="row">Two readers at once (Amsterdam, Warsaw)</th><td>72 s and 98 s; writer sent 4 107 MB</td><td>102 s and 99 s; writer sent 3 419 MB</td></tr>
+        <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td>61 s · 22 MB</td><td>15 s · 12 MB</td></tr>
+        <tr><th scope="row">A 1.13 GiB directory renamed</th><td>38 s · 0.1 MB</td><td>67 s · 1 269 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % loss (the small files)</th><td>335 s · 295 MB</td><td>599 s · 314 MB</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><strong>Varsto is faster</strong> in every initial sync of large, compressible or duplicated data, and over the slow lossy link. Text costs a third of the bytes, because blocks are compressed before they are encrypted; a renamed directory and duplicate files move almost no data, because blocks already on the reader's disk are reused.</li>
+      <li><strong>Resilio Sync is faster</strong> on many small files when it does not stall (it did in one run of two), and at propagating a small change: Varsto now fetches only the changed blocks (22 MB instead of the whole 1.1 GiB in the build before), but still takes three to five times longer, because the writer's own sync of all folders and the reader's re-hashing of its local blocks cost more than the transfer.</li>
+      <li><strong>Two readers</strong> finished in about the same time with both tools; Varsto's readers fed each other in one run of two, and its writer still sent more.</li>
+      <li><strong>Memory:</strong> Varsto's writer service peaked at 360–800 MiB against Resilio Sync's 70–250 MiB.</li>
+    </ul>
+    <p class="note">One day, one provider, two runs per case, and an alpha: these are indications, not a verdict. The report lists everything that limits them.</p>
+
     <h2>Which one fits</h2>
     <div class="grid two">
       <div class="card"><h3>Resilio Sync</h3><p>Choose Resilio Sync when you want fast BitTorrent-style transfer between always-on machines and easy sharing by key or link, and a closed-source vendor product is acceptable.</p></div>

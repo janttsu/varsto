@@ -24,7 +24,7 @@
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/resilio-sync/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/resilio-sync/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
-<link rel="stylesheet" href="../../../assets/css/site.css?v=6b19e99415">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=ab2697617b">
 <script src="../../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -86,6 +86,29 @@
       <tr><th scope="row">Maturité</th><td>Produit commercial mature ; son avenir après le rachat de 2026 n’est pas encore précisé.</td><td>Alpha : pas pour des données de production, les formats peuvent encore changer.</td></tr>
       </tbody>
     </table>
+
+    <h2 id="measured">Mesuré face à Resilio Sync (novembre 2026)</h2>
+    <p>Le 8 novembre 2026, les deux outils ont déplacé les mêmes données entre les trois mêmes machines louées (un émetteur à Paris, des lecteurs à Amsterdam et à Varsovie, 2 vCPU chacune), un outil à la fois, relais et trackers désactivés, et chaque fichier a été vérifié ensuite par SHA-256. Varsto était la version quotidienne 20261108-c50f260 ; Resilio Sync était en 2.8.1, car la 3.1.2 ne synchronisait pas du tout depuis un fichier de configuration. Médianes de deux exécutions. « Octets » désigne ce que le lecteur a échangé avec les autres machines. La méthode, ses limites, les données brutes et les scripts pour la reproduire sont dans <a href="../../../docs/resilio-vs-varsto.html">le rapport de mesure</a> (en anglais).</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Scénario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td>44 s · 285 Mo</td><td>25 s · 310 Mo ; une exécution sur deux bloquée 5 min</td></tr>
+        <tr><th scope="row">Deux fichiers de 1 Gio</th><td>43 s · 2 166 Mo</td><td>109 s · 2 227 Mo</td></tr>
+        <tr><th scope="row">537 Mo de texte de type journal</th><td>17 s · 161 Mo</td><td>63 s · 558 Mo</td></tr>
+        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td>13 s · 410 Mo</td><td>78 s · 848 Mo</td></tr>
+        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>72 s et 98 s ; l’émetteur a envoyé 4 107 Mo</td><td>102 s et 99 s ; l’émetteur a envoyé 3 419 Mo</td></tr>
+        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>61 s · 22 Mo</td><td>15 s · 12 Mo</td></tr>
+        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td>38 s · 0,1 Mo</td><td>67 s · 1 269 Mo</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes (les petits fichiers)</th><td>335 s · 295 Mo</td><td>599 s · 314 Mo</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><strong>Varsto est plus rapide</strong> dans chaque synchronisation initiale de données volumineuses, compressibles ou dupliquées, et sur la liaison lente avec pertes. Le texte coûte un tiers des octets, car les blocs sont compressés avant d’être chiffrés ; un répertoire renommé et des fichiers en double ne déplacent presque aucune donnée, car les blocs déjà présents sur le disque du lecteur sont réutilisés.</li>
+      <li><strong>Resilio Sync est plus rapide</strong> sur beaucoup de petits fichiers quand il ne se bloque pas (il l’a fait dans une exécution sur deux), et pour propager une petite modification : Varsto ne récupère plus que les blocs modifiés (22 Mo au lieu de tout le 1,1 Gio dans la version précédente), mais met encore trois à cinq fois plus de temps, car la synchronisation de tous les dossiers par l’émetteur et le re-hachage des blocs locaux par le lecteur coûtent plus que le transfert.</li>
+      <li><strong>Deux lecteurs</strong> ont terminé en à peu près le même temps avec les deux outils ; les lecteurs de Varsto se sont alimentés l’un l’autre dans une exécution sur deux, et son émetteur a tout de même envoyé davantage.</li>
+      <li><strong>Mémoire :</strong> le service émetteur de Varsto a culminé à 360–800 Mio contre 70–250 Mio pour Resilio Sync.</li>
+    </ul>
+    <p class="note">Un jour, un fournisseur, deux exécutions par cas et une alpha : ce sont des indications, pas un verdict. Le rapport énumère tout ce qui les limite.</p>
 
     <h2>Lequel choisir</h2>
     <div class="grid two">
