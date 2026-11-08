@@ -35,17 +35,21 @@ manifest), the bytes on the reader's public interface (/proc/net/dev) and,
 from an iptables chain, the bytes exchanged with the writer and the other
 reader; CPU seconds and peak RSS of the daemon on the reader and the writer.
 
-Timing. Varsto: `POST /api/sync` on the reader's running service, from the
-request to the answer, after `folder attach` (the reader's service is
-restarted after the writer's, so it does not start with the writer in
-back-off). Resilio Sync: from starting
+Timing, both tools alike: from the moment the reader is told about the
+folder (Varsto: `POST /api/folder/attach` on its running service, which
+starts the pull; Resilio Sync: starting `rslsync`) to the first poll
+(every 0.25 s) that sees every file at its size with no temporary file,
+confirmed by the sha256 check after it. Varsto's pull report (blocks from
+peers, reused local blocks) is read from its service log. Resilio Sync: from starting
 `rslsync` on the reader to the first poll (every 0.25 s) that sees every
 file at its size with no temporary file, confirmed by the sha256 check
-after it. Changes after the initial sync (set `mut`): Varsto's time is the
-writer's `POST /api/sync` (push) plus the reader's, both explicit (the
-bucket's new blocks are deleted in between, not timed); Resilio's is from
-the change on the writer to the reader's verified folder, its own
-detection included.
+after it. Changes after the initial sync (set `mut`): Varsto's time is
+from the change to the end of the writer's push (`POST /api/sync`, the
+writer's own watcher may have started it) plus, after the bucket's new
+blocks are deleted (not timed), from the reader's service start to the
+complete folder; Resilio's is from the change on the writer to the
+reader's verified folder, its own detection included. No service is
+paused: a paused service stops serving peers in this build.
 """
 import argparse
 import concurrent.futures as cf
@@ -354,42 +358,47 @@ class RvV(pb.Bench):
             self.varsto_fair(r, h)
             self.node_sh(r, "svc-start", h, env=se)
             self.node_sh(r, "wait-sync", h, "1")
-            self.node_sh(r, "api", h, "POST", "/api/service/pause", '{"paused":true}')
 
         with cf.ThreadPoolExecutor(len(readers)) as ex:
             list(ex.map(prepare, readers))
         # The writer trusts a new device's certificate after two restarts (see p2p-bench.py).
         self.writer_service(restart=True)
         self.writer_service(restart=True)
-        # A reader that tried the writer while it restarted lets it rest
-        # (back-off) and would skip it for a while: restart the readers too,
-        # so every run starts with a reachable writer, as Resilio's does.
+        # A reader that tried the writer while it restarted may hold it in a
+        # back-off: restart the readers too, so every run starts with a
+        # reachable writer, as Resilio Sync's does. (The services are never
+        # paused: in this build a paused service stops its peer-to-peer part.)
         def restart(r):
             self.node_sh(r, "svc-stop", homes[r], check=False)
             self.node_sh(r, "svc-start", homes[r], env=se)
             self.node_sh(r, "wait-sync", homes[r], "1")
-            self.node_sh(r, "api", homes[r], "POST", "/api/service/pause", '{"paused":true}')
         with cf.ThreadPoolExecutor(len(readers)) as ex:
             list(ex.map(restart, readers))
-        for r in readers:
-            self.node_sh(r, "api", homes[r], "POST", "/api/folder/attach", json.dumps({"name_or_id": s, "path": datas[r], "plain": True}))
         self.netem_on(readers, netem)
         try:
-            self.varsto_step("initial", scenario, s, readers, rep, netem, homes, datas, tag, writer_wall=0.0)
+            # `folder attach` on the running service starts the pull by itself:
+            # the attach is the start of the timed part.
+            self.varsto_step("initial", scenario, s, readers, rep, netem, homes, datas, tag, writer_wall=0.0,
+                             run={r: f"bash /bench/bench-node.sh api {homes[r]} POST /api/folder/attach "
+                                     + shlex.quote(json.dumps({"name_or_id": s, "path": datas[r], "plain": True})) for r in readers})
             if s in MUTABLE:
-                # Paused, the writer's service still serves blocks but does not
-                # push by itself on a change: the timed push below does it.
-                self.node_sh("par", "api", "/bench/w", "POST", "/api/service/pause", '{"paused":true}')
                 for what in ("change", "rename"):
+                    # The readers are stopped while the writer publishes the
+                    # change and the bucket's new blocks are deleted (an
+                    # unpaused reader would pull at once, from the bucket).
+                    # They start again for the timed pull: their first sync.
+                    for r in readers:
+                        self.node_sh(r, "svc-stop", homes[r], check=False)
                     out = self.mutate("varsto", s, rep, what)
                     t = json.loads(self.node_sh("par", "timed-sync", "/bench/w", s))
                     push = t["report"][0].get("push") if isinstance(t["report"], list) and t["report"] else t["report"]
+                    writer_wall = t["t1"] - out["t0"]  # the writer's clock: from the change to the push's end
                     self.purge_chunks()
-                    self.varsto_step(what, scenario, s, readers, rep, netem, homes, datas, tag, writer_wall=t["wall"],
-                                     extra={"writer_push": push, "mutation": out})
+                    hints = ["--changed", *out["changed"]] if what == "change" else ["--gone", out["from"]]
+                    self.varsto_step(what, scenario, s, readers, rep, netem, homes, datas, tag, writer_wall=writer_wall,
+                                     run={r: f"bash /bench/bench-node.sh svc-start {homes[r]}" for r in readers}, env=se, hints=hints,
+                                     extra={"writer_push": push, "writer_sync_wall_s": round(t["wall"], 2), "mutation": out})
         finally:
-            if s in MUTABLE:
-                self.node_sh("par", "api", "/bench/w", "POST", "/api/service/pause", '{"paused":false}', check=False)
             for r in readers:
                 self.node_sh(r, "svc-stop", homes[r], check=False)
                 dev = json.loads(self.ssh(r, f"cat {homes[r]}/vault.json"))["device_id"]
@@ -397,47 +406,76 @@ class RvV(pb.Bench):
                 self.ssh(r, f"cp {homes[r]}.log /bench/log-{tag}-{r}.txt; cp {homes[r]}/logs/varsto-service.log /bench/debug-{tag}-{r}.log; "
                             f"rm -rf {homes[r]} {datas[r]}", check=False)
 
-    def varsto_step(self, step, scenario, s, readers, rep, netem, homes, datas, tag, writer_wall, extra=None):
+    def pull_report(self, r, home, folder, since):
+        """The pull reports of the folder since `since` (epoch) from the
+        service's own log (`pull done subject=<id> ... result={json}`, zero
+        fields left out), summed: the attach or the service start runs the
+        real pull, later syncs of the step are no-ops."""
+        lines = self.ssh(r, f"grep 'pull done subject=' {home}/logs/varsto-service.log | grep -F '\"folder\":\"{folder}\"'", check=False)
+        total, n = {}, 0
+        for line in lines.splitlines():
+            try:
+                t = time.mktime(time.strptime(line[:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone
+                rep = json.loads(line.split(" result=", 1)[1].strip())
+            except (ValueError, IndexError):
+                continue
+            if t < since - 2:
+                continue
+            n += 1
+            for k, v in rep.items():
+                if isinstance(v, (int, float)):
+                    total[k] = total.get(k, 0) + v
+                elif k == "files_unavailable":
+                    total[k] = max(total.get(k, 0), unavailable_count(v))
+        total["pulls"] = n
+        return total
+
+    def varsto_step(self, step, scenario, s, readers, rep, netem, homes, datas, tag, writer_wall, run, env="", hints=(), extra=None):
         if step == "initial":
             self.dropcaches()
-        wb = self.writer_proc()
-        before = {r: (self.net(r), json.loads(self.node_sh(r, "proc", homes[r]))) for r in readers}
+        wb, wn0 = self.writer_proc(), self.net("par")
 
         def go(r):
-            return r, json.loads(self.node_sh(r, "timed-sync", homes[r], s))
+            args = ["observe", datas[r], self.man("varsto", s), "--iface", self.iface(r), "--ips", *self.others(r),
+                    "--service-json", f"{homes[r]}/service.json", "--run", run[r], "--log", f"/bench/observe-{tag}-{r}.log",
+                    "--timeout", "1500" if step == "initial" else "900", *hints]
+            return r, json.loads(self.ssh(r, f"{env} python3 /bench/bench-tools.py " + " ".join(shlex.quote(a) for a in args)))
         with cf.ThreadPoolExecutor(len(readers)) as ex:
-            synced = dict(ex.map(go, readers))
-        after = {r: (self.net(r), json.loads(self.node_sh(r, "proc", homes[r]))) for r in readers}
-        wa = self.writer_proc()
+            seen = dict(ex.map(go, readers))
+        wa, wn1 = self.writer_proc(), self.net("par")
         per = {}
         for r in readers:
-            rep_ = synced[r]["report"]
-            pull = rep_[0]["pull"] if isinstance(rep_, list) and rep_ else {}
-            v = self.jtools(r, "verify", datas[r], self.man("varsto", s))
-            traffic = json.loads(self.node_sh(r, "api", homes[r], "GET", "/api/p2p/traffic"))
-            routes = self.ssh(r, f"grep -oE ': (tcp|quic|relay) [^ ]+ answered' {homes[r]}.log | sort | uniq -c", check=False).strip()
-            (n0, p0), (n1, p1) = before[r], after[r]
+            o = seen[r]
+            w = o["wait"]
+            pull = self.pull_report(r, homes[r], s, o["t0"])
+            traffic = json.loads(self.node_sh(r, "api", homes[r], "GET", "/api/p2p/traffic", check=False) or "{}")
+            routes = self.ssh(r, f"grep -oE ': (tcp|quic|relay) [^ ]+ answered' {homes[r]}/logs/varsto-service.log | sort | uniq -c", check=False).strip()
+            p0, p1 = o["proc_before"], o["proc_after"] or o["proc_before"]
+            reader_wall = (w["done"] - o["t0"]) if w.get("done") else None
             per[r] = self.reader_entry(
-                synced[r]["wall"] + writer_wall, n0, n1, p1["user_s"] + p1["sys_s"] - p0["user_s"] - p0["sys_s"], p1["hwm_kib"],
-                v["verified"], {"reader_wall_s": round(synced[r]["wall"], 2), "writer_wall_s": round(writer_wall, 2),
-                                "files": pull.get("files_updated"), "chunks": pull.get("chunks_downloaded"),
-                                "chunks_from_peers": pull.get("chunks_from_peers"), "bytes_pulled": pull.get("bytes_downloaded"),
-                                "unavailable": len(pull.get("files_unavailable") or []),
-                                "unavailable_sample": (pull.get("files_unavailable") or [])[:5], "verify": v,
-                                "p2p_in_bytes": sum(p.get("rx_total", 0) for p in traffic.get("peers", [])),
-                                "paths": [(p.get("name"), p.get("path"), str(p.get("addr"))) for p in traffic.get("peers", [])],
-                                "routes": routes})
-            if not isinstance(rep_, list):
-                per[r]["error"] = str(rep_)[:2000]
+                None if reader_wall is None else reader_wall + writer_wall, o["net_before"], o["net_after"],
+                p1["user_s"] + p1["sys_s"] - p0["user_s"] - p0["sys_s"], p1["hwm_kib"], w["verified"],
+                {"reader_wall_s": None if reader_wall is None else round(reader_wall, 2), "writer_wall_s": round(writer_wall, 2),
+                 "files": pull.get("files_updated", 0), "chunks": pull.get("chunks_downloaded", 0),
+                 "chunks_from_peers": pull.get("chunks_from_peers", 0), "bytes_pulled": pull.get("bytes_downloaded", 0),
+                 "chunks_reused_local": pull.get("chunks_reused_local", 0), "bytes_reused_local": pull.get("bytes_reused_local", 0),
+                 "unavailable": pull.get("files_unavailable", 0),
+                 "pull_report": pull, "wait": w,
+                 "p2p_in_bytes": sum(p.get("rx_total", 0) for p in traffic.get("peers", [])),
+                 "paths": [(p.get("name"), p.get("path"), str(p.get("addr"))) for p in traffic.get("peers", [])],
+                 "routes": routes})
         w = {"cpu_s": round(wa["user_s"] + wa["sys_s"] - wb["user_s"] - wb["sys_s"], 2) if wa and wb else None,
-             "peak_rss_mib": round(wa["hwm_kib"] / 1024, 1) if wa else None}
+             "peak_rss_mib": round(wa["hwm_kib"] / 1024, 1) if wa else None,
+             "sent_to": {ip: wn1["peers"][ip]["tx"] - wn0["peers"][ip]["tx"] for ip in wn0["peers"]},
+             "iface_tx": wn1["iface_tx"] - wn0["iface_tx"]}
         self.record_rvv({"tool": "varsto", "scenario": scenario, "set": s, "step": step, "readers": readers, "rep": rep,
                          "netem": netem, "per_reader": per, "writer": w, "extra": extra or {}})
         for r in readers:
             e = per[r]
-            if e["chunks_from_peers"] != e["chunks"] or e["verified"] != "identical" or e["unavailable"]:
-                raise SystemExit(f"varsto {r} {step}: not every block from a peer, or folder different: "
-                                 + json.dumps({k: e.get(k) for k in ('chunks', 'chunks_from_peers', 'verified', 'unavailable', 'error')}))
+            no_report = not e["pull_report"].get("pulls") or (step == "initial" and e["chunks"] == 0)
+            if e["chunks_from_peers"] != e["chunks"] or e["verified"] != "identical" or e["unavailable"] or e["wall_s"] is None or no_report:
+                raise SystemExit(f"varsto {r} {step}: not every block from a peer, folder different, or no pull report: "
+                                 + json.dumps({k: e.get(k) for k in ('chunks', 'chunks_from_peers', 'verified', 'unavailable', 'wall_s', 'pull_report')}))
 
     def mutate(self, tool, s, rep, what):
         """The same change to this tool's tree on the writer; the new manifest replaces the old everywhere."""
@@ -492,7 +530,7 @@ class RvV(pb.Bench):
                 wait_args = ["--changed", f"{src}/big.bin", f"{src}/app.log"]
             else:
                 wait_args = ["--gone", src]
-        wb = self.jtools("par", "proc", wpid)
+        wb, wn0 = self.jtools("par", "proc", wpid), self.net("par")
         result = {}
         mut_out = {}
 
@@ -511,7 +549,7 @@ class RvV(pb.Bench):
             # start, and the waiters have to start before the change: write it
             # first (mutate computes it before changing anything), then start them.
             mut_out = self.mutate_resilio_then_wait(s, rep, step, readers, observe, result)
-        wa = self.jtools("par", "proc", wpid)
+        wa, wn1 = self.jtools("par", "proc", wpid), self.net("par")
         per = {}
         for r in readers:
             o = result[r]
@@ -522,7 +560,9 @@ class RvV(pb.Bench):
             p1 = o["proc_after"] or o["proc_before"]
             per[r] = self.reader_entry(wall, o["net_before"], o["net_after"], p1["user_s"] + p1["sys_s"] - p0["user_s"] - p0["sys_s"],
                                        p1["hwm_kib"], w["verified"], {"wait": w})
-        wr = {"cpu_s": round(wa["user_s"] + wa["sys_s"] - wb["user_s"] - wb["sys_s"], 2), "peak_rss_mib": round(wa["hwm_kib"] / 1024, 1)}
+        wr = {"cpu_s": round(wa["user_s"] + wa["sys_s"] - wb["user_s"] - wb["sys_s"], 2), "peak_rss_mib": round(wa["hwm_kib"] / 1024, 1),
+              "sent_to": {ip: wn1["peers"][ip]["tx"] - wn0["peers"][ip]["tx"] for ip in wn0["peers"]},
+              "iface_tx": wn1["iface_tx"] - wn0["iface_tx"]}
         self.record_rvv({"tool": "resilio", "scenario": scenario, "set": s, "step": step, "readers": readers, "rep": rep,
                          "netem": netem, "per_reader": per, "writer": wr, "extra": dict(extra or {}, mutation=mut_out, clocks=self.clocks())})
         for r in readers:
@@ -574,10 +614,21 @@ class RvV(pb.Bench):
         log(f"plan done; failures: {failures}")
 
     def report(self):
+        if self.args.before:
+            print(report_compare(pathlib.Path(self.args.before), self.work / "results.jsonl"))
+            return
         print(report_markdown(self.work / "results.jsonl"))
         if self.args.detail:
             print()
             print(report_runs(self.work / "results.jsonl"))
+
+
+def unavailable_count(v):
+    """`files_unavailable` of a pull report: a list, or in the service log a
+    summary `{"len": n, "first": [...]}` when the list is long."""
+    if isinstance(v, dict):
+        return int(v.get("len", len(v.get("first") or [])))
+    return len(v or [])
 
 
 def report_markdown(path):
@@ -606,8 +657,8 @@ def report_markdown(path):
         m = med([x for x in xs if x is not None])
         return "" if m is None else f"{m:.{d}f}"
     out = ["| Scenario | Step | Reader | Tool | Runs | Time s | Resilio: 99 % of bytes s | Wire MB (reader) | With peers MB | "
-           "Reader CPU s | Reader RSS MiB | Writer CPU s | Writer RSS MiB | Failed runs |",
-           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+           "Reused local MB | Writer sent MB | Reader CPU s | Reader RSS MiB | Writer CPU s | Writer RSS MiB | Failed runs |",
+           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     keys = sorted(set(rows) | set(bad), key=lambda k: (order.index(k[0]) if k[0] in order else 99, k[0],
                                                         ["initial", "change", "rename"].index(k[1]), k[2], k[3]))
     for key in keys:
@@ -617,11 +668,67 @@ def report_markdown(path):
                                        f([x[2] for x in v]),
                                        f([x[0]["wire_bytes"] / 1e6 for x in v]),
                                        f([(x[0]["peer_rx"] + x[0]["peer_tx"]) / 1e6 for x in v]),
+                                       f([x[0].get("bytes_reused_local", 0) / 1e6 for x in v]) if key[3] == "varsto" else "",
+                                       f([sum(x[1]["sent_to"].values()) / 1e6 for x in v if x[1].get("sent_to")]),
                                        f([x[0]["cpu_s"] for x in v]),
                                        f([x[0]["peak_rss_mib"] for x in v], 0),
                                        f([x[1].get("cpu_s") for x in v]),
                                        f([x[1].get("peak_rss_mib") for x in v], 0),
                                        str(bad.get(key, 0))]) + " |")
+    return "\n".join(out)
+
+
+def collect(path):
+    """(scenario, step, reader, tool) -> list of (per_reader entry, writer entry) of verified runs, and failures."""
+    rows, bad = {}, {}
+    for line in open(path):
+        e = json.loads(line)
+        if e.get("kind") != "rvv":
+            continue
+        for r, pr in e["per_reader"].items():
+            key = (e["scenario"], e["step"], r if len(e["readers"]) > 1 else "", e["tool"])
+            if pr.get("verified") != "identical" or pr.get("wall_s") is None:
+                bad[key] = bad.get(key, 0) + 1
+            else:
+                rows.setdefault(key, []).append((pr, e["writer"]))
+    return rows, bad
+
+
+def report_compare(before, after):
+    """One table per scenario and step: both builds of Varsto and both days of
+    Resilio Sync side by side (medians; with two runs, the mean)."""
+    runs = {"before": collect(before), "after": collect(after)}
+    med = lambda xs: statistics.median(xs) if xs else None
+
+    def f(xs, d=1):
+        m = med([x for x in xs if x is not None])
+        return "" if m is None else f"{m:.{d}f}"
+    out = []
+    order = [p[0] for p in PLAN]
+    keys = sorted({k[:3] for day in runs.values() for k in list(day[0]) + list(day[1])},
+                  key=lambda k: (order.index(k[0]) if k[0] in order else 99, k[0], ["initial", "change", "rename"].index(k[1]), k[2]))
+    for sc, step, reader in keys:
+        title = f"{sc}, {step}" + (f", reader {reader}" if reader else "")
+        out.append(f"**{title}**\n")
+        out.append("| Tool, day | Runs | Time s | Wire MB | With peers MB | Reused local MB | Writer sent MB | Reader CPU s | Reader RSS MiB | Writer CPU s | Writer RSS MiB | Failed |")
+        out.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
+        for tool in ("varsto", "resilio"):
+            for day, label in (("before", "11-07"), ("after", "11-08")):
+                rows, bad = runs[day]
+                v = rows.get((sc, step, reader, tool), [])
+                if not v and not bad.get((sc, step, reader, tool)):
+                    continue
+                name = {"varsto": {"before": "Varsto 46adda3 (11-07)", "after": "Varsto c50f260 (11-08)"},
+                        "resilio": {"before": "Resilio 2.8.1 (11-07)", "after": "Resilio 2.8.1 (11-08)"}}[tool][day]
+                out.append("| " + " | ".join([
+                    name, str(len(v)), f([x[0]["wall_s"] for x in v]), f([x[0]["wire_bytes"] / 1e6 for x in v]),
+                    f([(x[0]["peer_rx"] + x[0]["peer_tx"]) / 1e6 for x in v]),
+                    f([x[0].get("bytes_reused_local", 0) / 1e6 for x in v]) if tool == "varsto" and day == "after" else "",
+                    f([sum(x[1]["sent_to"].values()) / 1e6 for x in v if x[1].get("sent_to")]),
+                    f([x[0]["cpu_s"] for x in v]), f([x[0]["peak_rss_mib"] for x in v], 0),
+                    f([x[1].get("cpu_s") for x in v]), f([x[1].get("peak_rss_mib") for x in v], 0),
+                    str(bad.get((sc, step, reader, tool), 0))]) + " |")
+        out.append("")
     return "\n".join(out)
 
 
@@ -664,6 +771,7 @@ def main():
     ap.add_argument("--stop-after-min", type=float, default=200)
     ap.add_argument("--variant", default="")
     ap.add_argument("--detail", action="store_true", help="report: also every run")
+    ap.add_argument("--before", default="", help="report: an earlier results.jsonl to put side by side, per scenario")
     args = ap.parse_args()
     b = RvV(args)
     getattr(b, args.step.replace("-", "_"))()

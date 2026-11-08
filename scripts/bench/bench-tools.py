@@ -23,11 +23,14 @@ synced directory for themselves: `.sync/` and `*.!sync` (Resilio Sync),
     bench-tools.py proc <pid>                    CPU seconds, peak and current RSS
     bench-tools.py idle <pid> [--quiet 5] [--max 1800]
         wait until the process used no CPU and read no disk for --quiet seconds
-    bench-tools.py observe <dir> <manifest> --iface IF --ips IP ... --pidfile F [--start CMD] [wait options]
-        counters, then (with --start) the daemon started in the background
-        with its pid written to F, then `wait`, then the counters again:
-        one JSON object with t0 (just before the start), the wait result,
-        CPU/RSS of the pid before and after, and the byte counters
+    bench-tools.py observe <dir> <manifest> --iface IF --ips IP ... (--pidfile F | --pid N | --service-json J)
+                   [--start CMD | --run CMD] [wait options]
+        counters, then the daemon started in the background (--start, its
+        pid written to F) or a command run to completion (--run: Varsto's
+        folder attach or service start), then `wait`, then the counters
+        again: one JSON object with t0 (just before the start or run), the
+        wait result, CPU/RSS of the pid before and after (--service-json:
+        the pid in Varsto's service.json, read after --run), and the bytes
 """
 import argparse
 import hashlib
@@ -239,13 +242,21 @@ def observe(a):
     import contextlib
     import io
     n0 = net_counters(a.iface, a.ips)
+    pid = a.pid or (open(a.pidfile).read().strip() if a.pidfile and not a.start else None)
+    if a.service_json and os.path.exists(a.service_json) and not a.run:
+        pid = str(json.load(open(a.service_json))["pid"])
+    p_before = proc_stats(pid) if pid else None
     t0 = time.time()
     if a.start:
         p = subprocess.Popen(a.start, shell=True, stdin=subprocess.DEVNULL, stdout=open(a.log, "ab"),
                              stderr=subprocess.STDOUT, start_new_session=True)
         open(a.pidfile, "w").write(str(p.pid))
-    pid = open(a.pidfile).read().strip()
-    p0 = proc_stats(pid)
+        pid = str(p.pid)
+    if a.run:
+        subprocess.run(a.run, shell=True, check=True, stdout=open(a.log, "ab"), stderr=subprocess.STDOUT)
+        if a.service_json:
+            pid = str(json.load(open(a.service_json))["pid"])
+    p0 = p_before or proc_stats(pid)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         wait(a)
@@ -306,7 +317,8 @@ def main():
     p.add_argument("--timeout", type=float, default=1800); p.add_argument("--interval", type=float, default=0.25)
     p.add_argument("--changed", nargs="*"); p.add_argument("--gone", nargs="*")
     p.add_argument("--iface", required=True); p.add_argument("--ips", nargs="*", default=[])
-    p.add_argument("--pidfile", required=True); p.add_argument("--start"); p.add_argument("--log", default="/dev/null")
+    p.add_argument("--pidfile"); p.add_argument("--pid"); p.add_argument("--service-json")
+    p.add_argument("--start"); p.add_argument("--run"); p.add_argument("--log", default="/dev/null")
     p.set_defaults(fn=observe)
     p = sub.add_parser("proc"); p.add_argument("pid"); p.set_defaults(fn=proc)
     p = sub.add_parser("idle"); p.add_argument("pid"); p.add_argument("--quiet", type=float, default=5)
