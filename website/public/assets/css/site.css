@@ -203,8 +203,10 @@ table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95re
 th, td { text-align: left; vertical-align: top; padding: .5rem .6rem; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; }
 code.sum { font-size: .8rem; word-break: break-all; }
-.doclist, .posts { list-style: none; padding: 0; }
-.doclist li, .posts li { padding: .45rem 0; border-bottom: 1px solid var(--border); }
+.doclist, .posts { list-style: none; padding: 0; display: grid; gap: .6rem; max-width: 56rem; }
+.doclist li, .posts li { position: relative; padding: .85rem 1rem .85rem 2.6rem; background: var(--raise); border: 1px solid var(--border); border-radius: 12px; color: var(--muted); }
+.doclist li::before, .posts li::before { content: ""; position: absolute; left: 1rem; top: 1.25rem; width: .55rem; height: .55rem; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--glow); }
+.doclist li:hover, .posts li:hover { border-color: var(--border-2); }
 .posts time { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: .5rem; }
 pre.licence { white-space: pre-wrap; }
 figure.hero { margin: 2rem 0 1rem; }
@@ -227,13 +229,14 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 
 .dl-release { color:var(--muted); }
 .dl-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(13.5rem, 1fr)); gap:1rem; margin:1rem 0 1.5rem; }
-.dl-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1.1rem; display:flex; flex-direction:column; gap:.6rem; }
+.dl-card { background:linear-gradient(180deg, var(--surface), var(--raise)); border:1px solid var(--border); border-radius:var(--radius); padding:1.1rem; display:flex; flex-direction:column; gap:.6rem; }
 .dl-head { display:flex; align-items:center; gap:.6rem; }
 .dl-head h3 { margin:0; font-size:1.1rem; }
 .dl-icon { width:28px; height:28px; fill:var(--accent); flex:none; }
-.dl-primary { display:block; text-align:center; background:var(--accent); color:var(--accent-contrast); font-weight:600; padding:.6rem .8rem; border-radius:10px; text-decoration:none; }
-.dl-primary:hover { filter:brightness(1.08); }
-.dl-primary.dl-disabled { background:var(--surface); color:var(--muted); border:1px solid var(--border); }
+.dl-primary { display:block; text-align:center; background:var(--text); color:var(--bg); font-weight:550; padding:.6rem .8rem; border-radius:10px; text-decoration:none; border:1px solid var(--text); transition: transform .15s, box-shadow .2s; }
+.dl-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 30px var(--glow); }
+.dl-primary.dl-disabled { background:transparent; color:var(--muted); border:1px solid var(--border-2); }
+.dl-primary.dl-disabled:hover { transform:none; box-shadow:none; }
 .dl-meta { font-size:.8rem; color:var(--muted); margin:0; overflow-wrap:anywhere; }
 .dl-alt { list-style:none; padding:0; margin:0; font-size:.9rem; }
 .dl-alt li { padding:.15rem 0; }
@@ -323,3 +326,11 @@ a.card:hover { border-color: var(--accent, currentColor); }
 .foot-mark.live { color: transparent; background: none; -webkit-text-fill-color: transparent; }
 .foot-mark canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 @media (prefers-reduced-motion: reduce) { .stage .window::after { display: none; } }
+
+/* Disclosure rows (the download list, the verification steps). */
+details.dl-all > summary, main details:not(.pop) > summary { cursor: pointer; color: var(--muted); font-weight: 550; padding: .5rem 0; }
+main details:not(.pop) > summary:hover { color: var(--text); }
+main details:not(.pop)[open] > summary { color: var(--text); }
+/* Every page: the first heading settles out of glyphs, cards and figures rise in. */
+.motion main .rise { opacity: 0; transform: translateY(18px); transition: opacity .7s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); transition-delay: calc(var(--i, 0) * 70ms); }
+.motion main .rise.in { opacity: 1; transform: none; }
