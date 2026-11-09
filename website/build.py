@@ -438,8 +438,6 @@ PLATFORMS = [
      "Release-signed APK for sideloading: allow the install when the phone asks. Not a debug build, so an update replaces the previous install. Runs the same core as a foreground service."),
     ("iOS", "ios", lambda n: n.endswith("-ios-unsigned.ipa"), [],
      "Unsigned .ipa for iPhone and iPad. It does not install by itself: AltStore, SideStore or Sideloadly sign it with your own Apple ID. A Sideloadly error about signing, an Apple ID limit, an expired install or an untrusted developer comes from that tool or from Apple, not from a broken package. Built by CI on a Mac runner; not yet run on a real device."),
-    ("Source", "source", lambda n: n.endswith("-source.tar.gz"), [],
-     "Git archive of the tagged release. Build with a stable Rust toolchain: cargo build --release."),
 ]
 
 ICONS = {
@@ -448,7 +446,6 @@ ICONS = {
     "windows": '<path d="M3 5.5 11 4.4v7.1H3zm0 13 8 1.1v-7H3zm9 1.2L22 21v-8.4h-10zm0-15.4V11h10V3z"/>',
     "android": '<path d="M7 9h10v8a2 2 0 0 1-2 2h-1v3h-2v-3h-1v3H9v-3H8a1 1 0 0 1-1-1zm10.6-1H6.4c.3-1.9 1.4-3.5 3-4.4L8.3 2.5l.9-.5 1.2 2.2c.5-.1 1-.2 1.6-.2s1.1.1 1.6.2l1.2-2.2.9.5-1.1 2.1c1.6.9 2.7 2.5 3 4.4zM9.5 6.5a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4zm5 0a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4zM4 10h2v7H4zm14 0h2v7h-2z"/>',
     "ios": '<path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v15h8V4zm3 16.5h2v1h-2z"/>',
-    "source": '<path d="m8.5 7-5 5 5 5 1.4-1.4L6.3 12l3.6-3.6zm7 0-1.4 1.4 3.6 3.6-3.6 3.6L15.5 17l5-5z"/>',
 }
 
 
@@ -524,6 +521,10 @@ def downloads_table(depth: int) -> str:
             size = remote["sizes"].get(name, 0)
         else:
             size = (OUT / "downloads" / name).stat().st_size if (OUT / "downloads" / name).exists() else 0
+        # The source archive stays on the release. The site does not offer it;
+        # the repository is the place to get the source.
+        if name.endswith("-source.tar.gz"):
+            continue
         files.append((name, digest, size))
     version = notes.get("_version", "")
     pre = "../" * depth
@@ -545,8 +546,6 @@ def downloads_table(depth: int) -> str:
             label = "Download the unsigned .ipa" if title == "iOS" else ("Download Varsto.app (Apple Silicon)" if not name.endswith("-lite.zip") else "Download Varsto.app (interim, Apple Silicon)") if title == "macOS" else "Download the Windows installer" if title == "Windows" else f"Download for {html.escape(title)}"
             button = (f'<a class="dl-primary" href="{pre}downloads/{html.escape(name)}">{label}</a>'
                       f'<p class="dl-meta">{html.escape(name)}<br>{human(size)} · <span class="sum" title="{digest}">SHA-256 {digest[:12]}…</span></p>')
-        elif title == "Source":
-            button = f'<a class="dl-primary" href="{pre}downloads/">Source</a>'
         else:
             button = f'<a class="dl-primary dl-disabled" href="{pre}docs/">Not available yet</a>'
             if title == "iOS":  # a release without an .ipa (the live set before this one is published)
