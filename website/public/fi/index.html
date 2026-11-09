@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Varsto-sovellus: salattu synkronointi ja varmuuskopio omaan tallennustilaan</title>
-<meta name="description" content="Varsto-sovellus: päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.">
+<meta name="description" content="Varsto-sovellus: päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/fi/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Varsto-sovellus: salattu synkronointi ja varmuuskopio omaan tallennustilaan">
-<meta property="og:description" content="Varsto-sovellus: päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.">
+<meta property="og:description" content="Varsto-sovellus: päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.">
 <meta property="og:url" content="https://varsto.net/fi/">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -23,7 +23,7 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv","fr"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/fi/","description":"Varsto-sovellus: päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android, iOS","softwareVersion":"0.0.1-alpha.16","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.16","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv","fr"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/fi/","description":"Varsto-sovellus: päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android, iOS","softwareVersion":"0.0.1-alpha.16","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.16","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
 <link rel="stylesheet" href="../assets/css/site.css?v=ab2697617b">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
@@ -59,7 +59,7 @@
     <section class="hero">
       <canvas class="field" id="field" aria-hidden="true"></canvas>
       <h1>Tuo oma tallennuspaikkasi. Pidä omat avaimesi. Tiedä, missä jokainen lohko on.</h1>
-      <p class="lead">Päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi laitteidesi välillä, jälkikvanttisella hybridikryptografialla ja kirjanpidolla, jonka voit itse tarkastaa. Ei palvelinta, ei tiliä, ei palveluntarjoajaa, johon pitäisi luottaa.</p>
+      <p class="lead">Päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla ja kirjanpidolla, jonka voit itse tarkastaa. Ei palvelinta, ei tiliä, ei palveluntarjoajaa, johon pitäisi luottaa. Miten tämä eroaa <a href="compare/syncthing/">Syncthingistä</a> ja <a href="compare/resilio-sync/">Resilio Syncistä</a>.</p>
       <div class="cta"><a class="button" href="downloads/">Lataa alfa</a> <a class="button secondary" href="../docs/quick-start.html">Pika-aloitus</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Lähdekoodi GitHubissa</a></div>
       <nav class="platforms" aria-label="Lataukset"><a href="downloads/">Linux</a> <a href="downloads/">Windows</a> <a href="downloads/">macOS</a> <a href="downloads/">Android</a> <a href="downloads/">iOS</a></nav>
     </section>

@@ -945,7 +945,10 @@ def build_sitemap() -> None:
     pages = []
     for f in sorted(OUT.rglob("*.html")):
         rel = f.relative_to(OUT).as_posix()
-        if rel == "404.html" or rel.startswith("downloads/"):
+        # The English download page is downloads/index.html. Other files under
+        # downloads/ are the binaries, not pages. The translated pages live at
+        # fi/downloads/ and are not under this prefix, so they were already listed.
+        if rel == "404.html" or (rel.startswith("downloads/") and rel != "downloads/index.html"):
             continue
         text = f.read_text(errors="ignore")
         if 'http-equiv="refresh"' in text or re.search(r'<meta name="robots" content="[^"]*noindex', text):
