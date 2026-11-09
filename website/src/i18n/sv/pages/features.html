@@ -112,7 +112,7 @@ description: Vad Varsto gör: en signerad liggare som räknar varje kopia, din e
       <div>
         <p>Det finns inget konto och ingen deponering: valvnyckeln är bara din, så appen hjälper dig att ta vara på den. <code>varsto recovery kit</code> skriver ut nyckeln som 24 ord med en kontrollsumma, uppställda för papper eller metall, och valfritt tre delar där två valfria återskapar nyckeln och en ensam inte avslöjar något, så att ingen enskild plats behöver rymma allt. En ny enhet ansluter direkt med orden. Testa det en gång om året.</p>
         <p>Från vilken annan enhet som helst signerar Ta bort enhet en återkallelse till din lagring. Varje enhet ignorerar sedan den borttagna enhetens liggarposter efter brytpunkten och vägrar dess peer-anslutningar, och valvet byter till en ny nyckel som förseglas (X25519 + ML-KEM-768) enbart till var och en av de kvarvarande enheterna: liggare, poster, manifest och nya filer i varje mapp använder nycklar som den borttagna enheten aldrig ser. Med en raderingsorder raderar enheten sina nycklar, sitt synkroniseringstillstånd och mapparnas innehåll nästa gång den kör Varsto och når en av dina lagringsplatser; ordern är signerad av en av dina enheter, så varken en lagringsplats eller någon med en gammal valvnyckel kan utlösa den.</p>
-        <p class="note">Det som den borttagna enheten kunde läsa tidigare förblir läsbart för den; mappar som delats med andra personer och Strongroom-mappar behåller sina nycklar; inloggningsuppgifter till lagringen roteras inte åt dig. Skriv ut ett nytt återställningspaket efteråt.</p>
+        <p class="note">Det som den borttagna enheten kunde läsa tidigare förblir läsbart för den; mappar som delats med andra personer och Strongroom-mappar behåller sina nycklar; inloggningsuppgifter till lagringen roteras inte åt dig. Varsto fortsätter att påminna tills du har angett en ny nyckel på varje kvarvarande enhet och bekräftat att den gamla nyckeln är avstängd hos leverantören. Skriv ut ett nytt återställningspaket efteråt.</p>
       </div>
     </section>
 
@@ -140,9 +140,7 @@ description: Vad Varsto gör: en signerad liggare som räknar varje kopia, din e
     </ul>
     <h2>Också med i designen</h2>
     <ul>
-      <li>Inloggningsuppgifter till lagringen per enhet, som roteras hos leverantören när en enhet tas bort.</li>
       <li>Omkryptering av befintliga data efter att en enhet har tagits bort.</li>
-      <li>Peer-upptäckt via DHT.</li>
       <li>Utmaningar för bevis på lagring.</li>
       <li>Erasure coding över lagringsplatser.</li>
       <li>En integration med File Provider / Cloud Files för platshållare.</li>

@@ -118,6 +118,7 @@ pub fn section9_allows(class: WriterClass, kind: Kind) -> bool {
                 | OrgRoster
                 | OrgLog
                 | Mailbox
+                | Credential
         ),
         WriterClass::FullEditor => {
             matches!(
@@ -136,6 +137,7 @@ pub fn section9_allows(class: WriterClass, kind: Kind) -> bool {
                 | Settings
                 | StorageNames
                 | Mailbox
+                | Credential
                 | Batch
         ),
         WriterClass::MemberEditor => matches!(kind, Manifest | BlockMap | Trash | Batch),

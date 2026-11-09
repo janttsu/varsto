@@ -194,10 +194,10 @@
 </tr>
 <tr>
 <td>A11</td>
-<td>Operator of a relay or DHT node</td>
-<td>Sees IP addresses, timing, sizes and opaque records; drops, delays or replays records; may run many nodes (Sybil, eclipse).</td>
+<td>Operator of a relay or the rendezvous service</td>
+<td>Sees IP addresses, timing, sizes and opaque records; drops, delays or replays records.</td>
 <td>Content, names, keys, the identity of the shared folder.</td>
-<td>Redirect a device to an impostor: the DHT record is only a hint and authenticity is checked in the hybrid handshake.</td>
+<td>Redirect a device to an impostor: an address from the operator is only a hint, and the pinned handshake decides.</td>
 </tr>
 <tr>
 <td>A12</td>
@@ -269,10 +269,10 @@
 <td>Every chunk is checked against its hash before acceptance; claims of holding data are challenged (plan 6.19). (Status 0.0.1-alpha.13: the hash check is built; challenging claims of holding data is not built.)</td>
 </tr>
 <tr>
-<td>Relay and DHT</td>
+<td>Relay and rendezvous</td>
 <td>Nothing.</td>
 <td>Opaque, encrypted traffic and records.</td>
-<td>Hints only; authenticity is established end to end in the hybrid handshake (plan 6.33).</td>
+<td>An address is only a hint; authenticity is established end to end by the pinned handshake (spec section 83).</td>
 </tr>
 </tbody>
 </table>
@@ -323,16 +323,10 @@
 <td>Not designed in detail; <strong>TBD</strong> (plan section 8, "rendezvous record metadata").</td>
 </tr>
 <tr>
-<td>DHT participants (A11)</td>
-<td>The device's IP address and that it looks up or publishes a record at certain times; a Sybil attacker may link lookups across epochs.</td>
-<td>DHT off by default or only with explicit consent; record key derived from a shared secret and a daily epoch; records encrypted. The record carries a classical signature only, because a BEP 44 record is too small for an ML-DSA signature, so it is treated as a hint and never as proof of authenticity (plan 6.33).</td>
-<td>Default <strong>TBD</strong> (plan section 8, "P2P library and discovery").</td>
-</tr>
-<tr>
-<td>Relay operator (A11)</td>
-<td>IP addresses of both ends, timing and volume of traffic.</td>
-<td>Self-hostable relays; direct connections preferred; relays see only encrypted traffic.</td>
-<td>Design intent.</td>
+<td>Relay or rendezvous operator (A11)</td>
+<td>IP addresses of both ends, timing and volume of traffic; which addresses belong to one vault.</td>
+<td>Self-hostable relays and rendezvous; direct connections preferred; they see only encrypted traffic. An address they hand out is only tried; the pinned handshake decides.</td>
+<td>Built for the rendezvous service (spec section 83). A relay through one of the user's own devices is built.</td>
 </tr>
 <tr>
 <td>Network observer (A2)</td>
@@ -427,7 +421,7 @@
 <td>6.28, 6.32; plan section 8 "local control API"</td>
 </tr>
 <tr>
-<td>A11 Relay or DHT operator</td>
+<td>A11 Relay or rendezvous operator</td>
 <td>F-012, F-013, S-003</td>
 <td>6.7, 6.33</td>
 </tr>

@@ -359,6 +359,10 @@ pub struct RevokeReport {
     /// device of each that holds its key re-keys it at its next read of the
     /// membership (`Membership::rekey_after_removals`).
     pub folders_not_rekeyed: Vec<String>,
+    /// What to do about storage keys. Empty when nothing here has a provider
+    /// key. The removal itself already happened; these do not block sync.
+    #[serde(default)]
+    pub credential_notes: Vec<String>,
 }
 
 /// Remove what a wipe removes inside one folder root. A root that is the
@@ -802,7 +806,7 @@ impl Engine {
                 .unwrap_or_else(|| hex::encode(f))
         };
         let target = targets.iter().next().cloned().expect("checked non-empty");
-        Ok(RevokeReport {
+        let mut out = RevokeReport {
             device_id: target.to_string(),
             name: names[0].clone(),
             devices: names,
@@ -822,7 +826,16 @@ impl Engine {
                 .map(|(f, _)| folder_name(f))
                 .collect(),
             folders_not_rekeyed: report.folders_not_rotated.iter().map(folder_name).collect(),
-        })
+            credential_notes: Vec::new(),
+        };
+        // The revocation is already stored. The reminder names the key that
+        // was just used to write it; failing to publish the reminder does
+        // not undo the removal.
+        match self.credential_after_revoke(out.key_epoch) {
+            Ok(notes) => out.credential_notes = notes,
+            Err(e) => log::warn!("storage-key reminder was not saved: {e:#}"),
+        }
+        Ok(out)
     }
 
     // ----- picking up changes on sync -------------------------------------------

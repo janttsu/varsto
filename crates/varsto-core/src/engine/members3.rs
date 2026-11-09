@@ -781,6 +781,11 @@ impl Engine {
                 m.grant_missing_vault_keys()
             })?;
         }
+        // The storage-key reminder, from records already on the storages
+        // this read opened. A failure here does not fail the sync.
+        if let Err(e) = self.refresh_credentials() {
+            log::warn!("storage-key reminder not updated: {e:#}");
+        }
         Ok(())
     }
 

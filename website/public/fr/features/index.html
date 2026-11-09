@@ -163,7 +163,7 @@
       <div>
         <p>Il n’y a ni compte ni séquestre : la clé du coffre n’est qu’à vous, et l’application vous aide donc à la conserver. <code>varsto recovery kit</code> imprime la clé en 24 mots avec une somme de contrôle, mis en page pour le papier ou le métal, et éventuellement trois parts dont deux suffisent à reconstruire la clé alors qu’une seule ne révèle rien, de sorte qu’aucun lieu unique n’a à tout détenir. Un nouvel appareil rejoint directement à partir des mots. Testez-le une fois par an.</p>
         <p>Depuis n’importe quel autre appareil, Retirer l’appareil signe une révocation dans votre stockage. Chaque appareil ignore alors les entrées du registre de l’appareil retiré après la date de coupure et refuse ses connexions de pair, et le coffre passe à une nouvelle clé scellée (X25519 + ML-KEM-768) pour chaque appareil restant uniquement : le registre, les enregistrements, les manifestes et les nouveaux fichiers de chaque dossier utilisent des clés que l’appareil retiré ne voit jamais. Avec un ordre d’effacement, l’appareil supprime ses clés, son état de synchronisation et le contenu de ses dossiers la prochaine fois qu’il exécute Varsto et atteint l’un de vos stockages ; l’ordre est signé par l’un de vos appareils, de sorte qu’un stockage ou quelqu’un qui possède une ancienne clé de coffre ne peut pas le déclencher.</p>
-        <p class="note">Ce que l’appareil retiré pouvait lire auparavant lui reste lisible ; les dossiers partagés avec d’autres personnes et les dossiers Strongroom gardent leurs clés ; les identifiants de stockage ne sont pas renouvelés pour vous. Imprimez ensuite un nouveau kit de récupération.</p>
+        <p class="note">Ce que l’appareil retiré pouvait lire auparavant lui reste lisible ; les dossiers partagés avec d’autres personnes et les dossiers Strongroom gardent leurs clés ; les identifiants de stockage ne sont pas renouvelés pour vous. Varsto continue de le rappeler jusqu’à ce que vous ayez saisi une nouvelle clé sur chaque appareil restant et confirmé que l’ancienne clé est désactivée chez le fournisseur. Imprimez ensuite un nouveau kit de récupération.</p>
       </div>
     </section>
 
@@ -191,9 +191,7 @@
     </ul>
     <h2>Aussi dans la conception</h2>
     <ul>
-      <li>Des identifiants de stockage propres à chaque appareil, renouvelés chez le fournisseur lorsqu’un appareil est retiré.</li>
       <li>Le rechiffrement des données existantes après le retrait d’un appareil.</li>
-      <li>La découverte de pairs par DHT.</li>
       <li>Des défis de preuve de stockage.</li>
       <li>Un code d’effacement à travers les stockages.</li>
       <li>Une intégration File Provider / Cloud Files pour les fichiers substituts.</li>

@@ -406,6 +406,14 @@ mod imp {
             }
             Err(e) => log::warn!("recovery copies not checked: {e:#}"),
         }
+        match engine.credential_warnings() {
+            Ok(list) => {
+                for w in list {
+                    eprintln!("warning: {}", w.text);
+                }
+            }
+            Err(e) => log::warn!("storage keys not checked: {e:#}"),
+        }
         let waiting = engine.records_waiting3();
         if waiting > 0 {
             eprintln!(

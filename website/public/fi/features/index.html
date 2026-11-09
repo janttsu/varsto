@@ -163,7 +163,7 @@
       <div>
         <p>Tiliä ei ole, eikä avainta talleteta kenellekään: holviavain on vain sinun, joten sovellus auttaa sinua pitämään sen tallessa. <code>varsto recovery kit</code> tulostaa avaimen 24 sanana tarkistussummineen paperille tai metallille aseteltuna ja halutessasi kolmena osana, joista mitkä tahansa kaksi palauttavat avaimen ja yksi yksinään ei paljasta mitään, joten minkään yksittäisen paikan ei tarvitse sisältää kaikkea. Uusi laite liittyy suoraan sanojen avulla. Testaa se kerran vuodessa.</p>
         <p>Miltä tahansa muulta laitteelta Poista laite kirjoittaa tallennuspaikkaasi allekirjoitetun oikeuksien perumisen. Sen jälkeen jokainen laite jättää huomiotta poistetun laitteen katkaisuhetken jälkeiset kirjanpitomerkinnät ja torjuu sen vertaisyhteydet, ja holvi siirtyy uuteen avaimeen, joka sinetöidään (X25519 + ML-KEM-768) vain jäljelle jääville laitteille: jokaisen kansion kirjanpito, tietueet, manifestit ja uudet tiedostot käyttävät avaimia, joita poistettu laite ei koskaan näe. Tyhjennysmääräyksen kanssa laite poistaa avaimensa, synkronointitilansa ja kansioiden sisällön, kun siinä seuraavan kerran ajetaan Varstoa ja se tavoittaa jonkin tallennuspaikoistasi; määräyksen allekirjoittaa jokin laitteistasi, joten tallennuspaikka tai joku, jolla on vanha holviavain, ei voi laukaista sitä.</p>
-        <p class="note">Minkä poistettu laite pystyi lukemaan aiemmin, sen se pystyy lukemaan edelleen; muiden ihmisten kanssa jaetut kansiot ja Strongroom-kansiot säilyttävät avaimensa; tallennuspaikkojen tunnuksia ei vaihdeta puolestasi. Tulosta tämän jälkeen uusi palautuspaketti.</p>
+        <p class="note">Minkä poistettu laite pystyi lukemaan aiemmin, sen se pystyy lukemaan edelleen; muiden ihmisten kanssa jaetut kansiot ja Strongroom-kansiot säilyttävät avaimensa; tallennuspaikkojen tunnuksia ei vaihdeta puolestasi. Varsto muistuttaa, kunnes olet syöttänyt uuden avaimen jokaiselle jäljelle jäävälle laitteelle ja vahvistanut, että vanha avain on poistettu käytöstä palveluntarjoajalla. Tulosta tämän jälkeen uusi palautuspaketti.</p>
       </div>
     </section>
 
@@ -191,9 +191,7 @@
     </ul>
     <h2>Suunnitelmissa myös</h2>
     <ul>
-      <li>Laitekohtaiset tallennuspaikkatunnukset, jotka vaihdetaan palveluntarjoajalla, kun laite poistetaan.</li>
       <li>Olemassa olevan datan salaaminen uudelleen laitteen poiston jälkeen.</li>
-      <li>Vertaisten haku DHT:llä.</li>
       <li>Tallennuksen todistavat haasteet (proof-of-storage).</li>
       <li>Virheenkorjaava koodaus (erasure coding) tallennuspaikkojen yli.</li>
       <li>File Provider- / Cloud Files -integraatio paikkamerkeille.</li>
