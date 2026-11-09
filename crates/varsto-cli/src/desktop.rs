@@ -2630,10 +2630,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         (Method::Post, "/api/service/hold") => {
             // Memory only. A sync that already has the engine runs out;
             // the loop will not start another while this is set.
-            let hold = input
-                .get("hold")
-                .and_then(|b| b.as_bool())
-                .unwrap_or(true);
+            let hold = input.get("hold").and_then(|b| b.as_bool()).unwrap_or(true);
             st.service.hold_sync = hold;
             if !hold {
                 // A peer's "sync now" that arrived while held would walk

@@ -169,6 +169,7 @@ pub use org_ops::{
     UnlistedDevice,
 };
 pub use p2p3::{DirectoryRead, SAVED_PEERS};
+pub use patch::folder_names_for_paths;
 pub use protection::{ClassCoverage, Protection};
 pub use quotas::QuotaStatus;
 pub use repair::{
@@ -192,7 +193,6 @@ pub use trash::{
     TRASH_UPKEEP_EVERY_SECS,
 };
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
-pub use patch::folder_names_for_paths;
 pub use youtube::{
     find_youtube_job, task_args as youtube_task_args, youtube_jobs_at, BlockingYoutubeEnv,
     ServiceYoutubeEnv, TaskKind as YoutubeTaskKind, Video as YoutubeVideo, VideoCounts,

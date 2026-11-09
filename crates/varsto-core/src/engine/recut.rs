@@ -82,7 +82,10 @@ mod tests {
         let old = refs(&chunk_bytes(data, params), key);
         let kept = keep_prefix(&mut file, &old, key, &mut hasher).unwrap();
         assert_eq!(kept.len(), old.len());
-        assert_eq!(hasher.finalize(), *blake3::keyed_hash(&key.0, data).as_bytes());
+        assert_eq!(
+            hasher.finalize(),
+            *blake3::keyed_hash(&key.0, data).as_bytes()
+        );
         kept
     }
 
@@ -122,7 +125,10 @@ mod tests {
         }
         let fresh = refs(&tail, &key);
         assert_ne!(fresh[0].chunk, old[kept.len()].chunk);
-        assert_eq!(hasher.finalize(), *blake3::keyed_hash(&key.0, &data).as_bytes());
+        assert_eq!(
+            hasher.finalize(),
+            *blake3::keyed_hash(&key.0, &data).as_bytes()
+        );
         let whole = refs(&chunk_bytes(&data, params), &key);
         let mut got = kept;
         got.extend(fresh);

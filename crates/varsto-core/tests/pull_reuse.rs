@@ -218,7 +218,10 @@ fn deletions_applied_first_leave_their_blocks_in_the_trash_copy() {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .count();
-    assert_eq!(trashed, 0, "a rename does not copy the files through the trash");
+    assert_eq!(
+        trashed, 0,
+        "a rename does not copy the files through the trash"
+    );
 }
 
 #[test]

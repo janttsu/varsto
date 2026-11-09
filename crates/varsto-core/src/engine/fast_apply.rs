@@ -259,8 +259,8 @@ impl Engine {
             file.set_len(new_len)?;
             modified = true;
             if remote.mtime > 0 {
-                let t = std::time::UNIX_EPOCH
-                    + std::time::Duration::from_nanos(remote.mtime as u64);
+                let t =
+                    std::time::UNIX_EPOCH + std::time::Duration::from_nanos(remote.mtime as u64);
                 let _ = file.set_modified(t);
             }
             file.sync_all()?;
@@ -316,7 +316,8 @@ impl Engine {
         let mut bytes = 0u64;
         while from + n < entries.len() && n < SMALL_RUN_MAX && bytes < SMALL_RUN_BYTES {
             let (path, remote) = entries[from + n];
-            if self.placed_early.contains(path) || !self.simple_new(root, state, ignore, path, remote)
+            if self.placed_early.contains(path)
+                || !self.simple_new(root, state, ignore, path, remote)
             {
                 break;
             }
@@ -349,7 +350,9 @@ impl Engine {
                 }
             }
             let chunk = &remote.chunks[0];
-            let taken = if let Some(bytes) = have.get(&chunk.chunk).filter(|b| b.len() as u64 == chunk.size)
+            let taken = if let Some(bytes) = have
+                .get(&chunk.chunk)
+                .filter(|b| b.len() as u64 == chunk.size)
             {
                 Taken {
                     bytes: bytes.clone(),
@@ -375,16 +378,17 @@ impl Engine {
                 break;
             }
             if remote.mtime > 0 {
-                let t = std::time::UNIX_EPOCH + std::time::Duration::from_nanos(remote.mtime as u64);
+                let t =
+                    std::time::UNIX_EPOCH + std::time::Duration::from_nanos(remote.mtime as u64);
                 let _ = file.set_modified(t);
             }
             let settings = self.meta_settings(&rec.folder_id);
-            let mode = if settings.permissions && self.meta_caps.mode == crate::fsmeta::ModeCap::Full
-            {
-                remote.meta.as_ref().and_then(|m| m.mode)
-            } else {
-                None
-            };
+            let mode =
+                if settings.permissions && self.meta_caps.mode == crate::fsmeta::ModeCap::Full {
+                    remote.meta.as_ref().and_then(|m| m.mode)
+                } else {
+                    None
+                };
             crate::util::set_final_mode(&file, mode);
             staged.push(Staged {
                 path: (*path).clone(),
@@ -422,9 +426,8 @@ impl Engine {
             .collect();
         let journal_home = self.home().to_path_buf();
         self.local_blocks = Some((folder_id.clone(), local));
-        let commit = std::thread::spawn(move || {
-            super::apply_journal::commit(&journal_home, &planned)
-        });
+        let commit =
+            std::thread::spawn(move || super::apply_journal::commit(&journal_home, &planned));
         self.prefetch_following(rec, root, entries, from + staged.len(), state, storages);
         let _journal_path = match commit.join() {
             Ok(Ok(path)) => path,
@@ -506,7 +509,11 @@ impl Engine {
             state.pending_remote.remove(&item.path);
             state.files.insert(item.path.clone(), item.remote.clone());
             report.files_updated += 1;
-            local.add_file(item.disk.parent().unwrap_or(root), &item.disk, &item.remote.chunks);
+            local.add_file(
+                item.disk.parent().unwrap_or(root),
+                &item.disk,
+                &item.remote.chunks,
+            );
             if self.share_read_only(rec) {
                 super::share_roles::set_read_only(&item.disk, true);
             }
@@ -636,7 +643,8 @@ impl Engine {
         let staging = self.staging_roots();
         if let Some((path, _)) = super::disk_fetch::staged_object(&staging, &chunk.object) {
             if let Ok(bytes) = fs::read(&path) {
-                if crate::ids::ObjectName::from_bytes(&crate::crypto::hash(&bytes)) == chunk.object {
+                if crate::ids::ObjectName::from_bytes(&crate::crypto::hash(&bytes)) == chunk.object
+                {
                     let plain = crate::chunk_seal::open_chunk(
                         fk,
                         &self.vault.vault_id,
@@ -742,9 +750,9 @@ fn verify_keeps(
     for c in old {
         let start = at;
         at += c.size;
-        let kept = spans.iter().any(|s| {
-            matches!(s, Span::Keep { off, len } if start >= *off && at <= *off + *len)
-        });
+        let kept = spans
+            .iter()
+            .any(|s| matches!(s, Span::Keep { off, len } if start >= *off && at <= *off + *len));
         if !kept {
             continue;
         }
@@ -766,13 +774,12 @@ fn chunks_kept(chunks: &[ChunkRef], spans: &[Span]) -> u64 {
     for c in chunks {
         let start = at;
         at += c.size;
-        if spans.iter().any(|s| {
-            matches!(s, Span::Keep { off, len } if start >= *off && at <= *off + *len)
-        }) {
+        if spans
+            .iter()
+            .any(|s| matches!(s, Span::Keep { off, len } if start >= *off && at <= *off + *len))
+        {
             n += 1;
         }
     }
     n
 }
-
-

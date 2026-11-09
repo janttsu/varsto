@@ -86,8 +86,7 @@ pub(super) fn write(home: &Path, files: &[Planned]) -> io::Result<OpenJournal> {
         let dest = item.dest.to_str().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "journal path is not utf-8")
         })?;
-        if dest.is_empty() || dest.len() > 4096 || dest.contains('\0') || !item.dest.is_absolute()
-        {
+        if dest.is_empty() || dest.len() > 4096 || dest.contains('\0') || !item.dest.is_absolute() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "journal path must be absolute",
@@ -181,14 +180,20 @@ fn seal_one(path: &Path) -> io::Result<()> {
     let mut magic = [0u8; 8];
     file.read_exact(&mut magic)?;
     if &magic != MAGIC {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad journal magic"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "bad journal magic",
+        ));
     }
     let _created = read_u64(&mut file)?;
     let count = read_u32(&mut file)?;
     for _ in 0..count {
         let dest_len = read_u32(&mut file)? as usize;
         if dest_len == 0 || dest_len > 4096 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "bad journal path"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "bad journal path",
+            ));
         }
         let mut dest_buf = vec![0u8; dest_len];
         file.read_exact(&mut dest_buf)?;
@@ -252,14 +257,20 @@ fn replay_one(path: &Path) -> io::Result<()> {
     let mut magic = [0u8; 8];
     file.read_exact(&mut magic)?;
     if &magic != MAGIC {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad journal magic"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "bad journal magic",
+        ));
     }
     let created = read_u64(&mut file)? as u128;
     let count = read_u32(&mut file)?;
     for _ in 0..count {
         let dest_len = read_u32(&mut file)? as usize;
         if dest_len == 0 || dest_len > 4096 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "bad journal path"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "bad journal path",
+            ));
         }
         let mut dest_buf = vec![0u8; dest_len];
         file.read_exact(&mut dest_buf)?;
@@ -269,7 +280,10 @@ fn replay_one(path: &Path) -> io::Result<()> {
         let mode = read_u32(&mut file)? as i32;
         let len = read_u64(&mut file)? as usize;
         if len > 1024 * 1024 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "journal record too large"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "journal record too large",
+            ));
         }
         let mut bytes = vec![0u8; len];
         file.read_exact(&mut bytes)?;

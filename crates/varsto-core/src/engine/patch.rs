@@ -62,12 +62,7 @@ pub(super) fn plan(old: &[ChunkRef], new: &[ChunkRef]) -> Option<Vec<Span>> {
                 if i + a >= old.len() {
                     break;
                 }
-                if same_place(
-                    &old[i + a],
-                    &new[j + b],
-                    old_off[i + a],
-                    new_off[j + b],
-                ) {
+                if same_place(&old[i + a], &new[j + b], old_off[i + a], new_off[j + b]) {
                     found = Some((a, b));
                     break;
                 }
@@ -144,10 +139,7 @@ fn push_write(spans: &mut Vec<Span>, off: u64, chunks: &[ChunkRef]) {
     if chunks.is_empty() {
         return;
     }
-    if let Some(Span::Write {
-        chunks: have, ..
-    }) = spans.last_mut()
-    {
+    if let Some(Span::Write { chunks: have, .. }) = spans.last_mut() {
         have.extend(chunks.iter().cloned());
         return;
     }
@@ -168,7 +160,10 @@ pub(super) fn same_blocks(a: &[ChunkRef], b: &[ChunkRef]) -> bool {
 
 /// Folder names whose directories contain `paths`, longest mount first.
 /// `None` when any path is outside every mount: the caller syncs everything.
-pub fn folder_names_for_paths(mounts: &[(String, PathBuf)], paths: &[PathBuf]) -> Option<Vec<String>> {
+pub fn folder_names_for_paths(
+    mounts: &[(String, PathBuf)],
+    paths: &[PathBuf],
+) -> Option<Vec<String>> {
     if mounts.is_empty() || paths.is_empty() {
         return None;
     }
@@ -259,10 +254,7 @@ mod tests {
         assert!(folder_names_for_paths(&mounts, &[PathBuf::from("/other/a")]).is_none());
         let got = folder_names_for_paths(
             &mounts,
-            &[
-                PathBuf::from("/data/docs/a"),
-                PathBuf::from("/data/docs/b"),
-            ],
+            &[PathBuf::from("/data/docs/a"), PathBuf::from("/data/docs/b")],
         )
         .unwrap();
         assert_eq!(got, vec!["docs".to_string()]);
