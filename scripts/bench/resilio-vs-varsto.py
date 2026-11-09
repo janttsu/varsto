@@ -27,7 +27,16 @@ every block came from a peer.
                                     V R / R V; starts no run after --stop-after-min from `up`
     resilio-vs-varsto.py report [--detail]  medians per scenario, tool and step as Markdown
                                     (--detail: every run too)
-    resilio-vs-varsto.py down       p2p-bench down (machines, volumes, IPs, bucket)
+    resilio-vs-varsto.py down       p2p-bench down (machines, volumes, IPs, bucket).
+                                    An --orca host is not a Scaleway machine: down
+                                    only stops the bench processes there and removes /bench.
+
+With --orca HOST (an SSH alias, for example isa-pc) that desktop is an extra
+reader on its own link, after the Scaleway scenarios. It is never created or
+deleted with the VMs. Its runs are separate scenarios (home-files, home-large,
+home-text, home-dup, home-change), so they are not averaged into the
+Paris–Amsterdam medians. netem is not applied on it, and its page cache is
+not dropped. Passwordless sudo is required: the bench directory is /bench.
 
 Per run and reader the record (kind "rvv" in <work>/results.jsonl) has the
 wall seconds to a verified folder (every sha256 equal to the writer's
@@ -92,6 +101,15 @@ PLAN = [
     ("netem", "files", ["ams"], "delay 40ms loss 1% rate 100mbit"),
 ]
 
+# The home desktop, alone, after the VM plan. Not shaped, not cache-dropped.
+HOME_PLAN = [
+    ("home-files", "files", ["orca"], None),
+    ("home-large", "pair", ["orca"], None),
+    ("home-text", "text", ["orca"], None),
+    ("home-dup", "dup", ["orca"], None),
+    ("home-change", "mut", ["orca"], None),
+]
+
 
 class RvV(pb.Bench):
     # ----- helpers --------------------------------------------------------------
@@ -107,6 +125,61 @@ class RvV(pb.Bench):
 
     def others(self, node):
         return [self.ip(n) for n in pb.ZONES if n != node]
+
+    def external(self, node):
+        return (self.state.get("external") or {}).get(node)
+
+    def ssh(self, node, cmd, check=True, capture=True):
+        ext = self.external(node)
+        if not ext:
+            return super().ssh(node, cmd, check=check, capture=capture)
+        remote = "sudo -n bash -c " + shlex.quote(cmd) if ext.get("sudo") else cmd
+        p = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", ext["ssh_host"], remote],
+            capture_output=capture, text=True)
+        if check and p.returncode != 0:
+            what = "(command with credentials)" if "VARSTO_S3_SECRET" in cmd or "RCLONE_" in cmd else cmd
+            raise SystemExit(f"{node}: remote command failed ({p.returncode}): {what[:60]}\n{(p.stderr or '')[-2000:]}")
+        return p.stdout if capture else ""
+
+    def ip(self, node):
+        ext = self.external(node)
+        if ext:
+            if not ext.get("ip"):
+                raise SystemExit(f"{node} has no public address yet (setup learns it)")
+            return ext["ip"]
+        return super().ip(node)
+
+    def push_file(self, node, local, remote):
+        ext = self.external(node)
+        if not ext:
+            sb.scp(str(local), f"root@{self.ip(node)}:{remote}")
+            return
+        tmp = "/tmp/" + pathlib.Path(str(local)).name + ".varsto-bench"
+        subprocess.run(
+            ["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", str(local), f"{ext['ssh_host']}:{tmp}"],
+            check=True)
+        self.ssh(node, f"mv {shlex.quote(tmp)} {shlex.quote(remote)}")
+
+    def probe_orca(self, host):
+        """Fail before any Scaleway machine exists when the desktop is not usable."""
+        p = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=12", host,
+             "echo OK; sudo -n true && echo SUDO; df -B1 --output=avail / | tail -1"],
+            capture_output=True, text=True)
+        out = p.stdout or ""
+        if p.returncode != 0 or "OK" not in out:
+            raise SystemExit(
+                f"orca ({host}) is not reachable ({(p.stderr or '').strip()[-300:]}). "
+                "Open the reverse tunnel before creating the machines.")
+        if "SUDO" not in out:
+            raise SystemExit(f"orca ({host}) answered, but passwordless sudo is required for /bench.")
+        free = int(out.strip().splitlines()[-1])
+        if free < 20 * 1024 ** 3:
+            raise SystemExit(f"orca has {free} bytes free on /, and the bench needs 20 GiB under /bench.")
+        self.state.setdefault("external", {})["orca"] = {"ssh_host": host, "sudo": True}
+        self.save()
+        log(f"orca: {host} answers, sudo works, {free / 1024 ** 3:.0f} GiB free")
 
     def net(self, node):
         return self.jtools(node, "net", self.iface(node), *self.others(node))
@@ -126,20 +199,25 @@ class RvV(pb.Bench):
             subprocess.run(sb.ssh_base("root", self.ip("par")) + [f"cat {path}"], stdout=f, check=True)
         for r in ("ams", "waw"):
             sb.scp(str(local), f"root@{self.ip(r)}:{path}")
+        for r in self.state.get("external") or {}:
+            self.push_file(r, local, path)
+
+    def bench_nodes(self):
+        return list(pb.ZONES) + list(self.state.get("external") or {})
 
     def stop_resilio(self):
-        for n in pb.ZONES:
+        for n in self.bench_nodes():
             self.ssh(n, "pkill -x rslsync; for i in $(seq 1 40); do pgrep -x rslsync >/dev/null || exit 0; sleep 0.25; done; pkill -9 -x rslsync; true", check=False)
 
     def stop_varsto(self):
         self.node_sh("par", "svc-stop", "/bench/w", check=False)
-        for r in ("ams", "waw"):
+        for r in ["ams", "waw", *list(self.state.get("external") or {})]:
             self.ssh(r, "for h in /bench/h-*; do [ -f $h/service.json ] && bash /bench/bench-node.sh svc-stop $h >/dev/null; done; true", check=False)
 
     def clocks(self):
         """Clock offset of every machine against this one (midpoint of an SSH round trip)."""
         out = {}
-        for n in pb.ZONES:
+        for n in self.bench_nodes():
             a = time.time()
             t = float(self.ssh(n, "date +%s.%N"))
             b = time.time()
@@ -159,7 +237,16 @@ class RvV(pb.Bench):
     def up(self):
         self.state.setdefault("t_up", time.time())
         self.save()
+        # The desktop is checked before any VM, so a closed tunnel does not leave machines running.
+        if self.args.orca:
+            self.probe_orca(self.args.orca)
         super().up()
+
+    def down(self):
+        for n in list(self.state.get("external") or {}):
+            log(f"{n}: stopping the bench and removing /bench; the machine stays")
+            self.ssh(n, "pkill -x rslsync || true; pkill -f '/bench/varsto --home' || true; rm -rf /bench", check=False)
+        super().down()
 
     def setup(self):
         super().setup()
@@ -179,10 +266,46 @@ class RvV(pb.Bench):
             nm[r] = self.ssh(r, "modprobe sch_netem && modprobe ifb && modprobe act_mirred && modprobe cls_u32 && echo ok "
                                 "|| (apt-get install -y -qq linux-modules-extra-$(uname -r) >/dev/null 2>&1; "
                                 "modprobe sch_netem && modprobe ifb && modprobe act_mirred && modprobe cls_u32 && echo ok-extra)", check=False).strip()
+        self.setup_orca()
         self.save()
         self.record({"kind": "tools", "versions": self.versions(), "resilio_tarball_sha256": self.state["rsl_sha256"],
-                     "resilio_url": RSL_URL, "iface": self.state["iface"], "netem": nm})
+                     "resilio_url": RSL_URL, "iface": self.state["iface"], "netem": nm,
+                     "external": self.state.get("external") or {}})
         log(f"versions {self.versions()}; netem {nm}")
+
+    def setup_orca(self):
+        ext = self.external("orca")
+        if not ext:
+            return
+        self.ssh("orca", "mkdir -p /bench && chmod 755 /bench")
+        for name in ("bench-node.sh", "bench-tools.py", "gen-data.py"):
+            self.push_file("orca", HERE / name, f"/bench/{name}")
+        self.push_file("orca", self.args.binary, "/bench/varsto")
+        self.ssh("orca", "chmod 755 /bench/varsto /bench/bench-node.sh /bench/bench-tools.py /bench/gen-data.py")
+        self.node_sh("orca", "setup")
+        self.state["iface"]["orca"] = self.node_sh("orca", "iface").strip()
+        ip = self.ssh("orca", "curl -4 -fsS --max-time 15 https://ifconfig.me || curl -4 -fsS --max-time 15 https://api.ipify.org").strip()
+        if not ip or " " in ip or len(ip) > 64:
+            raise SystemExit(f"orca: could not read a public address ({ip!r})")
+        ext["ip"] = ip
+        # The writer's byte counters should see the desktop too. Orca is not in the zone list.
+        for n in pb.ZONES:
+            self.node_sh(n, "acct", *self.others(n), ip)
+        self.node_sh("orca", "acct", *self.others("orca"))
+        out = self.node_sh("orca", "rsl-install", RSL_URL).strip().splitlines()
+        if out and out[0] != self.state.get("rsl_sha256"):
+            raise SystemExit(f"orca: Resilio tarball sha256 {out[0]} != {self.state.get('rsl_sha256')}")
+        par = self.ip("par")
+        reach = self.ssh(
+            "orca",
+            f"timeout 5 bash -c 'echo >/dev/tcp/{par}/22' && echo ssh-ok || echo ssh-closed",
+            check=False).strip()
+        info = self.ssh("orca", "nproc; free -g | sed -n 2p; lscpu | grep 'Model name'; uname -r").strip()
+        ext["reach_par_ssh"] = reach
+        ext["info"] = info
+        ext["cache"] = "not dropped"
+        self.save()
+        log(f"orca: public {ip}; {reach}; {info.replace(chr(10), ' | ')}")
 
     # ----- data -------------------------------------------------------------------
 
@@ -309,12 +432,18 @@ class RvV(pb.Bench):
         finally:
             if netem:
                 for r in readers:
+                    if self.external(r):
+                        continue
                     self.node_sh(r, "netem-off", check=False)
 
     def netem_on(self, readers, netem):
-        if netem:
-            for r in readers:
-                log(f"{r}: " + self.node_sh(r, "netem-on", *netem.split()).strip())
+        if not netem:
+            return
+        for r in readers:
+            if self.external(r):
+                log(f"{r}: netem skipped (home machine)")
+                continue
+            log(f"{r}: " + self.node_sh(r, "netem-on", *netem.split()).strip())
 
     def reader_entry(self, wall, n0, n1, cpu, hwm_kib, verified, extra=None):
         peers = {ip: {"rx": n1["peers"][ip]["rx"] - n0["peers"][ip]["rx"], "tx": n1["peers"][ip]["tx"] - n0["peers"][ip]["tx"]}
@@ -659,7 +788,10 @@ class RvV(pb.Bench):
         only = set(self.args.only.split(",")) if self.args.only else None
         t_up = self.state.get("t_up", time.time())
         failures = []
-        for scenario, s, readers, netem in PLAN:
+        scenarios = list(PLAN)
+        if self.external("orca"):
+            scenarios += HOME_PLAN
+        for scenario, s, readers, netem in scenarios:
             if only and scenario not in only:
                 continue
             for rep in range(self.args.rep_start, self.args.rep_start + self.args.reps):
@@ -688,6 +820,14 @@ class RvV(pb.Bench):
             print(report_runs(self.work / "results.jsonl"))
 
 
+def reader_label(readers, r):
+    """Amsterdam alone keeps a blank reader cell, as the earlier tables did.
+    A second cloud reader, or the home desktop, is named."""
+    if len(readers) > 1 or r != "ams":
+        return r
+    return ""
+
+
 def unavailable_count(v):
     """`files_unavailable` of a pull report: a list, or in the service log a
     summary `{"len": n, "first": [...]}` when the list is long."""
@@ -707,7 +847,7 @@ def report_markdown(path):
             continue
         t0_mut = (e.get("extra") or {}).get("mutation", {}).get("t0") if e["tool"] == "resilio" else None
         for r, pr in e["per_reader"].items():
-            key = (e["scenario"], e["step"], r if len(e["readers"]) > 1 else "", e["tool"])
+            key = (e["scenario"], e["step"], reader_label(e["readers"], r), e["tool"])
             if pr.get("verified") != "identical" or pr.get("wall_s") is None:
                 bad[key] = bad.get(key, 0) + 1
                 continue
@@ -751,7 +891,7 @@ def collect(path):
         if e.get("kind") != "rvv":
             continue
         for r, pr in e["per_reader"].items():
-            key = (e["scenario"], e["step"], r if len(e["readers"]) > 1 else "", e["tool"])
+            key = (e["scenario"], e["step"], reader_label(e["readers"], r), e["tool"])
             if pr.get("verified") != "identical" or pr.get("wall_s") is None:
                 bad[key] = bad.get(key, 0) + 1
             else:
@@ -829,6 +969,8 @@ def main():
     ap.add_argument("--scenario")
     ap.add_argument("--set", choices=SETS)
     ap.add_argument("--readers", default="ams")
+    ap.add_argument("--orca", default=os.environ.get("BENCH_ORCA", ""),
+                    help="SSH host of an extra home reader. Not created or deleted with the VMs.")
     ap.add_argument("--reps", type=int, default=2)
     ap.add_argument("--rep-start", type=int, default=1)
     ap.add_argument("--netem", default=None)
