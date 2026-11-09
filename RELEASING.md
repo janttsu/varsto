@@ -132,9 +132,12 @@ vault; the interface in Chromium three times, English, Finnish and Swedish
 (`ui-shots.py --lang`); the full-screen visualization TV scene in 4K, exported
 at 1920 px as `viz-tv.png` (`viz-shots.py`, `website/tools/screenshots/viz_tv_scene.py`);
 the Linux and Windows desktops, the Android emulator, the macOS window, the iOS
-Simulator) and the `screenshots` job packs everything (`finalize.py --pack`,
+Simulator). The interface, the Android emulator and those app windows are each
+taken light and dark. The tray menus stay one picture, and the TV scene stays
+the dark render. The `screenshots` job packs everything (`finalize.py --pack`,
 artifact `screenshots`) as `en/`, `fi/`, `sv/`, `viz/` and `shots.json`
-(sizes per set, version, commit, date, run). Pushes to `main` and tags publish
+(sizes per set, version, commit, date, run). Packing fails if a light/dark
+pair has only one side. Pushes to `main` and tags publish
 the tarball on the rolling pre-release `screenshots-latest`; the web server
 pulls it every 15 minutes (`ops/site/screenshots-sync.py`), writes `en/` to
 `assets/img/screenshots/`, `fi/` and `sv/` to `screenshots-fi/` and

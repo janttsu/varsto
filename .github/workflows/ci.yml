@@ -427,15 +427,11 @@ jobs:
           test -f "$RUNNER_TEMP/files/note.txt.varsto-placeholder"
           # The service unlocks itself from the login keychain, like after "Remember in Keychain".
           security add-generic-password -U -s varsto -a "$home" -w "$VARSTO_PASSPHRASE"
-      - name: Launch the app and capture its window
+      - name: Launch the app and capture its window, light and dark
         run: |
-          open smoke/Varsto.app
-          sleep 12
-          pgrep -x Varsto >/dev/null && echo "app process running" || { echo "app process NOT running"; exit 1; }
           mkdir -p dist/shots/raw
-          screencapture -x dist/shots/raw/macos-desktop.png
-          # The app's own window only: system prompts on the runner (local
-          # network access for the runner agent) stay out of the picture.
+          # The page follows the system appearance: the web view keeps no
+          # stored theme. The app is left running afterwards for the Finder step.
           cat > "$RUNNER_TEMP/winid.swift" <<'SWIFT'
           import CoreGraphics
           let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
@@ -443,9 +439,45 @@ jobs:
             print(w[kCGWindowNumber as String] as? Int ?? 0); break
           }
           SWIFT
-          wid="$(swift "$RUNNER_TEMP/winid.swift" | head -1)"
-          echo "Varsto window: ${wid:-not found}"
-          if [ -n "$wid" ]; then screencapture -x -o -l "$wid" dist/shots/macos-app.png; else cp dist/shots/raw/macos-desktop.png dist/shots/macos-app.png; fi
+          appearance() {
+            if [ "$1" = dark ]; then
+              osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+            else
+              osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
+            fi
+          }
+          capture() {
+            appearance "$1"
+            osascript -e 'tell application "Varsto" to quit' >/dev/null 2>&1 || true
+            sleep 2
+            pkill -x Varsto >/dev/null 2>&1 || true
+            sleep 1
+            open smoke/Varsto.app
+            sleep 12
+            pgrep -x Varsto >/dev/null || { echo "app process NOT running ($1)"; return 1; }
+            if [ "$1" = light ]; then screencapture -x dist/shots/raw/macos-desktop.png; fi
+            # The app's own window only: system prompts on the runner (local
+            # network access for the runner agent) stay out of the picture.
+            wid="$(swift "$RUNNER_TEMP/winid.swift" | head -1)"
+            echo "Varsto window ($1): ${wid:-not found}"
+            [ -n "$wid" ] || { echo "no Varsto window to capture ($1)"; return 1; }
+            screencapture -x -o -l "$wid" "dist/shots/macos-app-$1.png"
+            bytes="$(wc -c < "dist/shots/macos-app-$1.png" | tr -d ' ')"
+            [ "$bytes" -gt 20000 ] || { echo "macos-app-$1.png is too small ($bytes bytes)"; return 1; }
+          }
+          # A failed second theme removes the light window too, so packing
+          # does not see one side of the pair and hold back every other picture.
+          drop_app() {
+            rm -f dist/shots/macos-app-light.png dist/shots/macos-app-dark.png dist/shots/macos-app.png
+          }
+          capture light || { drop_app; exit 1; }
+          cp dist/shots/macos-app-light.png dist/shots/macos-app.png
+          capture dark || { drop_app; exit 1; }
+          if cmp -s dist/shots/macos-app-light.png dist/shots/macos-app-dark.png; then
+            echo "the light and dark macOS windows are the same picture"
+            drop_app
+            exit 1
+          fi
       - name: Finder - double-click a placeholder, Services menu entries
         run: |
           set -x

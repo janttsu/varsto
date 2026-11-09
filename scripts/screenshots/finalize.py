@@ -7,7 +7,10 @@
 Searches <in dir> recursively for the known names (the newest file wins when
 a name appears twice), scales each to the width the website shows it at and
 writes <out dir>/<name>.png plus shots.json (version, commit, date, source
-and the size of every picture). Unknown files are ignored.
+and the size of every picture). Unknown files are ignored. A name that ends in -light or -dark is a pair:
+if this run has one side and not the other, the command fails, so a one-theme
+set is not published. A pair that is missing entirely (that platform did not
+run) is reported and left as it was.
 
 With --pack the output is what ops/site/screenshots-sync.py takes: en/ (the
 shared and English pictures), fi/ and sv/ (the localized interface from
@@ -19,6 +22,7 @@ import argparse
 import datetime
 import json
 import pathlib
+import sys
 
 from PIL import Image
 
@@ -31,13 +35,15 @@ WIDTHS = {
     "desktop-traffic-light": None, "desktop-traffic-dark": None,
     "desktop-rendezvous-light": None, "desktop-rendezvous-dark": None,
     "mobile-light": 824, "mobile-dark": 824,
-    "macos-app": 1024,
-    "linux-app": 1280, "linux-tray": None,
-    "windows-app": 1280, "windows-tray": None,
+    # The unsuffixed names stay: they are a copy of the light window, so a
+    # page that has not switched to the pair yet still receives a picture.
+    "macos-app": 1024, "macos-app-light": 1024, "macos-app-dark": 1024,
+    "linux-app": 1280, "linux-app-light": 1280, "linux-app-dark": 1280, "linux-tray": None,
+    "windows-app": 1280, "windows-app-light": 1280, "windows-app-dark": 1280, "windows-tray": None,
     "android-light": 540, "android-dark": 540,
     "android-overview-light": 540, "android-overview-dark": 540,
     "android-files-light": 540, "android-files-dark": 540,
-    "ios-simulator": 540,
+    "ios-simulator": 540, "ios-simulator-light": 540, "ios-simulator-dark": 540,
 }
 
 # Website pictures of the localized interface and of the visualization. In a
@@ -67,8 +73,33 @@ a = ap.parse_args()
 src, dst = pathlib.Path(a.src), pathlib.Path(a.dst)
 
 
+def half_pairs(expected, found):
+    """Bases where exactly one of -light and -dark was captured.
+
+    A base whose both sides are absent is not listed: that platform did not
+    run, and the website keeps its previous pictures. A base with one side
+    only would publish a theme pair that does not match.
+    """
+    bad = []
+    seen = set()
+    for n in expected:
+        if n.endswith("-light"):
+            base = n[: -len("-light")]
+        elif n.endswith("-dark"):
+            base = n[: -len("-dark")]
+        else:
+            continue
+        if base in seen:
+            continue
+        seen.add(base)
+        light, dark = f"{base}-light", f"{base}-dark"
+        if light in expected and dark in expected and (light in found) != (dark in found):
+            bad.append(base)
+    return sorted(bad)
+
+
 def build(name, out):
-    """Scale the captures of one set into <out>; returns {website name: [w, h]}."""
+    """Scale the captures of one set into <out>; returns ({website name: [w, h]}, half pairs)."""
     folder, names = SETS[name]
     others = {f for f, _ in SETS.values() if f and f != folder}
     out.mkdir(parents=True, exist_ok=True)
@@ -93,7 +124,10 @@ def build(name, out):
     missing = sorted(set(names) - set(found))
     if missing:
         print(f"not in this run, set {name} (kept as they are):", ", ".join(missing))
-    return sizes
+    halves = half_pairs(set(names), set(found))
+    if halves:
+        print(f"error: set {name} has only one theme of:", ", ".join(halves), file=sys.stderr)
+    return sizes, halves
 
 
 meta = {
@@ -103,8 +137,16 @@ meta = {
     "source": a.source,
     "run": a.run,
 }
+halves = []
 if a.pack:
-    meta["sizes"] = {name: build(name, dst / name) for name in SETS}
+    sizes = {}
+    for name in SETS:
+        sizes[name], bad = build(name, dst / name)
+        halves.extend(f"{name}/{b}" for b in bad)
+    meta["sizes"] = sizes
 else:
-    meta["sizes"] = build("en", dst)
+    meta["sizes"], bad = build("en", dst)
+    halves.extend(bad)
 (dst / "shots.json").write_text(json.dumps(meta, indent=2) + "\n")
+if halves:
+    sys.exit(1)

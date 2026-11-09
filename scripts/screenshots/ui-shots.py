@@ -186,6 +186,29 @@ with sync_playwright() as p:
         c.close()
     b.close()
 
+# Every view of this scenario is required in both themes, and the two files
+# of a view must actually differ. A run that painted one theme twice stops
+# here instead of publishing a pair that is the same picture.
+PAIRS = (
+    "desktop-overview", "desktop-files", "desktop-organization", "desktop-where",
+    "desktop-traffic", "desktop-rendezvous", "desktop-import", "mobile-import", "mobile",
+)
+bad = []
+for name in PAIRS:
+    means = []
+    for scheme in ("light", "dark"):
+        p = os.path.join(out, f"{name}-{scheme}.png")
+        if not os.path.isfile(p) or os.path.getsize(p) < 4000:
+            bad.append(f"{name}-{scheme} missing or tiny")
+            continue
+        small = Image.open(p).convert("L").resize((32, 32))
+        means.append(sum(small.getdata()) / (32 * 32))
+    if len(means) == 2 and abs(means[0] - means[1]) < 8:
+        bad.append(f"{name} light and dark look the same ({means[0]:.0f} vs {means[1]:.0f})")
+if bad:
+    print("screenshot themes are incomplete: " + "; ".join(bad), file=sys.stderr)
+    sys.exit(1)
+
 for n in sorted(os.listdir(out)):
     if n.endswith(".png"):
         print(n, Image.open(os.path.join(out, n)).size)

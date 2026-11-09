@@ -1,6 +1,14 @@
 // Varsto desktop and mobile UI. Talks to the local API with a per-session token.
 (function () {
   "use strict";
+  // A screenshot run opens ?boot=…&theme=light or &theme=dark. Remember that
+  // choice before the start code is traded and the query is removed; the
+  // theme below reads it from localStorage. A normal visit has no theme
+  // parameter and still follows the operating system until the user switches.
+  try {
+    var themeQ = location.search.match(/[?&]theme=(light|dark)(?:&|$)/);
+    if (themeQ) localStorage.setItem("varsto-theme", themeQ[1]);
+  } catch (e) {}
   // The start address carries a one-time code (?boot=), not the session token:
   // it is traded for the token once, the address is cleaned at once, and the
   // token lives in sessionStorage only. The token never goes in an address.
