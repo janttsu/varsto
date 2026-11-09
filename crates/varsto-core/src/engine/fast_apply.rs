@@ -156,7 +156,8 @@ impl Engine {
                     self.note_fresh(rec, root, state, &dest_path, &add);
                     return Ok(true);
                 }
-                Err(e) if e.raw_os_error() == Some(libc::EXDEV) => return Ok(false),
+                // Any rename error falls back to a copy, including one across
+                // devices. The code is not matched: libc is a unix-only dependency.
                 Err(_) => return Ok(false),
             }
         }
