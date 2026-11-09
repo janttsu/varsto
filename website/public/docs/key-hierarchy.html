@@ -271,7 +271,7 @@
 <tr>
 <td>K21</td>
 <td>Discovery key</td>
-<td>Derive the rendezvous-record path and the DHT key, and encrypt the presence record (plan 6.33).</td>
+<td>Derive the rendezvous-record path and encrypt the presence record (plan 6.33).</td>
 <td>KDF(shared discovery secret, context <code>rendezvous</code> plus epoch). The discovery secret is random, shared among the devices of a folder or vault, and wrapped under K3 or K9.</td>
 <td>Discovery secret wrapped in storage; unwrapped copy in the OS keystore if presence must be published while locked (<strong>TBD</strong>).</td>
 <td>While publishing or looking up presence.</td>
@@ -591,8 +591,8 @@
 <td>Anything unlocked while malware runs is exposed.</td>
 </tr>
 <tr>
-<td>A11 Relay or DHT operator</td>
-<td>K21 derives opaque, epoch-based record keys and encrypts presence records.</td>
+<td>A11 Relay or rendezvous operator</td>
+<td>K21 derives opaque, epoch-based record keys and encrypts presence records. The rendezvous blob is sealed under the vault key.</td>
 <td>IP addresses and timing remain visible.</td>
 </tr>
 <tr>

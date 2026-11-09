@@ -9,7 +9,7 @@ Status of the documents that will define formats and protocols. Sections 32 to 6
 | Key hierarchy and key wrapping (incl. FIDO2 `hmac-secret`) | draft; parts implemented ([alpha-0-format.md](alpha-0-format.md) sections 21, 24 and 27): [key-hierarchy.md](key-hierarchy.md) |
 | Post-quantum hybrid handshakes and signatures | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 11 |
 | Event ledger and bookkeeping | design notes on signing: [ledger-signing-notes.md](ledger-signing-notes.md); alpha-0 mailbox model: [alpha-0-format.md](alpha-0-format.md) section 6 |
-| Peer discovery (LAN, storage rendezvous, DHT, relays) | LAN beacon, storage rendezvous record and relays through the user's own devices implemented: [alpha-0-format.md](alpha-0-format.md) section 15; DHT not started |
+| Peer discovery (LAN, storage rendezvous, relays) | LAN beacon, storage rendezvous record, relays through the user's own devices and an optional rendezvous service implemented: [alpha-0-format.md](alpha-0-format.md) sections 15 and 83 |
 | Peer-to-peer transfer protocol | alpha implemented (HTTP and QUIC, NAT traversal): [alpha-0-format.md](alpha-0-format.md) section 15; router port mapping (PCP, NAT-PMP, UPnP IGD): section 52 (released in 0.0.1-alpha.14) |
 | Version, trash and retention model | alpha-0 merge rules: [alpha-0-format.md](alpha-0-format.md) section 7; vault-wide trash with retention and a trash storage: section 43, and version history with staggered thinning: section 50 (both released in 0.0.1-alpha.14) |
 | Durability policy language | alpha implemented: [alpha-0-format.md](alpha-0-format.md) section 14 |

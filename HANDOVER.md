@@ -62,9 +62,11 @@ English only, no personal data, no secrets.
   from 2026-10-10 to 2026-10-16, before format 3, and look superseded;
   delete them after a look, do not merge them. Older experiments, pushed so
   they are not lost and written before format 3: `dht-discovery`
-  (`40a84ae0`, peers through the Mainline DHT) and `ios-camera-viewer`
-  (`f6736178`, iOS camera upload and a native viewer); they need rework on
-  top of `main` before any merge.
+  (`40a84ae0`, peers through the Mainline DHT) is not to be merged. Peer
+  discovery stays the LAN beacon, the rendezvous record in the user's own
+  storage and the rendezvous service. `ios-camera-viewer` (`f6736178`, iOS
+  camera upload and a native viewer) needs rework on top of `main` before
+  any merge.
 - The code review of 2026-10-30 (15 areas, 19 HIGH findings, none critical)
   is documented outside the repository; its HIGH fixes are the `fix/*`
   branches merged through `integrate/review-20261031` into PR #107.

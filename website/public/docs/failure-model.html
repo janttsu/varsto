@@ -115,8 +115,8 @@
 <td>Relay devices are down or blocked</td>
 <td>None.</td>
 <td>Peer discovery falls back in layers: known addresses, local network, the rendezvous record in the user's own storage, then manual invitation. Without a relay, some network types cannot connect directly and the app shows "not connected". Sync through shared storage is unaffected.</td>
-<td>No central tracker or account server; layered discovery: the LAN beacon, rendezvous records in your own storage and a relay through one of your own reachable devices (<a href="alpha-0-format.html">alpha-0-format.md</a> section 15). There is no DHT (designed only, not built).</td>
-<td>Two devices behind restrictive NATs, with no shared storage and no reachable own device to relay, cannot find or reach each other outside the local network. A relay device sees IP addresses and traffic volume.</td>
+<td>No central tracker or account server; layered discovery: the LAN beacon, rendezvous records in your own storage, a relay through one of your own reachable devices (<a href="alpha-0-format.html">alpha-0-format.md</a> section 15) and an optional rendezvous service (section 83).</td>
+<td>With the rendezvous service off or unreachable, two devices behind restrictive NATs, with no shared storage and no reachable own device to relay, cannot find or reach each other outside the local network. A relay or rendezvous operator sees IP addresses and traffic volume.</td>
 <td>F-012, F-013, F-005, N-001</td>
 </tr>
 <tr>
@@ -273,7 +273,7 @@
 <li><strong>The software itself.</strong> One code base implements the ledger, the cryptography and the sync. A bug there can affect every copy. Independent implementations of the readers and an independent audit are goals, not facts (N-004, S-007).</li>
 <li><strong>The release pipeline and the maintainer.</strong> Updates and signed releases depend on a small team (S-007, N-005).</li>
 <li><strong>Platform dependencies.</strong> Operating system keystores, hardware security keys and mobile background limits are outside the project's control (S-005, F-036).</li>
-<li><strong>Optional infrastructure.</strong> Relays and DHT bootstrap nodes are not required for sync through shared storage, but without them some networks cannot connect directly (F-012, F-013).</li>
+<li><strong>Optional infrastructure.</strong> A relay through one of your own reachable devices, and the optional rendezvous service, are not required for sync through shared storage, but without them some networks cannot connect directly (F-012, F-013).</li>
 </ul>
 <h2 id="maintaining-this-document">Maintaining this document</h2>
 <p>Update this document in the same change as any design change that adds, removes or alters a failure mode, a mitigation or a requirement ID it cites. Each table row must cite at least one existing requirement ID and must avoid absolute promises.</p>
