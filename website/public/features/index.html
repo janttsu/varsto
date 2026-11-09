@@ -163,7 +163,7 @@
       <div>
         <p>There is no account and no escrow: the vault key is yours alone, so the app helps you keep it. <code>varsto recovery kit</code> prints the key as 24 words with a checksum, laid out for paper or metal, and optionally three shares of which any two rebuild the key and one alone reveals nothing, so no single place has to hold everything. A new device joins straight from the words. Test it once a year.</p>
         <p>From any other device, Remove device signs a revocation into your storage. Every device then ignores the removed one's ledger entries after the cut-off and refuses its peer connections, and the vault moves to a new key that is sealed (X25519 + ML-KEM-768) to each remaining device only: ledger, records, manifests and new files of every folder use keys the removed device never sees. With a wipe order, the device deletes its keys, sync state and folder contents the next time it runs Varsto and reaches one of your storages; the order is signed by one of your devices, so a storage or someone with an old vault key cannot trigger it.</p>
-        <p class="note">What the removed device could read before stays readable to it; folders shared with other people and Strongroom folders keep their keys; storage credentials are not rotated for you. Print a new recovery kit afterwards.</p>
+        <p class="note">What the removed device could read before stays readable to it; folders shared with other people and Strongroom folders keep their keys; storage credentials are not rotated for you. Varsto keeps asking until you have entered a new key on each remaining device and confirmed that the old key is disabled at the provider. Print a new recovery kit afterwards.</p>
       </div>
     </section>
 
@@ -191,7 +191,6 @@
     </ul>
     <h2>Also in the design</h2>
     <ul>
-      <li>Per-device storage credentials, rotated at the provider when a device is removed.</li>
       <li>Re-encrypting existing data after a device is removed.</li>
       <li>DHT peer discovery.</li>
       <li>Proof-of-storage challenges.</li>

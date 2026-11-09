@@ -52,6 +52,7 @@ mod access_sync;
 mod backups;
 mod block_cache;
 mod changes_ops;
+mod credentials;
 mod data_moves;
 mod devinfo;
 mod disk_fetch;

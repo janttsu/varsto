@@ -45,6 +45,9 @@ pub enum Kind {
     OrgLog = 27,
     /// A device's mailbox board: what it holds staged for pool disks.
     Mailbox = 28,
+    /// What storage key this device says it holds, and whether the old key
+    /// was disabled at the provider after a removal. Newest seq wins.
+    Credential = 29,
 }
 
 /// One segment of a stream's storage path.
@@ -66,7 +69,7 @@ enum Seg {
 use Seg::*;
 
 impl Kind {
-    pub const ALL: [Kind; 28] = [
+    pub const ALL: [Kind; 29] = [
         Kind::Manifest,
         Kind::BlockMap,
         Kind::Trash,
@@ -95,6 +98,7 @@ impl Kind {
         Kind::OrgRoster,
         Kind::OrgLog,
         Kind::Mailbox,
+        Kind::Credential,
     ];
 
     pub fn code(self) -> u8 {
@@ -136,6 +140,7 @@ impl Kind {
             Kind::OrgRoster => "org-roster",
             Kind::OrgLog => "org-log",
             Kind::Mailbox => "mailbox",
+            Kind::Credential => "credential",
         }
     }
 
@@ -198,6 +203,7 @@ impl Kind {
             Kind::OrgRoster => &[Lit("vault"), Lit("org"), Lit("roster"), Device],
             Kind::OrgLog => &[Lit("vault"), Lit("org"), Lit("log"), Device],
             Kind::Mailbox => &[Lit("vault"), Lit("mailbox"), Device],
+            Kind::Credential => &[Lit("vault"), Lit("credentials"), Device],
         }
     }
 
@@ -240,7 +246,8 @@ impl Kind {
                 | Kind::OrgManifest
                 | Kind::OrgRoster
                 | Kind::OrgLog
-                | Kind::Mailbox,
+                | Kind::Mailbox
+                | Kind::Credential,
                 KeyId::Registry(_),
             ) => zero,
             (Kind::Strongroom, KeyId::Registry(_)) => !zero,

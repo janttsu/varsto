@@ -3066,6 +3066,14 @@ fn api_unlocked(
                 Ok(_) => {}
                 Err(e) => log::debug!("recovery copies not checked: {e:#}"),
             }
+            // Absent when nothing is waiting, so older status snapshots stay valid.
+            match engine.credential_warnings() {
+                Ok(list) if !list.is_empty() => {
+                    v["credential_warnings"] = serde_json::to_value(list)?;
+                }
+                Ok(_) => {}
+                Err(e) => log::debug!("storage keys not checked: {e:#}"),
+            }
             add_folder_access(&mut v, engine);
             let waiting = engine.records_waiting3();
             if waiting > 0 {
@@ -3157,6 +3165,20 @@ fn api_unlocked(
             let report = engine.revoke_device(&device, wipe)?;
             service.request_sync();
             Ok(serde_json::to_value(report)?)
+        }
+        (Method::Post, "/api/storage/secret") => {
+            let name = s(input, "name")?;
+            let secret = s(input, "secret")?;
+            varsto_core::logging::register_secret(&secret);
+            engine.replace_storage_secret(&name, &secret)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
+        }
+        (Method::Post, "/api/storage/key-disabled") => {
+            let name = s(input, "name")?;
+            engine.confirm_storage_key_disabled(&name)?;
+            service.request_sync();
+            Ok(json!({"ok": true}))
         }
         // Folder membership of storage format 3 (work package 8b). Only a
         // person at the page reaches these; the background service reads

@@ -1378,6 +1378,14 @@ enum StorageCmd {
         #[arg(long)]
         background: bool,
     },
+    /// Replace the S3 secret access key stored on this device.
+    /// Read from VARSTO_S3_SECRET, or asked for without echo. Never taken from the command line.
+    /// Enter the new key on every remaining device before disabling the old one.
+    Secret { name: String },
+    /// Record that the old key for this storage is disabled at the provider.
+    /// Varsto cannot check the provider. For an rclone remote, confirm only
+    /// after its configuration was updated on every remaining computer.
+    KeyDisabled { name: String },
     /// Show or set a storage's quota, which every device respects.
     Quota {
         name: String,
@@ -3017,7 +3025,7 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
             };
             print(cli, &report, |r| {
                 format!(
-                    "removed {} with {}{}; vault key epoch {}; new keys sent to {}{}",
+                    "removed {} with {}{}; vault key epoch {}; new keys sent to {}{}{}",
                     r.user,
                     r.devices.join(", "),
                     if r.revoke.wipe { " (wipe ordered)" } else { "" },
@@ -3031,6 +3039,11 @@ fn run_org(cli: &Cli, home: &Path, cmd: &OrgCmd) -> Result<()> {
                         String::new()
                     } else {
                         format!("; waiting for {}", r.revoke.keys_pending_for.join(", "))
+                    },
+                    if r.revoke.credential_notes.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n{}", r.revoke.credential_notes.join("\n"))
                     }
                 )
             })?;
@@ -3472,6 +3485,43 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Cmd::Storage { cmd } => {
+            match &cmd {
+                StorageCmd::Secret { name } => {
+                    let name = name.clone();
+                    let secret =
+                        secret_input(None, "VARSTO_S3_SECRET", "S3 secret access key: ", true)?;
+                    if call_service(
+                        &home,
+                        "/api/storage/secret",
+                        serde_json::json!({"name": name, "secret": secret.as_str()}),
+                    )?
+                    .is_none()
+                    {
+                        open_engine(&home)?.replace_storage_secret(&name, secret.as_str())?;
+                    }
+                    println!(
+                        "stored a new key for {name}; enter it on every other remaining device before you disable the old one"
+                    );
+                    return Ok(());
+                }
+                StorageCmd::KeyDisabled { name } => {
+                    let name = name.clone();
+                    if call_service(
+                        &home,
+                        "/api/storage/key-disabled",
+                        serde_json::json!({"name": name}),
+                    )?
+                    .is_none()
+                    {
+                        open_engine(&home)?.confirm_storage_key_disabled(&name)?;
+                    }
+                    println!(
+                        "{name}: recorded that the old key is disabled. Varsto cannot check the provider."
+                    );
+                    return Ok(());
+                }
+                _ => {}
+            }
             if let StorageCmd::Set { name, min_free } = cmd {
                 // Through the running service when there is one: its own
                 // copy of the configuration takes the change at once.
@@ -3490,6 +3540,9 @@ fn run(cli: &Cli) -> Result<()> {
             }
             let mut engine = open_engine(&home)?;
             match cmd {
+                StorageCmd::Secret { .. } | StorageCmd::KeyDisabled { .. } => {
+                    unreachable!("handled before the engine opens")
+                }
                 StorageCmd::AddLocal {
                     name,
                     path,
@@ -5196,7 +5249,7 @@ fn run(cli: &Cli) -> Result<()> {
                 };
                 print(cli, &report, |r| {
                     format!(
-                        "removed {} ({}); vault key epoch {}; ledger entries after #{} are ignored{}\nnew key sent to: {}{}\nre-keyed folders: {}{}\nprint a new recovery kit: `varsto recovery kit`",
+                        "removed {} ({}); vault key epoch {}; ledger entries after #{} are ignored{}\nnew key sent to: {}{}\nre-keyed folders: {}{}\nprint a new recovery kit: `varsto recovery kit`{}",
                         r.name,
                         &r.device_id[..8],
                         r.key_epoch,
@@ -5206,6 +5259,7 @@ fn run(cli: &Cli) -> Result<()> {
                         if r.keys_pending_for.is_empty() { String::new() } else { format!("\nwaiting for (they get it once they publish a key-exchange key): {}", r.keys_pending_for.join(", ")) },
                         if r.folders_rekeyed.is_empty() { "none".to_string() } else { r.folders_rekeyed.join(", ") },
                         if r.folders_not_rekeyed.is_empty() { String::new() } else { format!("\nnot re-keyed here (an owner device of each re-keys it at its next sync): {}", r.folders_not_rekeyed.join(", ")) },
+                        if r.credential_notes.is_empty() { String::new() } else { format!("\n{}", r.credential_notes.join("\n")) },
                     )
                 })?;
             }

@@ -20,6 +20,7 @@ pub mod blockmap;
 pub mod changes;
 pub mod chunk_seal;
 pub mod chunking;
+pub mod credentials;
 pub mod crypto;
 pub mod diskconf;
 pub mod diskformat;

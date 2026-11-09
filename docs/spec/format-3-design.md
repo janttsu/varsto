@@ -216,6 +216,7 @@ Storage name: `<stream prefix>/<seq 16 digits>-<part 4 digits>.rec`; MAX_PART_BO
 | 26 | `org-roster` | `vault/org/roster/<device>/` | `registry@` | no |
 | 27 | `org-log` | `vault/org/log/<device>/` | `registry@` | no |
 | 28 | `mailbox` | `vault/mailbox/<device>/` | `registry@` | no |
+| 29 | `credential` | `vault/credentials/<device>/` | `registry@` | no |
 
 Records without announcement are "newest seq of the stream wins" (put-if-absent at seq; a writer keeps its own counter and starts after the highest it finds). Forward leases (section 70) and the mailbox's staging leases (`vault/mailbox-leases/`) stay plain JSON leases: they decide nothing a reader trusts.
 
@@ -227,6 +228,7 @@ Records without announcement are "newest seq of the stream wins" (put-if-absent 
 - *Strongroom keys and conversion* (kind 24, scope = the Strongroom folder): `{folder, epoch, wraps: Vec<{credential_id, salt, wrapped K13ₑ}>, escrow: Option<K13ₑ wrapped under derive(K2, "strongroom-escrow", vault, K3₀, folder)>, converted_from: Option<[16]>}`, written by an owner of the folder. The wraps open only with a FIDO2 hmac-secret output, so the registry key is enough to hide nothing more than which credentials exist; K13 is never under K3. A conversion makes a new folder (new id, new K13); its record names the old folder in `converted_from`, and the old folder's record carries `removed`.
 - *Organizations* (kinds 25-27): the manifest, the roster and the log carry today's signed bodies (section 27: JSON with the administrators' signatures) as the record body; the envelope adds the writing device's signature and the registry key. Manifest and roster: newest seq per writer, then the body's own sequence decides; the log keeps every record. The organization rules are checked on the inner body as today.
 - *Mailbox board* (kind 28): `{device, updated_utc, held: [...]}` as section 78's board, newest seq per device wins; replaces `vault/mailbox/<device>/<utc>.enc`.
+- *Storage-key reminder* (kind 29): after a device is removed, each remaining device publishes the storages whose provider key was in use and a hash of its own S3 secret (never the secret). The reminder stays until every remaining device that uses an S3 storage has stored a different key and one of them has confirmed that the old key is disabled at the provider. An rclone remote has no hash and clears only on that confirmation. Older clients ignore the kind.
 
 Rules the switch keeps or states:
 

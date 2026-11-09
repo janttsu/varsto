@@ -645,6 +645,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var text = d.name + " was removed" + (rep.wipe ? " and will wipe itself when it next reaches a storage" : "") + ". New keys went to: " + (rep.keys_sent_to.join(", ") || "no other device") + ".";
         if (rep.keys_pending_for.length) { text += " Waiting for " + rep.keys_pending_for.join(", ") + ": they receive the new key after their next sync with this version."; }
         if (rep.folders_not_rekeyed.length) { text += " Not re-keyed here (an owner device of each re-keys it at its next sync): " + rep.folders_not_rekeyed.join(", ") + "."; }
+        (rep.credential_notes || []).forEach(function (n) { text += " " + n; });
         text += " Print a new recovery kit now.";
         return alertBox(text, "Device removed").then(refreshStatus);
       });
@@ -1488,6 +1489,62 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     p.then(clear, clear);
     return p;
   }
+  function renderCredentialWarnings(list) {
+    var box = $("credwarn");
+    if (!box) { return; }
+    box.innerHTML = "";
+    (list || []).forEach(function (w) {
+      var row = el("div", "notice warn banner-action");
+      var span = el("span", null, w.text || "");
+      span.setAttribute("data-no-i18n", "");
+      row.appendChild(span);
+      if (w.needs_secret) {
+        var replace = el("button", "secondary", "Replace key");
+        replace.type = "button";
+        replace.onclick = function () { replaceStorageKey(w); };
+        row.appendChild(replace);
+      }
+      if (w.needs_confirm) {
+        var label = w.kind === "rclone" ? "I updated rclone and disabled the old key" : "I disabled the old key";
+        var confirm = el("button", "secondary", label);
+        confirm.type = "button";
+        confirm.onclick = function () { confirmStorageKey(w); };
+        row.appendChild(confirm);
+      }
+      box.appendChild(row);
+    });
+  }
+  function replaceStorageKey(w) {
+    dialog({
+      title: "Replace the storage key",
+      text: "Create the new key at the provider first. Enter it here, and on every other remaining device, before you disable the old key. The removed device can still delete encrypted files until that old key is disabled.",
+      fields: [{ name: "secret", label: "Secret access key", type: "password", required: true }],
+      ok: "Replace key"
+    }).then(function (r) {
+      if (!r) { return; }
+      return api("POST", "/api/storage/secret", { name: w.name, secret: r.values.secret }).then(function () {
+        log("stored a new key for " + w.name);
+        return refreshStatus();
+      });
+    }).catch(function (e) { log("error: " + e.message); alertBox(e.message, "Could not replace the key"); });
+  }
+  function confirmStorageKey(w) {
+    var rclone = w.kind === "rclone";
+    var title = rclone ? "I updated rclone and disabled the old key" : "I disabled the old key";
+    dialog({
+      title: title,
+      text: rclone
+        ? "Confirm only if you have updated rclone's configuration on every remaining computer and disabled the old key at the provider. The removed device can still delete encrypted files until that key is disabled."
+        : "Confirm only after every remaining device has the new key and you have disabled the old key at the provider. Varsto cannot check the provider. The removed device can still delete encrypted files until that key is disabled.",
+      ok: title
+    }).then(function (r) {
+      if (!r) { return; }
+      return api("POST", "/api/storage/key-disabled", { name: w.name }).then(function () {
+        log(w.name + ": recorded that the old key is disabled");
+        return refreshStatus();
+      });
+    }).catch(function (e) { log("error: " + e.message); alertBox(e.message, "Could not record the confirmation"); });
+  }
   function drawStatus(got, background) {
     return got.then(function (s) {
       // The same summary as last time, or one from before the service got
@@ -1498,6 +1555,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       setTimeout(function () { helpAfterStatus(s); }, 0);
       setTimeout(function () { if (window.varstoFolders) { window.varstoFolders.update(s); } }, 0);
       renderLedger(s.ledger_health);
+      renderCredentialWarnings(s.credential_warnings);
       renderStoragesDown(s.storages_down || []);
       renderFolderSafety(s);
       $("who").textContent = s.device_name + " · vault " + s.vault_id.slice(0, 8) + " · " + s.ledger_batches + (s.ledger_batches === 1 ? " ledger batch" : " ledger batches");
@@ -4145,6 +4203,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         log("removed " + rep.user + " (" + rep.devices.join(", ") + ")" + (wipe ? " with a wipe order" : "") + "; vault key epoch " + rep.revoke.key_epoch);
         var text = rep.user + " was removed with " + rep.devices.join(", ") + ". New keys went to: " + (rep.revoke.keys_sent_to.join(", ") || "no other device") + ".";
         if (rep.revoke.keys_pending_for.length) { text += " Waiting for " + rep.revoke.keys_pending_for.join(", ") + "."; }
+        ((rep.revoke && rep.revoke.credential_notes) || []).forEach(function (n) { text += " " + n; });
         text += " Print a new recovery kit now.";
         return alertBox(text, "User removed").then(function () { loadOrg(); return refreshStatus(); });
       });
