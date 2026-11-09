@@ -634,6 +634,7 @@ pub(crate) fn engine_free(method: &Method, path: &str) -> bool {
             path,
             "/api/quit"
                 | "/api/service/pause"
+                | "/api/service/hold"
                 | "/api/service/restart"
                 | "/api/lock"
                 | "/api/ui-language"
@@ -1619,6 +1620,7 @@ const STATE_ROUTES: &[&str] = &[
     "/api/providers",
     "/api/service/restart",
     "/api/service/pause",
+    "/api/service/hold",
     "/api/unlock",
     "/api/lock",
     "/api/pair/start",
@@ -2624,6 +2626,21 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
                 st.service.paused = paused;
             }
             Ok(service_summary(st))
+        }
+        (Method::Post, "/api/service/hold") => {
+            // Memory only. A sync that already has the engine runs out;
+            // the loop will not start another while this is set.
+            let hold = input
+                .get("hold")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(true);
+            st.service.hold_sync = hold;
+            if !hold {
+                // A peer's "sync now" that arrived while held would walk
+                // every folder. The watcher still has the paths it saw.
+                st.service.sync_requested = false;
+            }
+            Ok(json!({"ok": true, "hold": hold}))
         }
         (Method::Post, "/api/unlock") => {
             let mut e = Engine::open(&st.home, &s(input, "passphrase")?)?;

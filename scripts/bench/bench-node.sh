@@ -103,6 +103,14 @@ case "$1" in
       kill "$pid" 2>/dev/null || true
       sleep 1
     fi
+    # service.json is removed on the way out. A start that failed after the
+    # process was up used to leave it sleeping, and the next run then bound
+    # a second listener. This home only.
+    pkill -f -- "${B} --home ${home} " || true
+    # A sync in progress ignores SIGTERM until it finishes, and the next
+    # start then shares the vault with it. Kill it before that start.
+    sleep 0.3
+    pkill -9 -f -- "${B} --home ${home} " || true
     cat "$home.time" 2>/dev/null || true
     ;;
   wait-sync)

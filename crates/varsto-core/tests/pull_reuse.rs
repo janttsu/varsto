@@ -127,10 +127,24 @@ fn a_changed_file_fetches_only_its_changed_blocks() {
     let push = a.push("docs").unwrap();
     assert!(push.chunks_uploaded >= 1, "{push:?}");
 
+    #[cfg(unix)]
+    let inode = {
+        use std::os::unix::fs::MetadataExt;
+        fs::metadata(lab.b_dir.join("big.bin")).unwrap().ino()
+    };
     let r = b.pull("docs").unwrap();
     assert!(r.files_unavailable.is_empty(), "{r:?}");
     assert_eq!(r.files_updated, 1);
     assert_eq!(fs::read(lab.b_dir.join("big.bin")).unwrap(), big);
+    // The unchanged spans stay in the file that was already here.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(
+            fs::metadata(lab.b_dir.join("big.bin")).unwrap().ino(),
+            inode
+        );
+    }
     // Only the blocks the push stored are fetched; the rest is copied from
     // the previous version on disk.
     // (Block boundaries depend on the folder's random key: the bounds hold
@@ -181,8 +195,9 @@ fn a_renamed_directory_fetches_nothing_and_leaves_no_empty_directory() {
 fn deletions_applied_first_leave_their_blocks_in_the_trash_copy() {
     // A pull applies a writer's files newest first and deletions (no
     // modification time) last. With every file dated at the epoch, the
-    // order is by path: `a/...` (the deletions) before `z/...`, so the old
-    // files are in the trash when the new ones are written.
+    // order is by path: `a/...` (the deletions) before `z/...`. The same
+    // blocks are renamed onto the new paths, so nothing is copied and the
+    // trash stays empty. A cross-device rename still falls back to the trash.
     let lab = lab();
     let (mut a, mut b) = pair(&lab, |d| {
         renamed_set(d, "a");
@@ -196,12 +211,14 @@ fn deletions_applied_first_leave_their_blocks_in_the_trash_copy() {
         }
     });
     pull_rename(&lab, &mut a, &mut b, "a", "z");
+    // The old files are renamed onto the new paths, so the trash stays
+    // empty. The blocks survive because the files themselves moved.
     let trashed = walkdir::WalkDir::new(lab.b_home.join("trash"))
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .count();
-    assert_eq!(trashed, 3, "the old files are kept in the trash");
+    assert_eq!(trashed, 0, "a rename does not copy the files through the trash");
 }
 
 #[test]
@@ -278,4 +295,51 @@ fn a_local_copy_that_changed_on_disk_is_fetched_instead() {
     assert_eq!(fs::read(&local).unwrap(), big);
     assert_eq!(r.chunks_reused_local, 0, "{r:?}");
     assert_eq!(r.bytes_downloaded, big.len() as u64, "{r:?}");
+}
+
+#[test]
+fn sync_hot_scans_only_the_named_folder() {
+    let lab = lab();
+    let (mut a, _) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    let other = lab.a_dir.parent().unwrap().join("other");
+    fs::create_dir_all(&other).unwrap();
+    a.add_folder("other", &other).unwrap();
+    fs::write(lab.a_dir.join("a.txt"), b"a").unwrap();
+    fs::write(other.join("b.txt"), b"b").unwrap();
+    a.sync(None).unwrap();
+    let before = a.scans();
+    fs::write(lab.a_dir.join("a.txt"), b"aa").unwrap();
+    a.sync_hot(&["docs".to_string()]).unwrap();
+    assert_eq!(a.scans(), before + 1);
+}
+
+#[test]
+fn a_run_of_new_small_files_lands_intact() {
+    let lab = lab();
+    let (mut a, key) = Engine::init(&lab.a_home, "laptop", PASS).unwrap();
+    a.chunker = ChunkerParams::SMALL;
+    a.add_storage(lab.storage.clone()).unwrap();
+    a.add_folder("docs", &lab.a_dir).unwrap();
+    for i in 0..64u8 {
+        // Shorter than the small chunker's minimum, so each file is one block.
+        fs::write(lab.a_dir.join(format!("n{i:03}.txt")), vec![i; 500]).unwrap();
+    }
+    a.push("docs").unwrap();
+    let mut b = common::join_approved(
+        &lab.b_home,
+        "phone",
+        PASS,
+        &key,
+        lab.storage.clone(),
+        &mut a,
+    );
+    b.chunker = ChunkerParams::SMALL;
+    b.attach_folder("docs", &lab.b_dir, false).unwrap();
+    let r = b.pull("docs").unwrap();
+    assert!(r.files_unavailable.is_empty(), "{r:?}");
+    assert_eq!(r.files_updated, 64, "{r:?}");
+    assert_eq!(tree(&lab.a_dir), tree(&lab.b_dir));
 }

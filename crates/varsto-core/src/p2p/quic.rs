@@ -1509,6 +1509,7 @@ async fn serve_v3(
             let snap = sv.snapshot.lock().unwrap().clone();
             let (r, ci, t) = (r.clone(), ci.clone(), target.clone());
             let (status, body, peer) = tokio::task::spawn_blocking(move || {
+                let _budget = super::ServeBudget::acquire();
                 r.handle(snap.as_deref(), &ci, &t, &auth, &for_device)
             })
             .await

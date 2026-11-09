@@ -53,6 +53,10 @@ pub struct ServiceState {
     pub files_new_pushed: std::collections::BTreeMap<String, Instant>,
     pub running: bool,
     pub paused: bool,
+    /// While set, the loop does not start a sync. Peer-to-peer keeps
+    /// running. Not saved: a restart syncs again. The benchmark holds a
+    /// reader across a purge so it does not fetch blocks from the bucket.
+    pub hold_sync: bool,
     pub interval_secs: u64,
     pub watching: Vec<PathBuf>,
     pub last_sync_utc: Option<i64>,
@@ -2458,11 +2462,14 @@ pub fn run(opts: Options) -> Result<()> {
     // of every change of the import list.
     crate::import_jobs::spawn_driver(state.clone(), activity_stop.clone());
 
-    // File watcher: sends a signal on any change under an attached folder.
-    let (tx, rx) = mpsc::channel::<()>();
+    // File watcher: a path that changed, or None when the event did not
+    // name one (rescan every folder).
+    let (tx, rx) = mpsc::channel::<Option<PathBuf>>();
     let mut watcher = make_watcher(tx)?;
     let mut watched: Vec<PathBuf> = Vec::new();
     let mut last_change: Option<Instant> = None;
+    let mut dirty_paths: Vec<PathBuf> = Vec::new();
+    let mut watch_rescan = false;
     let mut next_sync = Instant::now();
     // Folders known at the last sync; a new one is announced to the peers.
     let mut known_folders = usize::MAX;
@@ -2489,6 +2496,12 @@ pub fn run(opts: Options) -> Result<()> {
     let mut paired_seen: Option<String> = None;
 
     while !QUIT.load(Ordering::SeqCst) {
+        // Held: do not consume a file change or a sync request. The flag
+        // is cleared by POST /api/service/hold, which does not need the engine.
+        if desktop::lock_idle(&state).service.hold_sync {
+            std::thread::sleep(Duration::from_millis(200));
+            continue;
+        }
         // Removable disks: notice what was attached or taken away.
         if Instant::now() >= next_disk_check {
             next_disk_check = Instant::now() + disk_check_every;
@@ -2553,8 +2566,12 @@ pub fn run(opts: Options) -> Result<()> {
             }
         }
         // Drain change notifications.
-        while rx.try_recv().is_ok() {
+        while let Ok(changed) = rx.try_recv() {
             last_change = Some(Instant::now());
+            match changed {
+                None => watch_rescan = true,
+                Some(path) => dirty_paths.push(path),
+            }
         }
         // Re-evaluate watched folders when the engine or its folders changed.
         {
@@ -2788,6 +2805,8 @@ pub fn run(opts: Options) -> Result<()> {
         };
         if unlocked && !paused && (due_change || due_timer || requested) {
             last_change = None;
+            let changed_paths = std::mem::take(&mut dirty_paths);
+            let rescan = std::mem::replace(&mut watch_rescan, false);
             // The whole round (peer records, ledger, the sync itself, the
             // upkeep) runs with the engine and the service's state taken out
             // of the shared state: the interface, the tray, the command line
@@ -2820,7 +2839,28 @@ pub fn run(opts: Options) -> Result<()> {
             };
             let started = Instant::now();
             varsto_core::events::publish("sync.started", json!({ "reason": why }));
-            let result = st.engine.as_mut().map(|e| e.sync(None));
+            // A file change alone syncs the folders that contain it and
+            // skips the vault-wide upkeep. A timer, an explicit sync, a
+            // path outside every folder, or an event with no path still
+            // syncs everything.
+            let mut hot_ran = false;
+            let result = st.engine.as_mut().map(|e| {
+                let hot = due_change && !due_timer && !requested && !rescan;
+                if hot {
+                    let mounts: Vec<(String, PathBuf)> = e
+                        .folders()
+                        .into_iter()
+                        .filter_map(|(rec, mount)| mount.map(|p| (rec.name.clone(), p)))
+                        .collect();
+                    if let Some(names) =
+                        varsto_core::engine::folder_names_for_paths(&mounts, &changed_paths)
+                    {
+                        hot_ran = true;
+                        return e.sync_hot(&names);
+                    }
+                }
+                e.sync(None)
+            });
             if let Some(Ok(reports)) = &result {
                 {
                     let (pulled, pushed) = reports.iter().fold((0, 0), |(a, b), (pl, ps)| {
@@ -2856,17 +2896,19 @@ pub fn run(opts: Options) -> Result<()> {
                         }
                     }
                     snapshot_syncs = st.service.syncs; // the snapshot above is current
-                    let upkeep = varsto_core::logging::Timer::start();
-                    // One step at a time, with the engine handed back in
-                    // between: requests waiting for it get their turn (each
-                    // step can take a while on a big vault).
-                    st = run_upkeep(st, false);
-                    log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, mailbox, drains, backups, trash, restic, YouTube, moves, torrents, disk suggestions, device details)");
-                    let checked = st.engine.as_ref().map(|e| e.policy_check());
-                    match checked {
-                        Some(Ok(reps)) => st.service.record_policies(reps),
-                        Some(Err(e)) => log::warn!("policy check failed: {e:#}"),
-                        None => {}
+                    if !hot_ran {
+                        let upkeep = varsto_core::logging::Timer::start();
+                        // One step at a time, with the engine handed back in
+                        // between: requests waiting for it get their turn (each
+                        // step can take a while on a big vault).
+                        st = run_upkeep(st, false);
+                        log::debug!(ms = upkeep.ms(); "service upkeep after sync (ledger, verify, scrub, repair, forwarding, mailbox, drains, backups, trash, restic, YouTube, moves, torrents, disk suggestions, device details)");
+                        let checked = st.engine.as_ref().map(|e| e.policy_check());
+                        match checked {
+                            Some(Ok(reps)) => st.service.record_policies(reps),
+                            Some(Err(e)) => log::warn!("policy check failed: {e:#}"),
+                            None => {}
+                        }
                     }
                 }
                 Some(Err(e)) => {
@@ -2932,12 +2974,21 @@ fn is_change(ev: &notify::Event) -> bool {
     })
 }
 
-fn make_watcher(tx: mpsc::Sender<()>) -> Result<notify::RecommendedWatcher> {
+fn make_watcher(tx: mpsc::Sender<Option<PathBuf>>) -> Result<notify::RecommendedWatcher> {
     let watcher = notify::RecommendedWatcher::new(
         move |res: notify::Result<notify::Event>| {
             if let Ok(ev) = res {
-                if is_change(&ev) {
-                    let _ = tx.send(());
+                if !is_change(&ev) {
+                    return;
+                }
+                // No path, or a kind that does not say which file: sync
+                // every folder rather than guess.
+                if ev.paths.is_empty() || matches!(ev.kind, notify::EventKind::Any) {
+                    let _ = tx.send(None);
+                    return;
+                }
+                for path in ev.paths {
+                    let _ = tx.send(Some(path));
                 }
             }
         },
@@ -3966,6 +4017,25 @@ mod tests {
             EventKind::Create(CreateKind::File),
             ".varsto-tmp-1"
         )));
+    }
+
+    #[test]
+    fn a_change_inside_one_folder_names_that_folder() {
+        let mounts = vec![
+            ("docs".into(), PathBuf::from("/data/docs")),
+            ("photos".into(), PathBuf::from("/data/photos")),
+        ];
+        let got = varsto_core::engine::folder_names_for_paths(
+            &mounts,
+            &[PathBuf::from("/data/docs/a.txt")],
+        )
+        .unwrap();
+        assert_eq!(got, vec!["docs".to_string()]);
+        assert!(varsto_core::engine::folder_names_for_paths(
+            &mounts,
+            &[PathBuf::from("/tmp/outside")]
+        )
+        .is_none());
     }
 
     /// `service stop` stops a running user unit (including one waiting out

@@ -49,6 +49,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 mod access_sync;
+mod apply_journal;
 mod backups;
 mod block_cache;
 mod changes_ops;
@@ -59,6 +60,7 @@ mod disk_groups;
 mod disk_insert;
 mod disk_suggest;
 mod drain;
+mod fast_apply;
 mod fetch;
 mod folder3;
 mod folder_rules;
@@ -86,10 +88,12 @@ mod notes;
 mod org_ops;
 mod p2p3;
 mod pack_upkeep;
+mod patch;
 mod placement;
 mod protection;
 mod quotas;
 mod records3_io;
+mod recut;
 mod repair;
 mod restic_mirror;
 mod scrub;
@@ -187,6 +191,7 @@ pub use trash::{
     TRASH_UPKEEP_EVERY_SECS,
 };
 pub use where_data::{CopyStats, DataLocations, DeviceShare, FolderShare, StorageShare};
+pub use patch::folder_names_for_paths;
 pub use youtube::{
     find_youtube_job, task_args as youtube_task_args, youtube_jobs_at, BlockingYoutubeEnv,
     ServiceYoutubeEnv, TaskKind as YoutubeTaskKind, Video as YoutubeVideo, VideoCounts,
@@ -272,6 +277,11 @@ struct FolderState {
     /// once each, and applied once the rule or setting no longer stops them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     ignored_remote: BTreeMap<String, FileState>,
+    /// Paths a pull is writing into in place. A crash can leave a
+    /// half-written file there; the scan does not publish it, and the next
+    /// pull deletes it and downloads it when it no longer matches the index.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    patching: BTreeSet<String>,
 }
 
 fn now_secs() -> i64 {
@@ -791,6 +801,17 @@ pub struct Engine {
     local_blocks: Option<(FolderId, local_blocks::LocalBlocks)>,
     /// The folder whose pull is running and may build `local_blocks`.
     local_blocks_for: Option<FolderId>,
+    /// Content hash → new path and file, for a deletion this pull can apply
+    /// by renaming the local file (`fast_apply`). Cleared at the end of the pull.
+    rename_offers: HashMap<String, Vec<(String, FileState)>>,
+    /// Paths already placed that way; the apply loop skips them.
+    placed_early: BTreeSet<String>,
+    /// How many times a folder was scanned (tests of the hot sync).
+    scans: u64,
+    /// Set for a sync of only the folders that changed: no vault-wide upkeep.
+    hot_sync: bool,
+    /// Those folders, when `hot_sync` is set.
+    only_folders: Option<Vec<String>>,
     /// How fast peers and storages answered during recent downloads.
     fetch_stats: std::sync::Arc<FetchStats>,
     /// Strongroom folder keys held in memory until the expiry time (UTC seconds).
@@ -2093,6 +2114,11 @@ impl Engine {
             prefetched: HashMap::new(),
             local_blocks: None,
             local_blocks_for: None,
+            rename_offers: HashMap::new(),
+            placed_early: BTreeSet::new(),
+            scans: 0,
+            hot_sync: false,
+            only_folders: None,
             local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
@@ -2187,6 +2213,9 @@ impl Engine {
             bail!("{}", crate::format_mismatch(vault.format_version));
         }
         util::private_home(home)?;
+        // A crash during a small-file pull leaves one journal. Restore
+        // before a scan can treat a torn file as the user's copy.
+        apply_journal::replay(home);
         // Read before the state: a writer that comes after is noticed.
         let home_generation = home_lock::read_generation(home);
         let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
@@ -2205,6 +2234,11 @@ impl Engine {
             prefetched: HashMap::new(),
             local_blocks: None,
             local_blocks_for: None,
+            rename_offers: HashMap::new(),
+            placed_early: BTreeSet::new(),
+            scans: 0,
+            hot_sync: false,
+            only_folders: None,
             local_rules: None,
             fetch_stats: Default::default(),
             unlocked: BTreeMap::new(),
@@ -3686,6 +3720,7 @@ impl Engine {
         root: &Path,
         state: &mut FolderState,
     ) -> Result<(u64, u64)> {
+        self.scans = self.scans.saturating_add(1);
         let _task = activity::start(activity::SYNC_SCAN, &rec.name, 0, activity::Unit::Items);
         if self.mount_is_encrypted(&rec.folder_id) {
             return self.scan_cached(rec, root, state);
@@ -3796,6 +3831,16 @@ impl Engine {
                 continue;
             }
             let path = state.local_names.vault_of(rules, &local);
+            // A file this device is patching in place may be half written.
+            // Leave the index as it was; the pull deletes and fetches it
+            // when the bytes no longer match, and never publishes the tear.
+            if state.patching.contains(&path) {
+                seen.insert(path.clone());
+                if let Some(e) = state.local_index.get(&path) {
+                    new_index.insert(path.clone(), e.clone());
+                }
+                continue;
+            }
             let md = match entry.metadata() {
                 Ok(md) => md,
                 Err(_) => {
@@ -3936,7 +3981,7 @@ impl Engine {
             if let Some(hook) = self.scan_read_hook.clone() {
                 hook(entry.path());
             }
-            let file = match fs::File::open(entry.path()) {
+            let mut file = match fs::File::open(entry.path()) {
                 Ok(f) => f,
                 Err(_) => {
                     state.unreadable.insert(path);
@@ -3948,6 +3993,41 @@ impl Engine {
             let params = self.chunker_for(size, &fk);
             let events_before = self.pending.len();
             let mut read_failed = false;
+            // A gear cut depends only on the bytes since the previous cut,
+            // so blocks before a change still match. Hash those and keep
+            // their ids; cut again from the first block that differs.
+            // A file that crossed a size tier is cut again from the start,
+            // so every device still agrees on the blocks.
+            if let Some(old) = state.files.get(&path).and_then(|p| {
+                if p.deleted || p.is_symlink() || p.chunks.is_empty() {
+                    None
+                } else {
+                    Some(p.chunks.clone())
+                }
+            }) {
+                let old_size = old.iter().map(|c| c.size).sum();
+                if params.same_sizes(&self.chunker_for(old_size, &fk)) {
+                    match recut::keep_prefix(&mut file, &old, &fk.hash, &mut hasher) {
+                        Ok(kept) => {
+                            for c in &kept {
+                                if !rec.is_backup() {
+                                    self.pending.push(Event::ChunkOnDevice {
+                                        folder: rec.folder_id.clone(),
+                                        chunk: c.chunk.clone(),
+                                        object: c.object.clone(),
+                                        size: c.size,
+                                    });
+                                }
+                            }
+                            chunks.extend(kept);
+                        }
+                        Err(_) => {
+                            state.unreadable.insert(path);
+                            continue;
+                        }
+                    }
+                }
+            }
             let chunker = match Chunker::new(std::io::BufReader::new(file), params) {
                 Ok(c) => c,
                 Err(_) => {
@@ -4129,7 +4209,11 @@ impl Engine {
             .files
             .iter()
             .filter(|(p, f)| {
-                !f.deleted && !seen.contains(*p) && !placeholders.contains(*p) && !kept.contains(*p)
+                !f.deleted
+                    && !seen.contains(*p)
+                    && !state.patching.contains(*p)
+                    && !placeholders.contains(*p)
+                    && !kept.contains(*p)
             })
             .map(|(p, _)| p.clone())
             .filter(|p| !ignore.as_mut().is_some_and(|m| m.is_ignored(p, false)))
@@ -4152,7 +4236,7 @@ impl Engine {
             }
         }
         for (p, e) in &state.local_index {
-            if unreadable_covers(&state.unreadable, p) {
+            if unreadable_covers(&state.unreadable, p) || state.patching.contains(p) {
                 new_index.entry(p.clone()).or_insert_with(|| e.clone());
             }
         }
@@ -4807,10 +4891,25 @@ impl Engine {
     }
 
     fn pull_inner(&mut self, folder: &str) -> Result<PullReport> {
+        // A reader that also serves blocks would fill the link with its
+        // own uploads. A few objects at a time until this pull returns.
+        struct ServingLimit;
+        impl Drop for ServingLimit {
+            fn drop(&mut self) {
+                crate::p2p::limit_serving(false);
+            }
+        }
+        crate::p2p::limit_serving(true);
+        let _limit = ServingLimit;
+        // Journals written by this pull are synced and removed after the
+        // files are in place, off the path the caller is waiting on.
+        let _journals = apply_journal::FinishJournals::arm(&self.home);
         let out = self.pull_folder(folder);
         // The index of local blocks lives for one pull.
         self.local_blocks = None;
         self.local_blocks_for = None;
+        self.rename_offers.clear();
+        self.placed_early.clear();
         out
     }
 
@@ -5103,12 +5202,39 @@ impl Engine {
             }
             report.manifests_applied += 1;
             let fetch_ahead = !encrypted_here && !self.mount_is_selective(&rec.folder_id);
+            self.prepare_rename_offers(&root, &state, &entries);
             let mut ahead_from = 0;
-            for (i, (path, remote)) in entries.iter().enumerate() {
+            let mut i = 0;
+            while i < entries.len() {
+                let (path, remote) = entries[i];
+                if self.placed_early.contains(path) {
+                    i += 1;
+                    continue;
+                }
                 if fetch_ahead && i >= ahead_from {
                     ahead_from = self.prefetch_small(&rec, &root, &entries, i, &state, &storages);
                 }
+                let n = if fetch_ahead {
+                    self.write_small_run(
+                        &rec,
+                        &fk,
+                        &root,
+                        &mut state,
+                        &entries,
+                        i,
+                        &mut ignore,
+                        &storages,
+                        &mut report,
+                    )
+                } else {
+                    0
+                };
+                if n >= 8 {
+                    i += n;
+                    continue;
+                }
                 if Self::skip_ignored(&mut ignore, &mut state, remote, &mut report) {
+                    i += 1;
                     continue;
                 }
                 self.merge_or_defer(
@@ -5123,6 +5249,7 @@ impl Engine {
                 );
                 // Served to other devices pulling the same files from now on.
                 self.note_fresh(&rec, &root, &state, path, remote);
+                i += 1;
             }
             state.last_seen.insert(dev, v.seq);
             self.prefetched.clear();
@@ -5534,6 +5661,9 @@ impl Engine {
                     state.pending_remote.insert(remote.path.clone(), remote);
                     return Ok(());
                 }
+                if self.rename_onto_add(rec, root, state, &remote, &disk, report)? {
+                    return Ok(());
+                }
                 self.ensure_local_blocks(rec, root, state);
                 let trashed = self.move_to_trash(&rec.folder_id, &disk, &remote.path)?;
                 // The trash copy still holds the blocks: a file this pull
@@ -5646,6 +5776,10 @@ impl Engine {
             } else {
                 Err(anyhow!("changed while syncing; nothing was overwritten"))
             }
+        } else if aside.is_none()
+            && self.try_inplace(rec, fk, root, state, &remote, &disk, storages, report)?
+        {
+            Ok(())
         } else {
             self.ensure_local_blocks(rec, root, state);
             self.download_to_guarded(
@@ -7436,10 +7570,50 @@ impl Engine {
         Ok(out)
     }
 
+    /// How many times a folder has been scanned since this engine was opened.
+    #[doc(hidden)]
+    pub fn scans(&self) -> u64 {
+        self.scans
+    }
+
+    /// pull then push, for the folders named in `folders` only, without the
+    /// vault-wide upkeep a full sync does. An empty list syncs nothing.
+    pub fn sync_hot(&mut self, folders: &[String]) -> Result<Vec<(PullReport, PushReport)>> {
+        if folders.is_empty() {
+            return Ok(Vec::new());
+        }
+        let label = folders.join(", ");
+        crate::logged_op!("sync", label, {
+            self.exclusive(|e| {
+                e.only_folders = Some(folders.to_vec());
+                e.hot_sync = true;
+                let out = e.sync_inner(None);
+                e.hot_sync = false;
+                e.only_folders = None;
+                out
+            })
+        })
+    }
+
     /// pull then push, for every attached folder (or one).
+    ///
+    /// A named folder skips the vault-wide upkeep (ledger checkpoints,
+    /// manifest pruning, notes, trash). The service timer and a sync of
+    /// every folder still run it. Naming the folder is how a change is
+    /// pushed without walking the rest of the vault.
     pub fn sync(&mut self, folder: Option<&str>) -> Result<Vec<(PullReport, PushReport)>> {
         crate::logged_op!("sync", folder.unwrap_or("all folders"), {
-            self.exclusive(|e| e.sync_inner(folder))
+            self.exclusive(|e| {
+                let named = folder.is_some();
+                if named {
+                    e.hot_sync = true;
+                }
+                let out = e.sync_inner(folder);
+                if named {
+                    e.hot_sync = false;
+                }
+                out
+            })
         })
     }
 
@@ -7477,19 +7651,24 @@ impl Engine {
         // System, version and platform, signed (an organization's platform
         // policy is checked against them); republished only when changed.
         let _ = self.refresh_device_details();
-        // Checkpoints, acknowledgements and pruning; anything left undone
-        // (an unreachable storage) is retried after the next sync.
-        let _ = self.ledger_upkeep();
-        // Last-accessed records of every device, when due (`access_sync`).
-        let _ = self.access_upkeep(false);
-        // File analyses: follow renames, publish and read (`notes`).
-        let _ = self.notes_upkeep(false);
-        let _ = self.manifest_upkeep();
-        // No claims at all while manifests name blocks: the ledger is gone
-        // everywhere (checked at most hourly, and only without claims).
-        let _ = self.ledger_lost_everywhere(false);
-        // The other devices' trash records, when due (`trash`).
-        let _ = self.trash_refresh(false);
+        // A change in one folder does not walk the ledger, the notes or the
+        // trash. The timer and a sync of every folder still do. A named
+        // folder and the watcher's hot path set `hot_sync`.
+        if !self.hot_sync {
+            // Checkpoints, acknowledgements and pruning; anything left undone
+            // (an unreachable storage) is retried after the next sync.
+            let _ = self.ledger_upkeep();
+            // Last-accessed records of every device, when due (`access_sync`).
+            let _ = self.access_upkeep(false);
+            // File analyses: follow renames, publish and read (`notes`).
+            let _ = self.notes_upkeep(false);
+            let _ = self.manifest_upkeep();
+            // No claims at all while manifests name blocks: the ledger is gone
+            // everywhere (checked at most hourly, and only without claims).
+            let _ = self.ledger_lost_everywhere(false);
+            // The other devices' trash records, when due (`trash`).
+            let _ = self.trash_refresh(false);
+        }
         // The storages this run could not reach, for every folder's report.
         let down: Vec<String> = self
             .storage_health()
@@ -7530,6 +7709,7 @@ impl Engine {
         self.restic_auto_attach();
         let names: Vec<String> = match folder {
             Some(f) => vec![f.to_string()],
+            None if self.hot_sync => self.only_folders.clone().unwrap_or_default(),
             None => self
                 .folders()
                 .into_iter()

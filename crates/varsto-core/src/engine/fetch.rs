@@ -33,8 +33,8 @@ const WINDOW_STEP: usize = 4;
 const ROUND: Duration = Duration::from_millis(500);
 /// Fetching ahead across single-block files during a pull: at most this
 /// many files looked at and objects fetched per batch.
-pub(super) const PREFETCH_FILES: usize = 64;
-pub(super) const PREFETCH_OBJECTS: usize = 32;
+pub(super) const PREFETCH_FILES: usize = 128;
+pub(super) const PREFETCH_OBJECTS: usize = 64;
 /// A storage answers faster than the peers only if it beats them by this
 /// factor: peer-to-peer costs nothing per gigabyte.
 const PEER_BIAS: f64 = 1.25;

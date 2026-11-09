@@ -318,6 +318,54 @@ mod served {
     }
 }
 
+/// While a pull is running, serve at most a few objects at a time so the
+/// upload does not fill the link the download is using. One object left
+/// the other reader waiting when two devices pulled the same folder.
+/// Off: the ordinary slot cap applies and this permit is not taken.
+const SERVING_CAP: usize = 4;
+static SERVING_LIMITED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SERVING_HELD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub(crate) fn limit_serving(on: bool) {
+    SERVING_LIMITED.store(on, std::sync::atomic::Ordering::Release);
+}
+
+/// A permit for one served object while [`limit_serving`] is on.
+/// At most [`SERVING_CAP`] of these are held at once.
+pub(super) struct ServeBudget {
+    held: bool,
+}
+
+impl ServeBudget {
+    pub(super) fn acquire() -> Self {
+        use std::sync::atomic::Ordering;
+        loop {
+            if !SERVING_LIMITED.load(Ordering::Acquire) {
+                return ServeBudget { held: false };
+            }
+            let n = SERVING_HELD.load(Ordering::Acquire);
+            if n >= SERVING_CAP {
+                std::thread::sleep(Duration::from_millis(2));
+                continue;
+            }
+            if SERVING_HELD
+                .compare_exchange(n, n + 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return ServeBudget { held: true };
+            }
+        }
+    }
+}
+
+impl Drop for ServeBudget {
+    fn drop(&mut self) {
+        if self.held {
+            SERVING_HELD.fetch_sub(1, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
+
 /// Requests the HTTP server answers at the same time: twice the cores
 /// (producing an object is reading, compressing and encrypting), between 8
 /// and 32, so a peer that keeps a deep window of requests is kept busy.
@@ -716,6 +764,7 @@ fn serve_connection<S: Read + Write + CloseWrite>(
         let path = target.split('?').next().unwrap_or("").to_string();
         let (status, body, peer) = if method == "GET" {
             let snap = snapshot.lock().unwrap().clone();
+            let _budget = ServeBudget::acquire();
             let _slot = slots.take();
             handler(snap.as_deref(), &path, &hdrs)
         } else {
