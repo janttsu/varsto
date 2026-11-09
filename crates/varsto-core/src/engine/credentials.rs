@@ -568,10 +568,8 @@ fn touch_current(
         entry.name = credentials::clip(name, 256);
         entry.detail = credentials::clip(detail, 1024);
         // A removal starts the reminder over, even when the secret did not change.
-        if force_hash {
-            entry.secret_hash = hash;
-            entry.retired = false;
-        } else if entry.secret_hash != hash {
+        // A different secret does the same. An unchanged secret leaves the confirmation.
+        if force_hash || entry.secret_hash != hash {
             entry.secret_hash = hash;
             entry.retired = false;
         }
@@ -619,10 +617,10 @@ fn canon_reminder(cache: &mut ReminderCache) {
 }
 
 fn scrub_reminder(cache: &mut ReminderCache) {
-    cache.baselines.retain(|b| baseline_ok(b));
-    cache.current.retain(|c| current_ok(c));
+    cache.baselines.retain(baseline_ok);
+    cache.current.retain(current_ok);
     cache.others.retain(|_, rows| {
-        rows.retain(|c| current_ok(c));
+        rows.retain(current_ok);
         !rows.is_empty()
     });
     canon_reminder(cache);

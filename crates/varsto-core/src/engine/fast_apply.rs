@@ -167,6 +167,7 @@ impl Engine {
     /// the right offsets. `Ok(true)` is done (the caller records the index).
     /// `Ok(false)` means the ordinary download should run. `Err` only after
     /// the file was changed: the path stays in `state.patching`.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn try_inplace(
         &mut self,
         rec: &FolderRecord,
@@ -565,7 +566,7 @@ impl Engine {
         if ignore.as_mut().is_some_and(|m| m.is_ignored(path, false)) {
             return false;
         }
-        if !matches!(manifest_take(state, path, remote), true) {
+        if !manifest_take(state, path, remote) {
             return false;
         }
         if self.check_no_link_above(root, state, path).is_err() {
@@ -623,22 +624,22 @@ impl Engine {
                 from_peer: false,
             });
         }
-        if let Some(got) = self.prefetched.get(&chunk.object) {
-            if let super::fetch::Fetched::Got { bytes, from_peer } = got {
-                let plain = crate::chunk_seal::open_chunk(
-                    fk,
-                    &self.vault.vault_id,
-                    &chunk.chunk,
-                    chunk.epoch,
-                    chunk.size,
-                    bytes,
-                )?;
-                return Ok(Taken {
-                    bytes: plain,
-                    reused: false,
-                    from_peer: *from_peer,
-                });
-            }
+        if let Some(super::fetch::Fetched::Got { bytes, from_peer }) =
+            self.prefetched.get(&chunk.object)
+        {
+            let plain = crate::chunk_seal::open_chunk(
+                fk,
+                &self.vault.vault_id,
+                &chunk.chunk,
+                chunk.epoch,
+                chunk.size,
+                bytes,
+            )?;
+            return Ok(Taken {
+                bytes: plain,
+                reused: false,
+                from_peer: *from_peer,
+            });
         }
         let staging = self.staging_roots();
         if let Some((path, _)) = super::disk_fetch::staged_object(&staging, &chunk.object) {

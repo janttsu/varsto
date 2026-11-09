@@ -434,7 +434,7 @@ mod tests {
         let mine = dev(1, "laptop", vec![cur("s3:a", KIND_S3, old, false)]);
         let w = warnings(
             &baselines,
-            &[mine.clone()],
+            std::slice::from_ref(&mine),
             &me(),
             &[live("s3:a", Some(old))],
         );
@@ -459,7 +459,7 @@ mod tests {
         let changed = dev(1, "laptop", vec![cur("s3:a", KIND_S3, [8; 32], false)]);
         let w = warnings(
             &baselines,
-            &[changed.clone()],
+            std::slice::from_ref(&changed),
             &me(),
             &[live("s3:a", Some([8; 32]))],
         );
@@ -536,7 +536,7 @@ mod tests {
             "laptop",
             vec![cur("rclone:box:", KIND_RCLONE, ZERO_HASH, false)],
         );
-        let w = warnings(&baselines, &[mine.clone()], &me(), &[]);
+        let w = warnings(&baselines, std::slice::from_ref(&mine), &me(), &[]);
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].kind, "rclone");
         assert!(!w[0].needs_secret);
