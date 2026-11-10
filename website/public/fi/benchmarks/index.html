@@ -370,18 +370,18 @@
     </ul>
 
     <h2 id="resilio">Mitattu Resilio Synciä vastaan (marraskuu 2026)</h2>
-    <p>8. marraskuuta 2026 molemmat ohjelmat siirsivät saman datan samojen kolmen vuokrakoneen välillä (kirjoittaja Pariisissa, lukijat Amsterdamissa ja Varsovassa, 2 vCPU kukin), yksi ohjelma kerrallaan, välittäjät ja seurantapalvelimet pois päältä, ja jokainen tiedosto tarkistettiin jälkikäteen SHA-256-tiivisteellä. Varsto oli daily-käännös 20261108-c50f260; Resilio Sync oli versio 2.8.1, koska 3.1.2 ei synkronoinut asetustiedostosta lainkaan. Kahden ajon mediaanit. "Tavut" on se, mitä lukija vaihtoi muiden koneiden kanssa. Menetelmä, sen rajoitukset, raakadata ja toistamiseen tarvittavat skriptit ovat <a href="../../docs/resilio-vs-varsto.html">mittausraportissa</a> (englanniksi).</p>
+    <p>10. marraskuuta 2026 molemmat ohjelmat siirsivät saman datan samojen kolmen vuokrakoneen välillä (kirjoittaja Pariisissa, lukijat Amsterdamissa ja Varsovassa, 2 vCPU kukin), yksi ohjelma kerrallaan, välittäjät ja seurantapalvelimet pois päältä, ja jokainen tiedosto tarkistettiin jälkikäteen SHA-256-tiivisteellä. Varsto oli daily-käännös 20261109-c1cf5c2; Resilio Sync oli versio 2.8.1, koska 3.1.2 ei synkronoinut asetustiedostosta lainkaan. Kahden ajon mediaanit. "Tavut" on se, mitä lukija vaihtoi muiden koneiden kanssa. Menetelmä, sen rajoitukset, raakadata ja toistamiseen tarvittavat skriptit ovat <a href="../../docs/resilio-vs-varsto.html">mittausraportissa</a> (englanniksi).</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Skenaario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td>44 s · 285 MB</td><td>25 s · 310 MB; yksi ajo kahdesta jumittui 5 min</td></tr>
-        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td class="win">43 s · 2 166 MB</td><td>109 s · 2 227 MB</td></tr>
-        <tr><th scope="row">537 MB lokimaista tekstiä</th><td class="win">17 s · 161 MB</td><td>63 s · 558 MB</td></tr>
-        <tr><th scope="row">816 MB, josta puolet kopioita</th><td class="win">13 s · 410 MB</td><td>78 s · 848 MB</td></tr>
-        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>72 s ja 98 s; kirjoittaja lähetti 4 107 MB</td><td>102 s ja 99 s; kirjoittaja lähetti 3 419 MB</td></tr>
-        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>61 s · 22 MB</td><td>15 s · 12 MB</td></tr>
-        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td class="win">38 s · 0,1 MB</td><td>67 s · 1 269 MB</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">335 s · 295 MB</td><td>599 s · 314 MB</td></tr>
+        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td>25 s · 292 MB</td><td>25 s · 313 MB</td></tr>
+        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td class="win">44 s · 2 178 MB</td><td>90 s · 2 226 MB</td></tr>
+        <tr><th scope="row">537 MB lokimaista tekstiä</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
+        <tr><th scope="row">816 MB, josta puolet kopioita</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
+        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>Amsterdam 70 s, Varsova 118 s; kirjoittaja lähetti 3 685 MB</td><td>Amsterdam 76 s, Varsova 118 s; kirjoittaja lähetti 3 636 MB</td></tr>
+        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>12 s · 26 MB, yksi ajo</td><td>ei valmistunut</td></tr>
+        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td class="win">10 s · 0 MB tiedostodataa</td><td>ei mitattu</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä merkitsee rivin, jolla Varsto oli nopeampi.</p>

@@ -89,25 +89,25 @@
     </table>
 
     <h2 id="measured">Mitattu Resilio Synciä vastaan (marraskuu 2026)</h2>
-    <p>8. marraskuuta 2026 molemmat ohjelmat siirsivät saman datan samojen kolmen vuokrakoneen välillä (kirjoittaja Pariisissa, lukijat Amsterdamissa ja Varsovassa, 2 vCPU kukin), yksi ohjelma kerrallaan, välittäjät ja seurantapalvelimet pois päältä, ja jokainen tiedosto tarkistettiin jälkikäteen SHA-256-tiivisteellä. Varsto oli daily-käännös 20261108-c50f260; Resilio Sync oli versio 2.8.1, koska 3.1.2 ei synkronoinut asetustiedostosta lainkaan. Kahden ajon mediaanit. "Tavut" on se, mitä lukija vaihtoi muiden koneiden kanssa. Menetelmä, sen rajoitukset, raakadata ja toistamiseen tarvittavat skriptit ovat <a href="../../../docs/resilio-vs-varsto.html">mittausraportissa</a> (englanniksi).</p>
+    <p>10. marraskuuta 2026 molemmat ohjelmat siirsivät saman datan samojen kolmen vuokrakoneen välillä (kirjoittaja Pariisissa, lukijat Amsterdamissa ja Varsovassa, 2 vCPU kukin), yksi ohjelma kerrallaan, välittäjät ja seurantapalvelimet pois päältä, ja jokainen tiedosto tarkistettiin jälkikäteen SHA-256-tiivisteellä. Varsto oli daily-käännös 20261109-c1cf5c2; Resilio Sync oli versio 2.8.1, koska 3.1.2 ei synkronoinut asetustiedostosta lainkaan. Kahden ajon mediaanit. "Tavut" on se, mitä lukija vaihtoi muiden koneiden kanssa. Menetelmä, sen rajoitukset, raakadata ja toistamiseen tarvittavat skriptit ovat <a href="../../../docs/resilio-vs-varsto.html">mittausraportissa</a> (englanniksi).</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Skenaario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td>44 s · 285 MB</td><td>25 s · 310 MB; yksi ajo kahdesta jumittui 5 min</td></tr>
-        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td class="win">43 s · 2 166 MB</td><td>109 s · 2 227 MB</td></tr>
-        <tr><th scope="row">537 MB lokimaista tekstiä</th><td class="win">17 s · 161 MB</td><td>63 s · 558 MB</td></tr>
-        <tr><th scope="row">816 MB, josta puolet kopioita</th><td class="win">13 s · 410 MB</td><td>78 s · 848 MB</td></tr>
-        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>72 s ja 98 s; kirjoittaja lähetti 4 107 MB</td><td>102 s ja 99 s; kirjoittaja lähetti 3 419 MB</td></tr>
-        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>61 s · 22 MB</td><td>15 s · 12 MB</td></tr>
-        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td class="win">38 s · 0,1 MB</td><td>67 s · 1 269 MB</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">335 s · 295 MB</td><td>599 s · 314 MB</td></tr>
+        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td>25 s · 292 MB</td><td>25 s · 313 MB</td></tr>
+        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td class="win">44 s · 2 178 MB</td><td>90 s · 2 226 MB</td></tr>
+        <tr><th scope="row">537 MB lokimaista tekstiä</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
+        <tr><th scope="row">816 MB, josta puolet kopioita</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
+        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>Amsterdam 70 s, Varsova 118 s; kirjoittaja lähetti 3 685 MB</td><td>Amsterdam 76 s, Varsova 118 s; kirjoittaja lähetti 3 636 MB</td></tr>
+        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>12 s · 26 MB, yksi ajo</td><td>ei valmistunut</td></tr>
+        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td class="win">10 s · 0 MB tiedostodataa</td><td>ei mitattu</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä merkitsee rivin, jolla Varsto oli nopeampi.</p>
     <ul>
-      <li><strong>Varsto on nopeampi</strong> kaikissa isojen, pakkautuvien tai duplikaattia sisältävien aineistojen ensimmäisissä synkronoinneissa sekä hitaalla, hävikkisellä yhteydellä. Teksti vie kolmasosan tavuista, koska lohkot pakataan ennen salausta; uudelleennimetty hakemisto ja kopiotiedostot siirtävät lähes nolla dataa, koska lukijan levyllä jo olevat lohkot käytetään uudelleen.</li>
-      <li><strong>Resilio Sync on nopeampi</strong> monien pienten tiedostojen kanssa silloin, kun se ei jumitu (se jumittui yhdessä ajossa kahdesta), ja pienen muutoksen välittämisessä: Varsto hakee nyt vain muuttuneet lohkot (22 MB, kun edellinen käännös haki koko 1,1 GiB), mutta kestää yhä kolmesta viiteen kertaa kauemmin, koska kirjoittajan oma kaikkien kansioiden synkka ja lukijan omien lohkojen uudelleentiivistys maksavat enemmän kuin siirto.</li>
-      <li><strong>Kaksi lukijaa</strong> valmistuivat suunnilleen samassa ajassa kummallakin ohjelmalla; Varston lukijat syöttivät toisiaan yhdessä ajossa kahdesta, ja sen kirjoittaja lähetti silti enemmän.</li>
+      <li><strong>Varsto oli nopeampi</strong> kahdella suurella tiedostolla, lokitekstillä, kopioilla ja yhteydellä, joka katkaistiin tahallaan. Teksti vie noin kolmasosan tavuista, koska lohkot pakataan ennen salausta. Kopiot siirtävät vähemmän, koska lukijan levyllä jo olevat lohkot käytetään uudelleen.</li>
+      <li><strong>Pienet tiedostot olivat tasoissa</strong> 25 sekunnissa, eikä Resilio Sync jumittunut. Pienelle muutokselle ei ole Resilio Syncin aikaa: molemmat sen ajot jättivät lukijan kansion erilaiseksi. Varston yksi laskettu muutos siirsi 26 MB 12 sekunnissa.</li>
+      <li><strong>Kaksi lukijaa</strong> valmistuivat yhdessä noin kahdessa minuutissa kummallakin ohjelmalla. Varsova oli hitaampi. Kirjoittajat lähettivät noin 3,6 GB kumpikin.</li>
       <li><strong>Muisti:</strong> Varston kirjoittajapalvelu käytti enimmillään 360–800 MiB, Resilio Sync 70–250 MiB.</li>
     </ul>
     <p class="note">Yksi päivä, yksi palveluntarjoaja, kaksi ajoa tapausta kohden ja alfa: nämä ovat suuntaa antavia, eivät tuomio. Raportti luettelee kaiken, mikä niitä rajoittaa.</p>
@@ -124,7 +124,7 @@
       <button type="button" role="tab" data-tab="slow" aria-selected="false">Hidas, hävikkinen yhteys</button>
       </div>
     <div class="pace-panel" role="tabpanel" data-panel="files">
-    <figure class="pace" data-play="Toista" data-pace data-scene="files" data-resilio="25 s · 310 MB" data-varsto="44 s · 285 MB">
+    <figure class="pace" data-play="Toista" data-pace data-scene="files" data-resilio="25 s · 313 MB" data-varsto="25 s · 292 MB">
       <h3>10 000 pientä tiedostoa</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -132,10 +132,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Resilio Sync oli nopeampi siinä ajossa, joka ei jumittunut. Kymmenentuhatta pientä tiedostoa tarkoittaa pyyntöä tiedostoa kohden. Varsto pyytää jokaisen salatun lohkon erikseen, joten kättely ja edestakainen viive maksavat enemmän kuin tavut. Resilio Sync pitää monta palaa liikkeessä pienemmällä valmistelulla tiedostoa kohden. Toinen sen kahdesta ajosta jumittui viideksi minuutiksi; 25 s on se ajo, joka valmistui.</p>
+      <p class="pace-why">Kumpikaan ei ollut selvästi nopeampi. Mediaani on 25 s molemmilla. Resilio Sync siirsi 313 MB ja Varsto 292 MB, eikä kumpikaan ajo jumittunut. Kymmenentuhatta pientä tiedostoa tarkoittaa yhä pyyntöä tiedostoa kohden: Varsto pyytää jokaisen salatun lohkon erikseen, joten kättely voi maksaa enemmän kuin tavut, kun taas Resilio Sync pitää monta palaa liikkeessä pienemmällä valmistelulla. Tällä kertaa ero ei ratkaissut kelloa.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="pair" hidden>
-    <figure class="pace" data-play="Toista" data-pace data-scene="pair" data-resilio="109 s · 2 227 MB" data-varsto="43 s · 2 166 MB">
+    <figure class="pace" data-play="Toista" data-pace data-scene="pair" data-resilio="90 s · 2 226 MB" data-varsto="44 s · 2 178 MB">
       <h3>Kaksi 1 GiB:n tiedostoa</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -143,10 +143,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto oli nopeampi, ja molemmat siirsivät suunnilleen saman määrän tavuja. Tiedostot ovat suuria, joten rajana on yhteys eikä tiedostokohtainen valmistelu. Varsto pitää yhteyden vertaiseen auki ja pitää monta lohkopyyntöä samaan aikaan liikkeessä, joten linja pysyy täynnä. Resilio Syncillä kesti kauemmin siirtää samat kaksi tiedostoa tällä reitillä.</p>
+      <p class="pace-why">Varsto oli nopeampi, 44 s vastaan 90 s, ja molemmat siirsivät noin 2,2 GB. Tiedostot ovat suuria, joten rajana on yhteys eikä tiedostokohtainen valmistelu. Varsto pitää yhteyden vertaiseen auki ja pitää monta lohkopyyntöä samaan aikaan liikkeessä, joten linja pysyy täynnä. Resilio Syncillä kesti kauemmin siirtää samat kaksi tiedostoa tällä reitillä.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
-    <figure class="pace" data-play="Toista" data-pace data-scene="text" data-resilio="63 s · 558 MB" data-varsto="17 s · 161 MB">
+    <figure class="pace" data-play="Toista" data-pace data-scene="text" data-resilio="47 s · 563 MB" data-varsto="17 s · 169 MB">
       <h3>Lokimainen teksti</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -154,10 +154,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto oli nopeampi, koska se pakkaa jokaisen lohkon ennen salausta. Lokiteksti kutistuu noin kolmannekseen, joten linjan yli kulkee 161 MB eikä 558 MB. Resilio Sync lähettää tekstin sellaisena kuin se on levyllä.</p>
+      <p class="pace-why">Varsto oli nopeampi, 17 s vastaan 47 s, koska se pakkaa jokaisen lohkon ennen salausta. Lokiteksti kutistuu, joten linjan yli kulkee noin 169 MB eikä 563 MB. Resilio Sync lähettää tekstin sellaisena kuin se on levyllä.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="dup" hidden>
-    <figure class="pace" data-play="Toista" data-pace data-scene="dup" data-resilio="78 s · 848 MB" data-varsto="13 s · 410 MB">
+    <figure class="pace" data-play="Toista" data-pace data-scene="dup" data-resilio="62 s · 856 MB" data-varsto="13 s · 419 MB">
       <h3>Puolet kopioita</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -165,10 +165,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto oli nopeampi, koska puolet tiedostoista on kopioita toisesta puolikkaasta. Ne lohkot ovat jo lukijan levyllä, ja Varsto käyttää ne uudelleen sen sijaan että lataisi ne uudestaan. Resilio Sync lähettää kopiot toisen kerran, joten tavuja liikkuu noin kaksinkertaisesti.</p>
+      <p class="pace-why">Varsto oli nopeampi, 13 s vastaan 62 s, koska puolet tiedostoista on kopioita toisesta puolikkaasta. Ne lohkot ovat jo lukijan levyllä, ja Varsto käyttää ne uudelleen sen sijaan että lataisi ne uudestaan. Resilio Sync lähettää kopiot toisen kerran, joten se siirtää noin 856 MB eikä 419 MB.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="readers" hidden>
-    <figure class="pace" data-play="Toista" data-pace data-scene="readers" data-resilio="102 s · 3 419 MB" data-varsto="98 s · 4 107 MB">
+    <figure class="pace" data-play="Toista" data-pace data-scene="readers" data-resilio="118 s · 3 636 MB" data-varsto="118 s · 3 685 MB">
       <h3>Kaksi lukijaa yhtä aikaa</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -176,10 +176,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Kumpikaan ei ollut selvästi nopeampi. Kaksi lukijaa nouti samat suuret tiedostot yhtä aikaa. Toisessa Varston ajossa lukijat hakivat lohkoja myös toisiltaan, minkä vuoksi kirjoittaja lähetti silti enemmän tavuja, vaikka kellot olivat lähellä toisiaan.</p>
+      <p class="pace-why">Hitaampi lukija valmistui noin 118 sekunnissa kummallakin ohjelmalla. Amsterdam oli Varsovaa nopeampi molemmilla. Kumpikin kirjoittaja lähetti noin 3,6 GB. Kaksi lukijaa nouti samat suuret tiedostot yhtä aikaa, ja tavuja liikkui myös lukijoiden välillä, joten kirjoittajan kokonaismäärä on enemmän kuin yksi kopio tiedostoista.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Toista" data-pace data-scene="edit" data-resilio="15 s · 12 MB" data-varsto="61 s · 22 MB">
+    <figure class="pace" data-play="Toista" data-pace data-scene="edit" data-resilio="ei valmistunut" data-varsto="12 s · 26 MB, yksi ajo">
       <h3>Pieni muutos</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -187,10 +187,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Resilio Sync oli nopeampi. Vain 11 MiB muuttui tiedostossa, joka molemmilla oli jo. Resilio lähettää muutoksen ja lopettaa. Varsto siirtää myös vain muuttuneet lohkot, mutta ensin kirjoittaja synkronoi jokaisen kansion ja lukija laskee uudelleen tiivisteet lohkoille, jotka sillä jo on. Se kirjanpito kestää kauemmin kuin siirto.</p>
+      <p class="pace-why">Resilio Syncin muutos ei valmistunut: molemmilla kierroksilla lukijan kansio erosi tiedostoissa dir/app.log ja dir/big.bin, joten aikaa ei ole. Varston yksi onnistunut ajo siirsi 26 MB 12 sekunnissa ja täsmäsi sitten. Varsto siirtää muuttuneet lohkot, mutta kirjoittaja synkronoi myös jokaisen kansion ja lukija laskee uudelleen tiivisteet lohkoille, jotka sillä jo on. Siksi pieni muutos voi kestää kauemmin kuin tavut antavat olettaa. Toinen Varston ajo ei siirtänyt mitään, eikä sitä laskettu.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Toista" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB" data-varsto="38 s · 0,1 MB">
+    <figure class="pace" data-play="Toista" data-pace data-scene="rename" data-resilio="ei mitattu" data-varsto="10 s · 0 MB tiedostodataa">
       <h3>Hakemisto nimetty uudelleen</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -198,10 +198,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto oli nopeampi. Uudelleennimeäminen on uusi nimi lohkoille, jotka lukija on jo tallentanut. Varsto kirjaa uuden nimen ja siirtää paikalliset tiedostot, joten linjan yli ei kulje juuri mitään. Resilio Sync käsittelee uuden hakemiston uutena datana ja lähettää sen uudelleen.</p>
+      <p class="pace-why">Varston uudelleennimeäminen valmistui 10 sekunnissa, eikä lukija noutanut tiedostodataa: uusi nimi koskee lohkoja, jotka sillä jo on, ja Varsto siirtää paikalliset tiedostot. Resilio Syncin uudelleennimeämistä ei mitattu, koska sen muutos ei valmistunut. Marraskuun 8. päivänä, ennen tätä uusintaa, Resilio Sync lähetti uudelleennimetyn hakemiston uudelleen.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
-    <figure class="pace" data-play="Toista" data-pace data-scene="slow" data-resilio="599 s · 314 MB" data-varsto="335 s · 295 MB">
+    <figure class="pace" data-play="Toista" data-pace data-scene="slow" data-resilio="934 s · 328 MB" data-varsto="432 s · 336 MB">
       <h3>Hidas, hävikkinen yhteys</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -209,7 +209,7 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Lukijan yhteys on rajattu 100 Mbit/s:iin, viive on 40 ms ja 1 % paketeista katoaa satunnaisesti. Sen lisäksi yhteys katkaistaan tahallaan 0,3 sekunniksi joka neljäs sekunti: katkon aikana matkalla olevat paketit katoavat, ja TCP odottaa ja lähettää ne uudelleen. Pienet tiedostot eivät juuri pakkaudu, joten molemmat siirtävät suunnilleen saman määrän tavuja. Kuvassa väliin osuvat kuutiot kutistuvat ja katoavat katkon aikana ja lähtevät sitten uudelleen. Taulukon ajat ovat 8. marraskuuta, ennen näitä tahallisia katkoja; uusinta, jossa katkot ovat mukana, on käynnissä.</p>
+      <p class="pace-why">Lukijan yhteys oli rajattu 100 Mbit/s:iin, viive oli 40 ms ja 1 % paketeista katosi satunnaisesti, ja yhteys katkaistiin tahallaan 0,3 sekunniksi joka neljäs sekunti. Katkon aikana matkalla olevat paketit katoavat, ja TCP odottaa ja lähettää ne uudelleen. Pienet tiedostot eivät juuri pakkaudu, joten molemmat siirsivät noin 330 MB. Varsto valmistui 432 sekunnissa ja Resilio Sync 934 sekunnissa. Kuvassa väliin osuvat kuutiot kutistuvat ja katoavat katkon aikana ja lähtevät sitten uudelleen.</p>
     </div>
     </div>
     <h2>Kumpi sopii sinulle</h2>

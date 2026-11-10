@@ -38,25 +38,25 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
     </table>
 
     <h2 id="measured">Mätt mot Resilio Sync (november 2026)</h2>
-    <p>Den 8 november 2026 flyttade båda verktygen samma data mellan samma tre hyrda maskiner (en skrivare i Paris, läsare i Amsterdam och Warszawa, 2 vCPU vardera), ett verktyg i taget, med reläer och trackers avstängda, och varje fil kontrollerades efteråt med SHA-256. Varsto var dagsbygget 20261108-c50f260; Resilio Sync var 2.8.1, eftersom 3.1.2 inte synkroniserade från en konfigurationsfil alls. Medianer av två körningar. "Byte" är vad läsaren utbytte med de andra maskinerna. Metoden, dess begränsningar, rådata och skripten för att upprepa den finns i <a href="{{P}}docs/resilio-vs-varsto.html">mätrapporten</a> (på engelska).</p>
+    <p>Den 10 november 2026 flyttade båda verktygen samma data mellan samma tre hyrda maskiner (en skrivare i Paris, läsare i Amsterdam och Warszawa, 2 vCPU vardera), ett verktyg i taget, med reläer och trackers avstängda, och varje fil kontrollerades efteråt med SHA-256. Varsto var dagsbygget 20261109-c1cf5c2; Resilio Sync var 2.8.1, eftersom 3.1.2 inte synkroniserade från en konfigurationsfil alls. Medianer av två körningar. "Byte" är vad läsaren utbytte med de andra maskinerna. Metoden, dess begränsningar, rådata och skripten för att upprepa den finns i <a href="{{P}}docs/resilio-vs-varsto.html">mätrapporten</a> (på engelska).</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Scenario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 små filer (313 MB)</th><td>44 s · 285 MB</td><td>25 s · 310 MB; en körning av två fastnade i 5 min</td></tr>
-        <tr><th scope="row">Två filer på 1 GiB</th><td class="win">43 s · 2 166 MB</td><td>109 s · 2 227 MB</td></tr>
-        <tr><th scope="row">537 MB loggliknande text</th><td class="win">17 s · 161 MB</td><td>63 s · 558 MB</td></tr>
-        <tr><th scope="row">816 MB, hälften kopior</th><td class="win">13 s · 410 MB</td><td>78 s · 848 MB</td></tr>
-        <tr><th scope="row">Två läsare samtidigt (Amsterdam, Warszawa)</th><td>72 s och 98 s; skrivaren sände 4 107 MB</td><td>102 s och 99 s; skrivaren sände 3 419 MB</td></tr>
-        <tr><th scope="row">11 MiB ändrade inuti 1,13 GiB</th><td>61 s · 22 MB</td><td>15 s · 12 MB</td></tr>
-        <tr><th scope="row">En katalog på 1,13 GiB bytte namn</th><td class="win">38 s · 0,1 MB</td><td>67 s · 1 269 MB</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % förlust, avbrott 0,3 s var 4:e sekund (de små filerna)</th><td class="win">335 s · 295 MB</td><td>599 s · 314 MB</td></tr>
+        <tr><th scope="row">10 000 små filer (313 MB)</th><td>25 s · 292 MB</td><td>25 s · 313 MB</td></tr>
+        <tr><th scope="row">Två filer på 1 GiB</th><td class="win">44 s · 2 178 MB</td><td>90 s · 2 226 MB</td></tr>
+        <tr><th scope="row">537 MB loggliknande text</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
+        <tr><th scope="row">816 MB, hälften kopior</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
+        <tr><th scope="row">Två läsare samtidigt (Amsterdam, Warszawa)</th><td>Amsterdam 70 s, Warszawa 118 s; skrivaren sände 3 685 MB</td><td>Amsterdam 76 s, Warszawa 118 s; skrivaren sände 3 636 MB</td></tr>
+        <tr><th scope="row">11 MiB ändrade inuti 1,13 GiB</th><td>12 s · 26 MB, en körning</td><td>blev inte klar</td></tr>
+        <tr><th scope="row">En katalog på 1,13 GiB bytte namn</th><td class="win">10 s · 0 MB fildata</td><td>mättes inte</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % förlust, avbrott 0,3 s var 4:e sekund (de små filerna)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grönt markerar en rad där Varsto var snabbare.</p>
     <ul>
-      <li><strong>Varsto är snabbare</strong> i varje första synkronisering av stora, komprimerbara eller duplicerade data, och över den långsamma länken med förluster. Text kostar en tredjedel av bytena, eftersom blocken komprimeras innan de krypteras; en omdöpt katalog och dubblettfiler flyttar nästan inga data, eftersom block som redan finns på läsarens disk återanvänds.</li>
-      <li><strong>Resilio Sync är snabbare</strong> på många små filer när det inte fastnar (det gjorde det i en körning av två), och på att sprida en liten ändring: Varsto hämtar nu bara de ändrade blocken (22 MB i stället för hela 1,1 GiB i bygget före), men tar fortfarande tre till fem gånger längre tid, eftersom skrivarens egen synkronisering av alla mappar och läsarens omhashning av sina lokala block kostar mer än överföringen.</li>
-      <li><strong>Två läsare</strong> blev klara på ungefär samma tid med båda verktygen; Varstos läsare matade varandra i en körning av två, och dess skrivare sände ändå mer.</li>
+      <li><strong>Varsto var snabbare</strong> på de två stora filerna, på loggtext, på kopior och på länken som klipptes avsiktligt. Text kostar ungefär en tredjedel av bytena, eftersom blocken komprimeras innan de krypteras. Kopior flyttar mindre data, eftersom block som redan finns på läsarens disk återanvänds.</li>
+      <li><strong>Små filer var oavgjort</strong> på 25 s, och Resilio Sync fastnade inte. En liten ändring har ingen tid för Resilio Sync: båda körningarna lämnade läsarens mapp olika. Varstos enda räknade ändring flyttade 26 MB på 12 s.</li>
+      <li><strong>Två läsare</strong> blev klara tillsammans på ungefär två minuter med båda verktygen. Warszawa var den långsamma. Skrivarna sände ungefär 3,6 GB var.</li>
       <li><strong>Minne:</strong> Varstos skrivartjänst toppade på 360–800 MiB mot Resilio Syncs 70–250 MiB.</li>
     </ul>
     <p class="note">En dag, en leverantör, två körningar per fall och en alfa: det här är indikationer, inte en dom. Rapporten räknar upp allt som begränsar dem.</p>
@@ -73,7 +73,7 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
       <button type="button" role="tab" data-tab="slow" aria-selected="false">En långsam länk med förluster</button>
       </div>
     <div class="pace-panel" role="tabpanel" data-panel="files">
-    <figure class="pace" data-play="Spela" data-pace data-scene="files" data-resilio="25 s · 310 MB" data-varsto="44 s · 285 MB">
+    <figure class="pace" data-play="Spela" data-pace data-scene="files" data-resilio="25 s · 313 MB" data-varsto="25 s · 292 MB">
       <h3>10 000 små filer</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -81,10 +81,10 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Resilio Sync var snabbare i den körning som inte fastnade. Tiotusen små filer betyder en förfrågan per fil. Varsto ber om varje krypterat block för sig, så handskakningen och rundturen kostar mer än bytena. Resilio Sync håller många bitar i rörelse med mindre förberedelse per fil. En av två körningar fastnade i fem minuter; 25 s är den körning som blev klar.</p>
+      <p class="pace-why">Inget av verktygen var tydligt snabbare. Medianen är 25 s för båda. Resilio Sync flyttade 313 MB och Varsto 292 MB, och ingen körning fastnade. Tiotusen små filer betyder fortfarande en förfrågan per fil: Varsto ber om varje krypterat block för sig, så handskakningen kan kosta mer än bytena, medan Resilio Sync håller många bitar i rörelse med mindre förberedelse. Den här dagen avgjorde den skillnaden inte klockan.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="pair" hidden>
-    <figure class="pace" data-play="Spela" data-pace data-scene="pair" data-resilio="109 s · 2 227 MB" data-varsto="43 s · 2 166 MB">
+    <figure class="pace" data-play="Spela" data-pace data-scene="pair" data-resilio="90 s · 2 226 MB" data-varsto="44 s · 2 178 MB">
       <h3>Två filer på 1 GiB</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -92,10 +92,10 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto var snabbare, och båda flyttade ungefär lika många byte. Filerna är stora, så gränsen är länken, inte förberedelsen per fil. Varsto håller anslutningen till den andra enheten öppen och har många blockförfrågningar i gång, så linjen förblir full. Resilio Sync tog längre tid på sig att flytta samma två filer på den här vägen.</p>
+      <p class="pace-why">Varsto var snabbare, 44 s mot 90 s, och båda flyttade ungefär 2,2 GB. Filerna är stora, så gränsen är länken, inte förberedelsen per fil. Varsto håller anslutningen till den andra enheten öppen och har många blockförfrågningar i gång, så linjen förblir full. Resilio Sync tog längre tid på sig att flytta samma två filer på den här vägen.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
-    <figure class="pace" data-play="Spela" data-pace data-scene="text" data-resilio="63 s · 558 MB" data-varsto="17 s · 161 MB">
+    <figure class="pace" data-play="Spela" data-pace data-scene="text" data-resilio="47 s · 563 MB" data-varsto="17 s · 169 MB">
       <h3>Loggliknande text</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -103,10 +103,10 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto var snabbare eftersom det komprimerar varje block innan det krypteras. Loggtext krymper till ungefär en tredjedel, så 161 MB korsar länken i stället för 558 MB. Resilio Sync skickar texten som den ligger lagrad.</p>
+      <p class="pace-why">Varsto var snabbare, 17 s mot 47 s, eftersom det komprimerar varje block innan det krypteras. Loggtext krymper, så ungefär 169 MB korsar länken i stället för 563 MB. Resilio Sync skickar texten som den ligger lagrad.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="dup" hidden>
-    <figure class="pace" data-play="Spela" data-pace data-scene="dup" data-resilio="78 s · 848 MB" data-varsto="13 s · 410 MB">
+    <figure class="pace" data-play="Spela" data-pace data-scene="dup" data-resilio="62 s · 856 MB" data-varsto="13 s · 419 MB">
       <h3>Hälften kopior</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -114,10 +114,10 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto var snabbare eftersom hälften av filerna är kopior av den andra hälften. De blocken finns redan på läsarens disk, och Varsto återanvänder dem i stället för att hämta dem igen. Resilio Sync skickar kopiorna en andra gång och flyttar därför ungefär dubbelt så många byte.</p>
+      <p class="pace-why">Varsto var snabbare, 13 s mot 62 s, eftersom hälften av filerna är kopior av den andra hälften. De blocken finns redan på läsarens disk, och Varsto återanvänder dem i stället för att hämta dem igen. Resilio Sync skickar kopiorna en andra gång och flyttar därför ungefär 856 MB i stället för 419 MB.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="readers" hidden>
-    <figure class="pace" data-play="Spela" data-pace data-scene="readers" data-resilio="102 s · 3 419 MB" data-varsto="98 s · 4 107 MB">
+    <figure class="pace" data-play="Spela" data-pace data-scene="readers" data-resilio="118 s · 3 636 MB" data-varsto="118 s · 3 685 MB">
       <h3>Två läsare samtidigt</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -125,10 +125,10 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Inget av verktygen var tydligt snabbare. Två läsare hämtade samma stora filer samtidigt. I en av Varstos körningar hämtade läsarna också block från varandra, vilket är varför skrivaren ändå skickade fler byte fast klockorna låg nära varandra.</p>
+      <p class="pace-why">Den långsammare läsaren blev klar på ungefär 118 s med båda verktygen. Amsterdam var snabbare än Warszawa för båda. Varje skrivare sände ungefär 3,6 GB. Två läsare hämtade samma stora filer samtidigt, och byte rörde sig också mellan läsarna, så skrivarens summa är mer än en kopia av filerna.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Spela" data-pace data-scene="edit" data-resilio="15 s · 12 MB" data-varsto="61 s · 22 MB">
+    <figure class="pace" data-play="Spela" data-pace data-scene="edit" data-resilio="blev inte klar" data-varsto="12 s · 26 MB, en körning">
       <h3>En liten ändring</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -136,10 +136,10 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Resilio Sync var snabbare. Bara 11 MiB inuti en fil som båda redan har hade ändrats. Resilio skickar den ändringen och slutar. Varsto överför också bara de ändrade blocken, men först synkroniserar skrivaren varje mapp den har och läsaren räknar om kontrollsummor för block den redan har. Den bokföringen tar längre tid än överföringen.</p>
+      <p class="pace-why">Resilio Syncs ändring blev inte klar: i båda körningarna skilde sig läsarens mapp i dir/app.log och dir/big.bin, så det finns ingen tid. Varstos enda lyckade körning flyttade 26 MB på 12 s och stämde sedan. Varsto överför de ändrade blocken, men skrivaren synkroniserar också varje mapp den har och läsaren räknar om kontrollsummor för block den redan har. Därför kan en liten ändring ta längre tid än bytena antyder. Den andra Varsto-körningen flyttade inget och räknades inte.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Spela" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB" data-varsto="38 s · 0,1 MB">
+    <figure class="pace" data-play="Spela" data-pace data-scene="rename" data-resilio="mättes inte" data-varsto="10 s · 0 MB fildata">
       <h3>En katalog bytte namn</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -147,10 +147,10 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto var snabbare. Ett namnbyte är ett nytt namn på block som läsaren redan lagrat. Varsto skriver det nya namnet och flyttar de lokala filerna, så nästan inget korsar länken. Resilio Sync behandlar den nya katalogen som ny data och skickar den igen.</p>
+      <p class="pace-why">Varstos namnbyte blev klart på 10 s och läsaren hämtade ingen fildata: ett namnbyte är ett nytt namn på block den redan lagrat, och Varsto flyttar de lokala filerna. Resilio Syncs namnbyte mättes inte, eftersom dess ändring inte blev klar. Den 8 november, före den här omkörningen, skickade Resilio Sync den omdöpta katalogen igen.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
-    <figure class="pace" data-play="Spela" data-pace data-scene="slow" data-resilio="599 s · 314 MB" data-varsto="335 s · 295 MB">
+    <figure class="pace" data-play="Spela" data-pace data-scene="slow" data-resilio="934 s · 328 MB" data-varsto="432 s · 336 MB">
       <h3>En långsam länk med förluster</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -158,7 +158,7 @@ description: Söker du ett alternativ till Resilio Sync med totalsträckskrypter
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Läsarens länk hålls på 100 Mbit/s, med 40 ms fördröjning och 1 % av paketen slumpmässigt borta. Dessutom klipps länken avsiktligt i 0,3 sekunder var fjärde sekund: paket som är i luften under klippet försvinner, och TCP väntar och skickar dem igen. De små filerna komprimeras knappt, så båda verktygen flyttar ungefär lika många byte. I bilden krymper och försvinner de kuber som är i gapet medan länken är klippt, och börjar sedan om. Tiderna i tabellen är från den 8 november, före de avsiktliga klippen; omkörningen som innehåller klippen pågår.</p>
+      <p class="pace-why">Läsarens länk hölls på 100 Mbit/s, med 40 ms fördröjning och 1 % av paketen slumpmässigt borta, och den klipptes avsiktligt i 0,3 sekunder var fjärde sekund. Paket som är i luften under klippet försvinner, och TCP väntar och skickar dem igen. De små filerna komprimeras knappt, så båda verktygen flyttade ungefär 330 MB. Varsto blev klart på 432 s och Resilio Sync på 934 s. I bilden krymper och försvinner de kuber som är i gapet medan länken är klippt, och börjar sedan om.</p>
     </div>
     </div>
     <h2>Vilken passar</h2>
