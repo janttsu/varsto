@@ -283,12 +283,12 @@
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = mix(rgb(css("--faint", "#687083")), [0, 0, 0], 0.25);
       ctx.fillRect((W / 2) | 0, 28, 1, H - 56);
-      var rDone = lane("resilio", p, 6);
+      var rDone = lane("resilio", p, 18);
       var vDone = lane("varsto", p, 214);
       flush();
       var tickX = scene === "readers" ? 5.15 : 3.7;
       var tickY = (scene === "files" || scene === "text" || scene === "dup" || scene === "slow") ? 2.7 : 1.65;
-      if (rDone) { var rp = P(6, tickX, tickY, 0.2); tick(rp[0], rp[1]); }
+      if (rDone) { var rp = P(18, tickX, tickY, 0.2); tick(rp[0], rp[1]); }
       if (vDone) { var vp = P(214, tickX, tickY, 0.2); tick(vp[0], vp[1]); }
       show("resilio", resilioRaw, p, rAt);
       show("varsto", varstoRaw, p, vAt);
