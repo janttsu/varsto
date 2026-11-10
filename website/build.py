@@ -426,7 +426,6 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
   <div class="wrap foot-lines">
 {footer}
   </div>
-  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
 {home_script}</body>
 </html>

@@ -171,7 +171,7 @@ section.hero::after { content: ""; position: absolute; z-index: -1; left: 50%; t
 .home > p a.button.secondary { color: var(--text); }
 
 /* Footer */
-footer.site { border-top: 1px solid var(--border); padding: 3.5rem 0 0; color: var(--muted); font-size: .9rem; overflow: hidden; }
+footer.site { border-top: 1px solid var(--border); padding: 3.5rem 0 2.5rem; color: var(--muted); font-size: .9rem; }
 .foot-grid { display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); gap: 2rem; }
 .foot-grid p { margin: .6rem 0 0; max-width: 22rem; color: var(--faint); }
 .foot-grid h2 { font: 500 .74rem var(--mono); letter-spacing: .07em; text-transform: uppercase; color: var(--faint); margin: 0 0 .8rem; }
@@ -180,7 +180,6 @@ footer.site { border-top: 1px solid var(--border); padding: 3.5rem 0 0; color: v
 .foot-grid nav a:hover { color: var(--text); }
 .foot-lines { display: flex; flex-direction: column; gap: .35rem; padding-top: 2rem; margin-top: 2.5rem; border-top: 1px solid var(--border); color: var(--faint); font-size: .84rem; }
 .foot-lines a { color: var(--muted); }
-.foot-mark { position: relative; font: 700 clamp(5rem, 24vw, 21rem)/.82 var(--font); letter-spacing: -.07em; text-align: center; margin: 2rem 0 -1.2rem; background: linear-gradient(180deg, color-mix(in srgb, var(--text) 9%, transparent), transparent 85%); -webkit-background-clip: text; background-clip: text; color: transparent; user-select: none; }
 
 @media (max-width: 48rem) { .foot-grid { grid-template-columns: 1fr 1fr; } .foot-grid > :first-child { grid-column: 1 / -1; } }
 @media (prefers-reduced-motion: no-preference) { a, button { transition: background-color .15s, color .15s, border-color .15s, transform .15s, box-shadow .2s; } }
