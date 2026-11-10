@@ -42,15 +42,16 @@ description: Looking for a Resilio Sync alternative with end-to-end encryption o
       <thead><tr><th>Scenario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
         <tr><th scope="row">10 000 small files (313 MB)</th><td>44 s · 285 MB</td><td>25 s · 310 MB; one run of two stalled for 5 min</td></tr>
-        <tr><th scope="row">Two 1 GiB files</th><td>43 s · 2 166 MB</td><td>109 s · 2 227 MB</td></tr>
-        <tr><th scope="row">537 MB of log-like text</th><td>17 s · 161 MB</td><td>63 s · 558 MB</td></tr>
-        <tr><th scope="row">816 MB, half of it copies</th><td>13 s · 410 MB</td><td>78 s · 848 MB</td></tr>
+        <tr><th scope="row">Two 1 GiB files</th><td class="win">43 s · 2 166 MB</td><td>109 s · 2 227 MB</td></tr>
+        <tr><th scope="row">537 MB of log-like text</th><td class="win">17 s · 161 MB</td><td>63 s · 558 MB</td></tr>
+        <tr><th scope="row">816 MB, half of it copies</th><td class="win">13 s · 410 MB</td><td>78 s · 848 MB</td></tr>
         <tr><th scope="row">Two readers at once (Amsterdam, Warsaw)</th><td>72 s and 98 s; writer sent 4 107 MB</td><td>102 s and 99 s; writer sent 3 419 MB</td></tr>
         <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td>61 s · 22 MB</td><td>15 s · 12 MB</td></tr>
-        <tr><th scope="row">A 1.13 GiB directory renamed</th><td>38 s · 0.1 MB</td><td>67 s · 1 269 MB</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % loss (the small files)</th><td>335 s · 295 MB</td><td>599 s · 314 MB</td></tr>
+        <tr><th scope="row">A 1.13 GiB directory renamed</th><td class="win">38 s · 0.1 MB</td><td>67 s · 1 269 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % loss (the small files)</th><td class="win">335 s · 295 MB</td><td>599 s · 314 MB</td></tr>
       </tbody>
     </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green marks a row where Varsto was faster.</p>
     <ul>
       <li><strong>Varsto is faster</strong> in every initial sync of large, compressible or duplicated data, and over the slow lossy link. Text costs a third of the bytes, because blocks are compressed before they are encrypted; a renamed directory and duplicate files move almost no data, because blocks already on the reader's disk are reused.</li>
       <li><strong>Resilio Sync is faster</strong> on many small files when it does not stall (it did in one run of two), and at propagating a small change: Varsto now fetches only the changed blocks (22 MB instead of the whole 1.1 GiB in the build before), but still takes three to five times longer, because the writer's own sync of all folders and the reader's re-hashing of its local blocks cost more than the transfer.</li>
@@ -58,6 +59,79 @@ description: Looking for a Resilio Sync alternative with end-to-end encryption o
       <li><strong>Memory:</strong> Varsto's writer service peaked at 360–800 MiB against Resilio Sync's 70–250 MiB.</li>
     </ul>
     <p class="note">One day, one provider, two runs per case, and an alpha: these are indications, not a verdict. The report lists everything that limits them.</p>
+
+    <figure class="pace" data-pace data-scene="files" data-resilio="25 s · 310 MB" data-varsto="44 s · 285 MB">
+      <h3>10 000 small files</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+      <figcaption>10 000 small files, 313 MB in all. Resilio Sync finished in 25 s and moved 310 MB. Varsto took 44 s and moved 285 MB. One of Resilio Sync's two runs stalled for 5 min; 25 s is the run that finished.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="pair" data-resilio="109 s · 2 227 MB" data-varsto="43 s · 2 166 MB">
+      <h3>Two 1 GiB files</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+      <figcaption>Two files of 1 GiB each. Both tools moved a little over 2 GB. Varsto finished in 43 s (2 166 MB). Resilio Sync took 109 s (2 227 MB).</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="text" data-resilio="63 s · 558 MB" data-varsto="17 s · 161 MB">
+      <h3>Log-like text</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+      <figcaption>537 MB of log-like text. Varsto compresses each block before encrypting it, so about a third of the bytes cross the link and the copy finishes sooner: 17 s and 161 MB, against Resilio Sync's 63 s and 558 MB.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="dup" data-resilio="78 s · 848 MB" data-varsto="13 s · 410 MB">
+      <h3>Half of it copies</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+      <figcaption>816 MB, half of it copies. Varsto reuses blocks the reader already has, so 410 MB cross and the copy finishes in 13 s. Resilio Sync sends the copies again: 78 s and 848 MB.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="readers" data-resilio="102 s · 3 419 MB" data-varsto="98 s · 4 107 MB">
+      <h3>Two readers at once</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+      <figcaption>Two readers at once, in Amsterdam and Warsaw. They finished in about the same time: Varsto in 72 s and 98 s, Resilio Sync in 102 s and 99 s. In one of Varsto's two runs the readers fed each other, and its writer still sent more, 4 107 MB against 3 419 MB.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="edit" data-resilio="15 s · 12 MB" data-varsto="61 s · 22 MB">
+      <h3>A small change</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+      <figcaption>11 MiB changed inside a 1.13 GiB file both sides already have. Resilio Sync sends that change and is done in 15 s (12 MB). Varsto also sends only the changed blocks (22 MB) but takes 61 s, because the writer syncs every folder and the reader re-checks blocks it already holds.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB" data-varsto="38 s · 0.1 MB">
+      <h3>A directory renamed</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+      <figcaption>A 1.13 GiB directory was renamed. Varsto does that as a local move, so 0.1 MB crosses and it finishes in 38 s. Resilio Sync sends the directory again: 67 s and 1 269 MB.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="slow" data-resilio="599 s · 314 MB" data-varsto="335 s · 295 MB">
+      <h3>A slow, lossy link</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+      <figcaption>The same small files, over a link limited to 100 Mbit/s with 40 ms of delay and 1 % packet loss. Both sent about 300 MB. Varsto finished in 335 s (295 MB), Resilio Sync in 599 s (314 MB).</figcaption>
+    </figure>
 
     <h2>Which one fits</h2>
     <div class="grid two">

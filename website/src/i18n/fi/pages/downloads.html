@@ -12,7 +12,8 @@ description: Lataa Varsto-sovellus Linuxille, Windowsille, macOS:lle ja Androidi
     <h2>iOS: allekirjoittamaton ipa, AltStore, SideStore ja Sideloadly</h2>
     <p>iOS-paketti on allekirjoittamaton <code>.ipa</code>. Se ei asennu pelkästä tiedostosta. AltStore, SideStore tai Sideloadly allekirjoittaa sen omalla Apple ID:lläsi ja asentaa sen. Varstolla ei ole Applen kehittäjäallekirjoitusta. Sideloadlyn virhe allekirjoituksesta, Apple ID:stä joka ei voi allekirjoittaa enempää sovelluksia, vanhentuneesta asennuksesta tai laitteesta joka ei luota kehittäjään tulee siltä työkalulta tai Applelta, ei rikkinäisestä paketista. Sama tiedosto on se, jonka nämä työkalut asentavat. Sovellus on käännetty CI:ssä, eikä sitä ole ajettu oikealla laitteella. Kuoren lähde on hakemistossa <code>apps/ios</code> <a href="https://github.com/janttsu/varsto" rel="noopener">GitHubissa</a>.</p>
     <p class="note">Latauslista on englanniksi.</p>
-    {{DOWNLOADS}}
+        <p class="note">Alfa ei ole sovelluskaupassa. Tarkista tiedosto julkaisuavaimella allekirjoitetusta tarkistussummalistasta. Applen ja Microsoftin koodiallekirjoitusta ei vielä ole, joten macOS ja Windows varoittavat asennuksessa. Android-paketti on allekirjoitettu projektin omalla avaimella.</p>
+    {{DOWNLOADS_GROUPED}}
     <h2>Asennus ja tarkistus</h2>
     <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
 curl -O https://varsto.net/downloads/varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz

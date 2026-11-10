@@ -42,15 +42,16 @@ description: Vous cherchez une alternative à Resilio Sync avec chiffrement de b
       <thead><tr><th>Scénario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
         <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td>44 s · 285 Mo</td><td>25 s · 310 Mo ; une exécution sur deux bloquée 5 min</td></tr>
-        <tr><th scope="row">Deux fichiers de 1 Gio</th><td>43 s · 2 166 Mo</td><td>109 s · 2 227 Mo</td></tr>
-        <tr><th scope="row">537 Mo de texte de type journal</th><td>17 s · 161 Mo</td><td>63 s · 558 Mo</td></tr>
-        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td>13 s · 410 Mo</td><td>78 s · 848 Mo</td></tr>
+        <tr><th scope="row">Deux fichiers de 1 Gio</th><td class="win">43 s · 2 166 Mo</td><td>109 s · 2 227 Mo</td></tr>
+        <tr><th scope="row">537 Mo de texte de type journal</th><td class="win">17 s · 161 Mo</td><td>63 s · 558 Mo</td></tr>
+        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td class="win">13 s · 410 Mo</td><td>78 s · 848 Mo</td></tr>
         <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>72 s et 98 s ; l’émetteur a envoyé 4 107 Mo</td><td>102 s et 99 s ; l’émetteur a envoyé 3 419 Mo</td></tr>
         <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>61 s · 22 Mo</td><td>15 s · 12 Mo</td></tr>
-        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td>38 s · 0,1 Mo</td><td>67 s · 1 269 Mo</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes (les petits fichiers)</th><td>335 s · 295 Mo</td><td>599 s · 314 Mo</td></tr>
+        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td class="win">38 s · 0,1 Mo</td><td>67 s · 1 269 Mo</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes (les petits fichiers)</th><td class="win">335 s · 295 Mo</td><td>599 s · 314 Mo</td></tr>
       </tbody>
     </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque une ligne où Varsto a été plus rapide.</p>
     <ul>
       <li><strong>Varsto est plus rapide</strong> dans chaque synchronisation initiale de données volumineuses, compressibles ou dupliquées, et sur la liaison lente avec pertes. Le texte coûte un tiers des octets, car les blocs sont compressés avant d’être chiffrés ; un répertoire renommé et des fichiers en double ne déplacent presque aucune donnée, car les blocs déjà présents sur le disque du lecteur sont réutilisés.</li>
       <li><strong>Resilio Sync est plus rapide</strong> sur beaucoup de petits fichiers quand il ne se bloque pas (il l’a fait dans une exécution sur deux), et pour propager une petite modification : Varsto ne récupère plus que les blocs modifiés (22 Mo au lieu de tout le 1,1 Gio dans la version précédente), mais met encore trois à cinq fois plus de temps, car la synchronisation de tous les dossiers par l’émetteur et le re-hachage des blocs locaux par le lecteur coûtent plus que le transfert.</li>
@@ -58,6 +59,79 @@ description: Vous cherchez une alternative à Resilio Sync avec chiffrement de b
       <li><strong>Mémoire :</strong> le service émetteur de Varsto a culminé à 360–800 Mio contre 70–250 Mio pour Resilio Sync.</li>
     </ul>
     <p class="note">Un jour, un fournisseur, deux exécutions par cas et une alpha : ce sont des indications, pas un verdict. Le rapport énumère tout ce qui les limite.</p>
+
+    <figure class="pace" data-pace data-scene="files" data-resilio="25 s · 310 Mo" data-varsto="44 s · 285 Mo">
+      <h3>10 000 petits fichiers</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 Mo</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
+      </div>
+      <figcaption>10 000 petits fichiers, 313 Mo au total. Resilio Sync a fini en 25 s et a déplacé 310 Mo. Varsto a pris 44 s et 285 Mo. Une des deux exécutions de Resilio Sync est restée bloquée 5 min ; 25 s est l’exécution qui s’est terminée.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="pair" data-resilio="109 s · 2 227 Mo" data-varsto="43 s · 2 166 Mo">
+      <h3>Deux fichiers de 1 Gio</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 Mo</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
+      </div>
+      <figcaption>Deux fichiers de 1 Gio. Les deux outils ont déplacé un peu plus de 2 Go. Varsto a fini en 43 s (2 166 Mo). Resilio Sync a pris 109 s (2 227 Mo).</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="text" data-resilio="63 s · 558 Mo" data-varsto="17 s · 161 Mo">
+      <h3>Texte de type journal</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 Mo</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
+      </div>
+      <figcaption>537 Mo de texte de type journal. Varsto compresse chaque bloc avant de le chiffrer, donc environ un tiers des octets traverse le lien et la copie finit plus tôt : 17 s et 161 Mo, contre 63 s et 558 Mo pour Resilio Sync.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="dup" data-resilio="78 s · 848 Mo" data-varsto="13 s · 410 Mo">
+      <h3>La moitié en copies</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 Mo</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
+      </div>
+      <figcaption>816 Mo, dont la moitié sont des copies. Varsto réutilise les blocs que le lecteur a déjà, donc 410 Mo traversent le lien et la copie finit en 13 s. Resilio Sync renvoie les copies : 78 s et 848 Mo.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="readers" data-resilio="102 s · 3 419 Mo" data-varsto="98 s · 4 107 Mo">
+      <h3>Deux lecteurs en même temps</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 Mo</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
+      </div>
+      <figcaption>Deux lecteurs en même temps, à Amsterdam et à Varsovie. Ils ont fini en à peu près le même temps : Varsto en 72 s et 98 s, Resilio Sync en 102 s et 99 s. Dans une des deux exécutions de Varsto, les lecteurs se sont alimentés l’un l’autre, et son émetteur a tout de même envoyé davantage, 4 107 Mo contre 3 419 Mo.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="edit" data-resilio="15 s · 12 Mo" data-varsto="61 s · 22 Mo">
+      <h3>Une petite modification</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 Mo</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
+      </div>
+      <figcaption>11 Mio ont changé dans un fichier de 1,13 Gio que les deux côtés ont déjà. Resilio Sync envoie ce changement et a fini en 15 s (12 Mo). Varsto n’envoie aussi que les blocs modifiés (22 Mo) mais met 61 s, parce que l’émetteur synchronise tous les dossiers et le lecteur revérifie les blocs qu’il a déjà.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="rename" data-resilio="67 s · 1 269 Mo" data-varsto="38 s · 0,1 Mo">
+      <h3>Un répertoire renommé</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 Mo</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
+      </div>
+      <figcaption>Un répertoire de 1,13 Gio a été renommé. Varsto en fait un déplacement local, donc 0,1 Mo traverse le lien et c’est fini en 38 s. Resilio Sync renvoie le répertoire : 67 s et 1 269 Mo.</figcaption>
+    </figure>
+    <figure class="pace" data-pace data-scene="slow" data-resilio="599 s · 314 Mo" data-varsto="335 s · 295 Mo">
+      <h3>Une liaison lente avec pertes</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 Mo</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
+      </div>
+      <figcaption>Les mêmes petits fichiers, sur une liaison limitée à 100 Mbit/s, avec 40 ms de délai et 1 % de pertes. Les deux ont envoyé environ 300 Mo. Varsto a fini en 335 s (295 Mo), Resilio Sync en 599 s (314 Mo).</figcaption>
+    </figure>
 
     <h2>Lequel choisir</h2>
     <div class="grid two">

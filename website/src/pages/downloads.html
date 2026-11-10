@@ -11,7 +11,8 @@ description: Download Varsto for Linux, Windows, macOS and Android, or the unsig
     <p class="note"><strong>Android.</strong> The APK is signed for release under a new key, so later releases install over it as an update. An earlier debug APK (alpha.15 or an older daily build) cannot be updated to it: uninstall the old app first, which removes that device's copy of the vault, so make sure the vault has another device or a storage, then install the new APK.</p>
     <h2>iOS: unsigned ipa, AltStore, SideStore and Sideloadly</h2>
     <p>The iOS package is an unsigned <code>.ipa</code>. It does not install from the file alone. AltStore, SideStore or Sideloadly sign it with your own Apple ID and install it. Varsto does not have an Apple developer signature. A Sideloadly error about signing, an Apple ID that cannot sign more apps, an expired sideload, or a device that does not trust the developer comes from that tool or from Apple, not from a broken package. The same file is what those tools install. The app has been built in CI and has not been run on a real device yet. The source of the shell is in <code>apps/ios</code> on <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>.</p>
-    {{DOWNLOADS}}
+        <p class="note">The alpha is not in an app store. Check the file against the checksum list signed with the release key. Apple and Microsoft code signing is not in place yet, so macOS and Windows warn on install. The Android package is signed with the project's own key.</p>
+    {{DOWNLOADS_GROUPED}}
     <h2>Install and verify</h2>
     <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
 curl -O https://varsto.net/downloads/varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz

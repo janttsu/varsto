@@ -12,7 +12,8 @@ description: Ladda ner Varsto för Linux, Windows, macOS och Android, eller den 
     <h2>iOS: osignerad ipa, AltStore, SideStore och Sideloadly</h2>
     <p>iOS-paketet är en osignerad <code>.ipa</code>. Den installeras inte från filen ensam. AltStore, SideStore eller Sideloadly signerar den med ditt eget Apple-ID och installerar den. Varsto har ingen Apple-utvecklarsignatur. Ett Sideloadly-fel om signering, ett Apple-ID som inte kan signera fler appar, en installation som har gått ut, eller en enhet som inte litar på utvecklaren kommer från det verktyget eller från Apple, inte från ett trasigt paket. Samma fil är den som verktygen installerar. Appen har byggts i CI och har inte körts på en riktig enhet. Skalets källa ligger i <code>apps/ios</code> på <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>.</p>
     <p class="note">Nedladdningslistan är på engelska.</p>
-    {{DOWNLOADS}}
+        <p class="note">Alfan finns inte i en appbutik. Kontrollera filen mot kontrollsummelistan som är signerad med utgivningsnyckeln. Kodsignering från Apple och Microsoft finns inte ännu, så macOS och Windows varnar vid installation. Android-paketet är signerat med projektets egen nyckel.</p>
+    {{DOWNLOADS_GROUPED}}
     <h2>Installera och verifiera</h2>
     <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
 curl -O https://varsto.net/downloads/varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz

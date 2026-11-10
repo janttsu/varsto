@@ -21,7 +21,7 @@
 <link rel="alternate" hreflang="en" href="https://varsto.net/docs/building.html">
 <link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/building.html">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../assets/css/site.css?v=a0a7364f3a">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -52,7 +52,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Building Varsto</h1>
-<p class="note">From <code>BUILDING.md</code> in the repository, rendered 2026-11-08. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>BUILDING.md</code> in the repository, rendered 2026-11-10. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <p>How every part of Varsto is built, where (GitHub Actions, your machine, the Scaleway fallback), and how the screenshots, the daily channel and the website are produced. Written from the scripts and workflows in this repository; if they disagree with this page, they are right and this page needs a fix.</p>
 <p>Related: <a href="testing.html">TESTING.md</a> (tests and the VM lab: <a href="lab-runbook.html">docs/testing/lab.md</a>), <a href="./">RELEASING.md</a> (signing and publishing), <a href="./">HANDOVER.md</a> (current state), <a href="contributing.html">CONTRIBUTING.md</a>.</p>
 <p><strong>Default: let GitHub Actions build.</strong> The repository is public, so GitHub-hosted runners are free, and they build every platform (including macOS and iOS, which need Apple hardware). Build locally for a quick check of one platform, and use the Scaleway fallback only when GitHub cannot be used.</p>
@@ -191,7 +191,7 @@
 </tr>
 <tr>
 <td><code>daily.yml</code> (Daily builds)</td>
-<td>every day at 03:00 UTC (<code>schedule</code>), manual run with inputs <code>ref</code> (default <code>main</code>) and <code>publish</code> (default true)</td>
+<td>manual run with inputs <code>ref</code> (default <code>main</code>) and <code>publish</code> (default true). No schedule</td>
 </tr>
 <tr>
 <td><code>ios-ipa.yml</code> (iOS .ipa)</td>
@@ -385,10 +385,10 @@
 <h2 id="the-daily-channel">The daily channel</h2>
 <p>A development build of <code>main</code> for every platform, signed with a daily key (not the release key), at <a href="https://varsto.net/daily/">https://varsto.net/daily/</a>; <code>varsto update --daily</code> installs from it. <a href="./">RELEASING.md</a> ("Daily builds") has the keys, the signature format and what the updater checks. The pipeline:</p>
 <ol type="1">
-<li><code>daily.yml</code> runs at 03:00 UTC. Job <code>check</code> resolves <code>main</code> (or the <code>ref</code> input) and stops the scheduled run if that commit is already the one in the notes of the published <code>daily</code> pre-release (a manual run always builds). It also validates the version string from <code>Cargo.toml</code>.</li>
+<li>Someone starts <code>daily.yml</code> by hand (Actions, Daily builds, Run workflow). Job <code>check</code> resolves <code>main</code> (or the <code>ref</code> input) and validates the version string from <code>Cargo.toml</code>. A manual run always builds.</li>
 <li>Job <code>ci</code> calls <code>ci.yml</code> for that commit and job <code>ipa</code> calls <code>ios-ipa.yml</code>.</li>
 <li>Job <code>package</code>: <code>scripts/daily-assemble.py</code> collects the artifacts under stable names (<code>varsto-daily-linux-x86_64.tar.gz</code>, <code>-windows-setup.exe</code>, <code>-macos-apple-silicon.dmg</code>, <code>-android-debug.apk</code> (release bytes; the name is kept so the signed list stays valid), <code>-ios-unsigned.ipa</code>, <code>-rendezvous-linux-x86_64</code>, <code>-screenshots.tar.gz</code>) and writes an unsigned <code>SHA256SUMS</code> and <code>latest.json</code>; every file must be found exactly once or the script stops. <code>scripts/sign-daily.sh</code> signs the list with the key from the secret <code>VARSTO_DAILY_KEY</code>, refusing a key that does not match <code>daily-key.pub</code>, and the step verifies it. The files go to the artifact <code>daily-assets</code> (14 days).</li>
-<li>If publishing is on (always for the schedule; the <code>publish</code> input for a manual run), the old <code>daily</code> release and tag are deleted and a new pre-release <code>daily</code> is created with the files; its notes start with <code>commit: &lt;sha&gt;</code> and <code>build: &lt;id&gt;</code> (<code>YYYYMMDD-&lt;short sha&gt;</code>).</li>
+<li>If publishing is on (the <code>publish</code> input, default true), the old <code>daily</code> release and tag are deleted and a new pre-release <code>daily</code> is created with the files; its notes start with <code>commit: &lt;sha&gt;</code> and <code>build: &lt;id&gt;</code> (<code>YYYYMMDD-&lt;short sha&gt;</code>).</li>
 <li>On the web server, <code>ops/site/daily-sync.py</code> (cron, hourly) fetches the release, verifies <code>SHA256SUMS.sig</code> against the built-in daily public key and every size and hash, and only then writes <code>daily/builds/&lt;id&gt;/</code> and the <code>daily/latest/</code> links; it keeps the newest 7 builds and refuses a rollback. Setup of the cron line and the one-time secret: <a href="provider-price-data.html">ops/site/README.md</a>. Nothing on GitHub writes to the server.</li>
 </ol>
 <p>Rehearse with a manual run with <code>publish</code> off (Actions, Daily builds, Run workflow): the result stays an artifact. The manual path for a build made elsewhere is <code>website/tools/daily/make_daily.py</code> plus <code>scripts/sign-daily.sh</code> (see its header). Tests: <code>python3 -I -m unittest discover -s ops/site -p 'test_*.py'</code> (needs OpenSSL 3; CI runs them).</p>

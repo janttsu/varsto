@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Varsto: synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage</title>
-<meta name="description" content="Varsto : synchronisation, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.">
+<meta name="description" content="Varsto : synchronisation de fichiers, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/fr/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Varsto: synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage">
-<meta property="og:description" content="Varsto : synchronisation, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.">
+<meta property="og:description" content="Varsto : synchronisation de fichiers, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.">
 <meta property="og:url" content="https://varsto.net/fr/">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -23,9 +23,9 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv","fr"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/fr/","description":"Varsto : synchronisation, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android, iOS","softwareVersion":"0.0.1-alpha.16","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.16","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv","fr"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/fr/","description":"Varsto : synchronisation de fichiers, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et un registre signé de l’emplacement de chaque copie. Alpha, nom provisoire.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android, iOS","softwareVersion":"0.0.1-alpha.16","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.16","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../assets/css/site.css?v=a0a7364f3a">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -59,7 +59,7 @@
     <section class="hero">
       <canvas class="field" id="field" aria-hidden="true"></canvas>
       <h1>Apportez votre propre stockage. Gardez vos propres clés. Sachez où se trouve chaque bloc.</h1>
-      <p class="lead">Synchronisation, partage et sauvegarde chiffrés de bout en bout entre vos appareils, avec une cryptographie hybride post-quantique et une comptabilité que vous pouvez auditer. Pas de serveur, pas de compte, aucun fournisseur auquel se fier.</p>
+      <p class="lead">Synchronisation de fichiers, partage et sauvegarde chiffrés de bout en bout sur un stockage que vous possédez déjà, avec une cryptographie hybride post-quantique et une comptabilité que vous pouvez auditer. Pas de serveur, pas de compte, aucun fournisseur auquel se fier. En quoi cela diffère de <a href="compare/syncthing/">Syncthing</a> et de <a href="compare/resilio-sync/">Resilio Sync</a>.</p>
       <div class="cta"><a class="button" href="downloads/">Télécharger l’alpha</a> <a class="button secondary" href="../docs/quick-start.html">Démarrage rapide</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Le code source sur GitHub</a></div>
       <nav class="platforms" aria-label="Téléchargements"><a href="downloads/">Linux</a> <a href="downloads/">Windows</a> <a href="downloads/">macOS</a> <a href="downloads/">Android</a> <a href="downloads/">iOS</a></nav>
     </section>

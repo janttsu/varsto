@@ -24,7 +24,7 @@
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../../assets/css/site.css?v=a0a7364f3a">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -61,16 +61,17 @@
     <table class="compare-table compare-overview">
       <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="../compare/syncthing/">Syncthing</a></th><th scope="col"><a href="../compare/resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="../compare/mega/">MEGA</a></th><th scope="col"><a href="../compare/filen/">Filen</a></th><th scope="col"><a href="../compare/tresorit/">Tresorit</a></th><th scope="col"><a href="../compare/git-annex/">git-annex</a></th></tr></thead>
       <tbody>
-      <tr><th scope="row">Var dina filer finns</th><td class="win"><strong>Dina enheter och dina lagringsplatser</strong></td><td>Dina enheter</td><td>Dina enheter</td><td>MEGA:s moln</td><td>Filens moln</td><td>Tresorits moln</td><td>Var du än väljer</td></tr>
-      <tr><th scope="row">Konto eller central server</th><td><strong>Inget</strong></td><td>Inget</td><td>Inget konto</td><td>Konto</td><td>Konto</td><td>Konto</td><td>Inget</td></tr>
-      <tr><th scope="row">Enheterna måste vara online samtidigt</th><td><strong>Nej</strong></td><td>Ja</td><td>Ja</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td></tr>
-      <tr><th scope="row">Vet var varje kopia finns</th><td class="win"><strong>Ja</strong></td><td>Nej</td><td>Nej</td><td>En kopia hos leverantören</td><td>En kopia hos leverantören</td><td>En kopia hos leverantören</td><td>Ja</td></tr>
-      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td class="win"><strong>Ja</strong></td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Ja</td></tr>
-      <tr><th scope="row">Säkerhetskopior</th><td class="win"><strong>Skrivskyddade versioner i din lagring, sparas N dagar</strong></td><td>Versionshantering bara på mottagande enheter</td><td>Arkivmapp, 30 dagar som standard</td><td>Skrivskyddade säkerhetskopior i MEGA:s moln</td><td>Enkelriktat säkerhetskopieringsläge till Filens moln</td><td>Versionshistorik, inga separata säkerhetskopior</td><td>Kopior räknas, inga versioner eller lagringstid</td></tr>
-      <tr><th scope="row">Licens och pris</th><td><strong>Källkoden tillgänglig, gratis</strong></td><td>Öppen källkod, gratis</td><td>Proprietär, gratisnivå</td><td>Abonnemang, klientens källkod publicerad</td><td>Abonnemang, klienter med öppen källkod</td><td>Proprietära abonnemang</td><td>Fri programvara, gratis</td></tr>
+      <tr><th scope="row">Var dina filer finns</th><td><strong>Dina enheter och dina lagringsplatser</strong></td><td>Dina enheter</td><td>Dina enheter</td><td class="cloud">MEGA:s moln</td><td class="cloud">Filens moln</td><td class="cloud">Tresorits moln</td><td>Var du än väljer</td></tr>
+      <tr><th scope="row">Konto eller central server</th><td><strong>Inget</strong></td><td>Inget</td><td>Inget konto</td><td class="cloud">Konto</td><td class="cloud">Konto</td><td class="cloud">Konto</td><td>Inget</td></tr>
+      <tr><th scope="row">Enheterna måste vara online samtidigt</th><td><strong>Nej</strong></td><td class="closed">Ja</td><td class="closed">Ja</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td></tr>
+      <tr><th scope="row">Vet var varje kopia finns (en fullständig förteckning finns samlad på ett ställe)</th><td><strong>Ja</strong></td><td class="cloud">Nej</td><td class="cloud">Nej</td><td>En kopia hos leverantören</td><td>En kopia hos leverantören</td><td>En kopia hos leverantören</td><td>Ja</td></tr>
+      <tr><th scope="row">Flyttbara diskar och diskar offline</th><td><strong>Ja</strong></td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td class="win">Ja</td></tr>
+      <tr><th scope="row">Säkerhetskopior</th><td class="win"><strong>Skrivskyddade versioner i din lagring, sparas N dagar</strong></td><td>Versionshantering bara på mottagande enheter</td><td>Arkivmapp, 30 dagar som standard</td><td>Skrivskyddade säkerhetskopior i MEGA:s moln</td><td>Enkelriktat säkerhetskopieringsläge till Filens moln</td><td class="closed">Versionshistorik, inga separata säkerhetskopior</td><td>Kopior räknas, inga versioner eller lagringstid</td></tr>
+      <tr><th scope="row">Kvantresistent kryptering</th><td class="win"><strong>Ja, hybrid (inte granskad)</strong></td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td><td>Nej</td></tr>
+      <tr><th scope="row">Licens och pris</th><td class="closed"><strong>Källkoden tillgänglig, gratis</strong></td><td class="win">Öppen källkod, gratis</td><td class="cloud">Proprietär, gratisnivå</td><td class="closed">Abonnemang, klientens källkod publicerad</td><td class="closed">Abonnemang, klienter med öppen källkod</td><td class="closed">Proprietära abonnemang</td><td class="cloud">Fri programvara, gratis</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grönt: där Varsto gör mer än de flesta verktygen i tabellen.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grönt markerar en rad där Varsto ligger före varje annat verktyg i tabellen. <span class="noqc-swatch" aria-hidden="true"></span> En rödaktig kolumn markerar ett verktyg utan kvantresistent kryptering. <span class="closed-swatch" aria-hidden="true"></span> På licensraden markerar grönt Syncthing, gult Resilio Sync och git-annex, och rött MEGA, Filen och Tresorit. På raden om flyttbara diskar markerar grönt git-annex. På raden om säkerhetskopior markerar rött Tresorit. På raden om att enheterna måste vara online samtidigt markerar samma röda färg Syncthing och Resilio Sync. <span class="cloud-swatch" aria-hidden="true"></span> På raden om var filerna finns markerar gult MEGA, Filen och Tresorit. På raden om konto eller central server markerar samma gula färg MEGA, Filen och Tresorit. På raden om var varje kopia finns markerar samma gula färg Syncthing och Resilio Sync.</p>
     <p class="note">”En kopia hos leverantören” betyder att kopian utanför hemmet finns hos den leverantören; dina enheter har också sina egna kopior. Varje jämförelsesida förklarar detaljerna och länkar till källorna.</p>
 
     <h2>Jämförelser</h2>

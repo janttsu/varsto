@@ -12,7 +12,8 @@ description: Téléchargez Varsto pour Linux, Windows, macOS et Android, ou l’
     <h2>iOS : ipa non signé, AltStore, SideStore et Sideloadly</h2>
     <p>Le paquet iOS est un <code>.ipa</code> non signé. Il ne s’installe pas à partir du seul fichier. AltStore, SideStore ou Sideloadly le signe avec votre propre identifiant Apple et l’installe. Varsto n’a pas de signature de développeur Apple. Une erreur Sideloadly sur la signature, un identifiant Apple qui ne peut plus signer d’applications, une installation expirée ou un appareil qui ne fait pas confiance au développeur vient de cet outil ou d’Apple, pas d’un paquet cassé. C’est ce fichier que ces outils installent. L’application a été compilée en CI et n’a pas été exécutée sur un vrai appareil. Le code de la coque est dans <code>apps/ios</code> sur <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>.</p>
     <p class="note">La liste des téléchargements est en anglais.</p>
-    {{DOWNLOADS}}
+        <p class="note">L'alpha n'est pas dans une boutique d'applications. Vérifiez le fichier avec la liste de sommes signée par la clé de publication. La signature de code Apple et Microsoft n'est pas encore en place, donc macOS et Windows avertissent à l'installation. Le paquet Android est signé avec la clé du projet.</p>
+    {{DOWNLOADS_GROUPED}}
     <h2>Installer et vérifier</h2>
     <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
 curl -O https://varsto.net/downloads/varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz
