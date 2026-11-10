@@ -23,6 +23,20 @@
 set -euo pipefail
 ROOT=${BENCH_ROOT:-/bench}
 B=$ROOT/varsto
+
+link_chop_rules_off() {
+  while iptables -D INPUT ! -i lo -p tcp ! --dport 22 -j DROP 2>/dev/null; do :; done
+  while iptables -D OUTPUT ! -o lo -p tcp ! --sport 22 -j DROP 2>/dev/null; do :; done
+  while iptables -D INPUT ! -i lo -p udp -j DROP 2>/dev/null; do :; done
+  while iptables -D OUTPUT ! -o lo -p udp -j DROP 2>/dev/null; do :; done
+}
+link_chop_stop() {
+  if [ -f /run/bench-chop.pid ]; then
+    kill "$(cat /run/bench-chop.pid)" 2>/dev/null || true
+    rm -f /run/bench-chop.pid
+  fi
+  link_chop_rules_off
+}
 export VARSTO_PASSPHRASE=${VARSTO_PASSPHRASE:-bench-passphrase}
 
 svc_field() { python3 -c "import json,sys;print(json.load(open(sys.argv[1]+'/service.json'))[sys.argv[2]])" "$1" "$2"; }
@@ -74,9 +88,39 @@ case "$1" in
     tc filter add dev "$dev" parent ffff: protocol all u32 match u32 0 0 action mirred egress redirect dev ifb0
     tc qdisc add dev ifb0 root netem "$@"
     tc qdisc show dev ifb0
+    # A lossy case is also chopped: the link goes fully dead for a short slice
+    # on a fixed period, so packets in flight disappear. SSH and localhost stay up.
+    case " $* " in
+      *" loss "*)
+        link_chop_stop
+        interval=4
+        cut=0.30
+        setsid bash -c '
+          echo $$ > /run/bench-chop.pid
+          off() {
+            while iptables -D INPUT ! -i lo -p tcp ! --dport 22 -j DROP 2>/dev/null; do :; done
+            while iptables -D OUTPUT ! -o lo -p tcp ! --sport 22 -j DROP 2>/dev/null; do :; done
+            while iptables -D INPUT ! -i lo -p udp -j DROP 2>/dev/null; do :; done
+            while iptables -D OUTPUT ! -o lo -p udp -j DROP 2>/dev/null; do :; done
+          }
+          trap off EXIT
+          while true; do
+            sleep '"$interval"'
+            iptables -I INPUT ! -i lo -p tcp ! --dport 22 -j DROP
+            iptables -I OUTPUT ! -o lo -p tcp ! --sport 22 -j DROP
+            iptables -I INPUT ! -i lo -p udp -j DROP
+            iptables -I OUTPUT ! -o lo -p udp -j DROP
+            sleep '"$cut"'
+            off
+          done
+        ' >/var/log/bench-chop.log 2>&1 < /dev/null &
+        echo "chop ${cut}s every ${interval}s"
+        ;;
+    esac
     ;;
   netem-off)
     dev=$(ip route get 1.1.1.1 | grep -oP 'dev \K\S+')
+    link_chop_stop
     tc qdisc del dev "$dev" ingress 2>/dev/null || true
     tc qdisc del dev ifb0 root 2>/dev/null || true
     tc qdisc show dev "$dev"
