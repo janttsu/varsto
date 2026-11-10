@@ -51,7 +51,7 @@ FOOTER = [
 NAV_PRIMARY = ["Features", "How it works", "Compare", "Docs", "Blog"]
 FOOT_COLUMNS = [
     ("Product", ["Project", "Features", "Use cases", "Screenshots", "Downloads"]),
-    ("Learn", ["How it works", "Compare", "Docs", "Blog"]),
+    ("Learn", ["How it works", "Compare", "Videos", "Docs", "Blog"]),
     ("Community", ["Forum", "Contribute", "GitHub"]),
 ]
 UI_I18N = {
@@ -64,7 +64,7 @@ SVG_GH = '<svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.
 SVG_MOON = '<svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>'
 SVG_SUN = '<svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg>'
 SVG_MENU = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg>'
-NAV = [("Project", ""), ("Features", "features/"), ("Use cases", "use-cases/"), ("Compare", "compare/"), ("How it works", "how-it-works/"), ("Screenshots", "screenshots/"), ("Docs", "docs/"), ("Downloads", "downloads/"), ("Blog", "blog/"), ("Forum", "forum/"), ("Contribute", "contribute/"), ("GitHub", REPO)]
+NAV = [("Project", ""), ("Features", "features/"), ("Use cases", "use-cases/"), ("Compare", "compare/"), ("How it works", "how-it-works/"), ("Screenshots", "screenshots/"), ("Videos", "videos/"), ("Docs", "docs/"), ("Downloads", "downloads/"), ("Blog", "blog/"), ("Forum", "forum/"), ("Contribute", "contribute/"), ("GitHub", REPO)]
 
 # Repository documents rendered under docs/: (source path, slug, title, group)
 DOCS = [
@@ -177,13 +177,13 @@ def version_images(body: str) -> str:
 LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska"), ("fr", "Français")]
 NAV_I18N = {
     "fi": {"Project": "Projekti", "Features": "Ominaisuudet", "Use cases": "Käyttötapaukset", "Compare": "Vertailu",
-           "How it works": "Miten se toimii", "Screenshots": "Kuvakaappaukset", "Docs": "Dokumentaatio (en)",
+           "How it works": "Miten se toimii", "Screenshots": "Kuvakaappaukset", "Videos": "Videot", "Docs": "Dokumentaatio (en)",
            "Downloads": "Lataukset", "Blog": "Blogi (en)", "Forum": "Foorumi (en)", "Contribute": "Osallistu", "GitHub": "GitHub"},
     "sv": {"Project": "Projekt", "Features": "Funktioner", "Use cases": "Användningsfall", "Compare": "Jämförelse",
-           "How it works": "Så fungerar det", "Screenshots": "Skärmbilder", "Docs": "Dokumentation (en)",
+           "How it works": "Så fungerar det", "Screenshots": "Skärmbilder", "Videos": "Videor", "Docs": "Dokumentation (en)",
            "Downloads": "Nedladdningar", "Blog": "Blogg (en)", "Forum": "Forum (en)", "Contribute": "Bidra", "GitHub": "GitHub"},
     "fr": {"Project": "Projet", "Features": "Fonctionnalités", "Use cases": "Cas d'usage", "Compare": "Comparaison",
-           "How it works": "Fonctionnement", "Screenshots": "Captures d'écran", "Docs": "Documentation (en)",
+           "How it works": "Fonctionnement", "Screenshots": "Captures d'écran", "Videos": "Vidéos", "Docs": "Documentation (en)",
            "Downloads": "Téléchargements", "Blog": "Blog (en)", "Forum": "Forum (en)", "Contribute": "Contribuer", "GitHub": "GitHub"},
 }
 ENGLISH_ONLY = ("docs/", "blog/", "forum/")

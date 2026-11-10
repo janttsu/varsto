@@ -433,3 +433,7 @@ main details:not(.pop)[open] > summary { color: var(--text); }
 .bench-vs td:nth-child(2) { color: var(--text); font-variant-numeric: tabular-nums; }
 .bench-vs td:nth-child(3) { color: var(--muted); font-variant-numeric: tabular-nums; }
 .bench-vs td.win { background: var(--win-bg); color: var(--win-text); box-shadow: inset 3px 0 0 var(--win-border); }
+
+.clip { margin: 1.6rem 0 2.2rem; max-width: 52rem; }
+.clip video { display: block; width: 100%; background: #14171c; border: 1px solid var(--border); border-radius: var(--radius); }
+.clip figcaption { color: var(--muted); margin-top: .55rem; }
