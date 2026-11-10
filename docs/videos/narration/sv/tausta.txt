@@ -1,0 +1,11 @@
+När du lägger till en fil skickar Varsto den inte som ett enda stycke. Den delar filen i block. Blockets storlek följer filens storlek, så en kort anteckning och en stor video använder inte samma block.
+
+Om blocket krymper av komprimering komprimeras det. Annars går det okomprimerat. Komprimeringen sker före krypteringen. Därför tar loggtext och annan upprepad data mindre plats i lagringen. Efter krypteringen ser datan slumpmässig ut och kan inte komprimeras mer.
+
+Varje block krypteras med mappens nyckel. I lagringen blir det ett krypterat block vars namn är dess hash, och en liten bokföring. Lagringen ser inte filnamnet, mappen eller innehållet.
+
+Den andra enheten ber först om de block som saknas direkt från en peer, om den går att nå i samma nät eller över internet. Först när ingen peer finns hämtas blocket från lagringen. Därför är en närliggande dator ofta snabbare än en bucket.
+
+Ett nytt namn är ett nytt namn på block som redan finns. Filen skickas inte igen. En liten ändring skickar bara de block vars innehåll ändrades. De oförändrade blocken finns redan i lagringen och på de andra enheterna.
+
+Bokföringen säger var varje block finns och när en annan enhet har kontrollerat kopian. Bakgrundstjänsten läser kopior igen och jämför hashen med namnet. Om en kopia är skadad ersätts den med en intakt kopia från en annan lagring. Kontrollen kan reparera ett block bara om en hel kopia finns någon annanstans.

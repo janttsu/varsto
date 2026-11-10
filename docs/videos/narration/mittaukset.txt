@@ -1,0 +1,15 @@
+Marraskuun kymmenentenä ajettiin sama vertailu Pariisin ja Amsterdamin välillä, kahdesti. Koneet olivat pieniä, ja kello käynnistyi vasta kun kirjoittaja oli valmis ja lukija alkoi hakea.
+
+Kymmenentuhatta pientä tiedostoa vei molemmilta kaksikymmentäviisi sekuntia. Siinä ei ollut selvää voittajaa. Varsto siirsi verkossa noin kaksisataayhdeksänkymmentäkaksi megatavua, Resilio Sync noin kolmesataakolmetoista.
+
+Kaksi yhden gibitavun tiedostoa meni Varstolla neljässäkymmenessäneljässä sekunnissa ja Resilio Syncillä yhdeksässäkymmenessä. Iso tiedosto kulkee lohkoina, ja vertainen voi antaa niitä suoraan.
+
+Lokiteksti on toisteista. Varsto pakkaa lohkon ennen salausta, joten se kutistuu. Siinä meni seitsemäntoista sekuntia ja verkossa satakuusikymmentäyhdeksän megatavua. Resiliolla neljäkymmentäseitsemän sekuntia ja viisisataakuusikymmentäkolme megatavua. Ero ei ole siinä, että toinen olisi jättänyt tiedostoja siirtämättä, vaan siinä, mitä salatusta datasta enää voi pakata.
+
+Kaksoiskappaleet olivat Varstolle edullisia: kolmetoista sekuntia ja neljäsataayhdeksäntoista megatavua, Resiliolla kuusikymmentäkaksi sekuntia ja kahdeksansataaviisikymmentäkuusi megatavua. Jo varastossa olevaa lohkoa ei lähetetä uudestaan.
+
+Kaksi lukijaa yhtä aikaa, Amsterdamissa ja Varsovassa, valmistui hitaamman kaupungin mukaan noin sadassakahdeksassatoista sekunnissa molemmilla. Se on tasapeli.
+
+Pieni muutos ison hakemiston sisällä vei Varstolta kaksitoista sekuntia yhdellä onnistuneella ajolla. Uudelleennimeäminen vei kymmenen sekuntia, eikä tiedostodataa lähetetty uudestaan, koska lohkot olivat jo olemassa. Resilio Syncin luvut näissä kahdessa ovat aiemmasta ajosta: viisitoista sekuntia ja kaksitoista megatavua, sekä kuusikymmentäseitsemän sekuntia ja tuhat kaksisataakuusikymmentäyhdeksän megatavua. Uusi ajo ei ole vielä korvannut niitä.
+
+Viimeisessä kokeessa linja oli sata megabittiä sekunnissa, viive neljäkymmentä millisekuntia ja yhden prosentin satunnainen hävikki. Sen lisäksi linja katkaistiin tahallaan kolmeksi sekunnin kymmenesosaksi joka neljäs sekunti. SSH jätettiin rauhaan. Varsto valmistui neljässäsadassa kolmessakymmenessäkahdessa sekunnissa, Resilio yhdeksässäsadassa kolmessakymmenessäneljässä. Tavuja liikkui suunnilleen saman verran, noin kolmesataakolmekymmentä megatavua. Hitaampi työkalu ei siirtänyt enempää tavaraa. Se käytti enemmän aikaa siihen, että katkennut yhteys piti rakentaa uudelleen.

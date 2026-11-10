@@ -1,0 +1,15 @@
+Den tionde november kördes samma jämförelse mellan Paris och Amsterdam, två gånger. Datorerna var små, och klockan startade först när skrivaren var klar och läsaren började hämta.
+
+Tiotusen små filer tog tjugofem sekunder för båda. Där fanns ingen tydlig vinnare. Varsto flyttade ungefär tvåhundranittiotvå megabyte på nätet, Resilio Sync ungefär trehundratretton.
+
+Två filer på en gibibyte tog fyrtiofyra sekunder med Varsto och nittio med Resilio Sync. En stor fil går som block, och en peer kan lämna dem direkt.
+
+Loggtext är upprepad. Varsto komprimerar blocket före krypteringen, så det krymper. Det tog sjutton sekunder och etthundrasextionio megabyte på nätet. Resilio tog fyrtiosju sekunder och femhundrasextiotre megabyte. Skillnaden är inte att det ena verktyget lämnade filer osända, utan vad som fortfarande går att komprimera efter kryptering.
+
+Dubbletter var billiga för Varsto: tretton sekunder och fyrahundranitton megabyte, mot sextiotvå sekunder och åttahundrafemtiosex megabyte för Resilio. Ett block som redan finns i lagringen skickas inte igen.
+
+Två läsare samtidigt, i Amsterdam och Warszawa, blev klara efter den långsammare staden på ungefär etthundraarton sekunder för båda. Det är oavgjort.
+
+En liten ändring inuti en stor katalog tog tolv sekunder för Varsto i en lyckad körning. Ett namnbyte tog tio sekunder, och ingen fildata skickades igen, eftersom blocken redan fanns. Resilio Syncs siffror i de två fallen är från en tidigare körning: femton sekunder och tolv megabyte, samt sextiosju sekunder och ettusentvåhundrasextionio megabyte. Den nya körningen har inte ersatt dem än.
+
+I sista provet var länken hundra megabit per sekund, fördröjningen fyrtio millisekunder och den slumpmässiga förlusten en procent. Dessutom bröts länken med avsikt i tre tiondelars sekund var fjärde sekund. SSH lämnades ifred. Varsto blev klart på fyrahundratrettiotvå sekunder, Resilio på niohundratrettiofyra. Ungefär lika många byte rörde sig, omkring trehundratrettio megabyte. Det långsammare verktyget flyttade inte mer data. Det lade mer tid på att bygga upp en bruten förbindelse igen.

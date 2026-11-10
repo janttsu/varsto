@@ -1,0 +1,11 @@
+Kun lisäät tiedoston, Varsto ei lähetä sitä yhtenä kappaleena. Se pilkkoo tiedoston lohkoiksi. Lohkon koko seuraa tiedoston kokoa, joten pieni muistiinpano ja iso video eivät käytä samaa lohkoa.
+
+Jos lohko kutistuu pakkaamalla, se pakataan. Jos ei, se lähtee pakkaamattomana. Pakkaus tapahtuu ennen salausta. Siksi lokiteksti ja muu toisteinen data vie varastossa vähemmän tilaa. Salauksen jälkeen data näyttää satunnaiselta, eikä sitä enää voi pakata.
+
+Jokainen lohko salataan kansion avaimella. Varastoon jää salattu lohko, jonka nimi on sen tiiviste, ja pieni kirjanpito. Varasto ei näe tiedoston nimeä, kansiota eikä sisältöä.
+
+Toinen laite pyytää puuttuvat lohkot ensin suoraan vertaiselta, jos se on tavoitettavissa samassa verkossa tai internetin yli. Vasta jos vertaista ei ole, lohko haetaan varastosta. Siksi läheinen kone on usein nopeampi kuin bucket.
+
+Uudelleennimeäminen on uusi nimi jo oleville lohkoille. Tiedostoa ei lähetetä uudestaan. Pieni muutos lähettää vain ne lohkot, joiden sisältö muuttui. Muuttumattomat lohkot ovat jo varastossa ja muilla laitteilla.
+
+Kirjanpito kertoo, missä kukin lohko on ja milloin toinen laite on tarkistanut kopion. Taustapalvelu lukee kopioita uudelleen ja vertaa tiivistettä nimeen. Jos kopio on vaurioitunut, se korvataan ehjällä kopiolla toisesta varastosta. Tarkistus voi korjata lohkon vain, jos ehjä kopio on jossain muualla.
