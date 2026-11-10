@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resilio-Sync-Alternative: Varsto und Resilio Sync im Vergleich</title>
+<meta name="description" content="Suchst du eine Resilio-Sync-Alternative mit Ende-zu-Ende-Verschlüsselung auf deinem eigenen Speicher (S3, NAS, Platten, rclone)? Wofür Resilio Sync gedacht ist, wie es funktioniert und wie es sich mit Varsto vergleicht.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/de/compare/resilio-sync/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Resilio-Sync-Alternative: Varsto und Resilio Sync im Vergleich">
+<meta property="og:description" content="Suchst du eine Resilio-Sync-Alternative mit Ende-zu-Ende-Verschlüsselung auf deinem eigenen Speicher (S3, NAS, Platten, rclone)? Wofür Resilio Sync gedacht ist, wie es funktioniert und wie es sich mit Varsto vergleicht.">
+<meta property="og:url" content="https://varsto.net/de/compare/resilio-sync/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="de_DE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/resilio-sync/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/resilio-sync/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/resilio-sync/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/resilio-sync/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/resilio-sync/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/compare/resilio-sync/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/resilio-sync/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/resilio-sync/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=74266d1106">
+<script src="../../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-Software, nicht für Produktionsdaten.</strong> Fehler können Daten zerstören, das Speicherformat kann sich ohne Migrationswerkzeug ändern, und die Verschlüsselung ist noch nicht geprüft. Behalte eigene Sicherungskopien und prüfe, dass du daraus wiederherstellen kannst.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../de/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Hauptmenü">
+      <a href="../../../de/features/">Funktionen</a>
+      <a href="../../../de/how-it-works/">So funktioniert es</a>
+      <a href="../../../de/compare/" aria-current="page">Vergleich</a>
+      <a href="../../../docs/">Dokumentation (en)</a>
+      <a href="../../../blog/">Blog (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Sprache">DE</summary>
+        <nav class="pop-body langs" aria-label="Sprache"><a href="../../../compare/resilio-sync/" hreflang="en" lang="en">English</a><a href="../../../fi/compare/resilio-sync/" hreflang="fi" lang="fi">Suomi</a><a href="../../../sv/compare/resilio-sync/" hreflang="sv" lang="sv">Svenska</a><a href="../../../fr/compare/resilio-sync/" hreflang="fr" lang="fr">Français</a><a href="../../../de/compare/resilio-sync/" hreflang="de" lang="de" aria-current="true">Deutsch</a><a href="../../../es/compare/resilio-sync/" hreflang="es" lang="es">Español</a><a href="../../../ru/compare/resilio-sync/" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../../de/downloads/">Herunterladen</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menü"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menü"><a href="../../../de/">Projekt</a><a href="../../../de/features/">Funktionen</a><a href="../../../de/use-cases/">Anwendungsfälle</a><a href="../../../de/compare/" aria-current="page">Vergleich</a><a href="../../../de/how-it-works/">So funktioniert es</a><a href="../../../de/screenshots/">Bildschirmfotos</a><a href="../../../de/videos/">Videos</a><a href="../../../docs/">Dokumentation (en)</a><a href="../../../de/downloads/">Downloads</a><a href="../../../blog/">Blog (en)</a><a href="../../../forum/">Forum (en)</a><a href="../../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Alle Vergleiche</a></p>
+    <h1>Varsto und Resilio Sync</h1>
+    <p class="lead">Resilio Sync synchronisiert und gibt Ordner zwischen Geräten per Peer-to-Peer frei, auf Basis von BitTorrent. Die kostenlose Ausgabe Sync Home ist für Einzelpersonen; das Hauptgeschäft der Firma ist Dateitransfer für Unternehmen. Nasuni hat Resilio im März 2026 gekauft.</p>
+
+    <h2>Worin sich Varsto unterscheidet</h2>
+    <ul>
+      <li>Quellcode verfügbar und ein veröffentlichtes Speicherformat: deine Daten bleiben ohne den Anbieter wiederherstellbar.</li>
+      <li>Hybride Post-Quanten-Kryptografie für jede gespeicherte Signatur und jeden versiegelten Schlüssel (dafür ausgelegt; nicht geprüft).</li>
+      <li>Deine Speicher sind die immer verfügbare Kopie, also ist keine dauerhaft eingeschaltete Gegenstelle nötig; die Geräte tauschen Blöcke trotzdem direkt aus, wenn sie einander erreichen.</li>
+      <li>Ein signiertes Hauptbuch zählt und prüft jede Kopie, und Aufbewahrungsregeln warnen, bevor eine Regel bricht.</li>
+      <li>Keine Tracker oder Relays des Anbieters: die Geräte finden einander über deine Speicher und im LAN und leiten über eines deiner eigenen Geräte weiter, wenn das NAT nicht durchstoßen werden kann.</li>
+    </ul>
+
+    <h2>So funktioniert Resilio Sync</h2>
+    <p>Die Geräte verbinden sich direkt; ein Konto gibt es nicht, und Ordner werden mit Schlüsseln oder Links freigegeben (nur lesen oder lesen und schreiben). Von Resilio betriebene Tracker und Relays helfen den Gegenstellen, einander zu finden. Die Daten liegen nur auf den Gegenstellen; Sync Home hat kein S3- oder rclone-Backend. Selektive Synchronisierung mit Platzhaltern gibt es, und ein „verschlüsselter Ordner“ lässt eine Gegenstelle auf einer nicht vertrauenswürdigen Maschine Daten speichern, die sie nicht lesen kann (diese Gegenstelle ist nur lesend und hat keine selektive Synchronisierung).</p>
+
+    <h2>Nebeneinander</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Resilio Sync</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Wo deine Dateien liegen</th><td>Nur auf den Gegenstellen (ein NAS oder ein Server zählt, wenn darauf Resilio läuft).</td><td>Auf deinen eigenen Geräten und auf Speichern, die du wählst: S3-kompatible Buckets, jedes rclone-Remote, lokale oder Netzwerkverzeichnisse sowie Plattenpools aus Wechseldatenträgern.</td></tr>
+      <tr><th scope="row">Konto oder zentraler Server</th><td>Kein Konto; von Resilio betriebene Tracker und Relays.</td><td>Keines von beiden. Es gibt keinen Varsto-Server; die Geräte finden einander über deine Speicher und im LAN.</td></tr>
+      <tr><th scope="row">Verschlüsselung</th><td>Während der Übertragung verschlüsselt; verschlüsselte Ordner für nicht vertrauenswürdige Gegenstellen. Geschlossener Quellcode, also nicht unabhängig prüfbar.</td><td>Ende-zu-Ende, clientseitig, bevor etwas das Gerät verlässt; hybride Post-Quanten-Verschlüsselung (ML-KEM zum Teilen der Schlüssel, Ed25519- und ML-DSA-65-Signaturen). Noch nicht unabhängig geprüft.</td></tr>
+      <tr><th scope="row">Geräte gleichzeitig online</th><td>Ja, außer es bleibt eine dauerhaft eingeschaltete Gegenstelle.</td><td>Nicht nötig: Die Geräte synchronisieren sich über deine Speicher und direkt von Gegenstelle zu Gegenstelle, wenn sie einander erreichen.</td></tr>
+      <tr><th scope="row">Weiß, wo jede Kopie liegt</th><td>Keine Erfassung von Kopien oder ihrer Anzahl.</td><td>Ja: Ein signiertes Hauptbuch hält fest, welcher Speicher und welches Gerät jeden Block hält; Aufbewahrungsregeln (standardmäßig 1 Kopie irgendwo, 1 externe und 1 auf deinen eigenen Platten, von einem anderen Gerät innerhalb von 30 Tagen geprüft) warnen, wenn eine Regel nicht erfüllt ist.</td></tr>
+      <tr><th scope="row">Wechseldatenträger und Offline-Platten</th><td>Kein Ablauf für Wechselplatten.</td><td>Ja: Plattenpools werden gefüllt, geprüft und erkannt, wenn sie zurückkommen; Dateien auf einer Platte, die weg ist, verlangen genau diese Platte.</td></tr>
+      <tr><th scope="row">Sicherungen</th><td>Ein Archivordner auf jedem Gerät behält gelöschte und ersetzte Dateien, auf Desktop-Rechnern standardmäßig 30 Tage. Eine eigene Sicherung an einem anderen Ort gibt es nicht.</td><td>Ja: Wähle einen Ordner auf einem beliebigen Gerät. Varsto behält davon verschlüsselte, schreibgeschützte Schnappschüsse nur auf deinen externen Speichern, nie auf deinen Geräten, so viele Tage, wie du wählst (standardmäßig 90), und löscht danach die abgelaufenen. Stelle einen beliebigen Schnappschuss in ein Verzeichnis wieder her, das du nennst, aus der App oder von der Kommandozeile.</td></tr>
+      <tr><th scope="row">Lizenz</th><td>Proprietär.</td><td>Quellcode verfügbar (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Preis</th><td>Sync Home ist kostenlos.</td><td>Kostenlos; du zahlst nur deinen Speicheranbieter</td></tr>
+      <tr><th scope="row">Reife</th><td>Ausgereiftes kommerzielles Produkt; seine Zukunft nach der Übernahme 2026 ist noch nicht genannt.</td><td>Alpha: nicht für Produktionsdaten, und die Formate können sich noch ändern.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="measured">Gemessen gegen Resilio Sync (November 2026)</h2>
+    <p>Am 10. November 2026 haben beide Programme dieselben Daten zwischen denselben drei gemieteten Maschinen verschoben (ein Schreiber in Paris, Leser in Amsterdam und Warschau, je 2 vCPU), ein Programm nach dem anderen, mit Relays und Trackern aus, und jede Datei wurde danach per SHA-256 geprüft. Varsto war der Daily-Build 20261109-c1cf5c2; Resilio Sync war 2.8.1, weil 3.1.2 aus einer Konfigurationsdatei überhaupt nicht synchronisierte. Mediane aus zwei Läufen. „Bytes“ ist, was der Leser mit den anderen Maschinen ausgetauscht hat. Methode, Grenzen, Rohdaten und die Skripte zum Wiederholen stehen im <a href="../../../docs/resilio-vs-varsto.html">Messbericht</a> (auf Englisch).</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Szenario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 kleine Dateien (313 MB)</th><td class="win">25 s · 292 MB</td><td class="win">25 s · 313 MB</td></tr>
+        <tr><th scope="row">Zwei Dateien à 1 GiB</th><td class="win">44 s · 2 178 MB</td><td>90 s · 2 226 MB</td></tr>
+        <tr><th scope="row">537 MB logähnlicher Text</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
+        <tr><th scope="row">816 MB, zur Hälfte Kopien</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
+        <tr><th scope="row">Zwei Leser gleichzeitig (Amsterdam, Warschau)</th><td class="win">Amsterdam 70 s, Warschau 118 s; der Schreiber sendete 3 685 MB</td><td class="win">Amsterdam 76 s, Warschau 118 s; der Schreiber sendete 3 636 MB</td></tr>
+        <tr><th scope="row">11 MiB geändert innerhalb von 1,13 GiB</th><td class="win">12 s · 26 MB, ein Lauf</td><td>15 s · 12 MB</td></tr>
+        <tr><th scope="row">Ein Verzeichnis von 1,13 GiB umbenannt</th><td class="win">10 s · 0 MB Dateidaten</td><td>67 s · 1 269 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % Verlust, Unterbrechung 0,3 s alle 4 s (die kleinen Dateien)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grün markiert die schnellere Spalte. Bei Gleichstand sind beide grün.</p>
+    <ul>
+      <li><strong>Varsto war schneller</strong> bei den zwei großen Dateien, beim Logtext, bei Kopien und bei der Verbindung, die absichtlich unterbrochen wurde. Text kostet etwa ein Drittel der Bytes, weil Blöcke vor der Verschlüsselung komprimiert werden. Kopien bewegen weniger Daten, weil Blöcke, die schon auf der Platte des Lesers liegen, wiederverwendet werden.</li>
+      <li><strong>Kleine Dateien waren gleichauf</strong> bei 25 s, und kein Lauf von Resilio Sync blieb hängen. Für die kleine Änderung und das Umbenennen stammen die Zahlen von Resilio Sync vom 8. November, während dieser Fall erneut läuft: 15 s und 12 MB für die Änderung, 67 s und 1 269 MB für das Umbenennen. Varstos Änderung vom 10. November, ein gezählter Lauf, war 12 s und 26 MB.</li>
+      <li><strong>Zwei Leser</strong> wurden mit beiden Programmen zusammen in etwa zwei Minuten fertig. Warschau war der langsame. Die Schreiber sendeten je etwa 3,6 GB.</li>
+      <li><strong>Speicher:</strong> Der Schreiberdienst von Varsto erreichte 360–800 MiB, Resilio Sync 70–250 MiB.</li>
+    </ul>
+    <p class="note">Ein Tag, ein Anbieter, zwei Läufe pro Fall und eine Alpha. Das sind Hinweise, kein Urteil. Der Bericht zählt alles auf, was sie begrenzt.</p>
+
+    <div class="pace-set" data-play="Abspielen">
+      <div class="pace-top" role="tablist" aria-label="Szenarien">
+      <button type="button" role="tab" data-tab="files" aria-selected="true">10 000 kleine Dateien</button>
+      <button type="button" role="tab" data-tab="pair" aria-selected="false">Zwei Dateien à 1 GiB</button>
+      <button type="button" role="tab" data-tab="text" aria-selected="false">Logähnlicher Text</button>
+      <button type="button" role="tab" data-tab="dup" aria-selected="false">Zur Hälfte Kopien</button>
+      <button type="button" role="tab" data-tab="readers" aria-selected="false">Zwei Leser gleichzeitig</button>
+      <button type="button" role="tab" data-tab="edit" aria-selected="false">Eine kleine Änderung</button>
+      <button type="button" role="tab" data-tab="rename" aria-selected="false">Ein Verzeichnis umbenannt</button>
+      <button type="button" role="tab" data-tab="slow" aria-selected="false">Eine langsame, verlustbehaftete Verbindung</button>
+      </div>
+    <div class="pace-panel" role="tabpanel" data-panel="files">
+    <figure class="pace" data-play="Abspielen" data-pace data-scene="files" data-resilio="25 s · 313 MB" data-varsto="25 s · 292 MB">
+      <h3>10 000 kleine Dateien</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Keines der Programme war klar schneller. Die Mediane liegen bei beiden bei 25 s. Resilio Sync hat 313 MB bewegt und Varsto 292 MB, und kein Lauf blieb hängen. Zehntausend kleine Dateien bedeuten immer noch eine Anfrage pro Datei: Varsto fordert jeden verschlüsselten Block einzeln an, sodass der Handshake mehr kosten kann als die Bytes, während Resilio Sync viele Stücke mit weniger Vorbereitung pro Datei in Bewegung hält. An diesem Tag hat dieser Unterschied die Uhr nicht entschieden.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="pair" hidden>
+    <figure class="pace" data-play="Abspielen" data-pace data-scene="pair" data-resilio="90 s · 2 226 MB" data-varsto="44 s · 2 178 MB">
+      <h3>Zwei Dateien à 1 GiB</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Varsto war schneller, 44 s gegen 90 s, und beide haben etwa 2,2 GB bewegt. Die Dateien sind groß, also ist die Verbindung die Grenze, nicht die Vorbereitung pro Datei. Varsto hält die Verbindung zur Gegenstelle offen und hat viele Blockanfragen gleichzeitig unterwegs, sodass die Leitung voll bleibt. Resilio Sync hat länger gebraucht, um dieselben zwei Dateien auf diesem Weg zu bewegen.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
+    <figure class="pace" data-play="Abspielen" data-pace data-scene="text" data-resilio="47 s · 563 MB" data-varsto="17 s · 169 MB">
+      <h3>Logähnlicher Text</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Varsto war schneller, 17 s gegen 47 s, weil es jeden Block vor dem Verschlüsseln komprimiert. Logtext schrumpft, also gehen etwa 169 MB über die Leitung statt 563 MB. Resilio Sync sendet den Text so, wie er gespeichert ist.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="dup" hidden>
+    <figure class="pace" data-play="Abspielen" data-pace data-scene="dup" data-resilio="62 s · 856 MB" data-varsto="13 s · 419 MB">
+      <h3>Zur Hälfte Kopien</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Varsto war schneller, 13 s gegen 62 s, weil die Hälfte der Dateien Kopien der anderen Hälfte ist. Diese Blöcke liegen schon auf der Platte des Lesers, und Varsto verwendet sie wieder, statt sie erneut herunterzuladen. Resilio Sync sendet die Kopien ein zweites Mal und bewegt deshalb etwa 856 MB statt 419 MB.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="readers" hidden>
+    <figure class="pace" data-play="Abspielen" data-pace data-scene="readers" data-resilio="118 s · 3 636 MB" data-varsto="118 s · 3 685 MB">
+      <h3>Zwei Leser gleichzeitig</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Der langsamere Leser wurde bei beiden Programmen in etwa 118 s fertig. Amsterdam war bei beiden schneller als Warschau. Jeder Schreiber sendete etwa 3,6 GB. Zwei Leser haben dieselben großen Dateien gleichzeitig geholt, und Bytes sind auch zwischen den Lesern gelaufen, sodass die Summe des Schreibers mehr als eine Kopie der Dateien ist.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
+    <figure class="pace" data-play="Abspielen" data-pace data-scene="edit" data-resilio="15 s · 12 MB" data-varsto="12 s · 26 MB, ein Lauf">
+      <h3>Eine kleine Änderung</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Die Zahl von Resilio Sync stammt vom 8. November, während dieser Fall erneut läuft. Damals wurde es in 15 s fertig und hat 12 MB bewegt. Es sendet das geänderte Stück und hört auf. Varstos einziger gezählter Lauf am 10. November hat 26 MB in 12 s bewegt. Auch Varsto überträgt nur die geänderten Blöcke, aber der Schreiber synchronisiert jeden Ordner, den er hält, und der Leser berechnet die Hashes der Blöcke neu, die er schon hat. Das kann mehr kosten als die Übertragung selbst. Der andere Lauf von Varsto hat nichts bewegt und wurde nicht gezählt.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
+    <figure class="pace" data-play="Abspielen" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB" data-varsto="10 s · 0 MB Dateidaten">
+      <h3>Ein Verzeichnis umbenannt</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Die Zahl von Resilio Sync stammt vom 8. November, während dieser Fall erneut läuft. Damals hat es das neue Verzeichnis als neue Daten behandelt und erneut gesendet, 67 s und 1 269 MB. Varstos Umbenennung am 10. November war in 10 s fertig, und der Leser hat keine Dateidaten geholt: ein neuer Name gilt für Blöcke, die schon gespeichert sind, und Varsto verschiebt die lokalen Dateien.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
+    <figure class="pace" data-play="Abspielen" data-pace data-scene="slow" data-resilio="934 s · 328 MB" data-varsto="432 s · 336 MB">
+      <h3>Eine langsame, verlustbehaftete Verbindung</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Die Verbindung des Lesers war auf 100 Mbit/s begrenzt, mit 40 ms Verzögerung und 1 % der Pakete zufällig verworfen, und sie wurde absichtlich alle 4 Sekunden für 0,3 Sekunden unterbrochen. Pakete, die während einer Unterbrechung unterwegs sind, verschwinden, und TCP wartet und sendet sie erneut. Die kleinen Dateien lassen sich kaum komprimieren, also haben beide etwa 330 MB bewegt. Varsto wurde in 432 s fertig, Resilio Sync in 934 s. Im Bild schrumpfen die Würfel, die die Lücke während der Unterbrechung erreichen, und verschwinden, dann starten sie erneut.</p>
+    </div>
+    </div>
+    <h2>Was zu dir passt</h2>
+    <div class="grid two">
+      <div class="card"><h3>Resilio Sync</h3><p>Wähle Resilio Sync, wenn du schnelle Übertragungen im BitTorrent-Stil zwischen dauerhaft eingeschalteten Maschinen und einfaches Freigeben per Schlüssel oder Link willst und ein kommerzielles Produkt mit geschlossenem Quellcode für dich akzeptabel ist.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Varstos Übertragung von Gegenstelle zu Gegenstelle folgt derselben Idee (verschlüsselte Blöcke von mehreren Gegenstellen gleichzeitig), ergänzt aber deine eigenen Speicher als immer verfügbare Kopie, eine Aufzeichnung, wo jede Kopie liegt, Aufbewahrungsregeln und eine offene Spezifikation der Formate.</p></div>
+    </div>
+    <p class="note">Varsto ist Alpha-Software: Vertraue ihm keine Daten an, von denen du keine weitere Kopie hast, und seine Kryptografie ist nicht unabhängig geprüft. Die anderen Produkte hier sind ausgereift. Angaben zu ihnen wurden im Oktober 2026 anhand ihrer eigenen Dokumentation geprüft; Preise und Tarife ändern sich oft, sieh also auf ihren eigenen Seiten nach den aktuellen Zahlen. Korrekturen sind als <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-Issues</a> willkommen.</p>
+
+    <h2>Quellen</h2>
+    <ul>
+      <li><a href="https://www.resilio.com/sync/">Website von Resilio Sync</a></li>
+      <li><a href="https://www.resilio.com/blog/understanding-the-sync-encrypted-folder">Verschlüsselte Ordner</a></li>
+      <li><a href="https://www.resilio.com/news/nasuni-acquires-resilio/">Nasuni kauft Resilio</a></li>
+      <li><a href="https://help.resilio.com/hc/en-us/articles/204754239-Does-Sync-support-versioning-">Does Sync support versioning? (en)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../../de/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Verschlüsselte dateisynchronisierung und sicherung auf deinem eigenen speicher.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../../de/">Projekt</a><a href="../../../de/features/">Funktionen</a><a href="../../../de/use-cases/">Anwendungsfälle</a><a href="../../../de/screenshots/">Bildschirmfotos</a><a href="../../../de/downloads/">Downloads</a></nav></div>
+    <div><h2>Lernen</h2><nav aria-label="Lernen"><a href="../../../de/how-it-works/">So funktioniert es</a><a href="../../../de/compare/" aria-current="page">Vergleich</a><a href="../../../de/videos/">Videos</a><a href="../../../docs/">Dokumentation (en)</a><a href="../../../blog/">Blog (en)</a></nav></div>
+    <div><h2>Gemeinschaft</h2><nav aria-label="Gemeinschaft"><a href="../../../forum/">Forum (en)</a><a href="../../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto ist ein Arbeitsname. Quellcode: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, unter der PolyForm Shield License 1.0.0 (Quellcode verfügbar).</span>
+    <span>Keine Cookies, kein Tracking. Der Webserver behält ein gewöhnliches Zugriffsprotokoll höchstens sieben Tage.</span>
+    <span><a href="../../../docs/security-policy.html">Sicherheitsrichtlinie</a> · <a href="../../../docs/licence.html">Lizenz</a> · <a href="../../../docs/trademark.html">Marke</a> (auf Englisch)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../../assets/js/motion.js?v=a547492b3b" defer></script>
+<script src="../../../assets/js/pace.js?v=5523a05b98" defer></script>
+</body>
+</html>

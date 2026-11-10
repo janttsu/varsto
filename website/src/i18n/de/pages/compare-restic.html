@@ -1,0 +1,47 @@
+---
+title: Alternative zu restic und borg: Varsto, restic und BorgBackup im Vergleich
+nav: Compare
+output: compare/restic/index.html
+description: Benutzt du restic oder BorgBackup für verschlüsselte Sicherungen und fragst dich, wie Varsto dazu steht? Was die beiden Sicherungsprogramme tun, wie sie sich von der Synchronisierung unterscheiden und wie Varstos restic-Spiegel dazukommt.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alle Vergleiche</a></p>
+    <h1>Varsto, restic und BorgBackup</h1>
+    <p class="lead">restic und BorgBackup (borg) sind Sicherungsprogramme. Sie nehmen Schnappschüsse von Verzeichnissen in ein verschlüsseltes, dedupliziertes Repository auf und stellen sie später wieder her. Sie sind keine Synchronisierungswerkzeuge und versuchen nicht, welche zu sein. Varsto macht sowohl die Synchronisierung als auch eigene Sicherungen, und sein restic-Spiegel lässt restic einen Tresor unabhängig von Varsto sichern.</p>
+
+    <h2>restic gegen Borg</h2>
+    <p><strong>restic</strong> ist eine einzelne ausführbare Datei, die ohne Server läuft. <code>restic backup</code> nimmt einen Schnappschuss eines Verzeichnisses in ein Repository auf und überträgt nur die Teile der Dateien, die sich geändert haben; <code>restic snapshots</code> listet sie, <code>restic restore</code> holt einen zurück, und <code>restic check</code> prüft das Repository. Repositorys können auf einer lokalen Platte oder auf vielen Speicherarten liegen, selbst betrieben und online, und alles darin ist verschlüsselt. <strong>borg</strong> ist ebenfalls ein deduplizierendes Sicherungsprogramm: Dateien werden in Chunks geteilt, und ein Chunk, der schon im Repository liegt, wird nicht erneut gespeichert, die Daten werden auf dem Client verschlüsselt (AES-256 mit HMAC-SHA256) und auf Wunsch komprimiert, Repositorys liegen auf lokalen Platten oder auf jedem Host, der über SSH erreichbar ist, und Archive lassen sich als Dateisystem einhängen, um zu stöbern und wiederherzustellen. Keines von beiden hält deine Geräte im Gleichschritt: eine Sicherung läuft zu einer Zeit, die du wählst, von einer Maschine in ein Repository, und die Dateien auf der Maschine bleiben, wie sie waren.</p>
+
+    <h2>Nebeneinander</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">restic / borg</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Wofür es gedacht ist</th><td>Sicherungen: geplante Schnappschüsse von Verzeichnissen in ein Repository, wiederhergestellt, wenn sie gebraucht werden.</td><td>Synchronisierung zwischen deinen Geräten, mit Sicherungen als schreibgeschützte Schnappschüsse auf deinen Speichern.</td></tr>
+      <tr><th scope="row">Wo deine Dateien liegen</th><td>Auf der Maschine, die gesichert wird, und im Repository: eine lokale Platte, ein SSH-Host (borg) oder viele Speicherarten (restic).</td><td>Auf deinen eigenen Geräten und auf Speichern, die du wählst: S3-kompatible Buckets, jedes rclone-Remote, lokale oder Netzwerkverzeichnisse sowie Plattenpools aus Wechseldatenträgern.</td></tr>
+      <tr><th scope="row">Konto oder zentraler Server</th><td>Keines von beiden; nur der Speicher, auf dem das Repository liegt.</td><td>Keines von beiden. Es gibt keinen Varsto-Server; die Geräte finden einander über deine Speicher und im LAN.</td></tr>
+      <tr><th scope="row">Verschlüsselung</th><td>Ja, auf dem Client, für alles im Repository (restic: ein passwortgeschütztes Repository; borg: AES-256 und HMAC-SHA256). Ausgereift und vielfach begutachtet.</td><td>Ende-zu-Ende, clientseitig, bevor etwas das Gerät verlässt; hybride Post-Quanten-Verschlüsselung (ML-KEM zum Teilen der Schlüssel, Ed25519- und ML-DSA-65-Signaturen). Noch nicht unabhängig geprüft.</td></tr>
+      <tr><th scope="row">Laufende Synchronisierung zwischen Geräten</th><td>Nein: eine Sicherung wird zu einer Zeit, die du wählst, von einer Maschine genommen; andere Maschinen erhalten die Dateien nicht.</td><td>Ja: Die Geräte synchronisieren sich über deine Speicher und direkt von Gegenstelle zu Gegenstelle, wenn sie einander erreichen.</td></tr>
+      <tr><th scope="row">Weiß, wo jede Kopie liegt</th><td>Das Repository kennt seine eigenen Schnappschüsse; nichts verfolgt Kopien außerhalb davon.</td><td>Ja: Ein signiertes Hauptbuch hält fest, welcher Speicher und welches Gerät jeden Block hält; Aufbewahrungsregeln (standardmäßig 1 Kopie irgendwo, 1 externe und 1 auf deinen eigenen Platten, von einem anderen Gerät innerhalb von 30 Tagen geprüft) warnen, wenn eine Regel nicht erfüllt ist.</td></tr>
+      <tr><th scope="row">Wechseldatenträger und Offline-Platten</th><td>Ein Repository kann auf einer Wechselplatte liegen; nichts verfolgt die Platte, solange sie weg ist.</td><td>Ja: Plattenpools werden gefüllt, geprüft und erkannt, wenn sie zurückkommen; Dateien auf einer Platte, die weg ist, verlangen genau diese Platte.</td></tr>
+      <tr><th scope="row">Sicherungen</th><td>Ja: deduplizierte, verschlüsselte Schnappschüsse mit Aufbewahrungsregeln (<code>forget</code> und <code>prune</code>), prüfbar und allein mit dem Werkzeug wiederherstellbar.</td><td>Ja: Wähle einen Ordner auf einem beliebigen Gerät. Varsto behält davon verschlüsselte, schreibgeschützte Schnappschüsse nur auf deinen externen Speichern, nie auf deinen Geräten, so viele Tage, wie du wählst (standardmäßig 90), und löscht danach die abgelaufenen. Stelle einen beliebigen Schnappschuss in ein Verzeichnis wieder her, das du nennst, aus der App oder von der Kommandozeile.</td></tr>
+      <tr><th scope="row">Gemeinsame Nutzung</th><td>restic kann jedes Verzeichnis sichern, auch einen Varsto-Ordner.</td><td>Neu in 0.0.1-alpha.14: der restic-Spiegel. Ein Gerät hält eine vollständige Klartextkopie des Tresors, Varsto prüft, dass die Kopie vollständig ist, und restic sichert sie in ein Repository außerhalb der Speicher des Tresors. Zum Wiederherstellen braucht es nur restic und das Passwort des Repositorys, sodass ein Fehler in Varsto oder ein verlorener Tresorschlüssel diese Kopie nicht erreicht.</td></tr>
+      <tr><th scope="row">Lizenz</th><td>Open Source: restic BSD-2-Clause, borg BSD-3-Clause.</td><td>Quellcode verfügbar (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Preis</th><td>Kostenlos.</td><td>Kostenlos; du zahlst nur deinen Speicheranbieter</td></tr>
+      <tr><th scope="row">Reife</th><td>Ausgereifte, langjährige Projekte.</td><td>Alpha: nicht für Produktionsdaten, und die Formate können sich noch ändern.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Was zu dir passt</h2>
+    <div class="grid two">
+      <div class="card"><h3>restic / borg</h3><p>Wähle restic oder borg, wenn du Sicherungen brauchst: ausgereifte, verschlüsselte, deduplizierte Schnappschüsse einer Maschine, allein mit dem Werkzeug wiederherstellbar, nach einem Zeitplan, den du selbst ausführst.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Wähle Varsto, wenn deine Geräte außerdem im Gleichschritt bleiben sollen, du eine Aufzeichnung willst, wo jede Kopie liegt, und Regeln, die warnen, und Sicherungen, die nichts ändern kann, auf denselben Speichern. Behalte restic über den Spiegel als zweite, unabhängige Verteidigungslinie.</p></div>
+    </div>
+    <p class="note">Varsto ist Alpha-Software: Vertraue ihm keine Daten an, von denen du keine weitere Kopie hast, und seine Kryptografie ist nicht unabhängig geprüft. Die anderen Produkte hier sind ausgereift. Angaben zu ihnen wurden im Oktober 2026 anhand ihrer eigenen Dokumentation geprüft; Preise und Tarife ändern sich oft, sieh also auf ihren eigenen Seiten nach den aktuellen Zahlen. Korrekturen sind im <a href="{{P}}forum/">Forum</a> oder auf GitHub willkommen.</p>
+
+    <h2>Quellen</h2>
+    <ul>
+      <li><a href="https://restic.net/">Website von restic</a></li>
+      <li><a href="https://restic.readthedocs.io/en/stable/">Dokumentation von restic (en)</a></li>
+      <li><a href="https://github.com/restic/restic/blob/master/LICENSE">Lizenz von restic (BSD-2-Clause)</a></li>
+      <li><a href="https://borgbackup.readthedocs.io/en/stable/">Dokumentation von BorgBackup (en)</a></li>
+      <li><a href="https://github.com/borgbackup/borg/blob/master/LICENSE">Lizenz von BorgBackup (BSD-3-Clause)</a></li>
+    </ul>

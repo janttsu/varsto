@@ -1,0 +1,42 @@
+---
+title: Descarga Varsto para Linux, Windows, macOS y Android
+nav: Downloads
+output: downloads/index.html
+description: Descarga Varsto para Linux, Windows, macOS y Android, o el ipa de iOS sin firmar, que AltStore, SideStore o Sideloadly firman con tu propio Apple ID. Las sumas de comprobación están firmadas.
+---
+    <h1>Descargas</h1>
+    <p class="note">Mira las <a href="{{L}}screenshots/">capturas</a> para ver cómo es la alfa.</p>
+    <p class="note">¿Quieres la compilación de desarrollo más reciente? Las <a href="{{L}}daily/">compilaciones diarias</a> no están firmadas y no sirven para datos de producción.</p>
+    <p class="lead">Un paquete por plataforma, con el servicio en segundo plano, la interfaz y la misma línea de comandos dentro; en Linux y en macOS el servicio arranca al iniciar sesión (una unidad de usuario de systemd o un launch agent) y en Windows lo ejecuta la aplicación de la bandeja. En Linux y en Windows la interfaz se abre en tu navegador; en macOS la aplicación nativa tiene su propia ventana. Alfa: úsala solo con datos de prueba y conserva tus propias copias de seguridad.</p>
+    <p class="note"><strong>Android.</strong> El APK está firmado para la publicación con una clave nueva, así que las publicaciones posteriores se instalan encima como actualización. Un APK de depuración anterior (alpha.15 o una compilación diaria más antigua) no se puede actualizar a este: desinstala antes la aplicación vieja, lo que borra la copia de la bóveda de ese dispositivo, así que asegúrate de que la bóveda esté en otro dispositivo o en un almacenamiento y luego instala el APK nuevo.</p>
+    <h2>iOS: ipa sin firmar, AltStore, SideStore y Sideloadly</h2>
+    <p>El paquete de iOS es un <code>.ipa</code> sin firmar. No se instala solo con el archivo. AltStore, SideStore o Sideloadly lo firman con tu propio Apple ID y lo instalan. Varsto no tiene firma de desarrollador de Apple. Un error de Sideloadly sobre la firma, un Apple ID que no puede firmar más aplicaciones, un sideload caducado o un dispositivo que no confía en el desarrollador viene de esa herramienta o de Apple, no de un paquete roto. El mismo archivo es el que instalan esas herramientas. La aplicación se ha compilado en CI y todavía no se ha ejecutado en un dispositivo real. El código fuente del envoltorio está en <code>apps/ios</code> en <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>.</p>
+    <p class="note">La lista de descargas está en inglés.</p>
+        <p class="note">La alfa no está en una tienda de aplicaciones. Comprueba el archivo con la lista de sumas de comprobación firmada con la clave de publicación. La firma de código de Apple y de Microsoft aún no está, así que macOS y Windows avisan al instalar. El paquete de Android está firmado con la clave propia del proyecto.</p>
+    {{DOWNLOADS_GROUPED}}
+    <h2>Instalar y verificar</h2>
+    <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
+curl -O https://varsto.net/downloads/varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz
+cd varsto-{{VERSION}}-x86_64-unknown-linux-musl
+./varsto desktop        # opens the desktop interface in your browser
+./varsto --help         # command line</code></pre>
+    <h2>Compilar desde el código fuente</h2>
+    <p>El código fuente está en <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a>; cada publicación es un tag allí, con los mismos archivos adjuntos a su <a href="https://github.com/janttsu/varsto/releases" rel="noopener">publicación de GitHub</a>, y el archivo de código fuente de abajo coincide con ella. Con una cadena de herramientas de Rust estable (1.85 o posterior): <code>git clone https://github.com/janttsu/varsto.git</code> o descomprime el archivo, y luego <code>cargo build --release</code>; el binario es <code>target/release/varsto</code>. <code>cargo test --workspace</code> ejecuta la batería de pruebas, incluidos los escenarios de dos dispositivos.</p>
+    <h2>Interfaz de escritorio</h2>
+    <p>En Linux y en Windows lo predeterminado es <code>varsto tray</code>: un icono en la bandeja con abrir y pausar, y una entrada para instalar cuando hay una versión más reciente; el servicio en segundo plano sincroniza los cambios en unos segundos por su cuenta. <code>varsto desktop</code> arranca un servidor web pequeño vinculado a 127.0.0.1 en un puerto aleatorio, imprime un enlace de un solo uso con un token de sesión y lo abre en tu navegador predeterminado. Solo los programas de este ordenador pueden alcanzarlo; la página rechaza las peticiones sin el token y las peticiones cuya cabecera Host no es la dirección local. Desde la interfaz puedes crear una bóveda o unirte a una, añadir almacenamientos y carpetas, compartir, fijar políticas de conservación y listar duplicados; la sincronización, la verificación y la reparación se ejecutan solas. El paquete de la aplicación y <code>Varsto.cmd</code> hacen exactamente esto.</p>
+    <h2>Inicio rápido (línea de comandos)</h2>
+    <pre><code>export VARSTO_PASSPHRASE='a long passphrase'
+varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once; keep it offline
+varsto --home ~/.varsto-laptop storage add-local box /mnt/box
+varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
+varsto --home ~/.varsto-laptop sync
+
+# another device that can reach the same storage
+varsto --home ~/.varsto-desk join --name desk --vault-key &lt;hex&gt; --storage-path /mnt/box
+varsto --home ~/.varsto-desk folder attach docs ~/synced
+varsto --home ~/.varsto-desk sync
+varsto --home ~/.varsto-desk status --json
+varsto --home ~/.varsto-desk fsck --verify</code></pre>
+    <p class="note">La clave de la bóveda es la clave maestra en hexadecimal. Perderla, y perder todos los dispositivos, es perder los datos: no hay cuenta ni custodia.</p>

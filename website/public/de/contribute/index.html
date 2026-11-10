@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beitragen: Varsto</title>
+<meta name="description" content="Hilf, Varsto zu bauen, ein in Rust geschriebenes Werkzeug für Ende-zu-Ende verschlüsselte Synchronisierung und Sicherung: Architektur, wo Hilfe gesucht wird, wie du es baust und testest, und die Lizenzbedingungen.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/de/contribute/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Beitragen: Varsto">
+<meta property="og:description" content="Hilf, Varsto zu bauen, ein in Rust geschriebenes Werkzeug für Ende-zu-Ende verschlüsselte Synchronisierung und Sicherung: Architektur, wo Hilfe gesucht wird, wie du es baust und testest, und die Lizenzbedingungen.">
+<meta property="og:url" content="https://varsto.net/de/contribute/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="de_DE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/contribute/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/contribute/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/contribute/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/contribute/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/contribute/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/contribute/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/contribute/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/contribute/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=74266d1106">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-Software, nicht für Produktionsdaten.</strong> Fehler können Daten zerstören, das Speicherformat kann sich ohne Migrationswerkzeug ändern, und die Verschlüsselung ist noch nicht geprüft. Behalte eigene Sicherungskopien und prüfe, dass du daraus wiederherstellen kannst.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Hauptmenü">
+      <a href="../../de/features/">Funktionen</a>
+      <a href="../../de/how-it-works/">So funktioniert es</a>
+      <a href="../../de/compare/">Vergleich</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../blog/">Blog (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Sprache">DE</summary>
+        <nav class="pop-body langs" aria-label="Sprache"><a href="../../contribute/" hreflang="en" lang="en">English</a><a href="../../fi/contribute/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/contribute/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/contribute/" hreflang="fr" lang="fr">Français</a><a href="../../de/contribute/" hreflang="de" lang="de" aria-current="true">Deutsch</a><a href="../../es/contribute/" hreflang="es" lang="es">Español</a><a href="../../ru/contribute/" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../de/downloads/">Herunterladen</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menü"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menü"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/compare/">Vergleich</a><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../de/videos/">Videos</a><a href="../../docs/">Dokumentation (en)</a><a href="../../de/downloads/">Downloads</a><a href="../../blog/">Blog (en)</a><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/" aria-current="page">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Bau Varsto mit uns</h1>
+    <p class="lead">Varsto ist ein Ende-zu-Ende verschlüsseltes Werkzeug zur Synchronisierung und Sicherung von Dateien, für Speicher, der dir schon gehört: S3-Buckets, NAS-Freigaben, rclone-Remotes, alte Platten und deine eigenen Geräte. Der Kern ist in Rust geschrieben, der Quellcode ist öffentlich auf <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>, und das Speicherformat ist schriftlich spezifiziert. Es ist eine frühe Alpha, die beste Zeit, es zu formen.</p>
+    <p><a class="button" href="https://github.com/janttsu/varsto" rel="noopener">Quellcode auf GitHub</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issues</a> <a class="button secondary" href="../../docs/contributing.html">Beitragsregeln (en)</a></p>
+    <p>Im Issue-Tracker steht die Arbeit. Die Labels <code>help wanted</code> und <code>good first issue</code> markieren, was eine neue beitragende Person übernehmen kann. Eine Fehlermeldung oder eine kleine Korrektur der Dokumentation ist willkommen, wenn die Liste leer ist.</p>
+
+    <h2>Woran du arbeiten würdest</h2>
+    <div class="grid">
+      <section class="card"><h3>Ein Rust-Kern mit geschriebener Spezifikation</h3><p><code>varsto-core</code> enthält den Motor: inhaltsdefiniertes Chunking, Verschlüsselung mit XChaCha20-Poly1305, ein signiertes Hauptbuch mit hybriden Signaturen Ed25519 + ML-DSA-65, Platzierung und Aufbewahrungsregeln, Blockaustausch von Gegenstelle zu Gegenstelle mit NAT-Durchgang und Speicher-Backends für Verzeichnisse, S3 und rclone. Jedes Objekt auf dem Speicher ist in der <a href="../../docs/alpha-0-format.html">Spezifikation des Speicherformats</a> (en) beschrieben.</p></section>
+      <section class="card"><h3>Eine Programmdatei, viele Hüllen</h3><p><code>varsto-cli</code> ist die Kommandozeile, der Hintergrunddienst, der Infobereich und eine lokale Weboberfläche (reines HTML, CSS und JavaScript). Dünne native Hüllen darum: Swift für macOS und iOS, Kotlin für Android, über <code>varsto-ffi</code>.</p></section>
+      <section class="card"><h3>Tests, die ganze Netze fahren</h3><p>Neben Unit- und Integrationstests stellt ein Labor aus virtuellen Maschinen Laptops, Desktops und Server hinter Heimroutern, symmetrischem NAT und einem öffentlichen Internet dar, mit einem S3-Server und auf Abruf mit Speicherausfällen, Abstürzen und Uhrabweichung. Siehe <a href="../../docs/testing.html">Testing</a> (en).</p></section>
+    </div>
+
+    <h2>Wo Hilfe gesucht wird</h2>
+    <ul>
+      <li><strong>Sicherheitsprüfung</strong> der <a href="../../docs/key-hierarchy.html">Schlüsselhierarchie</a>, des <a href="../../docs/threat-model.html">Bedrohungsmodells</a> und der Formatspezifikation. Befunde gehen über die <a href="../../docs/security-policy.html">Sicherheitsrichtlinie</a>.</li>
+      <li><strong>Plattformen:</strong> der Windows-Infobereich und die Explorer-Integration, die iOS-App auf echten Geräten, das Hintergrundverhalten von Android auf Telefonen verschiedener Hersteller.</li>
+      <li><strong>Netze:</strong> Austausch von Gegenstelle zu Gegenstelle und NAT-Durchgang in anderen Netzen als denen des Maintainers: Carrier-Grade-NAT, nur IPv6, Firmen-Firewalls.</li>
+      <li><strong>Speicher:</strong> Tests gegen weitere S3-kompatible Anbieter und rclone-Backends und ihre Eigenheiten (Bereichslesungen, Uhrabweichung, Konsistenz der Auflistungen).</li>
+      <li><strong>Paketierung:</strong> Flatpak, Homebrew, AUR, winget und andere Paketmanager.</li>
+      <li><strong>Übersetzungen:</strong> die Oberfläche ist auf Englisch, Finnisch, Schwedisch, Deutsch, Spanisch und Russisch, und diese Website in diesen Sprachen und auf Französisch; weitere Sprachen und die Prüfung durch Muttersprachlerinnen und Muttersprachler sind willkommen. Die Wörterbücher sind JSON-Dateien in <code>crates/varsto-cli/ui/i18n/</code>.</li>
+      <li><strong>Dokumentation</strong> und Fehlermeldungen aus echten Aufbauten: der <a href="https://github.com/janttsu/varsto/issues" rel="noopener">Issue-Tracker</a> (ein forum ist geplant).</li>
+    </ul>
+
+    <h2>Einstieg</h2>
+    <pre><code>git clone https://github.com/janttsu/varsto
+cd varsto
+cargo build --release
+cargo test --workspace</code></pre>
+    <p>Für den Kern und die Kommandozeile reicht eine stabile Rust-Toolchain (1.85 oder neuer). Der <a href="../../docs/quick-start.html">Schnellstart</a> (en) legt in einer Minute einen Tresor in einem lokalen Verzeichnis an, sodass du Änderungen ohne Cloud-Konto ausprobieren kannst. Vor einem Pull Request müssen <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets</code> und die Tests bestehen, und neues Verhalten braucht Tests. Öffne bitte vor großen Änderungen ein Issue.</p>
+
+    <h2>Lizenz</h2>
+    <p>Der Quellcode von Varsto ist verfügbar unter der <a href="../../docs/licence.html">PolyForm Shield License 1.0.0</a>: du darfst den Code lesen, nutzen, ändern und weitergeben, für jeden Zweck außer dem, ein Produkt anzubieten, das mit Varsto konkurriert. Es ist keine OSI-Open-Source-Lizenz. Mit dem Beitrag stimmst du zu, dass dein Beitrag unter dieser Lizenz verbreitet wird; die Einzelheiten stehen in den <a href="../../docs/contributing.html">Beitragsregeln</a> (en). Alles im Repository ist auf Englisch geschrieben.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Verschlüsselte dateisynchronisierung und sicherung auf deinem eigenen speicher.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../de/downloads/">Downloads</a></nav></div>
+    <div><h2>Lernen</h2><nav aria-label="Lernen"><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/compare/">Vergleich</a><a href="../../de/videos/">Videos</a><a href="../../docs/">Dokumentation (en)</a><a href="../../blog/">Blog (en)</a></nav></div>
+    <div><h2>Gemeinschaft</h2><nav aria-label="Gemeinschaft"><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/" aria-current="page">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto ist ein Arbeitsname. Quellcode: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, unter der PolyForm Shield License 1.0.0 (Quellcode verfügbar).</span>
+    <span>Keine Cookies, kein Tracking. Der Webserver behält ein gewöhnliches Zugriffsprotokoll höchstens sieben Tage.</span>
+    <span><a href="../../docs/security-policy.html">Sicherheitsrichtlinie</a> · <a href="../../docs/licence.html">Lizenz</a> · <a href="../../docs/trademark.html">Marke</a> (auf Englisch)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

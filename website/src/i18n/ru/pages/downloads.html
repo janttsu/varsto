@@ -1,0 +1,42 @@
+---
+title: Скачай Varsto для Linux, Windows, macOS и Android
+nav: Downloads
+output: downloads/index.html
+description: Скачай Varsto для Linux, Windows, macOS и Android или неподписанный IPA для iOS, который AltStore, SideStore или Sideloadly подписывает твоим Apple ID. Контрольные суммы подписаны.
+---
+    <h1>Загрузки</h1>
+    <p class="note">Посмотри <a href="{{L}}screenshots/">снимки экрана</a>, чтобы увидеть, как выглядит альфа.</p>
+    <p class="note">Нужна самая новая сборка для разработки? <a href="{{L}}daily/">Ежедневные сборки</a> не подписаны и не для рабочих данных.</p>
+    <p class="lead">Один пакет на платформу: фоновая служба, интерфейс и та же командная строка внутри. В Linux и macOS служба стартует при входе (пользовательский unit systemd или launch agent), в Windows её запускает приложение в трее. В Linux и Windows интерфейс открывается в браузере; в macOS у нативного приложения своё окно. Альфа: используй только с тестовыми данными и храни свои резервные копии.</p>
+    <p class="note"><strong>Android.</strong> APK подписан для выпуска новым ключом, поэтому следующие выпуски ставятся поверх как обновление. Прежний debug-APK (alpha.15 или более старая ежедневная сборка) обновить до него нельзя: сначала удали старое приложение. Это удаляет копию хранилища на этом устройстве, поэтому убедись, что хранилище есть на другом устройстве или в хранилище данных, и затем ставь новый APK.</p>
+    <h2>iOS: неподписанный IPA, AltStore, SideStore и Sideloadly</h2>
+    <p>Пакет iOS — неподписанный <code>.ipa</code>. Из одного файла он не ставится. AltStore, SideStore или Sideloadly подписывает его твоим Apple ID и устанавливает. У Varsto нет подписи разработчика Apple. Ошибка Sideloadly про подпись, Apple ID, который не может подписать ещё приложения, просроченная установка в обход магазина или устройство, которое не доверяет разработчику, идут от этого инструмента или от Apple, а не от сломанного пакета. Именно этот файл эти инструменты и ставят. Приложение собрано в CI и ещё не запускалось на настоящем устройстве. Исходный код оболочки лежит в <code>apps/ios</code> на <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>.</p>
+    <p class="note">Список загрузок на английском.</p>
+        <p class="note">Альфы нет в магазине приложений. Сверь файл со списком контрольных сумм, подписанным ключом выпуска. Подписи кода Apple и Microsoft ещё нет, поэтому macOS и Windows предупреждают при установке. Пакет Android подписан собственным ключом проекта.</p>
+    {{DOWNLOADS_GROUPED}}
+    <h2>Установка и проверка</h2>
+    <pre><code>curl -O https://varsto.net/downloads/SHA256SUMS
+curl -O https://varsto.net/downloads/varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf varsto-{{VERSION}}-x86_64-unknown-linux-musl.tar.gz
+cd varsto-{{VERSION}}-x86_64-unknown-linux-musl
+./varsto desktop        # opens the desktop interface in your browser
+./varsto --help         # command line</code></pre>
+    <h2>Сборка из исходников</h2>
+    <p>Исходный код лежит по адресу <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a>. Каждый выпуск — это тег там, и к <a href="https://github.com/janttsu/varsto/releases" rel="noopener">выпуску GitHub</a> приложены те же файлы; архив исходников ниже ему соответствует. Со стабильным набором инструментов Rust (1.85 или новее): <code>git clone https://github.com/janttsu/varsto.git</code> или распакуй архив, затем <code>cargo build --release</code>. Бинарный файл — <code>target/release/varsto</code>. <code>cargo test --workspace</code> запускает набор тестов, включая сценарии с двумя устройствами.</p>
+    <h2>Интерфейс рабочего стола</h2>
+    <p>В Linux и Windows по умолчанию <code>varsto tray</code>: значок в трее, из которого можно открыть и поставить на паузу, и пункт установки, когда есть версия новее. Фоновая служба сама синхронизирует изменения за несколько секунд. <code>varsto desktop</code> запускает небольшой веб-сервер, который слушает 127.0.0.1 на случайном порту, печатает одноразовую ссылку с токеном сеанса и открывает её в браузере по умолчанию. До него доходят только программы этого компьютера. Страница отвергает запросы без токена и запросы, у которых заголовок Host — не локальный адрес. Из интерфейса можно создать хранилище или присоединиться к нему, добавить хранилища данных и папки, дать общий доступ, задать правила хранения и показать дубликаты. Синхронизация, проверка и починка идут сами. Пакет приложения и <code>Varsto.cmd</code> делают ровно это.</p>
+    <h2>Быстрый старт (командная строка)</h2>
+    <pre><code>export VARSTO_PASSPHRASE='a long passphrase'
+varsto --home ~/.varsto-laptop init --name laptop            # prints the vault key once; keep it offline
+varsto --home ~/.varsto-laptop storage add-local box /mnt/box
+varsto --home ~/.varsto-laptop folder add docs ~/Documents/synced
+varsto --home ~/.varsto-laptop sync
+
+# another device that can reach the same storage
+varsto --home ~/.varsto-desk join --name desk --vault-key &lt;hex&gt; --storage-path /mnt/box
+varsto --home ~/.varsto-desk folder attach docs ~/synced
+varsto --home ~/.varsto-desk sync
+varsto --home ~/.varsto-desk status --json
+varsto --home ~/.varsto-desk fsck --verify</code></pre>
+    <p class="note">Ключ хранилища — главный ключ в шестнадцатеричном виде. Потеряешь его и все устройства — потеряешь данные: учётной записи нет, и ключи никто не хранит за тебя.</p>

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Videos: Varsto</title>
+<meta name="description" content="Kurze finnische Filme darüber, für wen Varsto ist, was darunter passiert, die Oberfläche, die Kommandozeile und der gemessene Vergleich mit Resilio Sync.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/de/videos/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Videos: Varsto">
+<meta property="og:description" content="Kurze finnische Filme darüber, für wen Varsto ist, was darunter passiert, die Oberfläche, die Kommandozeile und der gemessene Vergleich mit Resilio Sync.">
+<meta property="og:url" content="https://varsto.net/de/videos/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="de_DE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/videos/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/videos/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/videos/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/videos/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/videos/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/videos/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/videos/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/videos/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=74266d1106">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-Software, nicht für Produktionsdaten.</strong> Fehler können Daten zerstören, das Speicherformat kann sich ohne Migrationswerkzeug ändern, und die Verschlüsselung ist noch nicht geprüft. Behalte eigene Sicherungskopien und prüfe, dass du daraus wiederherstellen kannst.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Hauptmenü">
+      <a href="../../de/features/">Funktionen</a>
+      <a href="../../de/how-it-works/">So funktioniert es</a>
+      <a href="../../de/compare/">Vergleich</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../blog/">Blog (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Sprache">DE</summary>
+        <nav class="pop-body langs" aria-label="Sprache"><a href="../../videos/" hreflang="en" lang="en">English</a><a href="../../fi/videos/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/videos/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/videos/" hreflang="fr" lang="fr">Français</a><a href="../../de/videos/" hreflang="de" lang="de" aria-current="true">Deutsch</a><a href="../../es/videos/" hreflang="es" lang="es">Español</a><a href="../../ru/videos/" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../de/downloads/">Herunterladen</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menü"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menü"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/compare/">Vergleich</a><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../de/videos/" aria-current="page">Videos</a><a href="../../docs/">Dokumentation (en)</a><a href="../../de/downloads/">Downloads</a><a href="../../blog/">Blog (en)</a><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Videos</h1>
+    <p class="lead">Fünf kurze Filme. Die Erzählung ist vorerst auf Finnisch. Die anderen Sprachen bekommen später eigene Stimmen.</p>
+    <p class="note">Jeder Film ist die Lesung eines Themas, mit demselben Gastgeber in der Ecke. Die Zahlen im Vergleichsfilm sind die Läufe vom 10. November 2026, außer zwei Werten von Resilio Sync, die noch die früheren sind, solange dieser Fall erneut gefahren wird.</p>
+    <figure class="clip">
+      <video controls preload="metadata" src="../../assets/video/kenelle.mp4"></video>
+      <figcaption>Für wen Varsto ist: dein eigener Speicher, kein Konto, eine Alpha.</figcaption>
+    </figure>
+    <figure class="clip">
+      <video controls preload="metadata" src="../../assets/video/tausta.mp4"></video>
+      <figcaption>Darunter: Blöcke, Kompression, Verschlüsselung, zuerst eine Gegenstelle.</figcaption>
+    </figure>
+    <figure class="clip">
+      <video controls preload="metadata" src="../../assets/video/kayttoliittyma.mp4"></video>
+      <figcaption>Die Oberfläche: die Browserseite, das Telefon, die sechs Wörter.</figcaption>
+    </figure>
+    <figure class="clip">
+      <video controls preload="metadata" src="../../assets/video/komentorivi.mp4"></video>
+      <figcaption>Die Kommandozeile: folder add, sync, share und der tägliche Build.</figcaption>
+    </figure>
+    <figure class="clip">
+      <video controls preload="metadata" src="../../assets/video/mittaukset.mp4"></video>
+      <figcaption>Die Messungen gegen Resilio Sync, einschließlich der Verbindung, die gekappt wurde.</figcaption>
+    </figure>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Verschlüsselte dateisynchronisierung und sicherung auf deinem eigenen speicher.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../de/downloads/">Downloads</a></nav></div>
+    <div><h2>Lernen</h2><nav aria-label="Lernen"><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/compare/">Vergleich</a><a href="../../de/videos/" aria-current="page">Videos</a><a href="../../docs/">Dokumentation (en)</a><a href="../../blog/">Blog (en)</a></nav></div>
+    <div><h2>Gemeinschaft</h2><nav aria-label="Gemeinschaft"><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto ist ein Arbeitsname. Quellcode: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, unter der PolyForm Shield License 1.0.0 (Quellcode verfügbar).</span>
+    <span>Keine Cookies, kein Tracking. Der Webserver behält ein gewöhnliches Zugriffsprotokoll höchstens sieben Tage.</span>
+    <span><a href="../../docs/security-policy.html">Sicherheitsrichtlinie</a> · <a href="../../docs/licence.html">Lizenz</a> · <a href="../../docs/trademark.html">Marke</a> (auf Englisch)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

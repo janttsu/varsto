@@ -1,0 +1,52 @@
+---
+title: Alternativa a Tresorit: Varsto y Tresorit comparados
+nav: Compare
+output: compare/tresorit/index.html
+description: ¿Buscas una alternativa a Tresorit con cifrado de extremo a extremo en tu propio almacenamiento (S3, NAS, discos, rclone)? Para qué sirve Tresorit, cómo funciona y cómo se compara con Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Todas las comparaciones</a></p>
+    <h1>Varsto y Tresorit</h1>
+    <p class="lead">Tresorit es almacenamiento en la nube y uso compartido de archivos cifrados de extremo a extremo, de Suiza, dirigido sobre todo a empresas y sectores regulados, con planes personales también. Su interfaz limpia y cuidada es una de las referencias de la propia interfaz de Varsto.</p>
+
+    <h2>En qué se diferencia Varsto</h2>
+    <ul>
+      <li>Ningún proveedor guarda una copia ni una cuenta: tus propios buckets, recursos compartidos de NAS y discos, a los precios de tus proveedores.</li>
+      <li>Copias en discos extraíbles, contadas y comprobadas, junto a las copias de la nube.</li>
+      <li>Carpetas de Strongroom que solo se abren con una llave de seguridad de hardware, impuesto por la criptografía.</li>
+      <li>Organizaciones con administradores, aprobaciones de dispositivos y un registro firmado y encadenado (nuevo, alfa).</li>
+    </ul>
+
+    <h2>Cómo funciona Tresorit</h2>
+    <p>Creas una cuenta y los archivos se guardan en los centros de datos de Tresorit; los clientes de empresa pueden elegir en qué país se conservan los datos. Los archivos y los metadatos relevantes se cifran de extremo a extremo, y las claves se comparten con criptografía de clave pública. Ofrece enlaces cifrados para compartir, historial de versiones (el número de versiones depende del plan), borrado remoto del dispositivo y aplicaciones para Windows, macOS, Linux, Android, iOS y la web.</p>
+
+    <h2>Lado a lado</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Tresorit</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Dónde están tus archivos</th><td>En la nube de Tresorit; sin backends propios.</td><td>En tus propios dispositivos y en los almacenamientos que elijas: buckets compatibles con S3, cualquier remoto de rclone, directorios locales o de red y grupos de discos extraíbles.</td></tr>
+      <tr><th scope="row">Cuenta o servidor central</th><td>Hace falta una cuenta.</td><td>Ninguno. No hay servidor de Varsto; los dispositivos se encuentran a través de tus almacenamientos y en la LAN.</td></tr>
+      <tr><th scope="row">Cifrado</th><td>De extremo a extremo, con conocimiento cero; código cerrado.</td><td>De extremo a extremo, en el cliente, antes de que nada salga del dispositivo; cifrado híbrido poscuántico (ML-KEM para compartir claves, firmas Ed25519 + ML-DSA-65). Aún no auditado de forma independiente.</td></tr>
+      <tr><th scope="row">Dispositivos en línea a la vez</th><td>No hace falta: la copia está en la nube.</td><td>No hace falta: los dispositivos se sincronizan a través de tus almacenamientos y directamente de par a par cuando pueden alcanzarse.</td></tr>
+      <tr><th scope="row">Sabe dónde está cada copia</th><td>Una copia en el proveedor; no hay seguimiento de tus propios soportes.</td><td>Sí: un libro mayor firmado registra qué almacenamiento y qué dispositivo conserva cada bloque; las políticas de conservación (por defecto, 1 copia en cualquier sitio, 1 externa y 1 en tus propios discos, comprobada por otro dispositivo en un plazo de 30 días) avisan cuando no se cumple una regla.</td></tr>
+      <tr><th scope="row">Discos extraíbles y sin conexión</th><td>No hay un flujo de trabajo para discos extraíbles.</td><td>Sí: los grupos de discos se llenan, se comprueban y se reconocen cuando vuelven; los archivos que están en un disco ausente piden ese disco.</td></tr>
+      <tr><th scope="row">Copias de seguridad</th><td>Sincronización en dos sentidos, historial de versiones de los archivos (el número de versiones depende del plan) y restauración de archivos borrados. No hay copia de seguridad en un solo sentido.</td><td>Sí: elige una carpeta en cualquier dispositivo. Varsto guarda de ella instantáneas cifradas y de solo lectura solo en tus almacenamientos externos, nunca en tus dispositivos. Las conserva el número de días que elijas (90 por defecto) y borra las caducadas. Puedes restaurar cualquier instantánea en un directorio que nombres, desde la aplicación o la línea de órdenes.</td></tr>
+            <tr><th scope="row">Licencia</th><td>Propietario.</td><td>Código fuente disponible (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Precio</th><td>Un plan gratuito pequeño y planes de pago personales y de empresa.</td><td>Gratis; solo pagas a tu proveedor de almacenamiento</td></tr>
+      <tr><th scope="row">Madurez</th><td>Servicio comercial maduro, con funciones de cumplimiento normativo.</td><td>Alfa: no para datos de producción, y los formatos aún pueden cambiar.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Cuál te encaja</h2>
+    <div class="grid two">
+      <div class="card"><h3>Tresorit</h3><p>Elige Tresorit cuando necesitas un servicio de empresa conforme a la normativa, con soporte, administración, residencia de los datos y un uso compartido pulido, y te vale un proveedor de código cerrado.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Elige Varsto cuando quieres un cifrado de extremo a extremo comparable sin un proveedor en medio: tus propios buckets y discos, transferencia de par a par entre tus dispositivos, un registro de cada copia y un código que puedes leer. Las funciones de organización de Varsto (administradores, aprobaciones, quitar a una persona) son nuevas y siguen en alfa.</p></div>
+    </div>
+    <p class="note">Varsto es software en fase alfa: no le confíes datos de los que no tengas otra copia. Su criptografía tampoco se ha auditado de forma independiente. Los demás productos de aquí son maduros. Los datos sobre ellos se comprobaron en su propia documentación en octubre de 2026; los precios y los planes cambian a menudo, así que mira sus propias páginas para las cifras actuales. Las correcciones son bienvenidas como <a href="https://github.com/janttsu/varsto/issues" rel="noopener">issues de GitHub</a>.</p>
+
+    <h2>Fuentes</h2>
+    <ul>
+      <li><a href="https://tresorit.com/">Sitio web de Tresorit</a></li>
+      <li><a href="https://tresorit.com/security">Seguridad de Tresorit</a></li>
+      <li><a href="https://tresorit.com/pricing/personal">Planes personales de Tresorit</a></li>
+      <li><a href="https://support.tresorit.com/hc/en-us/articles/216114307-Backups-in-Tresorit">Backups in Tresorit (en)</a></li>
+    </ul>

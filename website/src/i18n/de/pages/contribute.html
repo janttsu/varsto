@@ -1,0 +1,38 @@
+---
+title: Beitragen
+nav: Contribute
+output: contribute/index.html
+description: Hilf, Varsto zu bauen, ein in Rust geschriebenes Werkzeug für Ende-zu-Ende verschlüsselte Synchronisierung und Sicherung: Architektur, wo Hilfe gesucht wird, wie du es baust und testest, und die Lizenzbedingungen.
+---
+    <h1>Bau Varsto mit uns</h1>
+    <p class="lead">Varsto ist ein Ende-zu-Ende verschlüsseltes Werkzeug zur Synchronisierung und Sicherung von Dateien, für Speicher, der dir schon gehört: S3-Buckets, NAS-Freigaben, rclone-Remotes, alte Platten und deine eigenen Geräte. Der Kern ist in Rust geschrieben, der Quellcode ist öffentlich auf <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>, und das Speicherformat ist schriftlich spezifiziert. Es ist eine frühe Alpha, die beste Zeit, es zu formen.</p>
+    <p><a class="button" href="https://github.com/janttsu/varsto" rel="noopener">Quellcode auf GitHub</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issues</a> <a class="button secondary" href="{{P}}docs/contributing.html">Beitragsregeln (en)</a></p>
+    <p>Im Issue-Tracker steht die Arbeit. Die Labels <code>help wanted</code> und <code>good first issue</code> markieren, was eine neue beitragende Person übernehmen kann. Eine Fehlermeldung oder eine kleine Korrektur der Dokumentation ist willkommen, wenn die Liste leer ist.</p>
+
+    <h2>Woran du arbeiten würdest</h2>
+    <div class="grid">
+      <section class="card"><h3>Ein Rust-Kern mit geschriebener Spezifikation</h3><p><code>varsto-core</code> enthält den Motor: inhaltsdefiniertes Chunking, Verschlüsselung mit XChaCha20-Poly1305, ein signiertes Hauptbuch mit hybriden Signaturen Ed25519 + ML-DSA-65, Platzierung und Aufbewahrungsregeln, Blockaustausch von Gegenstelle zu Gegenstelle mit NAT-Durchgang und Speicher-Backends für Verzeichnisse, S3 und rclone. Jedes Objekt auf dem Speicher ist in der <a href="{{P}}docs/alpha-0-format.html">Spezifikation des Speicherformats</a> (en) beschrieben.</p></section>
+      <section class="card"><h3>Eine Programmdatei, viele Hüllen</h3><p><code>varsto-cli</code> ist die Kommandozeile, der Hintergrunddienst, der Infobereich und eine lokale Weboberfläche (reines HTML, CSS und JavaScript). Dünne native Hüllen darum: Swift für macOS und iOS, Kotlin für Android, über <code>varsto-ffi</code>.</p></section>
+      <section class="card"><h3>Tests, die ganze Netze fahren</h3><p>Neben Unit- und Integrationstests stellt ein Labor aus virtuellen Maschinen Laptops, Desktops und Server hinter Heimroutern, symmetrischem NAT und einem öffentlichen Internet dar, mit einem S3-Server und auf Abruf mit Speicherausfällen, Abstürzen und Uhrabweichung. Siehe <a href="{{P}}docs/testing.html">Testing</a> (en).</p></section>
+    </div>
+
+    <h2>Wo Hilfe gesucht wird</h2>
+    <ul>
+      <li><strong>Sicherheitsprüfung</strong> der <a href="{{P}}docs/key-hierarchy.html">Schlüsselhierarchie</a>, des <a href="{{P}}docs/threat-model.html">Bedrohungsmodells</a> und der Formatspezifikation. Befunde gehen über die <a href="{{P}}docs/security-policy.html">Sicherheitsrichtlinie</a>.</li>
+      <li><strong>Plattformen:</strong> der Windows-Infobereich und die Explorer-Integration, die iOS-App auf echten Geräten, das Hintergrundverhalten von Android auf Telefonen verschiedener Hersteller.</li>
+      <li><strong>Netze:</strong> Austausch von Gegenstelle zu Gegenstelle und NAT-Durchgang in anderen Netzen als denen des Maintainers: Carrier-Grade-NAT, nur IPv6, Firmen-Firewalls.</li>
+      <li><strong>Speicher:</strong> Tests gegen weitere S3-kompatible Anbieter und rclone-Backends und ihre Eigenheiten (Bereichslesungen, Uhrabweichung, Konsistenz der Auflistungen).</li>
+      <li><strong>Paketierung:</strong> Flatpak, Homebrew, AUR, winget und andere Paketmanager.</li>
+      <li><strong>Übersetzungen:</strong> die Oberfläche ist auf Englisch, Finnisch, Schwedisch, Deutsch, Spanisch und Russisch, und diese Website in diesen Sprachen und auf Französisch; weitere Sprachen und die Prüfung durch Muttersprachlerinnen und Muttersprachler sind willkommen. Die Wörterbücher sind JSON-Dateien in <code>crates/varsto-cli/ui/i18n/</code>.</li>
+      <li><strong>Dokumentation</strong> und Fehlermeldungen aus echten Aufbauten: der <a href="https://github.com/janttsu/varsto/issues" rel="noopener">Issue-Tracker</a> (ein forum ist geplant).</li>
+    </ul>
+
+    <h2>Einstieg</h2>
+    <pre><code>git clone https://github.com/janttsu/varsto
+cd varsto
+cargo build --release
+cargo test --workspace</code></pre>
+    <p>Für den Kern und die Kommandozeile reicht eine stabile Rust-Toolchain (1.85 oder neuer). Der <a href="{{P}}docs/quick-start.html">Schnellstart</a> (en) legt in einer Minute einen Tresor in einem lokalen Verzeichnis an, sodass du Änderungen ohne Cloud-Konto ausprobieren kannst. Vor einem Pull Request müssen <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets</code> und die Tests bestehen, und neues Verhalten braucht Tests. Öffne bitte vor großen Änderungen ein Issue.</p>
+
+    <h2>Lizenz</h2>
+    <p>Der Quellcode von Varsto ist verfügbar unter der <a href="{{P}}docs/licence.html">PolyForm Shield License 1.0.0</a>: du darfst den Code lesen, nutzen, ändern und weitergeben, für jeden Zweck außer dem, ein Produkt anzubieten, das mit Varsto konkurriert. Es ist keine OSI-Open-Source-Lizenz. Mit dem Beitrag stimmst du zu, dass dein Beitrag unter dieser Lizenz verbreitet wird; die Einzelheiten stehen in den <a href="{{P}}docs/contributing.html">Beitragsregeln</a> (en). Alles im Repository ist auf Englisch geschrieben.</p>

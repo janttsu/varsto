@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Filen-Alternative: Varsto und Filen im Vergleich</title>
+<meta name="description" content="Suchst du eine Filen-Alternative mit Ende-zu-Ende-Verschlüsselung auf deinem eigenen Speicher (S3, NAS, Platten, rclone)? Wofür Filen gedacht ist, wie es funktioniert und wie es sich mit Varsto vergleicht.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/de/compare/filen/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Filen-Alternative: Varsto und Filen im Vergleich">
+<meta property="og:description" content="Suchst du eine Filen-Alternative mit Ende-zu-Ende-Verschlüsselung auf deinem eigenen Speicher (S3, NAS, Platten, rclone)? Wofür Filen gedacht ist, wie es funktioniert und wie es sich mit Varsto vergleicht.">
+<meta property="og:url" content="https://varsto.net/de/compare/filen/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="de_DE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/filen/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/filen/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/filen/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/filen/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/filen/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/compare/filen/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/filen/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/filen/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=74266d1106">
+<script src="../../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-Software, nicht für Produktionsdaten.</strong> Fehler können Daten zerstören, das Speicherformat kann sich ohne Migrationswerkzeug ändern, und die Verschlüsselung ist noch nicht geprüft. Behalte eigene Sicherungskopien und prüfe, dass du daraus wiederherstellen kannst.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../de/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Hauptmenü">
+      <a href="../../../de/features/">Funktionen</a>
+      <a href="../../../de/how-it-works/">So funktioniert es</a>
+      <a href="../../../de/compare/" aria-current="page">Vergleich</a>
+      <a href="../../../docs/">Dokumentation (en)</a>
+      <a href="../../../blog/">Blog (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Sprache">DE</summary>
+        <nav class="pop-body langs" aria-label="Sprache"><a href="../../../compare/filen/" hreflang="en" lang="en">English</a><a href="../../../fi/compare/filen/" hreflang="fi" lang="fi">Suomi</a><a href="../../../sv/compare/filen/" hreflang="sv" lang="sv">Svenska</a><a href="../../../fr/compare/filen/" hreflang="fr" lang="fr">Français</a><a href="../../../de/compare/filen/" hreflang="de" lang="de" aria-current="true">Deutsch</a><a href="../../../es/compare/filen/" hreflang="es" lang="es">Español</a><a href="../../../ru/compare/filen/" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../../de/downloads/">Herunterladen</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menü"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menü"><a href="../../../de/">Projekt</a><a href="../../../de/features/">Funktionen</a><a href="../../../de/use-cases/">Anwendungsfälle</a><a href="../../../de/compare/" aria-current="page">Vergleich</a><a href="../../../de/how-it-works/">So funktioniert es</a><a href="../../../de/screenshots/">Bildschirmfotos</a><a href="../../../de/videos/">Videos</a><a href="../../../docs/">Dokumentation (en)</a><a href="../../../de/downloads/">Downloads</a><a href="../../../blog/">Blog (en)</a><a href="../../../forum/">Forum (en)</a><a href="../../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Alle Vergleiche</a></p>
+    <h1>Varsto und Filen</h1>
+    <p class="lead">Filen ist Zero-Knowledge-verschlüsselter Cloud-Speicher aus Deutschland, für Menschen und Teams, denen Privatsphäre wichtig ist. Er bietet ein Laufwerk, Desktop-Synchronisierung, ein Netzlaufwerk mit Dateien auf Abruf, Notizen und Chat, zu niedrigen Preisen.</p>
+
+    <h2>Worin sich Varsto unterscheidet</h2>
+    <ul>
+      <li>Du wählst den Speicher und kannst ihn wechseln: ein Bucket bei einem beliebigen Anbieter, ein NAS, ein rclone-Remote, deine eigenen Platten.</li>
+      <li>Kopien auf deinen eigenen Platten und bei mehreren Anbietern gleichzeitig, jede im Hauptbuch gezählt.</li>
+      <li>Aufbewahrungsregeln wie „mindestens eine Kopie außerhalb des Hauses“, anhand des Hauptbuchs geprüft, mit einer Warnung, bevor sie brechen.</li>
+      <li>Strongroom-Ordner, die sich nur mit einem Hardware-Sicherheitsschlüssel öffnen.</li>
+      <li>Ein Kern mit verfügbarem Quellcode und einem aufgeschriebenen Speicherformat (Filens Clients sind Open Source und seine Tarife günstig; siehe unten).</li>
+    </ul>
+
+    <h2>So funktioniert Filen</h2>
+    <p>Du legst ein Konto an, und die Dateien liegen auf Filens Servern in Deutschland, vor dem Hochladen auf dem Client verschlüsselt (AES-256 je Chunk). Die Clients und SDKs sind Open Source unter AGPL-3.0. Der Kommandozeilen-Client kann deinen Filen-Speicher lokal über WebDAV oder S3 bereitstellen, die Daten liegen aber weiterhin bei Filen. Sieh in den aktuellen Bedingungen des Anbieters nach, wie lange ein kostenloses Konto aktiv bleibt.</p>
+
+    <h2>Nebeneinander</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Filen</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Wo deine Dateien liegen</th><td>In Filens Cloud in Deutschland; keine eigenen Backends.</td><td>Auf deinen eigenen Geräten und auf Speichern, die du wählst: S3-kompatible Buckets, jedes rclone-Remote, lokale oder Netzwerkverzeichnisse sowie Plattenpools aus Wechseldatenträgern.</td></tr>
+      <tr><th scope="row">Konto oder zentraler Server</th><td>Konto erforderlich.</td><td>Keines von beiden. Es gibt keinen Varsto-Server; die Geräte finden einander über deine Speicher und im LAN.</td></tr>
+      <tr><th scope="row">Verschlüsselung</th><td>Ende-zu-Ende, clientseitig (AES-256); Open-Source-Clients.</td><td>Ende-zu-Ende, clientseitig, bevor etwas das Gerät verlässt; hybride Post-Quanten-Verschlüsselung (ML-KEM zum Teilen der Schlüssel, Ed25519- und ML-DSA-65-Signaturen). Noch nicht unabhängig geprüft.</td></tr>
+      <tr><th scope="row">Geräte gleichzeitig online</th><td>Nicht nötig: die Cloud hält die Kopie.</td><td>Nicht nötig: Die Geräte synchronisieren sich über deine Speicher und direkt von Gegenstelle zu Gegenstelle, wenn sie einander erreichen.</td></tr>
+      <tr><th scope="row">Weiß, wo jede Kopie liegt</th><td>Eine Kopie beim Anbieter; keine Erfassung über deine eigenen Medien hinweg.</td><td>Ja: Ein signiertes Hauptbuch hält fest, welcher Speicher und welches Gerät jeden Block hält; Aufbewahrungsregeln (standardmäßig 1 Kopie irgendwo, 1 externe und 1 auf deinen eigenen Platten, von einem anderen Gerät innerhalb von 30 Tagen geprüft) warnen, wenn eine Regel nicht erfüllt ist.</td></tr>
+      <tr><th scope="row">Wechseldatenträger und Offline-Platten</th><td>Kein Ablauf für Wechselplatten.</td><td>Ja: Plattenpools werden gefüllt, geprüft und erkannt, wenn sie zurückkommen; Dateien auf einer Platte, die weg ist, verlangen genau diese Platte.</td></tr>
+      <tr><th scope="row">Sicherungen</th><td>Die Desktop-App hat einen Synchronisierungsmodus „Local Backup“, der nur hochlädt und in Filens Cloud nie etwas löscht.</td><td>Ja: Wähle einen Ordner auf einem beliebigen Gerät. Varsto behält davon verschlüsselte, schreibgeschützte Schnappschüsse nur auf deinen externen Speichern, nie auf deinen Geräten, so viele Tage, wie du wählst (standardmäßig 90), und löscht danach die abgelaufenen. Stelle einen beliebigen Schnappschuss in ein Verzeichnis wieder her, das du nennst, aus der App oder von der Kommandozeile.</td></tr>
+      <tr><th scope="row">Lizenz</th><td>Clients AGPL-3.0.</td><td>Quellcode verfügbar (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Preis</th><td>Kostenloses Kontingent und günstige bezahlte Tarife.</td><td>Kostenlos; du zahlst nur deinen Speicheranbieter</td></tr>
+      <tr><th scope="row">Reife</th><td>Etablierter Dienst.</td><td>Alpha: nicht für Produktionsdaten, und die Formate können sich noch ändern.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Was zu dir passt</h2>
+    <div class="grid two">
+      <div class="card"><h3>Filen</h3><p>Wähle Filen, wenn du günstigen, in der EU gehosteten verschlüsselten Cloud-Speicher mit Open-Source-Clients willst und es dir recht ist, dass ein Anbieter deine Kopie außerhalb der eigenen Räume hält.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Wähle Varsto, wenn der Speicher selbst dir gehören soll, zum Wählen und Wechseln, wenn du Kopien bei mehreren Anbietern und auf deinen eigenen Platten willst und wenn Regeln wie „mindestens eine Kopie außerhalb des Hauses“ für dich geprüft werden sollen.</p></div>
+    </div>
+    <p class="note">Varsto ist Alpha-Software: Vertraue ihm keine Daten an, von denen du keine weitere Kopie hast, und seine Kryptografie ist nicht unabhängig geprüft. Die anderen Produkte hier sind ausgereift. Angaben zu ihnen wurden im Oktober 2026 anhand ihrer eigenen Dokumentation geprüft; Preise und Tarife ändern sich oft, sieh also auf ihren eigenen Seiten nach den aktuellen Zahlen. Korrekturen sind als <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-Issues</a> willkommen.</p>
+
+    <h2>Quellen</h2>
+    <ul>
+      <li><a href="https://filen.io/">Website von Filen</a></li>
+      <li><a href="https://filen.io/pricing">Preise von Filen</a></li>
+      <li><a href="https://github.com/FilenCloudDienste">Quellcode von Filen</a></li>
+      <li><a href="https://docs.filen.io/docs/desktop/setup">Synchronisierungsmodi von Filen Desktop (en)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../../de/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Verschlüsselte dateisynchronisierung und sicherung auf deinem eigenen speicher.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../../de/">Projekt</a><a href="../../../de/features/">Funktionen</a><a href="../../../de/use-cases/">Anwendungsfälle</a><a href="../../../de/screenshots/">Bildschirmfotos</a><a href="../../../de/downloads/">Downloads</a></nav></div>
+    <div><h2>Lernen</h2><nav aria-label="Lernen"><a href="../../../de/how-it-works/">So funktioniert es</a><a href="../../../de/compare/" aria-current="page">Vergleich</a><a href="../../../de/videos/">Videos</a><a href="../../../docs/">Dokumentation (en)</a><a href="../../../blog/">Blog (en)</a></nav></div>
+    <div><h2>Gemeinschaft</h2><nav aria-label="Gemeinschaft"><a href="../../../forum/">Forum (en)</a><a href="../../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto ist ein Arbeitsname. Quellcode: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, unter der PolyForm Shield License 1.0.0 (Quellcode verfügbar).</span>
+    <span>Keine Cookies, kein Tracking. Der Webserver behält ein gewöhnliches Zugriffsprotokoll höchstens sieben Tage.</span>
+    <span><a href="../../../docs/security-policy.html">Sicherheitsrichtlinie</a> · <a href="../../../docs/licence.html">Lizenz</a> · <a href="../../../docs/trademark.html">Marke</a> (auf Englisch)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

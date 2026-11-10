@@ -1,0 +1,53 @@
+---
+title: Alternativa a git-annex: Varsto y git-annex comparados
+nav: Compare
+output: compare/git-annex/index.html
+description: ¿Buscas una alternativa a git-annex con cifrado de extremo a extremo en tu propio almacenamiento (S3, NAS, discos, rclone)? Para qué sirve git-annex, cómo funciona y cómo se compara con Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Todas las comparaciones</a></p>
+    <h1>Varsto y git-annex</h1>
+    <p class="lead">git-annex gestiona archivos grandes con git sin guardar su contenido en git. Es una herramienta potente para usuarios técnicos que archivan, hacen copias de seguridad y mueven datos entre muchos discos y remotos, y es el pariente más cercano de Varsto en esta lista.</p>
+
+    <h2>En qué se diferencia Varsto</h2>
+    <ul>
+      <li>La misma idea de seguir las ubicaciones, pero el cifrado de los nombres y del contenido está siempre activo, en cada almacenamiento.</li>
+      <li>Sincronización continua en segundo plano, interfaz de escritorio y de teléfono, uso compartido con otras personas y políticas de conservación que avisan antes de que se incumpla una regla.</li>
+      <li>Copias de seguridad como instantáneas de solo lectura, con un plazo de conservación, en tus almacenamientos.</li>
+      <li>Una vía de importación desde repositorios git-annex, disco a disco, es nueva en 0.0.1-alpha.14. git-annex es la herramienta más madura y es software libre; ver abajo.</li>
+    </ul>
+
+    <h2>Cómo funciona git-annex</h2>
+    <p>Cada repositorio puede estar en cualquier máquina o disco, y los «special remotes» llegan a S3 y a almacenes compatibles, a rclone, a rsync, a directorios normales o extraíbles, a WebDAV y a más. Una rama de git registra qué repositorio conserva cada archivo («git annex whereis»), y numcopies se niega a soltar el contenido si no hay bastantes copias verificadas en otro sitio. El cifrado es opcional en cada special remote y usa GnuPG; los nombres de archivo del propio repositorio git siguen visibles salvo que se use gcrypt. Es sobre todo una herramienta de línea de órdenes; hay un asistente más simple, en Android funciona a través de Termux y no hay aplicación para iOS.</p>
+
+    <h2>Lado a lado</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">git-annex</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Dónde están tus archivos</th><td>Donde tú elijas: discos propios, NAS, S3, otras nubes a través de rclone.</td><td>En tus propios dispositivos y en los almacenamientos que elijas: buckets compatibles con S3, cualquier remoto de rclone, directorios locales o de red y grupos de discos extraíbles.</td></tr>
+      <tr><th scope="row">Cuenta o servidor central</th><td>Ninguno.</td><td>Ninguno. No hay servidor de Varsto; los dispositivos se encuentran a través de tus almacenamientos y en la LAN.</td></tr>
+      <tr><th scope="row">Cifrado</th><td>Opcional en cada special remote (GnuPG); los nombres del repositorio quedan visibles salvo que se use gcrypt.</td><td>De extremo a extremo, en el cliente, antes de que nada salga del dispositivo; cifrado híbrido poscuántico (ML-KEM para compartir claves, firmas Ed25519 + ML-DSA-65). Aún no auditado de forma independiente.</td></tr>
+      <tr><th scope="row">Dispositivos en línea a la vez</th><td>No hace falta; la sincronización es explícita o programada, y no continua por defecto.</td><td>No hace falta: los dispositivos se sincronizan a través de tus almacenamientos y directamente de par a par cuando pueden alcanzarse.</td></tr>
+      <tr><th scope="row">Sabe dónde está cada copia</th><td>Sí: seguimiento de ubicaciones y numcopies, la inspiración del libro mayor y de las políticas de conservación de Varsto.</td><td>Sí: un libro mayor firmado registra qué almacenamiento y qué dispositivo conserva cada bloque; las políticas de conservación (por defecto, 1 copia en cualquier sitio, 1 externa y 1 en tus propios discos, comprobada por otro dispositivo en un plazo de 30 días) avisan cuando no se cumple una regla.</td></tr>
+      <tr><th scope="row">Discos extraíbles y sin conexión</th><td>Sí: de primera clase; el contenido de un disco sigue constando aunque esté desconectado.</td><td>Sí: los grupos de discos se llenan, se comprueban y se reconocen cuando vuelven; los archivos que están en un disco ausente piden ese disco.</td></tr>
+      <tr><th scope="row">Copias de seguridad</th><td>Conserva el número de copias que pides (numcopies) en los remotos, y las versiones antiguas siguen en el historial de git hasta que se descartan. No hay instantáneas programadas ni plazo de conservación.</td><td>Sí: elige una carpeta en cualquier dispositivo. Varsto guarda de ella instantáneas cifradas y de solo lectura solo en tus almacenamientos externos, nunca en tus dispositivos. Las conserva el número de días que elijas (90 por defecto) y borra las caducadas. Puedes restaurar cualquier instantánea en un directorio que nombres, desde la aplicación o la línea de órdenes.</td></tr>
+      <tr><th scope="row">Pasar desde git-annex</th><td>No aplica.</td><td>Nuevo en 0.0.1-alpha.14: <code>varsto import git-annex</code> trae un repositorio a una carpeta, disco a disco, lee cada clon solo con git (git-annex no se ejecuta y no se cambia nada en los discos), comprueba cada archivo contra el hash de su clave y, a partir de los registros de ubicación, dice qué disco hay que insertar a continuación.</td></tr>
+            <tr><th scope="row">Licencia</th><td>Software libre (AGPL-3+).</td><td>Código fuente disponible (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Precio</th><td>Gratis.</td><td>Gratis; solo pagas a tu proveedor de almacenamiento</td></tr>
+      <tr><th scope="row">Madurez</th><td>Maduro, con versiones publicadas de forma activa desde hace más de una década.</td><td>Alfa: no para datos de producción, y los formatos aún pueden cambiar.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Cuál te encaja</h2>
+    <div class="grid two">
+      <div class="card"><h3>git-annex</h3><p>Elige git-annex cuando te manejas con git y la línea de órdenes, quieres el máximo control y la máxima transparencia, y valoras una herramienta madura de software libre por encima de una aplicación ya hecha.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Varsto pretende dar las mismas garantías (cada copia contabilizada, reglas de cuántas copias deben existir, discos extraíbles que van y vienen) a quien no usa git: sincronización continua en segundo plano, interfaz de escritorio y de teléfono, cifrado que cubre siempre los nombres y el contenido, transferencia de par a par y uso compartido con otras personas.</p></div>
+    </div>
+    <p class="note">Varsto es software en fase alfa: no le confíes datos de los que no tengas otra copia. Su criptografía tampoco se ha auditado de forma independiente. Los demás productos de aquí son maduros. Los datos sobre ellos se comprobaron en su propia documentación en octubre de 2026; los precios y los planes cambian a menudo, así que mira sus propias páginas para las cifras actuales. Las correcciones son bienvenidas como <a href="https://github.com/janttsu/varsto/issues" rel="noopener">issues de GitHub</a>.</p>
+
+    <h2>Fuentes</h2>
+    <ul>
+      <li><a href="https://git-annex.branchable.com/">Sitio web de git-annex</a></li>
+      <li><a href="https://git-annex.branchable.com/special_remotes/">Special remotes</a></li>
+      <li><a href="https://git-annex.branchable.com/encryption/">Cifrado</a></li>
+      <li><a href="https://git-annex.branchable.com/git-annex-numcopies/">numcopies</a></li>
+    </ul>

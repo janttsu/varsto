@@ -133,7 +133,7 @@ class VarstoService : Service() {
             } catch (e: Exception) {
                 return c
             }
-            if (lang !in listOf("en", "fi", "sv")) return c
+            if (lang !in listOf("en", "fi", "sv", "de", "es", "ru")) return c
             val conf = Configuration(c.resources.configuration)
             conf.setLocale(Locale.forLanguageTag(lang))
             return c.createConfigurationContext(conf)

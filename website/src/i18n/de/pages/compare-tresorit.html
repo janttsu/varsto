@@ -1,0 +1,52 @@
+---
+title: Tresorit-Alternative: Varsto und Tresorit im Vergleich
+nav: Compare
+output: compare/tresorit/index.html
+description: Suchst du eine Tresorit-Alternative mit Ende-zu-Ende-Verschlüsselung auf deinem eigenen Speicher (S3, NAS, Platten, rclone)? Wofür Tresorit gedacht ist, wie es funktioniert und wie es sich mit Varsto vergleicht.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alle Vergleiche</a></p>
+    <h1>Varsto und Tresorit</h1>
+    <p class="lead">Tresorit ist Ende-zu-Ende verschlüsselter Cloud-Speicher und Dateifreigabe aus der Schweiz, vor allem für Unternehmen und regulierte Branchen, mit persönlichen Tarifen dazu. Seine klare, sorgfältige Oberfläche ist eines der Vorbilder für Varstos eigene.</p>
+
+    <h2>Worin sich Varsto unterscheidet</h2>
+    <ul>
+      <li>Kein Anbieter hält eine Kopie oder ein Konto: deine eigenen Buckets, NAS-Freigaben und Platten, zu den Preisen deiner Anbieter.</li>
+      <li>Kopien auf Wechselplatten, gezählt und geprüft, neben den Cloud-Kopien.</li>
+      <li>Strongroom-Ordner, die sich nur mit einem Hardware-Sicherheitsschlüssel öffnen, in der Kryptografie erzwungen.</li>
+      <li>Organisationen mit Administratoren, Gerätegenehmigungen und einem signierten, verketteten Protokoll (neu, Alpha).</li>
+    </ul>
+
+    <h2>So funktioniert Tresorit</h2>
+    <p>Du legst ein Konto an, und die Dateien liegen in Tresorits Rechenzentren, mit Wahl des Speicherorts für Geschäftskunden. Dateien und die relevanten Metadaten sind Ende-zu-Ende verschlüsselt; Schlüssel werden mit Public-Key-Kryptografie geteilt. Es gibt verschlüsselte Freigabelinks, einen Versionsverlauf (die Anzahl der Versionen hängt vom Tarif ab), Fernlöschung von Geräten und Apps für Windows, macOS, Linux, Android, iOS und das Web.</p>
+
+    <h2>Nebeneinander</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Tresorit</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Wo deine Dateien liegen</th><td>In Tresorits Cloud; keine eigenen Backends.</td><td>Auf deinen eigenen Geräten und auf Speichern, die du wählst: S3-kompatible Buckets, jedes rclone-Remote, lokale oder Netzwerkverzeichnisse sowie Plattenpools aus Wechseldatenträgern.</td></tr>
+      <tr><th scope="row">Konto oder zentraler Server</th><td>Konto erforderlich.</td><td>Keines von beiden. Es gibt keinen Varsto-Server; die Geräte finden einander über deine Speicher und im LAN.</td></tr>
+      <tr><th scope="row">Verschlüsselung</th><td>Ende-zu-Ende, Zero-Knowledge; geschlossener Quellcode.</td><td>Ende-zu-Ende, clientseitig, bevor etwas das Gerät verlässt; hybride Post-Quanten-Verschlüsselung (ML-KEM zum Teilen der Schlüssel, Ed25519- und ML-DSA-65-Signaturen). Noch nicht unabhängig geprüft.</td></tr>
+      <tr><th scope="row">Geräte gleichzeitig online</th><td>Nicht nötig: die Cloud hält die Kopie.</td><td>Nicht nötig: Die Geräte synchronisieren sich über deine Speicher und direkt von Gegenstelle zu Gegenstelle, wenn sie einander erreichen.</td></tr>
+      <tr><th scope="row">Weiß, wo jede Kopie liegt</th><td>Eine Kopie beim Anbieter; keine Erfassung über deine eigenen Medien hinweg.</td><td>Ja: Ein signiertes Hauptbuch hält fest, welcher Speicher und welches Gerät jeden Block hält; Aufbewahrungsregeln (standardmäßig 1 Kopie irgendwo, 1 externe und 1 auf deinen eigenen Platten, von einem anderen Gerät innerhalb von 30 Tagen geprüft) warnen, wenn eine Regel nicht erfüllt ist.</td></tr>
+      <tr><th scope="row">Wechseldatenträger und Offline-Platten</th><td>Kein Ablauf für Wechselplatten.</td><td>Ja: Plattenpools werden gefüllt, geprüft und erkannt, wenn sie zurückkommen; Dateien auf einer Platte, die weg ist, verlangen genau diese Platte.</td></tr>
+      <tr><th scope="row">Sicherungen</th><td>Zwei-Wege-Synchronisierung mit Dateiversionsverlauf (Anzahl der Versionen je nach Tarif) und Wiederherstellung gelöschter Dateien; keine einseitige Sicherung.</td><td>Ja: Wähle einen Ordner auf einem beliebigen Gerät. Varsto behält davon verschlüsselte, schreibgeschützte Schnappschüsse nur auf deinen externen Speichern, nie auf deinen Geräten, so viele Tage, wie du wählst (standardmäßig 90), und löscht danach die abgelaufenen. Stelle einen beliebigen Schnappschuss in ein Verzeichnis wieder her, das du nennst, aus der App oder von der Kommandozeile.</td></tr>
+      <tr><th scope="row">Lizenz</th><td>Proprietär.</td><td>Quellcode verfügbar (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Preis</th><td>Ein kleines kostenloses Kontingent und bezahlte Tarife für Privatpersonen und Unternehmen.</td><td>Kostenlos; du zahlst nur deinen Speicheranbieter</td></tr>
+      <tr><th scope="row">Reife</th><td>Ausgereifter kommerzieller Dienst mit Compliance-Funktionen.</td><td>Alpha: nicht für Produktionsdaten, und die Formate können sich noch ändern.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Was zu dir passt</h2>
+    <div class="grid two">
+      <div class="card"><h3>Tresorit</h3><p>Wähle Tresorit, wenn du einen regelkonformen, betreuten Geschäftsdienst brauchst, mit Verwaltung, Wahl des Speicherorts und ausgefeilter Freigabe, und ein Anbieter mit geschlossenem Quellcode für dich akzeptabel ist.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Wähle Varsto, wenn du vergleichbare Ende-zu-Ende-Verschlüsselung ohne einen Anbieter in der Mitte willst: deine eigenen Buckets und Platten, Übertragung von Gegenstelle zu Gegenstelle zwischen deinen Geräten, eine Aufzeichnung jeder Kopie und Quellcode, den du lesen kannst. Varstos Organisationsfunktionen (Administratoren, Genehmigungen, eine Person entfernen) sind neu und noch Alpha.</p></div>
+    </div>
+    <p class="note">Varsto ist Alpha-Software: Vertraue ihm keine Daten an, von denen du keine weitere Kopie hast, und seine Kryptografie ist nicht unabhängig geprüft. Die anderen Produkte hier sind ausgereift. Angaben zu ihnen wurden im Oktober 2026 anhand ihrer eigenen Dokumentation geprüft; Preise und Tarife ändern sich oft, sieh also auf ihren eigenen Seiten nach den aktuellen Zahlen. Korrekturen sind als <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-Issues</a> willkommen.</p>
+
+    <h2>Quellen</h2>
+    <ul>
+      <li><a href="https://tresorit.com/">Website von Tresorit</a></li>
+      <li><a href="https://tresorit.com/security">Sicherheit bei Tresorit</a></li>
+      <li><a href="https://tresorit.com/pricing/personal">Persönliche Tarife von Tresorit</a></li>
+      <li><a href="https://support.tresorit.com/hc/en-us/articles/216114307-Backups-in-Tresorit">Backups in Tresorit (en)</a></li>
+    </ul>

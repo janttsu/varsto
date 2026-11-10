@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сценарии использования: Varsto</title>
+<meta name="description" content="Тринадцать ситуаций, для которых спроектирован Varsto, от самолёта без интернета до пожара в доме, с честной пометкой о том, что альфа уже делает.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/ru/use-cases/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Сценарии использования: Varsto">
+<meta property="og:description" content="Тринадцать ситуаций, для которых спроектирован Varsto, от самолёта без интернета до пожара в доме, с честной пометкой о том, что альфа уже делает.">
+<meta property="og:url" content="https://varsto.net/ru/use-cases/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/use-cases/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/use-cases/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/use-cases/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/use-cases/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/use-cases/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/use-cases/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/use-cases/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/use-cases/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=74266d1106">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">К содержанию</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Альфа-версия, не для рабочих данных.</strong> Ошибки могут уничтожить данные, формат хранения может измениться без средства переноса, а шифрование ещё не проверяли. Храни собственные резервные копии и убедись, что из них можно восстановиться.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Главное меню">
+      <a href="../../ru/features/">Возможности</a>
+      <a href="../../ru/how-it-works/">Как это устроено</a>
+      <a href="../../ru/compare/">Сравнение</a>
+      <a href="../../docs/">Документация (en)</a>
+      <a href="../../blog/">Блог (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Язык">RU</summary>
+        <nav class="pop-body langs" aria-label="Язык"><a href="../../use-cases/" hreflang="en" lang="en">English</a><a href="../../fi/use-cases/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/use-cases/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/use-cases/" hreflang="fr" lang="fr">Français</a><a href="../../de/use-cases/" hreflang="de" lang="de">Deutsch</a><a href="../../es/use-cases/" hreflang="es" lang="es">Español</a><a href="../../ru/use-cases/" hreflang="ru" lang="ru" aria-current="true">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../ru/downloads/">Скачать</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Меню"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Меню"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/" aria-current="page">Сценарии</a><a href="../../ru/compare/">Сравнение</a><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../ru/videos/">Видео</a><a href="../../docs/">Документация (en)</a><a href="../../ru/downloads/">Загрузки</a><a href="../../blog/">Блог (en)</a><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Сценарии использования</h1>
+    <p class="lead">Это ситуации, на которых проверяют замысел. Они взяты из плана проекта и задают требования, автоматические тесты и <a href="../features/">список возможностей</a>. В каждом сказано, что альфа делает сегодня и что спроектировано, но ещё не собрано. Ничто здесь не обещание про альфу; <a href="../../docs/failure-model.html">модель отказов</a> перечисляет, что ещё может пойти не так.</p>
+
+    <section class="feature" id="uc-1">
+      <h2>1. «Забыл скопировать файл перед поездкой»</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/plane.webp?v=1c3d0704f3"><img src="../../assets/img/usecases/plane.png?v=7d04610f99" alt="Два устройства в самолёте синхронизируются через точку доступа телефона; облако перечёркнуто до посадки." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/plane-dark.webp?v=adb5854823"><img src="../../assets/img/usecases/plane-dark.png?v=5bb5f2c441" alt="Два устройства в самолёте синхронизируются через точку доступа телефона; облако перечёркнуто до посадки." width="640" height="320"></picture>
+      <div>
+        <p><strong>Ситуация.</strong> В самолёте ты понимаешь, что нужный файл на телефоне, а не на ноутбуке. Интернета нет.</p>
+        <p><strong>Как помогает Varsto.</strong> Два устройства находят друг друга локально (точка доступа телефона или любая локальная сеть), и файл идёт напрямую с одного на другое. На ноутбуке папка в выборочном режиме, поэтому файл уже виден как заполнитель; один щелчок забирает его с телефона. Твои правки возвращаются тем же путём.</p>
+        <p><strong>Когда сеть возвращается</strong> в аэропорту или в гостинице, оба устройства отправляют изменения в твоё облачное хранилище данных, и остальные устройства догоняют. Журнал учёта в каждый момент знает, какая версия где.</p>
+        <p class="note">Честно: Wi-Fi в самолёте обычно изолирует клиентов, поэтому собственная точка доступа телефона — задокументированный первый выбор. Пока оба устройства в одной сумке, изменения существуют только в одном месте; приложение показывает «только на этих двух устройствах, ещё не в облаке» и напоминает синхронизироваться, когда сеть есть. Вход, в том числе ключом безопасности, работает без сети, потому что спрашивать не у какого сервера. Сегодня: выборочная синхронизация, заполнители, журнал учёта и прямая передача от устройства к устройству в локальной сети есть (точка доступа телефона — это локальная сеть); облако догоняет, когда до него можно добраться. Через интернет устройства находят путь сквозь NAT с помощью STUN и пробивания дыр или через одно из твоих доступных устройств как ретранслятор; у хранилища, где каждое устройство за NAT, пути по-прежнему нет.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-2">
+      <h2>2. Украденный ноутбук</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/stolen.webp?v=85977b529d"><img src="../../assets/img/usecases/stolen.png?v=6796f1a05e" alt="Украденный ноутбук: папка Strongroom остаётся запертой, устройство отзывают и стирают с телефона." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/stolen-dark.webp?v=ba70a2203b"><img src="../../assets/img/usecases/stolen-dark.png?v=34b22d5cbb" alt="Украденный ноутбук: папка Strongroom остаётся запертой, устройство отзывают и стирают с телефона." width="640" height="320"></picture>
+      <div>
+        <p>Вор открывает машину. Папки Strongroom остаются запертыми, потому что им нужен твой ключ безопасности, а не пароль, который может лежать в кэше. С другого устройства ты отзываешь ноутбук и ставишь в очередь приказ стирания, который выполняется в следующий раз, когда на устройстве запускается Varsto и оно достигает одного из твоих хранилищ данных; на вора, который держит машину без сети, это не действует. Всё по-прежнему восстанавливается из твоих собственных хранилищ данных. Отсечка отзыва в журнале учёта значит, что события, подписанные украденным устройством после этого момента, уходят в карантин, а не принимаются на веру.</p>
+        <p class="note">Сегодня: папки Strongroom есть (ключ живёт только пока ты касаешься ключа безопасности, и есть запасной ключ, если ты его зарегистрировал), а устройство, восстановленное из старой резервной копии, обнаруживается и изолируется в журнале учёта. Удаление устройства работает с любого другого устройства («Узлы», «Устройства», «Удалить устройство…» или <code>varsto device revoke laptop --wipe</code>): его более поздние записи журнала учёта игнорируются, твои устройства отказывают его соединениям узлов, и хранилище получает новые ключи, которые достаются только оставшимся устройствам, поэтому ничто, записанное после, не открывается тем, что есть у ноутбука. Приказ стирания подписывает твоё устройство, и он выполняется, когда ноутбук в следующий раз достигает одного из твоих хранилищ данных. То, что ноутбук мог прочитать раньше, для него остаётся читаемым, папки в общем доступе с другими людьми сохраняют свои ключи, а его учётные данные хранилищ данных работают, пока ты не сменишь их у поставщика.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-3">
+      <h2>3. Поставщик закрывает твой аккаунт или теряет твои данные</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/provider.webp?v=bd7ed85c17"><img src="../../assets/img/usecases/provider.png?v=69940e970f" alt="Один поставщик закрыт; копии у второго поставщика и на диске дома остаются, и приложение чинит недостающее." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/provider-dark.webp?v=71aedaf377"><img src="../../assets/img/usecases/provider-dark.png?v=9b3a39369e" alt="Один поставщик закрыт; копии у второго поставщика и на диске дома остаются, и приложение чинит недостающее." width="640" height="320"></picture>
+      <div>
+        <p>Твоё хранилище данных закрывают без предупреждения. Данные есть ещё и у второго поставщика и на твоих устройствах, потому что Varsto никогда не опирается на одно хранилище данных. Приложение предупреждает, что правило хранения больше не выполняется, чинит недостающие копии в другое хранилище данных, а «опорожнение» (drain) уносит всё с записи мёртвого поставщика. Смена поставщика — обычная операция, а не проект миграции.</p>
+        <p class="note">Сегодня: любое число хранилищ данных (каталоги, бакеты S3, удалённые ресурсы rclone), правила хранения, которые предупреждают в приложении и уведомлением, когда правило под угрозой или нарушено, <code>fsck</code> сообщает, какие заявленные копии хранилище данных больше не может подтвердить, недостающие или повреждённые копии в твоих хранилищах данных чинятся автоматически из другой копии, и новые хранилища данных получают то, чего им не хватает. Удаление хранилища данных сначала копирует его данные в другое место (alpha.8); фоновое опорожнение в пределах бюджета и квоты — новое в 0.0.1-alpha.14.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-4">
+      <h2>4. Пожар в доме</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/fire.webp?v=94579f2551"><img src="../../assets/img/usecases/fire.png?v=301a60d13c" alt="Дом в огне; у каждого файла есть ещё копия у родственников в другом городе и в облачном бакете." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/fire-dark.webp?v=50728053e2"><img src="../../assets/img/usecases/fire-dark.png?v=44c6c7d2eb" alt="Дом в огне; у каждого файла есть ещё копия у родственников в другом городе и в облачном бакете." width="640" height="320"></picture>
+      <div>
+        <p>Всё дома пропадает сразу: ПК, NAS, диски в шкафу. Правила размещения по месту («одна копия вне этого места») заранее обеспечили, что каждый файл есть ещё и в другом городе или стране, в облачном бакете, на диске у родственников или на <a href="#uc-11">недоверенной реплике</a> у друга. Устройства в одном месте считаются одной областью отказа, поэтому две копии в одной комнате никогда не считаются за две.</p>
+        <p class="note">Сегодня: у каждого хранилища данных есть метка места (home, cloud, offsite, ...), и правило папки вроде «хотя бы одна копия в месте cloud» проверяется по журналу учёта на каждом устройстве, с предупреждением до того, как оно нарушится. Пул дисков может держать две копии на дисках, которые хранятся в разных местах, и папку можно писать только в выбранные места. Группировка целых устройств в площадки спроектирована.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-5">
+      <h2>5. Плёнка камеры заполнена</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/camera.webp?v=bf647f863b"><img src="../../assets/img/usecases/camera.png?v=7aec7acb3f" alt="Полная плёнка камеры телефона уходит зашифрованной; место освобождается, когда вторая копия проверена." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/camera-dark.webp?v=1357a4c812"><img src="../../assets/img/usecases/camera-dark.png?v=fc7587fe02" alt="Полная плёнка камеры телефона уходит зашифрованной; место освобождается, когда вторая копия проверена." width="640" height="320"></picture>
+      <div>
+        <p>Автоматическая отправка с камеры переносит фото и видео в твои хранилища данных, зашифрованные на телефоне до того, как они его покинут. «Освободить место» удаляет оригиналы только после того, как твоё правило хранения выполнено и копии проверены по хешу, а не просто отправлены. Миниатюры остаются на телефоне, поэтому галерея по-прежнему выглядит как галерея.</p>
+        <p class="note">Сегодня: приложение Android отправляет новые фото и видео в выбранную тобой папку (YYYY/MM по дате съёмки, по желанию только по Wi-Fi или на зарядке), каждое один раз, а зашифрованные миниатюры и проверенные копии есть в ядре. Оригиналы оно никогда не удаляет: освобождение места в галерее ещё впереди.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-6">
+      <h2>6. Новое устройство или маленький телефон</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/newdevice.webp?v=fc64382a68"><img src="../../assets/img/usecases/newdevice.png?v=d890f9954b" alt="Новый маленький телефон видит всё дерево папок как заполнители и скачал лишь несколько объектов." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/newdevice-dark.webp?v=234d034d77"><img src="../../assets/img/usecases/newdevice-dark.png?v=306f7c8797" alt="Новый маленький телефон видит всё дерево папок как заполнители и скачал лишь несколько объектов." width="640" height="320"></picture>
+      <div>
+        <p>Присоедини новое устройство своим ключом, и всё дерево папок сразу появляется как заполнители. Скачивается только то, что ты открываешь, и большие папки никогда не заполняют маленький диск. Телефон на 128 GB может нести хранилище на 2 TB. «Освободить место» снова делает файл заполнителем, когда он надёжно лежит в другом месте.</p>
+        <p class="note">Сегодня: <code>varsto folder attach --selective</code>, получение и освобождение, в командной строке и в интерфейсе компьютера. Finder, Explorer и файловые менеджеры Linux скачивают и освобождают файлы из контекстных меню; родные заполнители в Finder, Explorer и приложении «Файлы» будут позже.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-7">
+      <h2>7. «Прибери эту папку за меня»</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/tidy.webp?v=f843b65187"><img src="../../assets/img/usecases/tidy.png?v=a03202d808" alt="Разговор с помощником, который работает внутри одной выданной папки и предлагает более аккуратную структуру, с кнопкой «Подтвердить»." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/tidy-dark.webp?v=1735fe9174"><img src="../../assets/img/usecases/tidy-dark.png?v=3e91d9c283" alt="Разговор с помощником, который работает внутри одной выданной папки и предлагает более аккуратную структуру, с кнопкой «Подтвердить»." width="640" height="320"></picture>
+      <div>
+        <p>Десять лет отсканированных писем, чеков и заметок в одной папке. Ты даёшь языковой модели эту одну папку через сервер MCP в Varsto: локальной модели на твоей машине (Ollama, LM Studio или чему угодно, что говорит на Model Context Protocol). Содержимое никогда не покидает твои устройства: облачного помощника нет, ничего не отправляется поставщику модели, и модель видит только ту одну папку, которую ты выдал. Она читает файлы, разбирается, что это и что относится к одному, и предлагает структуру твоими словами: по году, по контрагенту, по проекту, «налоговые бумаги по годам, всё остальное по отправителю». После твоего подтверждения она создаёт каталоги, переносит и переименовывает файлы в них и пишет указатель, что куда ушло. Новая раскладка синхронизируется на остальные устройства как любое изменение, которое ты сделал сам.</p>
+        <p>Правила зафиксированы в Varsto, а не оставлены модели: она видит только выданные тобой папки, только для чтения, пока ты не разрешишь изменения, никогда твои Strongroom, и она не может ничего уничтожить. Инструмента удаления нет; запись только создаёт новые файлы, а перенос или переименование идёт только в имя, свободное на каждом устройстве, поэтому ни один файл никогда не заменяется другим. Если модель ошибётся, всё по-прежнему на месте, под другим путём.</p>
+        <p>Где должны лежать неиспользуемые данные, решает сам Varsto, не помощник: приложение ведёт запись последнего использования каждого файла и предлагает в интерфейсе, к чему не прикасались месяцами и сколько это стоило бы в классе холодного хранения, с источниками и датами.</p>
+        <p class="note">Сегодня: <code>varsto mcp</code> с выдачами по папкам (<code>varsto mcp grant Letters --write</code>): чтение, список, создание каталогов, перенос и переименование в свободные имена и создание новых заметок, без способа удалить или перезаписать; собственная оценка размещения Varsto в интерфейсе и в командной строке, посчитанная твоими ценами хранилищ данных, один щелчок (или <code>varsto advice apply</code>), чтобы освободить неиспользуемые файлы на этом устройстве, когда их копии проверены и правило папки всё ещё выполняется, и, когда у тебя есть более дешёвое холодное хранилище данных, один щелчок, чтобы перенести туда блоки неиспользуемых файлов, так что уменьшается сам счёт, никогда не опускаясь ниже правила папки (<code>varsto move Letters --from box --to glacier --idle-days 180</code> делает то же вручную, а <code>--dry-run</code> сначала показывает стоимость).</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-8">
+      <h2>8. Чувствительные документы</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/sensitive.webp?v=c67f2d78d7"><img src="../../assets/img/usecases/sensitive.png?v=93334cfc6f" alt="Налоговая папка в Strongroom: открывается только ключом безопасности, на телефоне нет открытого текста, скрыта от ИИ-помощника." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/sensitive-dark.webp?v=bf583c9b4c"><img src="../../assets/img/usecases/sensitive-dark.png?v=9b59b31414" alt="Налоговая папка в Strongroom: открывается только ключом безопасности, на телефоне нет открытого текста, скрыта от ИИ-помощника." width="640" height="320"></picture>
+      <div>
+        <p>Налоговая папка живёт в Strongroom: она открывается только касанием твоего ключа безопасности FIDO2, и это обеспечивает криптография, а не диалог. На телефоне из неё никогда ничего не пишется открытым текстом, и помощник не видит, что папка существует. Когда папка закрыта, ключ уходит из памяти.</p>
+        <p class="note">Сегодня: папки Strongroom открываются только ключом безопасности FIDO2 (инструменты libfido2), у них может быть запасной ключ, и они невидимы для помощников; в хранилище данных ничего не пишется открытым текстом. Существующую налоговую папку можно превратить в Strongroom: она заново шифруется новым ключом, старые копии удаляются из хранилища данных, открытые копии на других устройствах заменяются заполнителями. Папки, которые на телефоне держатся зашифрованными, содержат там только зашифрованные блоки, в том числе для файлов, оставленных для работы без сети; приложение Android показывает картинки, видео, звук и текст в своём просмотрщике, расшифрованные в памяти, не записывая копию на телефон; PDF и другие файлы по-прежнему открываются в другом приложении, которое получает расшифрованную копию, и Varsto удаляет её, когда запирается или перезапускается.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-9">
+      <h2>9. Десятки терабайт на старых дисках</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/disks.webp?v=c0209b5984"><img src="../../assets/img/features/disks.png?v=96f3587910" alt="Жёсткие диски на полке рядом с ПК и USB-доком." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/disks-dark.webp?v=66444a5bc2"><img src="../../assets/img/features/disks-dark.png?v=aaa4d305bd" alt="Жёсткие диски на полке рядом с ПК и USB-доком." width="640" height="320"></picture>
+      <div>
+        <p><strong>Ситуация.</strong> Ты ведёшь огромный архив на старых жёстких дисках через USB-док. Диски лежат в шкафу; часть хранится в другом месте. Сегодня ты следишь за ними таблицей или git-annex.</p>
+        <p><strong>Как помогает Varsto.</strong> Подключи диск «data-01» и скажи приложению его использовать. Оно заполняет диск по твоему правилу хранения, говорит, когда его можно извлечь, и записывает в журнал учёта, что на нём, где его хранят и когда его проверяли в последний раз. Когда на ноутбуке нужен большой файл, а скачивание из облака заняло бы часы, приложение предлагает: «Подключи диск data-01 (shelf: home); около 12 минут вместо 9 часов из облака». Папку можно держать только на дисках, в стольких копиях, сколько выберешь, без облачной копии.</p>
+        <p class="note">Сегодня: пул дисков — это хранилище данных; <code>varsto disk add</code> регистрирует диск, заполняет его в пределах запаса и помнит, что на нём, <code>disk check</code> проверяет и дополняет его, когда он возвращается, <code>disk eject</code> говорит, когда его безопасно извлечь, а файл, чья копия на отсутствующем диске, говорит в приложении и в командной строке «подключи диск data-01 (shelf)». Правила хранения считают отключённый диск по его последней проверке. Группы дисков держат заданное число копий на дисках, которые хранятся в разных местах (<code>varsto disk group shelf --copies 2</code>, у каждого диска своё место), правила хранения считают каждую копию на диске в её месте, и у папки, которую пишут только в пул (<code>varsto folder placement Archive --storage shelf</code>), нет облачной копии. Оценки времени в подсказке (планы получения) и <code>varsto import git-annex</code> — новое в 0.0.1-alpha.14.</p>
+      </div>
+    </section>
+
+
+    <section class="feature" id="uc-10">
+      <h2>10. Гигабайты между домом и офисом, без отправки</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/transferrer.webp?v=f3b21b15de"><img src="../../assets/img/features/transferrer.png?v=1169d86f86" alt="USB-накопитель, помеченный как переносчик, между домашним ПК и офисным ПК." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/transferrer-dark.webp?v=fded2eda96"><img src="../../assets/img/features/transferrer-dark.png?v=34b8b11ef0" alt="USB-накопитель, помеченный как переносчик, между домашним ПК и офисным ПК." width="640" height="320"></picture>
+      <div>
+        <p>Пометь USB-накопитель или внешний диск как <em>переносчик</em> и подключи его к обеим машинам. Он получает только те зашифрованные блоки, которых другой стороне ещё не хватает; когда блок есть на обоих концах, он удаляется с накопителя, который везёт ещё и партии журнала учёта, поэтому две машины согласны в том, что произошло, даже если у них никогда нет общей сети. Отредактируй видео в офисе, отвези накопитель домой, подключи, готово.</p>
+        <p class="note"><code>varsto storage add-local stick /media/usb --carrier</code> на обоих устройствах.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-11">
+      <h2>11. Двое друзей хранят резервные копии друг друга</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/untrusted.webp?v=645633b6de"><img src="../../assets/img/features/untrusted.png?v=3c570f3f9f" alt="Ты с ключами, общее хранилище данных и NAS друга, который хранит проверенные зашифрованные копии и не может их открыть." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/untrusted-dark.webp?v=bd3aee3a9f"><img src="../../assets/img/features/untrusted-dark.png?v=ad7af5f67f" alt="Ты с ключами, общее хранилище данных и NAS друга, который хранит проверенные зашифрованные копии и не может их открыть." width="640" height="320"></picture>
+      <div>
+        <p>Ты даёшь другу <em>токен реплики</em>. Его устройство копирует твои зашифрованные объекты из хранилища данных, до которого достаёте оба, на свой диск, проверяет каждый хеш и пишет собственный подписанный отчёт в твой журнал учёта. Оно никогда не получает ключ, которым можно что-то открыть; оно узнаёт имена объектов и размеры, ровно то, что узнаёт поставщик облака. В твоём приложении копии видны как проверенные. Они делают то же с твоим NAS. Никто из вас не может читать файлы другого, и у обоих есть копия вне площадки бесплатно.</p>
+        <p class="note"><code>varsto replica token</code> у тебя; <code>varsto replica init</code> и <code>replica run</code> у них. Тот же механизм годится для арендованной машины, которой ты не доверяешь.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-12">
+      <h2>12. Общий доступ к папке другому пользователю Varsto</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/sharing.webp?v=a0ea94f30b"><img src="../../assets/img/features/sharing.png?v=57aa0c5c33" alt="Два пользователя; ключ папки передаётся, чтобы другой пользователь мог синхронизировать и читать папку." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/sharing-dark.webp?v=e985c6ead3"><img src="../../assets/img/features/sharing-dark.png?v=b1853a6d68" alt="Два пользователя; ключ папки передаётся, чтобы другой пользователь мог синхронизировать и читать папку." width="640" height="320"></picture>
+      <div>
+        <p>Устройство другого пользователя входит в хранилище словами хранилища и видит имя папки, но содержимого не держит. Оно просит папку (<code>varsto folder request</code>), а на своём устройстве ты сравниваешь шесть слов, которые показывают оба экрана, и подтверждаешь вручную (<code>varsto folder approve</code>), и это записывает ему грант: ключ папки, запечатанный для него (гибрид X25519 + ML-KEM-768), потому что открыть его может только его устройство. Фоновая служба никогда не подтверждает. Он указывает папку на хранилище данных, до которого достаёте оба, и с этого момента синхронизирует и читает её как любую свою. Его устройство пишет собственный подписанный журнал учёта под ключом папки, поэтому ты видишь и его копии. Со сборки alpha.9 (выпущена как часть alpha.10) ты подтверждаешь, кто прислал код запроса, сравнивая шесть слов по другому каналу, а участника можно удалить, и тогда папка переходит на новый ключ. QR-приглашения и ссылки <code>varsto://</code> несут приглашение.</p>
+        <p class="note"><code>varsto share create docs</code> и для получателя <code>varsto share accept</code>, или те же кнопки в интерфейсе компьютера.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-13">
+      <h2>13. Просмотр фото на устройстве, которое их не скачивало</h2>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/reader.webp?v=b0cecd824e"><img src="../../assets/img/usecases/reader.png?v=31cea47963" alt="Компьютер создаёт миниатюры, хранит их зашифрованными, а телефон показывает превью файлов, которые он не скачивал." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/reader-dark.webp?v=eca1b5945e"><img src="../../assets/img/usecases/reader-dark.png?v=8642bee0fc" alt="Компьютер создаёт миниатюры, хранит их зашифрованными, а телефон показывает превью файлов, которые он не скачивал." width="640" height="320"></picture>
+      <div>
+        <p>Устройство, на котором лежат фото и видео, один раз создаёт миниатюры, шифрует их ключом папки и кладёт рядом с данными. Каждое другое устройство с ключом, в том числе телефон, чья папка сплошь заполнители, показывает превью, не забирая ни одной картинки. Поставщики хранилищ данных видят только шифротекст, у миниатюр так же, как у всего остального.</p>
+      </div>
+    </section>
+
+    <h2>Как это проверяется</h2>
+    <p>Автоматический набор в репозитории проигрывает несколько этих сценариев двумя или тремя смоделированными устройствами, которые никогда не бывают в сети одновременно: схождение без сети, одновременные правки с копиями конфликтов, устройство, восстановленное из старой резервной копии, реплика, папка в общем доступе, диск-переносчик, выборочная синхронизация и миниатюры. Лаборатория виртуальных машин с домашней и офисной сетями за NAT на каждом выпуске проигрывает сценарии передачи между узлами, локальной сети, обрыва, расхождения часов, масштаба и съёмных дисков (горячее подключение диска, подготовка целого диска, планы получения); всего 59 сценариев. Смотри <a href="../../docs/testing.html">Тестирование</a> и <a href="../../docs/failure-model.html">модель отказов</a>.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Шифрованная синхронизация и резервное копирование файлов на твоём хранилище.</p></div>
+    <div><h2>Продукт</h2><nav aria-label="Продукт"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/" aria-current="page">Сценарии</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../ru/downloads/">Загрузки</a></nav></div>
+    <div><h2>Изучить</h2><nav aria-label="Изучить"><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/compare/">Сравнение</a><a href="../../ru/videos/">Видео</a><a href="../../docs/">Документация (en)</a><a href="../../blog/">Блог (en)</a></nav></div>
+    <div><h2>Сообщество</h2><nav aria-label="Сообщество"><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto — рабочее название. Исходный код: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, по лицензии PolyForm Shield License 1.0.0 (исходный код доступен).</span>
+    <span>Без cookie и без слежения. Веб-сервер хранит обычный журнал доступа не дольше семи дней.</span>
+    <span><a href="../../docs/security-policy.html">Политика безопасности</a> · <a href="../../docs/licence.html">Лицензия</a> · <a href="../../docs/trademark.html">Товарный знак</a> (на английском)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

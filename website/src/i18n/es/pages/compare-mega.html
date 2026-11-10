@@ -1,0 +1,51 @@
+---
+title: Alternativa a MEGA: Varsto y MEGA comparados
+nav: Compare
+output: compare/mega/index.html
+description: ¿Buscas una alternativa a MEGA con cifrado de extremo a extremo en tu propio almacenamiento (S3, NAS, discos, rclone)? Para qué sirve MEGA, cómo funciona y cómo se compara con Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Todas las comparaciones</a></p>
+    <h1>Varsto y MEGA</h1>
+    <p class="lead">MEGA es almacenamiento en la nube cifrado de extremo a extremo para particulares y empresas. Tiene planes con mucho espacio, sincronización de escritorio, aplicaciones móviles y servicios relacionados, como un chat y una VPN.</p>
+
+    <h2>En qué se diferencia Varsto</h2>
+    <ul>
+      <li>Varios proveedores a la vez, o tu propio NAS y tus discos, en lugar de una sola nube.</li>
+      <li>Un libro mayor firmado dice dónde está cada copia y cuándo otro dispositivo la comprobó por última vez.</li>
+      <li>Copias de seguridad cifradas y de solo lectura, con un plazo de conservación, en tus propios almacenamientos.</li>
+      <li>Criptografía híbrida poscuántica para cada firma almacenada y cada clave sellada (diseñada para ello; sin auditar).</li>
+    </ul>
+
+    <h2>Cómo funciona MEGA</h2>
+    <p>Creas una cuenta y tus archivos se guardan en los centros de datos de MEGA; los dispositivos se sincronizan a través de los servidores de MEGA. Los archivos se cifran en el cliente con claves por archivo, a su vez protegidas por una clave derivada de tu contraseña. En 2022, investigadores de la ETH Zúrich publicaron ataques contra la criptografía de MEGA; MEGA los corrigió, y los autores señalaron que una corrección completa exigiría un rediseño. Hay aplicaciones de escritorio para Windows, macOS y Linux, además de aplicaciones móviles y un cliente de línea de órdenes.</p>
+
+    <h2>Lado a lado</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">MEGA</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Dónde están tus archivos</th><td>En la nube de MEGA; no puedes usar tu propio almacenamiento como base del disco.</td><td>En tus propios dispositivos y en los almacenamientos que elijas: buckets compatibles con S3, cualquier remoto de rclone, directorios locales o de red y grupos de discos extraíbles.</td></tr>
+      <tr><th scope="row">Cuenta o servidor central</th><td>Hace falta una cuenta; todo pasa por MEGA.</td><td>Ninguno. No hay servidor de Varsto; los dispositivos se encuentran a través de tus almacenamientos y en la LAN.</td></tr>
+      <tr><th scope="row">Cifrado</th><td>De extremo a extremo, en el cliente; las debilidades que hallaron antes investigadores académicos ya están corregidas.</td><td>De extremo a extremo, en el cliente, antes de que nada salga del dispositivo; cifrado híbrido poscuántico (ML-KEM para compartir claves, firmas Ed25519 + ML-DSA-65). Aún no auditado de forma independiente.</td></tr>
+      <tr><th scope="row">Dispositivos en línea a la vez</th><td>No hace falta: la copia está en la nube.</td><td>No hace falta: los dispositivos se sincronizan a través de tus almacenamientos y directamente de par a par cuando pueden alcanzarse.</td></tr>
+      <tr><th scope="row">Sabe dónde está cada copia</th><td>Una copia en el proveedor; no hay seguimiento de tus propios soportes.</td><td>Sí: un libro mayor firmado registra qué almacenamiento y qué dispositivo conserva cada bloque; las políticas de conservación (por defecto, 1 copia en cualquier sitio, 1 externa y 1 en tus propios discos, comprobada por otro dispositivo en un plazo de 30 días) avisan cuando no se cumple una regla.</td></tr>
+      <tr><th scope="row">Discos extraíbles y sin conexión</th><td>No hay un flujo de trabajo para discos extraíbles.</td><td>Sí: los grupos de discos se llenan, se comprueban y se reconocen cuando vuelven; los archivos que están en un disco ausente piden ese disco.</td></tr>
+      <tr><th scope="row">Copias de seguridad</th><td>La aplicación de escritorio copia carpetas en un solo sentido hacia la nube de MEGA, donde son de solo lectura. El historial de versiones depende del plan.</td><td>Sí: elige una carpeta en cualquier dispositivo. Varsto guarda de ella instantáneas cifradas y de solo lectura solo en tus almacenamientos externos, nunca en tus dispositivos. Las conserva el número de días que elijas (90 por defecto) y borra las caducadas. Puedes restaurar cualquier instantánea en un directorio que nombres, desde la aplicación o la línea de órdenes.</td></tr>
+            <tr><th scope="row">Licencia</th><td>Código de los clientes publicado (el SDK con licencia BSD, la aplicación de escritorio con la licencia propia de MEGA).</td><td>Código fuente disponible (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Precio</th><td>Plan gratuito y planes de pago con cuotas de transferencia.</td><td>Gratis; solo pagas a tu proveedor de almacenamiento</td></tr>
+      <tr><th scope="row">Madurez</th><td>Servicio grande y de larga trayectoria.</td><td>Alfa: no para datos de producción, y los formatos aún pueden cambiar.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Cuál te encaja</h2>
+    <div class="grid two">
+      <div class="card"><h3>MEGA</h3><p>Elige MEGA cuando quieres mucho espacio cifrado en la nube de un solo proveedor, con aplicaciones pulidas en todas partes, y te vale que la única copia fuera de casa la tenga el proveedor.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Elige Varsto cuando quieres elegir tú el almacenamiento (o varios proveedores a la vez), evitar quedar atado a un proveedor, guardar copias también en tus propios discos y saber en cada momento dónde está cada copia.</p></div>
+    </div>
+    <p class="note">Varsto es software en fase alfa: no le confíes datos de los que no tengas otra copia. Su criptografía tampoco se ha auditado de forma independiente. Los demás productos de aquí son maduros. Los datos sobre ellos se comprobaron en su propia documentación en octubre de 2026; los precios y los planes cambian a menudo, así que mira sus propias páginas para las cifras actuales. Las correcciones son bienvenidas como <a href="https://github.com/janttsu/varsto/issues" rel="noopener">issues de GitHub</a>.</p>
+
+    <h2>Fuentes</h2>
+    <ul>
+      <li><a href="https://mega.io/">Sitio web de MEGA</a></li>
+      <li><a href="https://github.com/meganz/MEGAsync">Código fuente de la aplicación de escritorio de MEGA</a></li>
+      <li><a href="https://eprint.iacr.org/2022/959">MEGA: Malleable Encryption Goes Awry (ETH Zúrich)</a></li>
+    </ul>

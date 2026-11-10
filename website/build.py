@@ -59,6 +59,9 @@ UI_I18N = {
     "fi": {"Menu": "Valikko", "Language": "Kieli", "Product": "Tuote", "Learn": "Opi", "Community": "Yhteisö", "Download": "Lataa", "Main": "Päävalikko"},
     "sv": {"Menu": "Meny", "Language": "Språk", "Product": "Produkt", "Learn": "Lär dig", "Community": "Gemenskap", "Download": "Ladda ner", "Main": "Huvudmeny"},
     "fr": {"Menu": "Menu", "Language": "Langue", "Product": "Produit", "Learn": "Découvrir", "Community": "Communauté", "Download": "Télécharger", "Main": "Menu principal"},
+    "de": {"Menu": "Menü", "Language": "Sprache", "Product": "Produkt", "Learn": "Lernen", "Community": "Gemeinschaft", "Download": "Herunterladen", "Main": "Hauptmenü"},
+    "es": {"Menu": "Menú", "Language": "Idioma", "Product": "Producto", "Learn": "Aprender", "Community": "Comunidad", "Download": "Descargar", "Main": "Menú principal"},
+    "ru": {"Menu": "Меню", "Language": "Язык", "Product": "Продукт", "Learn": "Изучить", "Community": "Сообщество", "Download": "Скачать", "Main": "Главное меню"},
 }
 SVG_GH = '<svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>'
 SVG_MOON = '<svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>'
@@ -174,7 +177,8 @@ def version_images(body: str) -> str:
 # Website languages: English at the root, the others under /<lang>/ with
 # pages translated in website/src/i18n/<lang>/pages/. Docs, blog and forum
 # stay English (internal documentation is English only).
-LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska"), ("fr", "Français")]
+LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska"), ("fr", "Français"),
+         ("de", "Deutsch"), ("es", "Español"), ("ru", "Русский")]
 NAV_I18N = {
     "fi": {"Project": "Projekti", "Features": "Ominaisuudet", "Use cases": "Käyttötapaukset", "Compare": "Vertailu",
            "How it works": "Miten se toimii", "Screenshots": "Kuvakaappaukset", "Videos": "Videot", "Docs": "Dokumentaatio (en)",
@@ -185,12 +189,24 @@ NAV_I18N = {
     "fr": {"Project": "Projet", "Features": "Fonctionnalités", "Use cases": "Cas d'usage", "Compare": "Comparaison",
            "How it works": "Fonctionnement", "Screenshots": "Captures d'écran", "Videos": "Vidéos", "Docs": "Documentation (en)",
            "Downloads": "Téléchargements", "Blog": "Blog (en)", "Forum": "Forum (en)", "Contribute": "Contribuer", "GitHub": "GitHub"},
+    "de": {"Project": "Projekt", "Features": "Funktionen", "Use cases": "Anwendungsfälle", "Compare": "Vergleich",
+           "How it works": "So funktioniert es", "Screenshots": "Bildschirmfotos", "Videos": "Videos", "Docs": "Dokumentation (en)",
+           "Downloads": "Downloads", "Blog": "Blog (en)", "Forum": "Forum (en)", "Contribute": "Mitwirken", "GitHub": "GitHub"},
+    "es": {"Project": "Proyecto", "Features": "Funciones", "Use cases": "Casos de uso", "Compare": "Comparación",
+           "How it works": "Cómo funciona", "Screenshots": "Capturas", "Videos": "Vídeos", "Docs": "Documentación (en)",
+           "Downloads": "Descargas", "Blog": "Blog (en)", "Forum": "Foro (en)", "Contribute": "Contribuir", "GitHub": "GitHub"},
+    "ru": {"Project": "Проект", "Features": "Возможности", "Use cases": "Сценарии", "Compare": "Сравнение",
+           "How it works": "Как это устроено", "Screenshots": "Снимки экрана", "Videos": "Видео", "Docs": "Документация (en)",
+           "Downloads": "Загрузки", "Blog": "Блог (en)", "Forum": "Форум (en)", "Contribute": "Участие", "GitHub": "GitHub"},
 }
 ENGLISH_ONLY = ("docs/", "blog/", "forum/")
 ALPHA_I18N = {
     "fi": "<strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.",
     "sv": "<strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.",
     "fr": "<strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.",
+    "de": "<strong>Alpha-Software, nicht für Produktionsdaten.</strong> Fehler können Daten zerstören, das Speicherformat kann sich ohne Migrationswerkzeug ändern, und die Verschlüsselung ist noch nicht geprüft. Behalte eigene Sicherungskopien und prüfe, dass du daraus wiederherstellen kannst.",
+    "es": "<strong>Software alfa, no para datos de producción.</strong> Los errores pueden destruir datos, el formato de almacenamiento puede cambiar sin una herramienta de migración y el cifrado aún no se ha auditado. Conserva tus propias copias de seguridad y comprueba que puedes restaurar desde ellas.",
+    "ru": "<strong>Альфа-версия, не для рабочих данных.</strong> Ошибки могут уничтожить данные, формат хранения может измениться без средства переноса, а шифрование ещё не проверяли. Храни собственные резервные копии и убедись, что из них можно восстановиться.",
 }
 FOOTER_I18N = {
     "fi": [
@@ -208,17 +224,37 @@ FOOTER_I18N = {
         "Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.",
         '<a href="{p}docs/security-policy.html">Politique de sécurité</a> · <a href="{p}docs/licence.html">Licence</a> · <a href="{p}docs/trademark.html">Marque</a> (en anglais)',
     ],
+    "de": [
+        f'{BRAND} ist ein Arbeitsname. Quellcode: <a href="{REPO}">github.com/janttsu/varsto</a>, unter der PolyForm Shield License 1.0.0 (Quellcode verfügbar).',
+        "Keine Cookies, kein Tracking. Der Webserver behält ein gewöhnliches Zugriffsprotokoll höchstens sieben Tage.",
+        '<a href="{p}docs/security-policy.html">Sicherheitsrichtlinie</a> · <a href="{p}docs/licence.html">Lizenz</a> · <a href="{p}docs/trademark.html">Marke</a> (auf Englisch)',
+    ],
+    "es": [
+        f'{BRAND} es un nombre provisional. Código fuente: <a href="{REPO}">github.com/janttsu/varsto</a>, bajo la PolyForm Shield License 1.0.0 (código fuente disponible).',
+        "Sin cookies, sin seguimiento. El servidor web conserva un registro de acceso ordinario como máximo siete días.",
+        '<a href="{p}docs/security-policy.html">Política de seguridad</a> · <a href="{p}docs/licence.html">Licencia</a> · <a href="{p}docs/trademark.html">Marca</a> (en inglés)',
+    ],
+    "ru": [
+        f'{BRAND} — рабочее название. Исходный код: <a href="{REPO}">github.com/janttsu/varsto</a>, по лицензии PolyForm Shield License 1.0.0 (исходный код доступен).',
+        "Без cookie и без слежения. Веб-сервер хранит обычный журнал доступа не дольше семи дней.",
+        '<a href="{p}docs/security-policy.html">Политика безопасности</a> · <a href="{p}docs/licence.html">Лицензия</a> · <a href="{p}docs/trademark.html">Товарный знак</a> (на английском)',
+    ],
 }
 SKIP_I18N = {"en": "Skip to content", "fi": "Siirry sisältöön", "sv": "Hoppa till innehållet",
-             "fr": "Aller au contenu"}
+             "fr": "Aller au contenu", "de": "Zum Inhalt springen", "es": "Saltar al contenido",
+             "ru": "К содержанию"}
 # The home page title: what people search for.
 TAGLINE = {"en": "encrypted file sync and backup on your own storage",
            "fi": "salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan",
            "sv": "krypterad filsynkronisering och säkerhetskopiering till din egen lagring",
-           "fr": "synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage"}
+           "fr": "synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage",
+           "de": "verschlüsselte Dateisynchronisierung und Sicherung auf deinem eigenen Speicher",
+           "es": "sincronización y copia de seguridad de archivos cifradas en tu propio almacenamiento",
+           "ru": "шифрованная синхронизация и резервное копирование файлов на твоём хранилище"}
 
 
-OG_LOCALE = {"en": "en_GB", "fi": "fi_FI", "sv": "sv_SE", "fr": "fr_FR"}
+OG_LOCALE = {"en": "en_GB", "fi": "fi_FI", "sv": "sv_SE", "fr": "fr_FR",
+             "de": "de_DE", "es": "es_ES", "ru": "ru_RU"}
 
 
 def absolute(lang: str, page_rel: str) -> str:
@@ -452,6 +488,21 @@ GROUP_COPY = {
         "desktop": ("Ordinateur", "Le service, l’interface et la ligne de commande dans un même paquet."),
         "mobile": ("Téléphone et tablette", "Android s’installe en APK. iOS est un ipa non signé que vous signez avec votre identifiant Apple."),
         "source": ("Source", "La version étiquetée en archive git. Le dépôt est le même arbre."),
+    },
+    "de": {
+        "desktop": ("Schreibtisch", "Dienst, Oberfläche und Befehlszeile in einem Paket."),
+        "mobile": ("Telefon und Tablet", "Android wird als APK installiert. iOS ist ein unsigniertes IPA, das du mit deiner eigenen Apple-ID signierst."),
+        "source": ("Quellcode", "Der markierte Release als Git-Archiv. Das Archiv ist derselbe Baum."),
+    },
+    "es": {
+        "desktop": ("Escritorio", "El servicio, la interfaz y la línea de comandos en un mismo paquete."),
+        "mobile": ("Teléfono y tableta", "Android se instala como APK. iOS es un IPA sin firmar que firmas con tu propio Apple ID."),
+        "source": ("Código fuente", "La versión etiquetada como archivo git. El repositorio es el mismo árbol."),
+    },
+    "ru": {
+        "desktop": ("Компьютер", "Служба, интерфейс и командная строка в одном пакете."),
+        "mobile": ("Телефон и планшет", "Android ставится как APK. iOS — неподписанный IPA, который ты подписываешь своим Apple ID."),
+        "source": ("Исходный код", "Отмеченный выпуск как git-архив. Репозиторий — то же дерево."),
     },
 }
 
@@ -771,6 +822,66 @@ DAILY_I18N = {
             "ios-untested": "L’ipa iOS n’a pas été exécuté sur un vrai appareil. Installez-le avec AltStore, SideStore ou Sideloadly.",
             "ui-strings": "Certains textes de l’interface de l’application ne sont pas encore traduits ; ils sont consignés dans les journaux.",
             "format3": "Ces versions écrivent le format de stockage 3. Un coffre créé par 0.0.1-alpha.15 ou plus ancien est refusé et doit être recréé (varsto reset --yes, varsto init, resynchroniser les fichiers) ; il n’y a pas de mise à niveau. Un appareil qui rejoint ne détient aucun dossier tant qu’un propriétaire n’a pas approuvé sa demande.",
+        },
+    },
+    "de": {
+        "build": 'Neuester Build <strong data-f="id"></strong>, <span data-f="date"></span>; Versionszeichenkette <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'Die Links in der Tabelle zeigen immer auf den neuesten Build. Build-Kennung, Größen und Prüfsummen setzt ein kleines Skript; ohne es liest du <a href="{pre}daily/latest.json">latest.json</a> und <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> direkt.',
+        "unavailable": "Die Angaben zum Build konnten gerade nicht geladen werden. Die Links in der Tabelle zeigen trotzdem auf den neuesten Build.",
+        "cols": ("Plattform", "Download", "Größe", "Gebaut aus", "SHA-256"),
+        "main": 'Der Hauptzweig bei Commit <a data-f="commit"></a>.',
+        "ci": 'CI-Lauf: <a data-f="ci_run"></a>',
+        "gaps": {
+            "unsigned": "Die Builds haben keine Release-Signatur und keine Codesignatur von Apple oder Microsoft. Die Prüfsummenliste ist mit dem separaten Daily-Schlüssel signiert (varsto update --daily prüft ihn). Das zeigt, dass ein Build aus der CI des Projekts kommt, nicht dass er getestet wurde.",
+            "os-warnings": "macOS, Windows und iOS warnen vor unsignierter Software; unter macOS Rechtsklick und Öffnen, unter Windows fragt SmartScreen nach.",
+            "windows-ci-only": "Das Windows-Installationsprogramm wurde nur in der CI angeraucht (Installation, Upgrade, Reparatur, verweigerte Rückstufung, Deinstallation), nicht auf einem echten Rechner.",
+            "ios-untested": "Das iOS-IPA lief nicht auf einem echten Gerät. Sideload mit AltStore, SideStore oder Sideloadly.",
+            "ui-strings": "Einige Texte der Oberfläche sind noch nicht übersetzt; sie werden protokolliert.",
+            "format3": "Diese Builds schreiben Speicherformat 3. Ein Tresor von 0.0.1-alpha.15 oder älter wird abgelehnt und muss neu angelegt werden (varsto reset --yes, varsto init, Dateien erneut synchronisieren); ein Upgrade gibt es nicht. Ein beitretendes Gerät hat keinen Ordner, bis ein Eigentümer die Anfrage annimmt.",
+            "windows-ios-previous": "Windows und iOS stammen noch vom vorherigen Build 20261016-316c579; sie wurden in dieser Runde nicht neu gebaut.",
+            "grace-default": "Die Frist, nach der ein zurückgefallener Speicher aufgegeben wird (Paket E), ist standardmäßig 30 Tage.",
+            "devices-unverified": "Der Vollbild-Code für Kotlin, Swift und Windows und die Paarungskorrektur sind auf echten Geräten nicht geprüft.",
+            "first-daily-update": "Das erste Update mit --daily braucht eine Binary, die die Funktion schon enthält. Installiere diesen Build einmal von Hand; danach übernimmt varsto update --daily.",
+        },
+    },
+    "es": {
+        "build": 'Última compilación <strong data-f="id"></strong>, <span data-f="date"></span>; cadena de versión <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'Los enlaces de la tabla apuntan siempre a la compilación más reciente. El identificador, los tamaños y las sumas de comprobación los rellena un script pequeño; sin él, lee <a href="{pre}daily/latest.json">latest.json</a> y <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> directamente.',
+        "unavailable": "Los datos de la compilación no se han podido cargar ahora. Los enlaces de la tabla siguen apuntando a la compilación más reciente.",
+        "cols": ("Plataforma", "Descarga", "Tamaño", "Construido desde", "SHA-256"),
+        "main": 'La rama principal en el commit <a data-f="commit"></a>.',
+        "ci": 'Ejecución de CI: <a data-f="ci_run"></a>',
+        "gaps": {
+            "unsigned": "Las compilaciones no llevan firma de versión ni firma de código de Apple o Microsoft. La lista de sumas está firmada con la clave diaria aparte (la comprueba varsto update --daily), lo que muestra que una compilación sale de la CI del proyecto, no que se haya probado.",
+            "os-warnings": "macOS, Windows e iOS avisan del software sin firmar; en macOS, clic derecho y Abrir, y en Windows SmartScreen pide confirmación.",
+            "windows-ci-only": "El instalador de Windows solo ha pasado una prueba de humo en CI (instalación, actualización, reparación, rechazo de bajar de versión, desinstalación), no en una máquina real.",
+            "ios-untested": "El IPA de iOS no se ha ejecutado en un dispositivo real. Instálalo con AltStore, SideStore o Sideloadly.",
+            "ui-strings": "Algunos textos de la interfaz aún no están traducidos; se anotan en el registro.",
+            "format3": "Estas compilaciones escriben el formato de almacenamiento 3. Una bóveda hecha con 0.0.1-alpha.15 o anterior se rechaza y hay que crearla de nuevo (varsto reset --yes, varsto init, sincronizar los archivos otra vez); no hay actualización. Un dispositivo que se une no tiene ninguna carpeta hasta que un propietario aprueba su solicitud.",
+            "windows-ios-previous": "Windows e iOS siguen saliendo de la compilación anterior 20261016-316c579; no se reconstruyeron en esta ronda.",
+            "grace-default": "El plazo antes de abandonar un almacenamiento que se ha quedado atrás (paquete E) es de 30 días por defecto.",
+            "devices-unverified": "El código a pantalla completa de Kotlin, Swift y Windows y la corrección del emparejamiento no se han comprobado en dispositivos reales.",
+            "first-daily-update": "La primera actualización con --daily necesita un binario que ya tenga la función, así que instala esta compilación a mano una vez; después varsto update --daily se encarga.",
+        },
+    },
+    "ru": {
+        "build": 'Последняя сборка <strong data-f="id"></strong>, <span data-f="date"></span>; строка версии <span data-f="version"></span>. <a href="{pre}daily/latest.json">latest.json</a> · <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>',
+        "noscript": 'Ссылки в таблице всегда ведут на самую новую сборку. Идентификатор, размеры и контрольные суммы подставляет небольшой скрипт; без него читай <a href="{pre}daily/latest.json">latest.json</a> и <a href="{pre}daily/latest/SHA256SUMS">SHA256SUMS</a> напрямую.',
+        "unavailable": "Сведения о сборке сейчас не загрузились. Ссылки в таблице всё равно ведут на самую новую сборку.",
+        "cols": ("Платформа", "Загрузка", "Размер", "Собрано из", "SHA-256"),
+        "main": 'Основная ветка на коммите <a data-f="commit"></a>.',
+        "ci": 'Запуск CI: <a data-f="ci_run"></a>',
+        "gaps": {
+            "unsigned": "У сборок нет подписи выпуска и подписи кода Apple или Microsoft. Список контрольных сумм подписан отдельным ежедневным ключом (его проверяет varsto update --daily). Это показывает, что сборка пришла из CI проекта, а не то, что её тестировали.",
+            "os-warnings": "macOS, Windows и iOS предупреждают о неподписанном ПО; на macOS это правый клик и «Открыть», на Windows — запрос SmartScreen.",
+            "windows-ci-only": "Установщик Windows прошёл только дымовой тест в CI (установка, обновление, восстановление, отказ понизить версию, удаление), не на настоящей машине.",
+            "ios-untested": "IPA для iOS не запускали на настоящем устройстве. Ставь его через AltStore, SideStore или Sideloadly.",
+            "ui-strings": "Часть строк интерфейса ещё не переведена; они пишутся в журнал.",
+            "format3": "Эти сборки пишут формат хранения 3. Хранилище, созданное версией 0.0.1-alpha.15 или старше, отклоняется, и его нужно создать заново (varsto reset --yes, varsto init, синхронизировать файлы снова); обновления нет. У присоединившегося устройства нет папок, пока владелец не примет запрос.",
+            "windows-ios-previous": "Windows и iOS всё ещё из предыдущей сборки 20261016-316c579; в этом круге их не пересобирали.",
+            "grace-default": "Срок, после которого отстающее хранилище данных бросают (пакет E), по умолчанию 30 дней.",
+            "devices-unverified": "Полноэкранный код Kotlin, Swift и Windows и исправление сопряжения на настоящих устройствах не проверяли.",
+            "first-daily-update": "Первое обновление через --daily требует программу, в которой эта возможность уже есть, поэтому поставь эту сборку один раз вручную; дальше это делает varsto update --daily.",
         },
     },
 }

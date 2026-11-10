@@ -1,0 +1,53 @@
+---
+title: Syncthing-Alternative: Varsto und Syncthing im Vergleich
+nav: Compare
+output: compare/syncthing/index.html
+description: Suchst du eine Syncthing-Alternative mit Ende-zu-Ende-Verschlüsselung auf deinem eigenen Speicher (S3, NAS, Platten, rclone)? Wofür Syncthing gedacht ist, wie es funktioniert und wie es sich mit Varsto vergleicht.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alle Vergleiche</a></p>
+    <h1>Varsto und Syncthing</h1>
+    <p class="lead">Syncthing hält Ordner auf deinen eigenen Geräten gleich, fortlaufend und ohne jede Cloud. Es ist kostenlos, ausgereift und bei technischen Nutzern und in Heimlabors beliebt: auf Laptop, Desktop und NAS installiert, bleiben die Ordner im Gleichschritt.</p>
+
+    <h2>Worin sich Varsto unterscheidet</h2>
+    <ul>
+      <li>Zwei Geräte müssen nicht gleichzeitig online sein: deine Speicher tragen die Änderungen, sodass ein Laptop, der nachts synchronisiert, und ein Telefon, das morgens synchronisiert, trotzdem im selben Stand ankommen.</li>
+      <li>Dateinamen und Inhalt sind auf jedem Speicher im Ruhezustand verschlüsselt, nicht nur auf eigens benannten „nicht vertrauenswürdigen Geräten“: ein Bucket, ein NAS, eine Platte oder der Rechner eines Freundes hält immer nur Geheimtext.</li>
+      <li>Kopien werden gezählt: ein signiertes Hauptbuch sagt, wo jede Kopie liegt und wann ein anderes Gerät sie geprüft hat, und eine Aufbewahrungsregel wie „eine Kopie außerhalb des Hauses“ warnt, bevor sie bricht.</li>
+      <li>Plattenpools aus Wechselplatten, die kommen und gehen, werden gefüllt, geprüft und als Kopien gezählt.</li>
+      <li>Sicherungen: schreibgeschützte, verschlüsselte Schnappschüsse eines beliebigen Ordners auf deinen Speichern, so viele Tage aufbewahrt, wie du wählst.</li>
+    </ul>
+
+    <h2>So funktioniert Syncthing</h2>
+    <p>Geräte verbinden sich von Gegenstelle zu Gegenstelle über TLS und werden über zertifikatsbasierte Geräte-IDs erkannt; ein Konto gibt es nicht. Öffentliche Discovery- und Relay-Server des Projekts helfen den Geräten, einander zu finden, und du kannst eigene betreiben. Die Daten liegen nur auf den beteiligten Geräten: ein S3- oder rclone-Backend gibt es nicht, und der Anbieter hat keine Kopie. Die Versionierung (Papierkorb, einfach, gestaffelt oder extern) gilt für Änderungen, die von anderen Geräten kommen. Selektive Synchronisierung läuft über Ignoriermuster; Platzhalter gibt es nicht. Unter Android wurde die offizielle App 2024 eingestellt, ein Community-Fork führt sie weiter; unter iOS gibt es nur einen Client eines Dritten.</p>
+
+    <h2>Nebeneinander</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Syncthing</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Wo deine Dateien liegen</th><td>Nur auf den Geräten, auf denen Syncthing läuft (ein NAS oder ein Server zählt, wenn darauf Syncthing läuft).</td><td>Auf deinen eigenen Geräten und auf Speichern, die du wählst: S3-kompatible Buckets, jedes rclone-Remote, lokale oder Netzwerkverzeichnisse sowie Plattenpools aus Wechseldatenträgern.</td></tr>
+      <tr><th scope="row">Konto oder zentraler Server</th><td>Keines von beiden; vom Projekt betriebene Discovery- und Relay-Server (selbst betreibbar).</td><td>Keines von beiden. Es gibt keinen Varsto-Server; die Geräte finden einander über deine Speicher und im LAN.</td></tr>
+      <tr><th scope="row">Verschlüsselung</th><td>TLS während der Übertragung; keine eigene Verschlüsselung im Ruhezustand. „Nicht vertrauenswürdige (verschlüsselte) Geräte“ gibt es, sie sind aber noch als Beta markiert.</td><td>Ende-zu-Ende, clientseitig, bevor etwas das Gerät verlässt; hybride Post-Quanten-Verschlüsselung (ML-KEM zum Teilen der Schlüssel, Ed25519- und ML-DSA-65-Signaturen). Noch nicht unabhängig geprüft.</td></tr>
+      <tr><th scope="row">Geräte gleichzeitig online</th><td>Ja: zwei Geräte müssen gleichzeitig online sein, um Änderungen auszutauschen, außer es bleibt ein dauerhaft eingeschaltetes Gerät.</td><td>Nicht nötig: Die Geräte synchronisieren sich über deine Speicher und direkt von Gegenstelle zu Gegenstelle, wenn sie einander erreichen.</td></tr>
+      <tr><th scope="row">Weiß, wo jede Kopie liegt</th><td>Keine Erfassung von Kopien oder ihrer Anzahl.</td><td>Ja: Ein signiertes Hauptbuch hält fest, welcher Speicher und welches Gerät jeden Block hält; Aufbewahrungsregeln (standardmäßig 1 Kopie irgendwo, 1 externe und 1 auf deinen eigenen Platten, von einem anderen Gerät innerhalb von 30 Tagen geprüft) warnen, wenn eine Regel nicht erfüllt ist.</td></tr>
+      <tr><th scope="row">Wechseldatenträger und Offline-Platten</th><td>Kein Ablauf für Wechselplatten.</td><td>Ja: Plattenpools werden gefüllt, geprüft und erkannt, wenn sie zurückkommen; Dateien auf einer Platte, die weg ist, verlangen genau diese Platte.</td></tr>
+      <tr><th scope="row">Sicherungen</th><td>Nach der eigenen FAQ kein Sicherungswerkzeug: Änderungen und Löschungen erreichen jedes Gerät. Die Dateiversionierung behält ersetzte Dateien auf den empfangenden Geräten.</td><td>Ja: Wähle einen Ordner auf einem beliebigen Gerät. Varsto behält davon verschlüsselte, schreibgeschützte Schnappschüsse nur auf deinen externen Speichern, nie auf deinen Geräten, so viele Tage, wie du wählst (standardmäßig 90), und löscht danach die abgelaufenen. Stelle einen beliebigen Schnappschuss in ein Verzeichnis wieder her, das du nennst, aus der App oder von der Kommandozeile.</td></tr>
+      <tr><th scope="row">Lizenz</th><td>Open Source (MPL-2.0).</td><td>Quellcode verfügbar (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Preis</th><td>Kostenlos.</td><td>Kostenlos; du zahlst nur deinen Speicheranbieter</td></tr>
+      <tr><th scope="row">Reife</th><td>Ausgereiftes, langjähriges Projekt (2.x).</td><td>Alpha: nicht für Produktionsdaten, und die Formate können sich noch ändern.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Was zu dir passt</h2>
+    <div class="grid two">
+      <div class="card"><h3>Syncthing</h3><p>Wähle Syncthing, wenn jede Kopie auf Maschinen bleiben soll, die du selbst betreibst, mindestens eine davon immer an ist und du ein ausgereiftes Open-Source-Werkzeug ganz ohne Konten willst.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Wähle Varsto, wenn du außerdem eine verschlüsselte Kopie in einem Bucket oder auf Wechselplatten willst, deine Geräte selten gleichzeitig online sind, du eine Aufzeichnung willst, wo jede Kopie liegt, oder ein Telefon, das Dateien liest, ohne sie im Klartext zu behalten.</p></div>
+    </div>
+    <p class="note">Varsto ist Alpha-Software: Vertraue ihm keine Daten an, von denen du keine weitere Kopie hast, und seine Kryptografie ist nicht unabhängig geprüft. Die anderen Produkte hier sind ausgereift. Angaben zu ihnen wurden im Oktober 2026 anhand ihrer eigenen Dokumentation geprüft; Preise und Tarife ändern sich oft, sieh also auf ihren eigenen Seiten nach den aktuellen Zahlen. Korrekturen sind als <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-Issues</a> willkommen.</p>
+
+    <h2>Quellen</h2>
+    <ul>
+      <li><a href="https://syncthing.net/">Website von Syncthing</a></li>
+      <li><a href="https://docs.syncthing.net/users/untrusted.html">Nicht vertrauenswürdige Geräte</a></li>
+      <li><a href="https://docs.syncthing.net/users/versioning.html">Dateiversionierung</a></li>
+      <li><a href="https://docs.syncthing.net/users/faq.html">FAQ von Syncthing (en)</a></li>
+    </ul>

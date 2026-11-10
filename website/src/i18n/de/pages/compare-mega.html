@@ -1,0 +1,51 @@
+---
+title: MEGA-Alternative: Varsto und MEGA im Vergleich
+nav: Compare
+output: compare/mega/index.html
+description: Suchst du eine MEGA-Alternative mit Ende-zu-Ende-Verschlüsselung auf deinem eigenen Speicher (S3, NAS, Platten, rclone)? Wofür MEGA gedacht ist, wie es funktioniert und wie es sich mit Varsto vergleicht.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alle Vergleiche</a></p>
+    <h1>Varsto und MEGA</h1>
+    <p class="lead">MEGA ist Ende-zu-Ende verschlüsselter Cloud-Speicher für Privatpersonen und Unternehmen, mit großzügigen Speichertarifen, Desktop-Synchronisierung, mobilen Apps und zugehörigen Diensten wie Chat und einem VPN.</p>
+
+    <h2>Worin sich Varsto unterscheidet</h2>
+    <ul>
+      <li>Mehrere Anbieter gleichzeitig, oder dein eigenes NAS und deine eigenen Platten, statt einer Cloud.</li>
+      <li>Ein signiertes Hauptbuch sagt, wo jede Kopie liegt und wann ein anderes Gerät sie zuletzt geprüft hat.</li>
+      <li>Schreibgeschützte, verschlüsselte Sicherungen mit einer Aufbewahrungsdauer auf deinen eigenen Speichern.</li>
+      <li>Hybride Post-Quanten-Kryptografie für jede gespeicherte Signatur und jeden versiegelten Schlüssel (dafür ausgelegt; nicht geprüft).</li>
+    </ul>
+
+    <h2>So funktioniert MEGA</h2>
+    <p>Du legst ein Konto an, und deine Dateien liegen in MEGAs Rechenzentren; die Geräte synchronisieren sich über MEGAs Server. Dateien werden auf dem Client mit einem Schlüssel je Datei verschlüsselt, unter einem Schlüssel, der aus deinem Passwort abgeleitet ist. 2022 haben Forscher der ETH Zürich Angriffe auf MEGAs Kryptografie veröffentlicht; MEGA hat sie behoben, und die Autoren haben festgehalten, dass eine vollständige Korrektur einen Neuentwurf bräuchte. Es gibt Desktop-Apps für Windows, macOS und Linux, mobile Apps und einen Kommandozeilen-Client.</p>
+
+    <h2>Nebeneinander</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">MEGA</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Wo deine Dateien liegen</th><td>In MEGAs Cloud; eigenen Speicher kannst du für das Laufwerk nicht benutzen.</td><td>Auf deinen eigenen Geräten und auf Speichern, die du wählst: S3-kompatible Buckets, jedes rclone-Remote, lokale oder Netzwerkverzeichnisse sowie Plattenpools aus Wechseldatenträgern.</td></tr>
+      <tr><th scope="row">Konto oder zentraler Server</th><td>Konto erforderlich; alles läuft über MEGA.</td><td>Keines von beiden. Es gibt keinen Varsto-Server; die Geräte finden einander über deine Speicher und im LAN.</td></tr>
+      <tr><th scope="row">Verschlüsselung</th><td>Ende-zu-Ende, clientseitig; früher von akademischen Forschern gefundene Schwächen wurden behoben.</td><td>Ende-zu-Ende, clientseitig, bevor etwas das Gerät verlässt; hybride Post-Quanten-Verschlüsselung (ML-KEM zum Teilen der Schlüssel, Ed25519- und ML-DSA-65-Signaturen). Noch nicht unabhängig geprüft.</td></tr>
+      <tr><th scope="row">Geräte gleichzeitig online</th><td>Nicht nötig: die Cloud hält die Kopie.</td><td>Nicht nötig: Die Geräte synchronisieren sich über deine Speicher und direkt von Gegenstelle zu Gegenstelle, wenn sie einander erreichen.</td></tr>
+      <tr><th scope="row">Weiß, wo jede Kopie liegt</th><td>Eine Kopie beim Anbieter; keine Erfassung über deine eigenen Medien hinweg.</td><td>Ja: Ein signiertes Hauptbuch hält fest, welcher Speicher und welches Gerät jeden Block hält; Aufbewahrungsregeln (standardmäßig 1 Kopie irgendwo, 1 externe und 1 auf deinen eigenen Platten, von einem anderen Gerät innerhalb von 30 Tagen geprüft) warnen, wenn eine Regel nicht erfüllt ist.</td></tr>
+      <tr><th scope="row">Wechseldatenträger und Offline-Platten</th><td>Kein Ablauf für Wechselplatten.</td><td>Ja: Plattenpools werden gefüllt, geprüft und erkannt, wenn sie zurückkommen; Dateien auf einer Platte, die weg ist, verlangen genau diese Platte.</td></tr>
+      <tr><th scope="row">Sicherungen</th><td>Die Desktop-App sichert Ordner in einer Richtung in MEGAs Cloud, wo sie schreibgeschützt sind; der Versionsverlauf hängt vom Tarif ab.</td><td>Ja: Wähle einen Ordner auf einem beliebigen Gerät. Varsto behält davon verschlüsselte, schreibgeschützte Schnappschüsse nur auf deinen externen Speichern, nie auf deinen Geräten, so viele Tage, wie du wählst (standardmäßig 90), und löscht danach die abgelaufenen. Stelle einen beliebigen Schnappschuss in ein Verzeichnis wieder her, das du nennst, aus der App oder von der Kommandozeile.</td></tr>
+      <tr><th scope="row">Lizenz</th><td>Quellcode der Clients veröffentlicht (SDK unter BSD-Lizenz, Desktop-App unter MEGAs eigener Lizenz).</td><td>Quellcode verfügbar (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Preis</th><td>Kostenloses Kontingent und bezahlte Tarife mit Transferkontingenten.</td><td>Kostenlos; du zahlst nur deinen Speicheranbieter</td></tr>
+      <tr><th scope="row">Reife</th><td>Großer, langjähriger Dienst.</td><td>Alpha: nicht für Produktionsdaten, und die Formate können sich noch ändern.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Was zu dir passt</h2>
+    <div class="grid two">
+      <div class="card"><h3>MEGA</h3><p>Wähle MEGA, wenn du viel verschlüsselten Cloud-Speicher von einem Anbieter willst, mit ausgefeilten Apps überall, und es dir recht ist, dass der Anbieter die einzige Kopie außerhalb deiner Räume hält.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Wähle Varsto, wenn du den Speicher selbst wählen willst (oder mehrere Anbieter gleichzeitig), Anbieterbindung vermeiden willst, Kopien auch auf deinen eigenen Platten behalten willst und in jedem Moment wissen willst, wo jede Kopie liegt.</p></div>
+    </div>
+    <p class="note">Varsto ist Alpha-Software: Vertraue ihm keine Daten an, von denen du keine weitere Kopie hast, und seine Kryptografie ist nicht unabhängig geprüft. Die anderen Produkte hier sind ausgereift. Angaben zu ihnen wurden im Oktober 2026 anhand ihrer eigenen Dokumentation geprüft; Preise und Tarife ändern sich oft, sieh also auf ihren eigenen Seiten nach den aktuellen Zahlen. Korrekturen sind als <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-Issues</a> willkommen.</p>
+
+    <h2>Quellen</h2>
+    <ul>
+      <li><a href="https://mega.io/">Website von MEGA</a></li>
+      <li><a href="https://github.com/meganz/MEGAsync">Quellcode der MEGA-Desktop-App</a></li>
+      <li><a href="https://eprint.iacr.org/2022/959">MEGA: Malleable Encryption Goes Awry (ETH Zürich)</a></li>
+    </ul>

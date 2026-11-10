@@ -1,0 +1,177 @@
+---
+title: Alternativa a Resilio Sync: Varsto y Resilio Sync comparados
+nav: Compare
+output: compare/resilio-sync/index.html
+description: ¿Buscas una alternativa a Resilio Sync con cifrado de extremo a extremo en tu propio almacenamiento (S3, NAS, discos, rclone)? Para qué sirve Resilio Sync, cómo funciona y cómo se compara con Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Todas las comparaciones</a></p>
+    <h1>Varsto y Resilio Sync</h1>
+    <p class="lead">Resilio Sync sincroniza y comparte carpetas entre dispositivos de par a par, sobre la tecnología BitTorrent. La edición gratuita Sync Home es para particulares; el negocio principal de la empresa es la transferencia de archivos para empresas. Nasuni compró Resilio en marzo de 2026.</p>
+
+    <h2>En qué se diferencia Varsto</h2>
+    <ul>
+      <li>Código fuente disponible y formato de almacenamiento publicado: tus datos siguen siendo recuperables sin el proveedor.</li>
+      <li>Criptografía híbrida poscuántica para cada firma almacenada y cada clave sellada (diseñada para ello; sin auditar).</li>
+      <li>Tus almacenamientos son la copia siempre disponible, así que no hace falta un par siempre encendido; los dispositivos siguen intercambiando bloques directamente cuando pueden alcanzarse.</li>
+      <li>Un libro mayor firmado cuenta y comprueba cada copia, y las políticas de conservación avisan antes de que se incumpla una regla.</li>
+      <li>Sin trackers ni relays del proveedor: los dispositivos se encuentran a través de tus almacenamientos y en la LAN, y pasan por uno de tus propios dispositivos cuando no se puede atravesar el NAT.</li>
+    </ul>
+
+    <h2>Cómo funciona Resilio Sync</h2>
+    <p>Los dispositivos se conectan directamente entre sí; no hay cuenta, y las carpetas se comparten con claves o enlaces (solo lectura, o lectura y escritura). Los trackers y relays que gestiona Resilio ayudan a los pares a encontrarse. Los datos están solo en los pares; Sync Home no tiene backend de S3 ni de rclone. Hay sincronización selectiva con marcadores de posición, y una «carpeta cifrada» permite que un par en una máquina no confiable guarde datos que no puede leer (ese par es de solo lectura y no tiene sincronización selectiva).</p>
+
+    <h2>Lado a lado</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Resilio Sync</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Dónde están tus archivos</th><td>Solo en los pares (un NAS o un servidor cuenta si ejecuta Resilio).</td><td>En tus propios dispositivos y en los almacenamientos que elijas: buckets compatibles con S3, cualquier remoto de rclone, directorios locales o de red y grupos de discos extraíbles.</td></tr>
+      <tr><th scope="row">Cuenta o servidor central</th><td>Sin cuenta; trackers y relays gestionados por Resilio.</td><td>Ninguno. No hay servidor de Varsto; los dispositivos se encuentran a través de tus almacenamientos y en la LAN.</td></tr>
+      <tr><th scope="row">Cifrado</th><td>Cifrado en tránsito; carpetas cifradas para pares no confiables. Código cerrado, así que no se puede comprobar de forma independiente.</td><td>De extremo a extremo, en el cliente, antes de que nada salga del dispositivo; cifrado híbrido poscuántico (ML-KEM para compartir claves, firmas Ed25519 + ML-DSA-65). Aún no auditado de forma independiente.</td></tr>
+      <tr><th scope="row">Dispositivos en línea a la vez</th><td>Sí, salvo que un par esté siempre encendido.</td><td>No hace falta: los dispositivos se sincronizan a través de tus almacenamientos y directamente de par a par cuando pueden alcanzarse.</td></tr>
+      <tr><th scope="row">Sabe dónde está cada copia</th><td>No hay seguimiento de las copias ni de cuántas hay.</td><td>Sí: un libro mayor firmado registra qué almacenamiento y qué dispositivo conserva cada bloque; las políticas de conservación (por defecto, 1 copia en cualquier sitio, 1 externa y 1 en tus propios discos, comprobada por otro dispositivo en un plazo de 30 días) avisan cuando no se cumple una regla.</td></tr>
+      <tr><th scope="row">Discos extraíbles y sin conexión</th><td>No hay un flujo de trabajo para discos extraíbles.</td><td>Sí: los grupos de discos se llenan, se comprueban y se reconocen cuando vuelven; los archivos que están en un disco ausente piden ese disco.</td></tr>
+      <tr><th scope="row">Copias de seguridad</th><td>Una carpeta de archivo en cada dispositivo conserva los archivos borrados y sustituidos, 30 días por defecto en los escritorios. No hay una copia de seguridad aparte en otro sitio.</td><td>Sí: elige una carpeta en cualquier dispositivo. Varsto guarda de ella instantáneas cifradas y de solo lectura solo en tus almacenamientos externos, nunca en tus dispositivos. Las conserva el número de días que elijas (90 por defecto) y borra las caducadas. Puedes restaurar cualquier instantánea en un directorio que nombres, desde la aplicación o la línea de órdenes.</td></tr>
+            <tr><th scope="row">Licencia</th><td>Propietario.</td><td>Código fuente disponible (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Precio</th><td>Sync Home es gratuito.</td><td>Gratis; solo pagas a tu proveedor de almacenamiento</td></tr>
+      <tr><th scope="row">Madurez</th><td>Producto comercial maduro; su futuro tras la adquisición de 2026 aún no se ha dicho.</td><td>Alfa: no para datos de producción, y los formatos aún pueden cambiar.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="measured">Medido frente a Resilio Sync (noviembre de 2026)</h2>
+    <p>El 10 de noviembre de 2026 las dos herramientas movieron los mismos datos entre las mismas tres máquinas alquiladas (un emisor en París, lectores en Ámsterdam y Varsovia, 2 vCPU cada una), una herramienta cada vez, con los relays y los trackers apagados, y cada archivo se comprobó después con SHA-256. Varsto era la compilación diaria 20261109-c1cf5c2; Resilio Sync era la 2.8.1, porque la 3.1.2 no sincronizaba en absoluto desde un archivo de configuración. Medianas de dos pasadas. «Bytes» es lo que el lector intercambió con las otras máquinas. El método, sus límites, los datos en bruto y los scripts para repetirlo están en <a href="{{P}}docs/resilio-vs-varsto.html">el informe de la medición</a> (en inglés).</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Escenario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 archivos pequeños (313 MB)</th><td class="win">25 s · 292 MB</td><td class="win">25 s · 313 MB</td></tr>
+        <tr><th scope="row">Dos archivos de 1 GiB</th><td class="win">44 s · 2 178 MB</td><td>90 s · 2 226 MB</td></tr>
+        <tr><th scope="row">537 MB de texto de log</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
+        <tr><th scope="row">816 MB, la mitad copias</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
+        <tr><th scope="row">Dos lectores a la vez (Ámsterdam, Varsovia)</th><td class="win">Ámsterdam 70 s, Varsovia 118 s; el emisor envió 3 685 MB</td><td class="win">Ámsterdam 76 s, Varsovia 118 s; el emisor envió 3 636 MB</td></tr>
+        <tr><th scope="row">11 MiB cambiados dentro de 1,13 GiB</th><td class="win">12 s · 26 MB, una pasada</td><td>15 s · 12 MB</td></tr>
+        <tr><th scope="row">Un directorio de 1,13 GiB renombrado</th><td class="win">10 s · 0 MB de datos de archivo</td><td>67 s · 1 269 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pérdida, corte de 0,3 s cada 4 s (los archivos pequeños)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> El verde marca la columna más rápida. En un empate, las dos van en verde.</p>
+    <ul>
+      <li><strong>Varsto fue más rápido</strong> con los dos archivos grandes, con el texto de log, con las copias y con el enlace que se cortó a propósito. El texto ocupa alrededor de un tercio de los bytes, porque los bloques se comprimen antes de cifrarse. Las copias mueven menos datos, porque se reutilizan los bloques que ya están en el disco del lector.</li>
+      <li><strong>Los archivos pequeños quedaron empatados</strong> en 25 s, y ninguna pasada de Resilio Sync se atascó. Las cifras de Resilio Sync del cambio pequeño y del renombrado son del 8 de noviembre, mientras se vuelve a ejecutar ese caso: 15 s y 12 MB para el cambio, 67 s y 1 269 MB para el renombrado. El cambio de Varsto del 10 de noviembre, una pasada contada, fue de 12 s y 26 MB.</li>
+      <li><strong>Dos lectores</strong> terminaron juntos en unos dos minutos con las dos herramientas. Varsovia fue la lenta. Los emisores enviaron unos 3,6 GB cada uno.</li>
+      <li><strong>Memoria:</strong> el servicio emisor de Varsto llegó a 360–800 MiB, frente a 70–250 MiB de Resilio Sync.</li>
+    </ul>
+    <p class="note">Un día, un proveedor, dos pasadas por caso y una alfa: son indicios, no un veredicto. El informe enumera todo lo que los limita.</p>
+
+    <div class="pace-set" data-play="Reproducir">
+      <div class="pace-top" role="tablist" aria-label="Escenarios">
+      <button type="button" role="tab" data-tab="files" aria-selected="true">10 000 archivos pequeños</button>
+      <button type="button" role="tab" data-tab="pair" aria-selected="false">Dos archivos de 1 GiB</button>
+      <button type="button" role="tab" data-tab="text" aria-selected="false">Texto de log</button>
+      <button type="button" role="tab" data-tab="dup" aria-selected="false">La mitad son copias</button>
+      <button type="button" role="tab" data-tab="readers" aria-selected="false">Dos lectores a la vez</button>
+      <button type="button" role="tab" data-tab="edit" aria-selected="false">Un cambio pequeño</button>
+      <button type="button" role="tab" data-tab="rename" aria-selected="false">Un directorio renombrado</button>
+      <button type="button" role="tab" data-tab="slow" aria-selected="false">Un enlace lento y con pérdidas</button>
+      </div>
+    <div class="pace-panel" role="tabpanel" data-panel="files">
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="files" data-resilio="25 s · 313 MB" data-varsto="25 s · 292 MB">
+      <h3>10 000 archivos pequeños</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Ninguna fue claramente más rápida. La mediana es 25 s en las dos. Resilio Sync movió 313 MB y Varsto 292 MB, y ninguna pasada se atascó. Diez mil archivos pequeños siguen siendo una petición por archivo: Varsto pide cada bloque cifrado por separado, así que la negociación puede costar más que los bytes, mientras que Resilio Sync mantiene muchas piezas en movimiento con menos preparación por archivo. Ese día la diferencia no decidió el tiempo.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="pair" hidden>
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="pair" data-resilio="90 s · 2 226 MB" data-varsto="44 s · 2 178 MB">
+      <h3>Dos archivos de 1 GiB</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Varsto fue más rápido, 44 s frente a 90 s, y las dos movieron unos 2,2 GB. Los archivos son grandes, así que el límite es el enlace, no la preparación por archivo. Varsto mantiene abierta la conexión con el par y tiene muchas peticiones de bloques en curso, así que el enlace se queda lleno. Resilio Sync tardó más en mover los mismos dos archivos por esta ruta.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="text" data-resilio="47 s · 563 MB" data-varsto="17 s · 169 MB">
+      <h3>Texto de log</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Varsto fue más rápido, 17 s frente a 47 s, porque comprime cada bloque antes de cifrarlo. El texto de log se encoge, así que por el enlace pasan unos 169 MB en lugar de 563 MB. Resilio Sync envía el texto tal como está almacenado.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="dup" hidden>
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="dup" data-resilio="62 s · 856 MB" data-varsto="13 s · 419 MB">
+      <h3>La mitad son copias</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Varsto fue más rápido, 13 s frente a 62 s, porque la mitad de los archivos son copias de la otra mitad. Esos bloques ya están en el disco del lector, y Varsto los reutiliza en lugar de volver a descargarlos. Resilio Sync envía las copias una segunda vez, así que mueve unos 856 MB en lugar de 419 MB.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="readers" hidden>
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="readers" data-resilio="118 s · 3 636 MB" data-varsto="118 s · 3 685 MB">
+      <h3>Dos lectores a la vez</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">El lector más lento terminó en unos 118 s con las dos herramientas. Ámsterdam fue más rápida que Varsovia en las dos. Cada emisor envió unos 3,6 GB. Dos lectores trajeron a la vez los mismos archivos grandes, y también se movieron bytes entre los lectores, así que el total del emisor es más que una copia de los archivos.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="edit" data-resilio="15 s · 12 MB" data-varsto="12 s · 26 MB, una ejecución">
+      <h3>Un cambio pequeño</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">La cifra de Resilio Sync es del 8 de noviembre, mientras se vuelve a ejecutar este caso. Entonces terminó en 15 s y movió 12 MB: envía la pieza cambiada y para. La única pasada contada de Varsto el 10 de noviembre movió 26 MB en 12 s. Varsto también transfiere solo los bloques cambiados, pero el emisor sincroniza cada carpeta que tiene y el lector vuelve a calcular el hash de bloques que ya tiene, y eso puede costar más que la propia transferencia. La otra pasada de Varsto no movió nada y no se contó.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB" data-varsto="10 s · 0 MB de datos de archivo">
+      <h3>Un directorio renombrado</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">La cifra de Resilio Sync es del 8 de noviembre, mientras se vuelve a ejecutar este caso. Entonces trató el directorio nuevo como datos nuevos y lo volvió a enviar, 67 s y 1 269 MB. El renombrado de Varsto el 10 de noviembre terminó en 10 s y el lector no trajo datos de archivo: un renombrado es un nombre nuevo para bloques que ya están guardados, y Varsto mueve los archivos locales.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="slow" data-resilio="934 s · 328 MB" data-varsto="432 s · 336 MB">
+      <h3>Un enlace lento y con pérdidas</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Resilio Sync</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">El enlace del lector se limitó a 100 Mbit/s, con 40 ms de retardo y un 1 % de paquetes perdidos al azar, y se cortó a propósito 0,3 segundos cada 4 segundos. Los paquetes que van por el camino durante un corte desaparecen, y TCP espera y los vuelve a enviar. Los archivos pequeños apenas se comprimen, así que las dos movieron unos 330 MB. Varsto terminó en 432 s y Resilio Sync en 934 s. En la imagen, los cubos que llegan al hueco mientras el enlace está cortado se encogen y desaparecen, y luego vuelven a salir.</p>
+    </div>
+    </div>
+    <h2>Cuál te encaja</h2>
+    <div class="grid two">
+      <div class="card"><h3>Resilio Sync</h3><p>Elige Resilio Sync cuando quieres transferencias rápidas al estilo BitTorrent entre máquinas siempre encendidas y compartir con facilidad mediante una clave o un enlace, y te vale un producto comercial de código cerrado.</p></div>
+      <div class="card"><h3>Varsto</h3><p>La transferencia de par a par de Varsto sigue la misma idea (bloques cifrados de varios pares a la vez), pero añade tus propios almacenamientos como copia siempre disponible, un registro de dónde está cada copia, políticas de conservación y una especificación abierta de los formatos.</p></div>
+    </div>
+    <p class="note">Varsto es software en fase alfa: no le confíes datos de los que no tengas otra copia. Su criptografía tampoco se ha auditado de forma independiente. Los demás productos de aquí son maduros. Los datos sobre ellos se comprobaron en su propia documentación en octubre de 2026; los precios y los planes cambian a menudo, así que mira sus propias páginas para las cifras actuales. Las correcciones son bienvenidas como <a href="https://github.com/janttsu/varsto/issues" rel="noopener">issues de GitHub</a>.</p>
+
+    <h2>Fuentes</h2>
+    <ul>
+      <li><a href="https://www.resilio.com/sync/">Sitio web de Resilio Sync</a></li>
+      <li><a href="https://www.resilio.com/blog/understanding-the-sync-encrypted-folder">Carpetas cifradas</a></li>
+      <li><a href="https://www.resilio.com/news/nasuni-acquires-resilio/">Nasuni compra Resilio</a></li>
+      <li><a href="https://help.resilio.com/hc/en-us/articles/204754239-Does-Sync-support-versioning-">Does Sync support versioning? (en)</a></li>
+    </ul>

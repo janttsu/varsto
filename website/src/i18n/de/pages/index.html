@@ -1,0 +1,77 @@
+---
+title: Projekt
+nav: Project
+output: index.html
+description: Varsto: Ende-zu-Ende verschlüsselte Synchronisierung, Freigabe und Sicherung von Dateien auf Speicher, der dir schon gehört, mit Post-Quanten-Hybridkryptografie und einer signierten Aufzeichnung, wo jede Kopie liegt. Alpha, Arbeitsname.
+---
+    <section class="hero">
+      <canvas class="field" id="field" aria-hidden="true"></canvas>
+      <h1>Bring deinen eigenen Speicher mit. Behalte deine eigenen Schlüssel. Wisse, wo jeder Block ist.</h1>
+      <p class="lead">Ende-zu-Ende verschlüsselte Synchronisierung, Freigabe und Sicherung von Dateien auf Speicher, der dir schon gehört, mit Post-Quanten-Hybridkryptografie und einem Hauptbuch, das du prüfen kannst. Kein Server, kein Konto, kein Anbieter, dem du vertrauen musst. Wie sich das von <a href="{{L}}compare/syncthing/">Syncthing</a> und <a href="{{L}}compare/resilio-sync/">Resilio Sync</a> unterscheidet.</p>
+      <div class="cta"><a class="button" href="{{L}}downloads/">Alpha herunterladen</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Schnellstart</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Quellcode auf GitHub</a></div>
+      <nav class="platforms" aria-label="Downloads"><a href="{{L}}downloads/">Linux</a> <a href="{{L}}downloads/">Windows</a> <a href="{{L}}downloads/">macOS</a> <a href="{{L}}downloads/">Android</a> <a href="{{L}}downloads/">iOS</a></nav>
+    </section>
+    <figure class="stage"><div class="window"><div class="window-bar"><i></i><i></i><i></i><span>varsto</span></div><picture class="theme-dark"><img src="{{P}}assets/img/screenshots/desktop-where-dark.png" alt="Wo deine Daten sind: Varsto folgt jedem Ordner zu den Speichern und Geräten, die seine Blöcke halten, und zählt, wie viele Kopien jeder Block hat." width="976" height="669"></picture><picture class="theme-light"><img src="{{P}}assets/img/screenshots/desktop-where-light.png" alt="Wo deine Daten sind: Varsto folgt jedem Ordner zu den Speichern und Geräten, die seine Blöcke halten, und zählt, wie viele Kopien jeder Block hat." width="976" height="669" loading="lazy"></picture></div></figure>
+
+    <div class="home">
+
+    <h2>Warum Varsto anders ist</h2>
+    <div class="grid">
+      <section class="card"><h3>Buchführung, die du prüfen kannst</h3><p>Jedes Gerät führt ein signiertes Hauptbuch darüber, was es gespeichert und geprüft hat, sodass Varsto weiß, wie viele Kopien jedes Blocks es gibt, wo sie liegen und wann ein anderes Gerät sie zuletzt geprüft hat. Eine Aufbewahrungsregel wie „zwei Kopien in der Cloud und eine zu Hause, geprüft innerhalb von 30 Tagen“ warnt dich, bevor sie nicht mehr stimmt. <a href="{{L}}features/#ledger">Hauptbuch und Aufbewahrungsregeln</a>.</p></section>
+      <section class="card"><h3>Dein Speicher, deine Schlüssel, kein Server</h3><p>Aus einem Verzeichnis, einer NAS-Freigabe, einem S3-Bucket bei einem beliebigen Anbieter oder einem beliebigen rclone-Remote wird ein Speicher, und ein Speicher sieht immer nur undurchsichtige verschlüsselte Objekte. Es gibt kein Varsto-Konto und keinen Server, der deine Daten hält, nichts, dem du vertrauen oder das du verlieren kannst. <a href="{{L}}features/#storage">Dein eigener Speicher</a>.</p></section>
+      <section class="card"><h3>Post-Quanten-Hybridkryptografie</h3><p>Jeder Hauptbuch-Stapel trägt eine Ed25519- und eine ML-DSA-65-Signatur, und jeder Ordnerschlüssel reist versiegelt an einen Schlüssel aus X25519 + ML-KEM-768. Für eine Post-Quanten-Welt ausgelegt; noch nicht auditiert. <a href="{{L}}features/#pq">Wie die Signaturen und Schlüssel funktionieren</a>.</p></section>
+      <section class="card"><h3>Alte Platten als gezählte, geprüfte Kopien</h3><p>Steck eine Platte ins Dock und nimm sie in einen Pool auf: sie füllt sich mit den Daten, die die wenigsten Kopien haben, sagt dir, wann du sie sicher auswerfen kannst, wird erkannt, wenn sie zurückkommt, und zählt für „eine Kopie zu Hause, eine anderswo“. <a href="{{L}}features/#disks">Plattenpools</a>.</p></section>
+      <section class="card"><h3>Strongroom</h3><p>Ordner, deren Schlüssel mit einem Geheimnis umhüllt ist, das nur dein FIDO2-Sicherheitsschlüssel nach einer Berührung erzeugt und das nirgends im Ruhezustand liegt. Weder eine Passphrase noch ein gestohlener Laptop noch ein Assistent öffnet sie. <a href="{{L}}features/#strongroom">Strongroom</a>.</p></section>
+      <section class="card"><h3>Geräte, die einander helfen</h3><p>Deine Geräte tauschen verschlüsselte Blöcke direkt, im LAN und durch NAT; ein optionaler Rendezvous-Dienst hilft ihnen, einander über Netze hinweg zu finden, und sieht keinen Inhalt. Ein USB-Stick kann nur das tragen, was der anderen Seite fehlt, und das NAS einer befreundeten Person kann geprüfte Kopien halten, die es nicht lesen kann. <a href="{{L}}features/#p2p">Von Gegenstelle zu Gegenstelle und Überträger</a>, <a href="{{L}}features/#replicas">nicht vertrauenswürdige Repliken</a>.</p></section>
+    </div>
+
+    <h2 id="where">Wo deine Daten liegen können</h2>
+    <p>Jedes Verzeichnis, das dieses Gerät erreicht, ein NAS oder eine Netzwerkfreigabe, jeder S3-kompatible Bucket mit deinen eigenen Schlüsseln (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO und andere), jedes rclone-Remote (SFTP, WebDAV, Google Drive und der Rest), kalte Archivklassen, die beschrieben, aber nie ohne deine Bestätigung gelesen werden, und Pools aus Wechselplatten im Regal. Nutze mehrere zugleich; jeder trägt eine Ortsbezeichnung und einen Preis, sodass eine Aufbewahrungsregel eine Kopie außerhalb des Hauses verlangen kann und die App zeigt, was jeder Ordner im Monat kostet. Dateien werden auf deinem Gerät in Blöcke geschnitten, komprimiert und verschlüsselt, sodass ein Speicher immer nur undurchsichtige Objekte und ihre Größen sieht, nie Dateinamen, Hashes im Klartext oder Inhalt.</p>
+    <figure class="hero"><picture class="theme-light"><source type="image/webp" srcset="{{P}}assets/img/hero.webp"><img src="{{P}}assets/img/hero.png" alt="Diagramm: deine Schlüssel in der Mitte, über verschlüsselte Verbindungen mit einem S3-Bucket, einem kalten Archiv, Festplatten im Regal, einem NAS, einem Laptop und einem Telefon verbunden; jeder Ort hält nur verschlossene, verschlüsselte Blöcke." width="1200" height="600"></picture><picture class="theme-dark"><source type="image/webp" srcset="{{P}}assets/img/hero-dark.webp"><img src="{{P}}assets/img/hero-dark.png" alt="Diagramm: deine Schlüssel in der Mitte, über verschlüsselte Verbindungen mit einem S3-Bucket, einem kalten Archiv, Festplatten im Regal, einem NAS, einem Laptop und einem Telefon verbunden; jeder Ort hält nur verschlossene, verschlüsselte Blöcke." width="1200" height="600" loading="lazy"></picture><figcaption>Kopien dorthin, wo du entscheidest: ein Bucket, ein kaltes Archiv, alte Platten im Regal, deine eigenen Rechner. Jede Kopie ist Geheimtext; die Schlüssel bleiben bei dir.</figcaption></figure>
+
+    <h2 id="security">Sicherheit, ehrlich</h2>
+    <ul>
+      <li>Der Inhalt wird mit XChaCha20-Poly1305 unter Schlüsseln verschlüsselt, die von einem zufälligen Tresorschlüssel abgeleitet sind, den nur deine Geräte haben; ein Speicher sieht Geheimtext-Objekte, die nach ihrem Hash benannt sind, und sonst nichts. <a href="{{L}}how-it-works/">So funktioniert es</a>, Schritt für Schritt.</li>
+      <li>Jede gespeicherte Signatur ist hybrid (Ed25519 + ML-DSA-65, beide müssen gültig sein) und jeder versiegelte Schlüssel ist hybrid (X25519 + ML-KEM-768): Post-Quanten-Hybridkryptografie, dafür ausgelegt, nicht auditiert. Der Transport (direkte Verbindungen tragen nur verschlüsselte Blöcke über TLS 1.3 mit angepinnten Zertifikaten, über TCP oder, durch NAT, QUIC) und die Signatur der Veröffentlichungen (minisign) nutzen klassische Algorithmen.</li>
+      <li>Strongroom-Ordner gehen nur mit einem FIDO2-Sicherheitsschlüssel auf; die Durchsetzung ist kryptografisch, kein Dialog.</li>
+      <li>Die KI-Hilfe bleibt lokal: der MCP-Server ist für Sprachmodelle gedacht, die auf deinem eigenen Rechner laufen, innerhalb der Ordner, die du zulässt, und nie in einem Strongroom. An einen Modellanbieter wird nichts gesendet.</li>
+      <li>Ein verlorenes Gerät wird mit einem signierten Widerruf entfernt, und der Tresor wechselt auf neue Schlüssel; ein Löschauftrag läuft, wenn das Gerät das nächste Mal einen Speicher erreicht. Es gibt kein Konto und keine Hinterlegung: den Wiederherstellungssatz, 24 Wörter oder drei Teile, bewahrst du selbst auf.</li>
+      <li>Weder der Entwurf noch der Code ist geprüft oder auditiert. Das <a href="{{P}}docs/threat-model.html">Bedrohungsmodell</a> und das <a href="{{P}}docs/failure-model.html">Fehlermodell</a> sagen, was der Entwurf beabsichtigt, was jede Seite sehen kann und wo er aufhört.</li>
+    </ul>
+
+    <h2 id="teams">Für Teams</h2>
+    <p>Eine Organisation legt über einen Tresor die Schicht, die eine Firma braucht: Administratoren genehmigen Geräte für benannte Personen, nachdem sie mit ihnen einen Fingerabdruck aus sechs Wörtern verglichen haben, entfernen eine Person mit jedem ihrer Geräte in einem Schritt (die verbleibenden Geräte bekommen neue Schlüssel), legen fest, was Mitglieder allein tun dürfen, und führen darüber ein Protokoll, das ihre Geräte signieren und verketten. Der Wurzelschlüssel, der die Administratoren einsetzt, liegt als 24 Wörter auf Papier, nie auf einem Gerät. Ein Tresor ohne Organisation sieht davon nichts. <a href="{{L}}features/#organizations">Organisationen</a>.</p>
+
+    <h2 id="developers">Für Entwicklerinnen und Entwickler</h2>
+    <p>Varsto ist ein Rust-Workspace auf <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a>. <code>varsto-core</code> ist der Motor und das Speicherformat, <code>varsto-cli</code> ist die Kommandozeile, der Dienst und die Weboberfläche, und <code>varsto-ffi</code> ist das, was die Swift- und Kotlin-Hüllen aufrufen. Das Format ist aufgeschrieben, und ein Labor aus virtuellen Maschinen führt die Szenarien aus. Die Lizenz ist <a href="{{P}}docs/licence.html">PolyForm Shield 1.0.0</a>: Quellcode verfügbar, keine OSI-Open-Source-Lizenz. Issues mit den Labels <code>help wanted</code> und <code>good first issue</code> sind der Einstieg, wenn welche offen sind. Eine Fehlermeldung oder eine kleine Korrektur der Dokumentation ist willkommen, wenn die Liste leer ist.</p>
+    <p><a class="button" href="{{L}}contribute/">So trägst du bei</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issues</a> <a class="button secondary" href="{{P}}docs/contributing.html">Regeln (en)</a> <a class="button secondary" href="{{P}}docs/alpha-0-format.html">Speicherformat</a></p>
+
+    <h2 id="next">Neu in {{RELEASED}}</h2>
+    <p class="note">Speicherformat 3 und das, was dazugehört. Tresore, die mit 0.0.1-alpha.15 oder früher erstellt wurden, müssen neu angelegt werden:</p>
+    <ul>
+      <li>Speicherformat 3: ein Hauptbuch der Pakete statt der Blöcke, signierte Datensätze, Blockkarten der Ordner und Manifeste aus Basis plus Delta.</li>
+      <li>Ordnerzugriff per Genehmigung: ein Gerät, das mit den Tresorwörtern beigetreten ist, fordert einen Ordner an (<code>varsto folder request</code>), eine Eigentümerin oder ein Eigentümer vergleicht sechs Wörter auf beiden Geräten und genehmigt.</li>
+      <li>Wiederherstellungswörter: ein zweiter Satz von 24 Wörtern und eine Wiederherstellungskopie jedes Ordnerschlüssels, sodass sich ein Tresor wieder öffnen lässt, wenn jedes Gerät verloren ist.</li>
+      <li>Der Rendezvous-Dienst (<code>https://varsto.net/rv</code> oder dein eigener): Gegenstellen finden einander über Netze hinweg, Kopplungslinks mit <code>rv=</code> funktionieren, und ein Ende-zu-Ende-verschlüsseltes Relais ist der letzte Weg. Alles funktioniert ohne ihn.</li>
+      <li>Arbeiten ohne Netz: Beitreten durch Koppeln, ohne einen Speicher zu erreichen, Änderungen der Mitgliedschaft bleiben auf dem Gerät, bis ein Speicher antwortet, und ein unerreichbarer Speicher lässt nicht mehr die ganze Synchronisierung scheitern.</li>
+      <li>Eine Seite Import, Torrent-Import für Torrents, die größer sind als die Platte (<code>varsto import torrent</code>), und YouTube-Kanäle in Ordner (<code>varsto import youtube</code>).</li>
+      <li>Ein Briefkasten, der Blöcke von einer angedockten Platte zu einer Pool-Platte oder einem Speicher trägt, der nicht da ist, und <code>varsto service remember</code> auf Servern ohne Desktop-Sitzung.</li>
+      <li>Eine release-signierte Android-APK, die spätere Veröffentlichungen an Ort und Stelle aktualisieren. Sie hat einen neuen Signaturschlüssel: deinstalliere zuerst einen früheren Debug-Build.</li>
+    </ul>
+
+    <h2 id="status">Ehrlicher Stand</h2>
+    <ul>
+      <li>Veröffentlichte Version: {{RELEASED}}. Die Alpha ist ein vertikaler Schnitt: Kernbibliothek, Kommandozeile, Hintergrunddienst, Hüllen für Infobereich und Menüleiste, Android-Hülle, etwa {{RUST_LINES}} Zeilen Rust, {{TESTS}} automatische Tests und ein Labor mit {{LAB_SCENARIOS}} Szenarien auf virtuellen Maschinen hinter Heim- und Büro-NAT: Zusammenführen ohne Netz, Konflikte, die Absperrung eines wiederhergestellten Geräts, Repliken, Freigabe, Aufbewahrungsregeln, Gegenstellen, Strongrooms, Plattenpools, Sicherungen und mehr. Benutze sie nur mit Testdaten.</li>
+      <li>Der kryptografische Entwurf ist weder geprüft noch auditiert. Das <a href="{{P}}docs/threat-model.html">Bedrohungsmodell</a> und das <a href="{{P}}docs/failure-model.html">Fehlermodell</a> sagen, was der Entwurf beabsichtigt und wo er aufhört.</li>
+      <li>Der Quellcode ist öffentlich unter <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> unter der <a href="{{P}}docs/licence.html">PolyForm Shield License 1.0.0</a> (Quellcode verfügbar, kein Open Source); Fehler und Fragen gehen an den Issue-Tracker dort. Das Speicherformat ist <a href="{{P}}docs/alpha-0-format.html">dokumentiert</a>, damit deine Daten wiederherstellbar bleiben.</li>
+      <li>Varsto ist in Rust geschrieben, mit Swift- und Kotlin-Hüllen und einer schlichten Weboberfläche. Sicherheitsprüfung, Plattformarbeit, Netz- und Speichertests, Paketierung und Übersetzungen sind willkommen: <a href="{{L}}contribute/">so trägst du bei</a>.</li>
+      <li>Der Name ist vorläufig.</li>
+    </ul>
+
+    <h2>Downloads <span class="note">(auf Englisch)</span></h2>
+    {{DOWNLOADS}}
+    <p class="note">Prüfe einen Download: die Prüfsummenliste ist mit dem Veröffentlichungsschlüssel von Varsto signiert (siehe „Verify your download“ oben): <code>varsto verify-release &lt;file&gt; --github</code> oder minisign und <code>sha256sum -c SHA256SUMS --ignore-missing</code>. <code>varsto update</code> prüft die Signatur und das GitHub-Release von selbst.</p>
+
+    <h2>Zuletzt aus dem blog</h2>
+    {{POSTS}}
+    </div>

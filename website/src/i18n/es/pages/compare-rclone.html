@@ -1,0 +1,45 @@
+---
+title: Alternativa a rclone: Varsto y rclone comparados
+nav: Compare
+output: compare/rclone/index.html
+description: ¿Usas rclone con un remoto crypt para guardar copias cifradas en S3 u otra nube? Para qué sirve rclone, cómo funcionan su backend crypt y bisync, y cómo se compara con Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Todas las comparaciones</a></p>
+    <h1>Varsto y rclone</h1>
+    <p class="lead">rclone es la herramienta de línea de órdenes para copiar y sincronizar archivos con más de setenta sistemas de almacenamiento en la nube. Su backend crypt cifra lo que pasa por él, y mucha gente usa los dos juntos como una copia de seguridad cifrada montada por uno mismo. El propio Varsto puede usar cualquier remoto de rclone como almacenamiento.</p>
+
+    <h2>Cómo funciona rclone</h2>
+    <p>rclone copia archivos entre un directorio local y un remoto, o entre dos remotos: <code>rclone copy</code>, <code>rclone sync</code> (en un sentido: deja el destino idéntico al origen), <code>rclone mount</code> y muchos más. Un remoto <em>crypt</em> envuelve a otro remoto y cifra el contenido de los archivos con NaCl SecretBox (XSalsa20 y Poly1305); en el modo por defecto también se cifran los nombres de archivo y de directorio, y se pueden dejar en claro o solo ofuscar. Fuera de un remoto crypt, rclone no cifra nada. La sincronización en dos sentidos es <code>rclone bisync</code>, que guarda un listado de los dos lados de la pasada anterior y propaga los cambios en ambas direcciones; rclone lo llama un comando avanzado, hay que prepararlo primero con <code>--resync</code>, y los archivos que cambian durante una pasada pueden perderse. rclone no lleva registro de dónde hay copias, más allá de lo que compara cada pasada, y no tiene noción de dispositivos: cada máquina ejecuta sus propios comandos.</p>
+
+    <h2>Lado a lado</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">rclone</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Dónde están tus archivos</th><td>Donde los copies: en directorios locales y en cualquier remoto compatible.</td><td>En tus propios dispositivos y en los almacenamientos que elijas: buckets compatibles con S3, cualquier remoto de rclone, directorios locales o de red y grupos de discos extraíbles.</td></tr>
+      <tr><th scope="row">Cuenta o servidor central</th><td>Ninguno; solo las cuentas de los remotos que uses.</td><td>Ninguno. No hay servidor de Varsto; los dispositivos se encuentran a través de tus almacenamientos y en la LAN.</td></tr>
+      <tr><th scope="row">Cifrado</th><td>Solo a través de un remoto crypt: XSalsa20-Poly1305 para el contenido; nombres de archivo y de directorio cifrados en el modo por defecto, en claro u ofuscados si lo eliges. En los demás remotos se escribe tal cual.</td><td>De extremo a extremo, en el cliente, antes de que nada salga del dispositivo; cifrado híbrido poscuántico (ML-KEM para compartir claves, firmas Ed25519 + ML-DSA-65). Aún no auditado de forma independiente.</td></tr>
+      <tr><th scope="row">Sincronización entre varios dispositivos</th><td>En un sentido por defecto (<code>sync</code>). En dos sentidos hace falta una configuración <code>bisync</code> aparte por cada par de rutas, con sus propios listados y un <code>--resync</code> inicial.</td><td>Sí, entre todos los dispositivos de la bóveda: los cambios se fusionan con vectores de versión, las ediciones simultáneas conservan las dos versiones, y los dispositivos se sincronizan a través de tus almacenamientos o de par a par.</td></tr>
+      <tr><th scope="row">Dispositivos en línea a la vez</th><td>No hace falta: cada pasada habla con el remoto.</td><td>No hace falta: los dispositivos se sincronizan a través de tus almacenamientos y directamente de par a par cuando pueden alcanzarse.</td></tr>
+      <tr><th scope="row">Sabe dónde está cada copia</th><td>No: cada comando compara los dos lados que recibe y no guarda registro.</td><td>Sí: un libro mayor firmado registra qué almacenamiento y qué dispositivo conserva cada bloque; las políticas de conservación (por defecto, 1 copia en cualquier sitio, 1 externa y 1 en tus propios discos, comprobada por otro dispositivo en un plazo de 30 días) avisan cuando no se cumple una regla.</td></tr>
+      <tr><th scope="row">Discos extraíbles y sin conexión</th><td>Un disco es una ruta local mientras está montado; nada lo sigue cuando no está.</td><td>Sí: los grupos de discos se llenan, se comprueban y se reconocen cuando vuelven; los archivos que están en un disco ausente piden ese disco.</td></tr>
+      <tr><th scope="row">Copias de seguridad</th><td>Copias hechas con <code>copy</code> o <code>sync</code>; conservar versiones antiguas exige el versionado del remoto u opciones como <code>--backup-dir</code>.</td><td>Sí: elige una carpeta en cualquier dispositivo. Varsto guarda de ella instantáneas cifradas y de solo lectura solo en tus almacenamientos externos, nunca en tus dispositivos. Las conserva el número de días que elijas (90 por defecto) y borra las caducadas. Puedes restaurar cualquier instantánea en un directorio que nombres, desde la aplicación o la línea de órdenes.</td></tr>
+            <tr><th scope="row">Licencia</th><td>Código abierto (MIT).</td><td>Código fuente disponible (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Precio</th><td>Gratis.</td><td>Gratis; solo pagas a tu proveedor de almacenamiento</td></tr>
+      <tr><th scope="row">Madurez</th><td>Maduro, un proyecto de larga trayectoria.</td><td>Alfa: no para datos de producción, y los formatos aún pueden cambiar.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Cuál te encaja</h2>
+    <div class="grid two">
+      <div class="card"><h3>rclone</h3><p>Elige rclone cuando quieres una herramienta madura que copia archivos a casi cualquier nube con el horario que tú marques, te va bien lanzar las pasadas tú mismo con scripts, y te bastan las copias en un sentido o un par bisync.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Elige Varsto cuando varios dispositivos deban mantenerse al día solos, cada byte deba cifrarse antes de salir, quieres un registro de dónde está cada copia y políticas que avisan, y aun así quieres seguir usando los remotos de rclone que ya tienes.</p></div>
+    </div>
+    <p class="note">Varsto es software en fase alfa: no le confíes datos de los que no tengas otra copia. Su criptografía tampoco se ha auditado de forma independiente. Los demás productos de aquí son maduros. Los datos sobre ellos se comprobaron en su propia documentación en octubre de 2026; los precios y los planes cambian a menudo, así que mira sus propias páginas para las cifras actuales. Las correcciones son bienvenidas en el <a href="{{P}}forum/">foro</a> o en GitHub.</p>
+
+    <h2>Fuentes</h2>
+    <ul>
+      <li><a href="https://rclone.org/">Sitio web de rclone</a></li>
+      <li><a href="https://rclone.org/crypt/">Remoto crypt: cifrado del contenido y de los nombres de archivo (en)</a></li>
+      <li><a href="https://rclone.org/bisync/">bisync: sincronización en dos sentidos (en)</a></li>
+      <li><a href="https://github.com/rclone/rclone/blob/master/COPYING">Licencia (MIT)</a></li>
+    </ul>

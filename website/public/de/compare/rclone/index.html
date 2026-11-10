@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rclone-Alternative: Varsto und rclone im Vergleich</title>
+<meta name="description" content="Benutzt du rclone mit einem crypt-Remote, um verschlüsselte Kopien auf S3 oder einer anderen Cloud zu halten? Wofür rclone gedacht ist, wie sein crypt-Backend und bisync funktionieren und wie es sich mit Varsto vergleicht.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/de/compare/rclone/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="rclone-Alternative: Varsto und rclone im Vergleich">
+<meta property="og:description" content="Benutzt du rclone mit einem crypt-Remote, um verschlüsselte Kopien auf S3 oder einer anderen Cloud zu halten? Wofür rclone gedacht ist, wie sein crypt-Backend und bisync funktionieren und wie es sich mit Varsto vergleicht.">
+<meta property="og:url" content="https://varsto.net/de/compare/rclone/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="de_DE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/rclone/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/rclone/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/rclone/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/rclone/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/rclone/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/compare/rclone/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/rclone/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/rclone/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=74266d1106">
+<script src="../../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-Software, nicht für Produktionsdaten.</strong> Fehler können Daten zerstören, das Speicherformat kann sich ohne Migrationswerkzeug ändern, und die Verschlüsselung ist noch nicht geprüft. Behalte eigene Sicherungskopien und prüfe, dass du daraus wiederherstellen kannst.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../de/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Hauptmenü">
+      <a href="../../../de/features/">Funktionen</a>
+      <a href="../../../de/how-it-works/">So funktioniert es</a>
+      <a href="../../../de/compare/" aria-current="page">Vergleich</a>
+      <a href="../../../docs/">Dokumentation (en)</a>
+      <a href="../../../blog/">Blog (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Sprache">DE</summary>
+        <nav class="pop-body langs" aria-label="Sprache"><a href="../../../compare/rclone/" hreflang="en" lang="en">English</a><a href="../../../fi/compare/rclone/" hreflang="fi" lang="fi">Suomi</a><a href="../../../sv/compare/rclone/" hreflang="sv" lang="sv">Svenska</a><a href="../../../fr/compare/rclone/" hreflang="fr" lang="fr">Français</a><a href="../../../de/compare/rclone/" hreflang="de" lang="de" aria-current="true">Deutsch</a><a href="../../../es/compare/rclone/" hreflang="es" lang="es">Español</a><a href="../../../ru/compare/rclone/" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../../de/downloads/">Herunterladen</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menü"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menü"><a href="../../../de/">Projekt</a><a href="../../../de/features/">Funktionen</a><a href="../../../de/use-cases/">Anwendungsfälle</a><a href="../../../de/compare/" aria-current="page">Vergleich</a><a href="../../../de/how-it-works/">So funktioniert es</a><a href="../../../de/screenshots/">Bildschirmfotos</a><a href="../../../de/videos/">Videos</a><a href="../../../docs/">Dokumentation (en)</a><a href="../../../de/downloads/">Downloads</a><a href="../../../blog/">Blog (en)</a><a href="../../../forum/">Forum (en)</a><a href="../../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Alle Vergleiche</a></p>
+    <h1>Varsto und rclone</h1>
+    <p class="lead">rclone ist das Kommandozeilenwerkzeug, um Dateien mit mehr als siebzig Cloud-Speichersystemen zu kopieren und zu synchronisieren. Sein crypt-Backend verschlüsselt, was hindurchgeht, und viele nutzen beides zusammen als selbst gebaute verschlüsselte Sicherung. Varsto selbst kann jedes rclone-Remote als Speicher benutzen.</p>
+
+    <h2>So funktioniert rclone</h2>
+    <p>rclone kopiert Dateien zwischen einem lokalen Verzeichnis und einem Remote oder zwischen zwei Remotes: <code>rclone copy</code>, <code>rclone sync</code> (in eine Richtung, das Ziel wird der Quelle gleich), <code>rclone mount</code> und viele weitere. Ein <em>crypt</em>-Remote legt sich um ein anderes Remote und verschlüsselt Dateiinhalte mit NaCl SecretBox (XSalsa20 und Poly1305); Datei- und Verzeichnisnamen werden im Standardmodus ebenfalls verschlüsselt und können im Klartext bleiben oder nur verschleiert werden. Außerhalb eines crypt-Remotes verschlüsselt rclone nichts. Synchronisierung in beide Richtungen gibt es als <code>rclone bisync</code>, das eine Liste beider Seiten vom vorigen Lauf behält und Änderungen in beide Richtungen weitergibt; rclone nennt es einen fortgeschrittenen Befehl, er muss zuerst mit <code>--resync</code> eingerichtet werden, und Dateien, die sich während eines Laufs ändern, können verloren gehen. rclone führt keine Aufzeichnung, welche Kopien wo existieren, über den Vergleich jedes einzelnen Laufs hinaus, und hat keinen Begriff von Geräten: jede Maschine führt ihre eigenen Befehle aus.</p>
+
+    <h2>Nebeneinander</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">rclone</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Wo deine Dateien liegen</th><td>Wohin du sie kopierst: lokale Verzeichnisse und jedes unterstützte Remote.</td><td>Auf deinen eigenen Geräten und auf Speichern, die du wählst: S3-kompatible Buckets, jedes rclone-Remote, lokale oder Netzwerkverzeichnisse sowie Plattenpools aus Wechseldatenträgern.</td></tr>
+      <tr><th scope="row">Konto oder zentraler Server</th><td>Keines von beiden; nur die Konten der Remotes, die du benutzt.</td><td>Keines von beiden. Es gibt keinen Varsto-Server; die Geräte finden einander über deine Speicher und im LAN.</td></tr>
+      <tr><th scope="row">Verschlüsselung</th><td>Nur über ein crypt-Remote: XSalsa20-Poly1305 für den Inhalt; Datei- und Verzeichnisnamen im Standardmodus verschlüsselt, im Klartext oder verschleiert, wenn du das wählst. Andere Remotes werden so geschrieben, wie sie sind.</td><td>Ende-zu-Ende, clientseitig, bevor etwas das Gerät verlässt; hybride Post-Quanten-Verschlüsselung (ML-KEM zum Teilen der Schlüssel, Ed25519- und ML-DSA-65-Signaturen). Noch nicht unabhängig geprüft.</td></tr>
+      <tr><th scope="row">Synchronisierung zwischen mehreren Geräten</th><td>Standardmäßig in eine Richtung (<code>sync</code>). Zwei Wege brauchen je Pfadpaar eine eigene <code>bisync</code>-Einrichtung, mit eigenen Listen und einem ersten <code>--resync</code>.</td><td>Ja, zwischen allen Geräten des Tresors: Änderungen werden mit Versionsvektoren zusammengeführt, gleichzeitige Bearbeitungen behalten beide Versionen, und die Geräte synchronisieren sich über deine Speicher oder von Gegenstelle zu Gegenstelle.</td></tr>
+      <tr><th scope="row">Geräte gleichzeitig online</th><td>Nicht nötig: jeder Lauf spricht mit dem Remote.</td><td>Nicht nötig: Die Geräte synchronisieren sich über deine Speicher und direkt von Gegenstelle zu Gegenstelle, wenn sie einander erreichen.</td></tr>
+      <tr><th scope="row">Weiß, wo jede Kopie liegt</th><td>Nein: jeder Befehl vergleicht die zwei Seiten, die er bekommen hat, und behält keine Aufzeichnung.</td><td>Ja: Ein signiertes Hauptbuch hält fest, welcher Speicher und welches Gerät jeden Block hält; Aufbewahrungsregeln (standardmäßig 1 Kopie irgendwo, 1 externe und 1 auf deinen eigenen Platten, von einem anderen Gerät innerhalb von 30 Tagen geprüft) warnen, wenn eine Regel nicht erfüllt ist.</td></tr>
+      <tr><th scope="row">Wechseldatenträger und Offline-Platten</th><td>Eine Platte ist ein lokaler Pfad, solange sie eingehängt ist; nichts verfolgt sie, wenn sie weg ist.</td><td>Ja: Plattenpools werden gefüllt, geprüft und erkannt, wenn sie zurückkommen; Dateien auf einer Platte, die weg ist, verlangen genau diese Platte.</td></tr>
+      <tr><th scope="row">Sicherungen</th><td>Kopien von <code>copy</code> oder <code>sync</code>; alte Versionen zu behalten braucht die Versionierung des Remotes oder Optionen wie <code>--backup-dir</code>.</td><td>Ja: Wähle einen Ordner auf einem beliebigen Gerät. Varsto behält davon verschlüsselte, schreibgeschützte Schnappschüsse nur auf deinen externen Speichern, nie auf deinen Geräten, so viele Tage, wie du wählst (standardmäßig 90), und löscht danach die abgelaufenen. Stelle einen beliebigen Schnappschuss in ein Verzeichnis wieder her, das du nennst, aus der App oder von der Kommandozeile.</td></tr>
+      <tr><th scope="row">Lizenz</th><td>Open Source (MIT).</td><td>Quellcode verfügbar (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Preis</th><td>Kostenlos.</td><td>Kostenlos; du zahlst nur deinen Speicheranbieter</td></tr>
+      <tr><th scope="row">Reife</th><td>Ausgereiftes, langjähriges Projekt.</td><td>Alpha: nicht für Produktionsdaten, und die Formate können sich noch ändern.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Was zu dir passt</h2>
+    <div class="grid two">
+      <div class="card"><h3>rclone</h3><p>Wähle rclone, wenn du ein ausgereiftes Werkzeug willst, das Dateien nach deinem eigenen Zeitplan in fast jede Cloud kopiert, du die Läufe gern selbst skriptest und Kopien in eine Richtung oder ein bisync-Paar genügen.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Wähle Varsto, wenn mehrere Geräte von selbst im Gleichschritt bleiben sollen, jedes Byte verschlüsselt sein soll, bevor es hinausgeht, du eine Aufzeichnung willst, wo jede Kopie liegt, und Aufbewahrungsregeln, die warnen, und du die rclone-Remotes, die du schon hast, trotzdem benutzen willst.</p></div>
+    </div>
+    <p class="note">Varsto ist Alpha-Software: Vertraue ihm keine Daten an, von denen du keine weitere Kopie hast, und seine Kryptografie ist nicht unabhängig geprüft. Die anderen Produkte hier sind ausgereift. Angaben zu ihnen wurden im Oktober 2026 anhand ihrer eigenen Dokumentation geprüft; Preise und Tarife ändern sich oft, sieh also auf ihren eigenen Seiten nach den aktuellen Zahlen. Korrekturen sind im <a href="../../../forum/">Forum</a> oder auf GitHub willkommen.</p>
+
+    <h2>Quellen</h2>
+    <ul>
+      <li><a href="https://rclone.org/">Website von rclone</a></li>
+      <li><a href="https://rclone.org/crypt/">crypt-Remote: Verschlüsselung von Inhalt und Dateinamen (en)</a></li>
+      <li><a href="https://rclone.org/bisync/">bisync: Synchronisierung in beide Richtungen (en)</a></li>
+      <li><a href="https://github.com/rclone/rclone/blob/master/COPYING">Lizenz (MIT)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../../de/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Verschlüsselte dateisynchronisierung und sicherung auf deinem eigenen speicher.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../../de/">Projekt</a><a href="../../../de/features/">Funktionen</a><a href="../../../de/use-cases/">Anwendungsfälle</a><a href="../../../de/screenshots/">Bildschirmfotos</a><a href="../../../de/downloads/">Downloads</a></nav></div>
+    <div><h2>Lernen</h2><nav aria-label="Lernen"><a href="../../../de/how-it-works/">So funktioniert es</a><a href="../../../de/compare/" aria-current="page">Vergleich</a><a href="../../../de/videos/">Videos</a><a href="../../../docs/">Dokumentation (en)</a><a href="../../../blog/">Blog (en)</a></nav></div>
+    <div><h2>Gemeinschaft</h2><nav aria-label="Gemeinschaft"><a href="../../../forum/">Forum (en)</a><a href="../../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto ist ein Arbeitsname. Quellcode: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, unter der PolyForm Shield License 1.0.0 (Quellcode verfügbar).</span>
+    <span>Keine Cookies, kein Tracking. Der Webserver behält ein gewöhnliches Zugriffsprotokoll höchstens sieben Tage.</span>
+    <span><a href="../../../docs/security-policy.html">Sicherheitsrichtlinie</a> · <a href="../../../docs/licence.html">Lizenz</a> · <a href="../../../docs/trademark.html">Marke</a> (auf Englisch)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

@@ -437,6 +437,9 @@ mod tests {
         for (lang, dict) in [
             ("fi", include_str!("../ui/i18n/fi.json")),
             ("sv", include_str!("../ui/i18n/sv.json")),
+            ("de", include_str!("../ui/i18n/de.json")),
+            ("es", include_str!("../ui/i18n/es.json")),
+            ("ru", include_str!("../ui/i18n/ru.json")),
         ] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let missing: Vec<&String> = found

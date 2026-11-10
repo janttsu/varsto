@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comparación: Varsto</title>
+<meta name="description" content="Cómo se compara Varsto con Syncthing, Resilio Sync, MEGA, Filen, Tresorit, git-annex, Cryptomator, rclone y restic/borg: para qué sirve cada uno y en qué se diferencian.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/es/compare/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Comparación: Varsto">
+<meta property="og:description" content="Cómo se compara Varsto con Syncthing, Resilio Sync, MEGA, Filen, Tresorit, git-annex, Cryptomator, rclone y restic/borg: para qué sirve cada uno y en qué se diferencian.">
+<meta property="og:url" content="https://varsto.net/es/compare/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="es_ES">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/compare/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=74266d1106">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Software alfa, no para datos de producción.</strong> Los errores pueden destruir datos, el formato de almacenamiento puede cambiar sin una herramienta de migración y el cifrado aún no se ha auditado. Conserva tus propias copias de seguridad y comprueba que puedes restaurar desde ellas.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menú principal">
+      <a href="../../es/features/">Funciones</a>
+      <a href="../../es/how-it-works/">Cómo funciona</a>
+      <a href="../../es/compare/" aria-current="page">Comparación</a>
+      <a href="../../docs/">Documentación (en)</a>
+      <a href="../../blog/">Blog (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Idioma">ES</summary>
+        <nav class="pop-body langs" aria-label="Idioma"><a href="../../compare/" hreflang="en" lang="en">English</a><a href="../../fi/compare/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/compare/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/compare/" hreflang="fr" lang="fr">Français</a><a href="../../de/compare/" hreflang="de" lang="de">Deutsch</a><a href="../../es/compare/" hreflang="es" lang="es" aria-current="true">Español</a><a href="../../ru/compare/" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../es/downloads/">Descargar</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menú"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menú"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/compare/" aria-current="page">Comparación</a><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/screenshots/">Capturas</a><a href="../../es/videos/">Vídeos</a><a href="../../docs/">Documentación (en)</a><a href="../../es/downloads/">Descargas</a><a href="../../blog/">Blog (en)</a><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Cómo se compara Varsto</h1>
+    <p class="lead">Las herramientas para mantener archivos sincronizados se dividen en tres grupos. Las de par a par, como Syncthing y Resilio Sync, copian carpetas entre tus propios dispositivos. Las nubes cifradas, como MEGA, Filen y Tresorit, guardan tus archivos en un solo proveedor. git-annex sigue archivos grandes en los discos y remotos que tú tienes. Varsto junta partes de los tres: archivos cifrados de extremo a extremo en almacenamientos que eliges, transferencia de par a par entre tus dispositivos y un registro de dónde está cada copia.</p>
+
+    <table class="compare-table compare-overview">
+      <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="../compare/syncthing/">Syncthing</a></th><th scope="col"><a href="../compare/resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="../compare/mega/">MEGA</a></th><th scope="col"><a href="../compare/filen/">Filen</a></th><th scope="col"><a href="../compare/tresorit/">Tresorit</a></th><th scope="col"><a href="../compare/git-annex/">git-annex</a></th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Dónde están tus archivos</th><td><strong>Tus dispositivos y tus almacenamientos</strong></td><td>Tus dispositivos</td><td>Tus dispositivos</td><td class="cloud">La nube de MEGA</td><td class="cloud">La nube de Filen</td><td class="cloud">La nube de Tresorit</td><td>Donde tú elijas</td></tr>
+      <tr><th scope="row">Cuenta o servidor central</th><td><strong>Ninguno</strong></td><td>Ninguno</td><td>Sin cuenta</td><td class="cloud">Cuenta</td><td class="cloud">Cuenta</td><td class="cloud">Cuenta</td><td>Ninguno</td></tr>
+      <tr><th scope="row">Los dispositivos deben estar en línea a la vez</th><td><strong>No</strong></td><td class="closed">Sí</td><td class="closed">Sí</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+      <tr><th scope="row">Sabe dónde está cada copia (el registro completo está disponible, reunido en un solo sitio)</th><td><strong>Sí</strong></td><td class="cloud">No</td><td class="cloud">No</td><td>Una copia en el proveedor</td><td>Una copia en el proveedor</td><td>Una copia en el proveedor</td><td>Sí</td></tr>
+      <tr><th scope="row">Discos extraíbles y sin conexión</th><td><strong>Sí</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td class="win">Sí</td></tr>
+      <tr><th scope="row">Copias de seguridad</th><td class="win"><strong>Instantáneas de solo lectura en tus almacenamientos, conservadas N días</strong></td><td>Versionado solo en los dispositivos que reciben</td><td>Carpeta de archivo, 30 días por defecto</td><td>Copias de seguridad de solo lectura en la nube de MEGA</td><td>Modo de copia de seguridad en un sentido hacia la nube de Filen</td><td class="closed">Historial de versiones, sin copias de seguridad aparte</td><td>Copias contadas, sin instantáneas ni plazo de conservación</td></tr>
+      <tr><th scope="row">Cifrado resistente a la computación cuántica</th><td class="win"><strong>Sí, híbrido (sin auditar)</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+      <tr><th scope="row">Licencia</th><td class="closed"><strong>Código fuente disponible</strong></td><td class="win">Código abierto</td><td class="cloud">Propietario</td><td class="closed">Código de los clientes publicado</td><td class="closed">Clientes de código abierto</td><td class="closed">Propietario</td><td class="cloud">Software libre</td></tr>
+      <tr><th scope="row">Precio</th><td><strong>Gratis</strong></td><td>Gratis</td><td>Plan gratuito</td><td>Planes</td><td>Planes</td><td>Planes</td><td>Gratis</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> El verde marca una fila en la que Varsto va por delante de todas las demás herramientas de la tabla. <span class="noqc-swatch" aria-hidden="true"></span> Una columna rojiza marca una herramienta sin cifrado resistente a la computación cuántica. <span class="closed-swatch" aria-hidden="true"></span> En la fila de la licencia, el verde marca Syncthing, el amarillo marca Resilio Sync y git-annex, y el rojo marca MEGA, Filen y Tresorit. En la fila de los discos extraíbles, el verde marca git-annex. En la fila de las copias de seguridad, el rojo marca Tresorit. En la fila sobre dispositivos en línea a la vez, el mismo rojo marca Syncthing y Resilio Sync. <span class="cloud-swatch" aria-hidden="true"></span> En la fila sobre dónde están los archivos, el amarillo marca MEGA, Filen y Tresorit. En la fila de la cuenta, el mismo amarillo marca MEGA, Filen y Tresorit. En la fila sobre saber dónde está cada copia, el mismo amarillo marca Syncthing y Resilio Sync.</p>
+    <p class="note">«Una copia en el proveedor» significa que la copia fuera del sitio está en ese proveedor; tus dispositivos también guardan las suyas. Cada página de comparación explica los detalles y enlaza a las fuentes.</p>
+
+    <h2>Comparaciones</h2>
+    <div class="grid three">
+      <a class="card" href="../compare/syncthing/"><h3>Varsto y Syncthing</h3><p>Syncthing mantiene las carpetas idénticas en tus propios dispositivos, de forma continua y sin ninguna nube.</p></a>
+      <a class="card" href="../compare/resilio-sync/"><h3>Varsto y Resilio Sync</h3><p>Resilio Sync sincroniza y comparte carpetas entre dispositivos de par a par, sobre la tecnología BitTorrent.</p></a>
+      <a class="card" href="../compare/mega/"><h3>Varsto y MEGA</h3><p>MEGA es almacenamiento en la nube cifrado de extremo a extremo para particulares y empresas. Tiene planes con mucho espacio, sincronización de escritorio, aplicaciones móviles y servicios relacionados, como un chat y una VPN.</p></a>
+      <a class="card" href="../compare/filen/"><h3>Varsto y Filen</h3><p>Filen es almacenamiento en la nube cifrado con conocimiento cero, de Alemania, para personas y equipos que cuidan su privacidad.</p></a>
+      <a class="card" href="../compare/tresorit/"><h3>Varsto y Tresorit</h3><p>Tresorit es almacenamiento en la nube y uso compartido de archivos cifrados de extremo a extremo, de Suiza, dirigido sobre todo a empresas y sectores regulados, con planes personales también.</p></a>
+      <a class="card" href="../compare/git-annex/"><h3>Varsto y git-annex</h3><p>git-annex gestiona archivos grandes con git sin guardar su contenido en git.</p></a>
+      <a class="card" href="../compare/cryptomator/"><h3>Varsto y Cryptomator</h3><p>Cryptomator cifra una carpeta de bóveda para cualquier nube; el propio cliente del proveedor la lleva de un dispositivo a otro.</p></a>
+      <a class="card" href="../compare/rclone/"><h3>Varsto y rclone</h3><p>rclone copia y sincroniza archivos con más de setenta sistemas de almacenamiento; su remoto crypt cifra lo que pasa por él.</p></a>
+      <a class="card" href="../compare/restic/"><h3>Varsto, restic y BorgBackup</h3><p>restic y borg toman instantáneas cifradas y deduplicadas en un repositorio: copias de seguridad, no sincronización.</p></a>
+    </div>
+    <p class="note">Varsto es software en fase alfa: no le confíes datos de los que no tengas otra copia. Su criptografía tampoco se ha auditado de forma independiente. Los demás productos de aquí son maduros. Los datos sobre ellos se comprobaron en su propia documentación en octubre de 2026; los precios y los planes cambian a menudo, así que mira sus propias páginas para las cifras actuales. Las correcciones son bienvenidas como <a href="https://github.com/janttsu/varsto/issues" rel="noopener">issues de GitHub</a>.</p>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Sincronización y copia de seguridad de archivos cifradas en tu propio almacenamiento.</p></div>
+    <div><h2>Producto</h2><nav aria-label="Producto"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/screenshots/">Capturas</a><a href="../../es/downloads/">Descargas</a></nav></div>
+    <div><h2>Aprender</h2><nav aria-label="Aprender"><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/compare/" aria-current="page">Comparación</a><a href="../../es/videos/">Vídeos</a><a href="../../docs/">Documentación (en)</a><a href="../../blog/">Blog (en)</a></nav></div>
+    <div><h2>Comunidad</h2><nav aria-label="Comunidad"><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto es un nombre provisional. Código fuente: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, bajo la PolyForm Shield License 1.0.0 (código fuente disponible).</span>
+    <span>Sin cookies, sin seguimiento. El servidor web conserva un registro de acceso ordinario como máximo siete días.</span>
+    <span><a href="../../docs/security-policy.html">Política de seguridad</a> · <a href="../../docs/licence.html">Licencia</a> · <a href="../../docs/trademark.html">Marca</a> (en inglés)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

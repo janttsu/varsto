@@ -1,0 +1,53 @@
+---
+title: Filen-Alternative: Varsto und Filen im Vergleich
+nav: Compare
+output: compare/filen/index.html
+description: Suchst du eine Filen-Alternative mit Ende-zu-Ende-Verschlüsselung auf deinem eigenen Speicher (S3, NAS, Platten, rclone)? Wofür Filen gedacht ist, wie es funktioniert und wie es sich mit Varsto vergleicht.
+---
+    <p class="back-link"><a href="{{L}}compare/">Alle Vergleiche</a></p>
+    <h1>Varsto und Filen</h1>
+    <p class="lead">Filen ist Zero-Knowledge-verschlüsselter Cloud-Speicher aus Deutschland, für Menschen und Teams, denen Privatsphäre wichtig ist. Er bietet ein Laufwerk, Desktop-Synchronisierung, ein Netzlaufwerk mit Dateien auf Abruf, Notizen und Chat, zu niedrigen Preisen.</p>
+
+    <h2>Worin sich Varsto unterscheidet</h2>
+    <ul>
+      <li>Du wählst den Speicher und kannst ihn wechseln: ein Bucket bei einem beliebigen Anbieter, ein NAS, ein rclone-Remote, deine eigenen Platten.</li>
+      <li>Kopien auf deinen eigenen Platten und bei mehreren Anbietern gleichzeitig, jede im Hauptbuch gezählt.</li>
+      <li>Aufbewahrungsregeln wie „mindestens eine Kopie außerhalb des Hauses“, anhand des Hauptbuchs geprüft, mit einer Warnung, bevor sie brechen.</li>
+      <li>Strongroom-Ordner, die sich nur mit einem Hardware-Sicherheitsschlüssel öffnen.</li>
+      <li>Ein Kern mit verfügbarem Quellcode und einem aufgeschriebenen Speicherformat (Filens Clients sind Open Source und seine Tarife günstig; siehe unten).</li>
+    </ul>
+
+    <h2>So funktioniert Filen</h2>
+    <p>Du legst ein Konto an, und die Dateien liegen auf Filens Servern in Deutschland, vor dem Hochladen auf dem Client verschlüsselt (AES-256 je Chunk). Die Clients und SDKs sind Open Source unter AGPL-3.0. Der Kommandozeilen-Client kann deinen Filen-Speicher lokal über WebDAV oder S3 bereitstellen, die Daten liegen aber weiterhin bei Filen. Sieh in den aktuellen Bedingungen des Anbieters nach, wie lange ein kostenloses Konto aktiv bleibt.</p>
+
+    <h2>Nebeneinander</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Filen</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Wo deine Dateien liegen</th><td>In Filens Cloud in Deutschland; keine eigenen Backends.</td><td>Auf deinen eigenen Geräten und auf Speichern, die du wählst: S3-kompatible Buckets, jedes rclone-Remote, lokale oder Netzwerkverzeichnisse sowie Plattenpools aus Wechseldatenträgern.</td></tr>
+      <tr><th scope="row">Konto oder zentraler Server</th><td>Konto erforderlich.</td><td>Keines von beiden. Es gibt keinen Varsto-Server; die Geräte finden einander über deine Speicher und im LAN.</td></tr>
+      <tr><th scope="row">Verschlüsselung</th><td>Ende-zu-Ende, clientseitig (AES-256); Open-Source-Clients.</td><td>Ende-zu-Ende, clientseitig, bevor etwas das Gerät verlässt; hybride Post-Quanten-Verschlüsselung (ML-KEM zum Teilen der Schlüssel, Ed25519- und ML-DSA-65-Signaturen). Noch nicht unabhängig geprüft.</td></tr>
+      <tr><th scope="row">Geräte gleichzeitig online</th><td>Nicht nötig: die Cloud hält die Kopie.</td><td>Nicht nötig: Die Geräte synchronisieren sich über deine Speicher und direkt von Gegenstelle zu Gegenstelle, wenn sie einander erreichen.</td></tr>
+      <tr><th scope="row">Weiß, wo jede Kopie liegt</th><td>Eine Kopie beim Anbieter; keine Erfassung über deine eigenen Medien hinweg.</td><td>Ja: Ein signiertes Hauptbuch hält fest, welcher Speicher und welches Gerät jeden Block hält; Aufbewahrungsregeln (standardmäßig 1 Kopie irgendwo, 1 externe und 1 auf deinen eigenen Platten, von einem anderen Gerät innerhalb von 30 Tagen geprüft) warnen, wenn eine Regel nicht erfüllt ist.</td></tr>
+      <tr><th scope="row">Wechseldatenträger und Offline-Platten</th><td>Kein Ablauf für Wechselplatten.</td><td>Ja: Plattenpools werden gefüllt, geprüft und erkannt, wenn sie zurückkommen; Dateien auf einer Platte, die weg ist, verlangen genau diese Platte.</td></tr>
+      <tr><th scope="row">Sicherungen</th><td>Die Desktop-App hat einen Synchronisierungsmodus „Local Backup“, der nur hochlädt und in Filens Cloud nie etwas löscht.</td><td>Ja: Wähle einen Ordner auf einem beliebigen Gerät. Varsto behält davon verschlüsselte, schreibgeschützte Schnappschüsse nur auf deinen externen Speichern, nie auf deinen Geräten, so viele Tage, wie du wählst (standardmäßig 90), und löscht danach die abgelaufenen. Stelle einen beliebigen Schnappschuss in ein Verzeichnis wieder her, das du nennst, aus der App oder von der Kommandozeile.</td></tr>
+      <tr><th scope="row">Lizenz</th><td>Clients AGPL-3.0.</td><td>Quellcode verfügbar (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Preis</th><td>Kostenloses Kontingent und günstige bezahlte Tarife.</td><td>Kostenlos; du zahlst nur deinen Speicheranbieter</td></tr>
+      <tr><th scope="row">Reife</th><td>Etablierter Dienst.</td><td>Alpha: nicht für Produktionsdaten, und die Formate können sich noch ändern.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Was zu dir passt</h2>
+    <div class="grid two">
+      <div class="card"><h3>Filen</h3><p>Wähle Filen, wenn du günstigen, in der EU gehosteten verschlüsselten Cloud-Speicher mit Open-Source-Clients willst und es dir recht ist, dass ein Anbieter deine Kopie außerhalb der eigenen Räume hält.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Wähle Varsto, wenn der Speicher selbst dir gehören soll, zum Wählen und Wechseln, wenn du Kopien bei mehreren Anbietern und auf deinen eigenen Platten willst und wenn Regeln wie „mindestens eine Kopie außerhalb des Hauses“ für dich geprüft werden sollen.</p></div>
+    </div>
+    <p class="note">Varsto ist Alpha-Software: Vertraue ihm keine Daten an, von denen du keine weitere Kopie hast, und seine Kryptografie ist nicht unabhängig geprüft. Die anderen Produkte hier sind ausgereift. Angaben zu ihnen wurden im Oktober 2026 anhand ihrer eigenen Dokumentation geprüft; Preise und Tarife ändern sich oft, sieh also auf ihren eigenen Seiten nach den aktuellen Zahlen. Korrekturen sind als <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-Issues</a> willkommen.</p>
+
+    <h2>Quellen</h2>
+    <ul>
+      <li><a href="https://filen.io/">Website von Filen</a></li>
+      <li><a href="https://filen.io/pricing">Preise von Filen</a></li>
+      <li><a href="https://github.com/FilenCloudDienste">Quellcode von Filen</a></li>
+      <li><a href="https://docs.filen.io/docs/desktop/setup">Synchronisierungsmodi von Filen Desktop (en)</a></li>
+    </ul>

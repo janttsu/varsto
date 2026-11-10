@@ -1,0 +1,39 @@
+---
+title: Vergleich
+nav: Compare
+output: compare/index.html
+description: Wie Varsto im Vergleich zu Syncthing, Resilio Sync, MEGA, Filen, Tresorit, git-annex, Cryptomator, rclone und restic/Borg dasteht: wofür jedes gedacht ist und worin sie sich unterscheiden.
+---
+    <h1>Wie Varsto im Vergleich dasteht</h1>
+    <p class="lead">Werkzeuge, die Dateien synchron halten, fallen in drei Gruppen. Peer-to-Peer-Werkzeuge wie Syncthing und Resilio Sync kopieren Ordner zwischen deinen eigenen Geräten. Verschlüsselte Clouds wie MEGA, Filen und Tresorit behalten deine Dateien bei einem Anbieter. git-annex verfolgt große Dateien über alle Platten und Remotes, die dir gehören. Varsto verbindet Teile aller drei: Ende-zu-Ende verschlüsselte Dateien auf Speichern, die du wählst, Übertragung von Gegenstelle zu Gegenstelle zwischen deinen Geräten und eine Aufzeichnung, wo jede Kopie liegt.</p>
+
+    <table class="compare-table compare-overview">
+      <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="{{L}}compare/syncthing/">Syncthing</a></th><th scope="col"><a href="{{L}}compare/resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="{{L}}compare/mega/">MEGA</a></th><th scope="col"><a href="{{L}}compare/filen/">Filen</a></th><th scope="col"><a href="{{L}}compare/tresorit/">Tresorit</a></th><th scope="col"><a href="{{L}}compare/git-annex/">git-annex</a></th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Wo deine Dateien liegen</th><td><strong>Deine Geräte und deine Speicher</strong></td><td>Deine Geräte</td><td>Deine Geräte</td><td class="cloud">MEGAs Cloud</td><td class="cloud">Filens Cloud</td><td class="cloud">Tresorits Cloud</td><td>Überall, wo du willst</td></tr>
+      <tr><th scope="row">Konto oder zentraler Server</th><td><strong>Keines von beiden</strong></td><td>Keines von beiden</td><td>Kein Konto</td><td class="cloud">Konto</td><td class="cloud">Konto</td><td class="cloud">Konto</td><td>Keines von beiden</td></tr>
+      <tr><th scope="row">Geräte müssen gleichzeitig online sein</th><td><strong>Nein</strong></td><td class="closed">Ja</td><td class="closed">Ja</td><td>Nein</td><td>Nein</td><td>Nein</td><td>Nein</td></tr>
+      <tr><th scope="row">Weiß, wo jede Kopie liegt (die vollständige Aufzeichnung liegt vor, an einem Ort zusammengeführt)</th><td><strong>Ja</strong></td><td class="cloud">Nein</td><td class="cloud">Nein</td><td>Eine Kopie beim Anbieter</td><td>Eine Kopie beim Anbieter</td><td>Eine Kopie beim Anbieter</td><td>Ja</td></tr>
+      <tr><th scope="row">Wechseldatenträger und Offline-Platten</th><td><strong>Ja</strong></td><td>Nein</td><td>Nein</td><td>Nein</td><td>Nein</td><td>Nein</td><td class="win">Ja</td></tr>
+      <tr><th scope="row">Sicherungen</th><td class="win"><strong>Schreibgeschützte Schnappschüsse auf deinen Speichern, N Tage aufbewahrt</strong></td><td>Versionierung nur auf den empfangenden Geräten</td><td>Archivordner, standardmäßig 30 Tage</td><td>Schreibgeschützte Sicherungen in MEGAs Cloud</td><td>Einseitiger Sicherungsmodus in Filens Cloud</td><td class="closed">Versionsverlauf, keine eigenen Sicherungen</td><td>Kopien werden gezählt, keine Schnappschüsse und keine Aufbewahrungsdauer</td></tr>
+      <tr><th scope="row">Quantenresistente Verschlüsselung</th><td class="win"><strong>Ja, hybrid (nicht geprüft)</strong></td><td>Nein</td><td>Nein</td><td>Nein</td><td>Nein</td><td>Nein</td><td>Nein</td></tr>
+      <tr><th scope="row">Lizenz</th><td class="closed"><strong>Quellcode verfügbar</strong></td><td class="win">Open Source</td><td class="cloud">Proprietär</td><td class="closed">Quellcode der Clients veröffentlicht</td><td class="closed">Open-Source-Clients</td><td class="closed">Proprietär</td><td class="cloud">Freie Software</td></tr>
+      <tr><th scope="row">Preis</th><td><strong>Kostenlos</strong></td><td>Kostenlos</td><td>Kostenloses Kontingent</td><td>Tarife</td><td>Tarife</td><td>Tarife</td><td>Kostenlos</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grün markiert eine Zeile, in der Varsto jedem anderen Werkzeug in der Tabelle voraus ist. <span class="noqc-swatch" aria-hidden="true"></span> Eine rötliche Spalte markiert ein Werkzeug ohne quantenresistente Verschlüsselung. <span class="closed-swatch" aria-hidden="true"></span> In der Lizenzzeile markiert Grün Syncthing, Gelb Resilio Sync und git-annex, und Rot markiert MEGA, Filen und Tresorit. In der Zeile der Wechselplatten markiert Grün git-annex. In der Zeile der Sicherungen markiert Rot Tresorit. In der Zeile dazu, dass Geräte gleichzeitig online sind, markiert dasselbe Rot Syncthing und Resilio Sync. <span class="cloud-swatch" aria-hidden="true"></span> In der Zeile dazu, wo deine Dateien liegen, markiert Gelb MEGA, Filen und Tresorit. In der Zeile zu Konto oder zentralem Server markiert dasselbe Gelb MEGA, Filen und Tresorit. In der Zeile dazu, wo jede Kopie liegt, markiert dasselbe Gelb Syncthing und Resilio Sync.</p>
+    <p class="note">„Eine Kopie beim Anbieter“ heißt, dass die Kopie außerhalb deiner Räume bei diesem Anbieter liegt; deine Geräte behalten auch ihre eigenen Kopien. Jede Vergleichsseite erklärt die Einzelheiten und verlinkt die Quellen.</p>
+
+    <h2>Vergleiche</h2>
+    <div class="grid three">
+      <a class="card" href="{{L}}compare/syncthing/"><h3>Varsto und Syncthing</h3><p>Syncthing hält Ordner auf deinen eigenen Geräten gleich, fortlaufend und ohne jede Cloud.</p></a>
+      <a class="card" href="{{L}}compare/resilio-sync/"><h3>Varsto und Resilio Sync</h3><p>Resilio Sync synchronisiert und gibt Ordner zwischen Geräten per Peer-to-Peer frei, auf Basis von BitTorrent.</p></a>
+      <a class="card" href="{{L}}compare/mega/"><h3>Varsto und MEGA</h3><p>MEGA ist Ende-zu-Ende verschlüsselter Cloud-Speicher für Privatpersonen und Unternehmen, mit großzügigen Speichertarifen, Desktop-Synchronisierung, mobilen Apps und zugehörigen Diensten wie Chat und einem VPN.</p></a>
+      <a class="card" href="{{L}}compare/filen/"><h3>Varsto und Filen</h3><p>Filen ist Zero-Knowledge-verschlüsselter Cloud-Speicher aus Deutschland, für Menschen und Teams, denen Privatsphäre wichtig ist.</p></a>
+      <a class="card" href="{{L}}compare/tresorit/"><h3>Varsto und Tresorit</h3><p>Tresorit ist Ende-zu-Ende verschlüsselter Cloud-Speicher und Dateifreigabe aus der Schweiz, vor allem für Unternehmen und regulierte Branchen, mit persönlichen Tarifen dazu.</p></a>
+      <a class="card" href="{{L}}compare/git-annex/"><h3>Varsto und git-annex</h3><p>git-annex verwaltet große Dateien mit git, ohne ihren Inhalt in git zu speichern.</p></a>
+      <a class="card" href="{{L}}compare/cryptomator/"><h3>Varsto und Cryptomator</h3><p>Cryptomator verschlüsselt einen Tresorordner für eine beliebige Cloud; der eigene Client des Cloud-Anbieters trägt ihn zwischen den Geräten.</p></a>
+      <a class="card" href="{{L}}compare/rclone/"><h3>Varsto und rclone</h3><p>rclone kopiert und synchronisiert Dateien mit mehr als siebzig Speichersystemen; ein crypt-Remote verschlüsselt, was hindurchgeht.</p></a>
+      <a class="card" href="{{L}}compare/restic/"><h3>Varsto, restic und BorgBackup</h3><p>restic und borg nehmen verschlüsselte, deduplizierte Schnappschüsse in ein Repository auf: Sicherungen, keine Synchronisierung.</p></a>
+    </div>
+    <p class="note">Varsto ist Alpha-Software: Vertraue ihm keine Daten an, von denen du keine weitere Kopie hast, und seine Kryptografie ist nicht unabhängig geprüft. Die anderen Produkte hier sind ausgereift. Angaben zu ihnen wurden im Oktober 2026 anhand ihrer eigenen Dokumentation geprüft; Preise und Tarife ändern sich oft, sieh also auf ihren eigenen Seiten nach den aktuellen Zahlen. Korrekturen sind als <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-Issues</a> willkommen.</p>

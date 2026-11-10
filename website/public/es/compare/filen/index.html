@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alternativa a Filen: Varsto y Filen comparados</title>
+<meta name="description" content="¿Buscas una alternativa a Filen con cifrado de extremo a extremo en tu propio almacenamiento (S3, NAS, discos, rclone)? Para qué sirve Filen, cómo funciona y cómo se compara con Varsto.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/es/compare/filen/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alternativa a Filen: Varsto y Filen comparados">
+<meta property="og:description" content="¿Buscas una alternativa a Filen con cifrado de extremo a extremo en tu propio almacenamiento (S3, NAS, discos, rclone)? Para qué sirve Filen, cómo funciona y cómo se compara con Varsto.">
+<meta property="og:url" content="https://varsto.net/es/compare/filen/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="es_ES">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/filen/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/filen/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/filen/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/filen/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/filen/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/compare/filen/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/filen/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/filen/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=74266d1106">
+<script src="../../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Software alfa, no para datos de producción.</strong> Los errores pueden destruir datos, el formato de almacenamiento puede cambiar sin una herramienta de migración y el cifrado aún no se ha auditado. Conserva tus propias copias de seguridad y comprueba que puedes restaurar desde ellas.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../es/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menú principal">
+      <a href="../../../es/features/">Funciones</a>
+      <a href="../../../es/how-it-works/">Cómo funciona</a>
+      <a href="../../../es/compare/" aria-current="page">Comparación</a>
+      <a href="../../../docs/">Documentación (en)</a>
+      <a href="../../../blog/">Blog (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Idioma">ES</summary>
+        <nav class="pop-body langs" aria-label="Idioma"><a href="../../../compare/filen/" hreflang="en" lang="en">English</a><a href="../../../fi/compare/filen/" hreflang="fi" lang="fi">Suomi</a><a href="../../../sv/compare/filen/" hreflang="sv" lang="sv">Svenska</a><a href="../../../fr/compare/filen/" hreflang="fr" lang="fr">Français</a><a href="../../../de/compare/filen/" hreflang="de" lang="de">Deutsch</a><a href="../../../es/compare/filen/" hreflang="es" lang="es" aria-current="true">Español</a><a href="../../../ru/compare/filen/" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../../es/downloads/">Descargar</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menú"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menú"><a href="../../../es/">Proyecto</a><a href="../../../es/features/">Funciones</a><a href="../../../es/use-cases/">Casos de uso</a><a href="../../../es/compare/" aria-current="page">Comparación</a><a href="../../../es/how-it-works/">Cómo funciona</a><a href="../../../es/screenshots/">Capturas</a><a href="../../../es/videos/">Vídeos</a><a href="../../../docs/">Documentación (en)</a><a href="../../../es/downloads/">Descargas</a><a href="../../../blog/">Blog (en)</a><a href="../../../forum/">Foro (en)</a><a href="../../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Todas las comparaciones</a></p>
+    <h1>Varsto y Filen</h1>
+    <p class="lead">Filen es almacenamiento en la nube cifrado con conocimiento cero, de Alemania, para personas y equipos que cuidan su privacidad. Ofrece un disco, sincronización de escritorio, una unidad de red con archivos bajo demanda, notas y chat, a precios bajos.</p>
+
+    <h2>En qué se diferencia Varsto</h2>
+    <ul>
+      <li>Tú eliges el almacenamiento y puedes cambiarlo: un bucket de cualquier proveedor, un NAS, un remoto de rclone, tus propios discos.</li>
+      <li>Copias en tus propios discos y en varios proveedores a la vez, cada una contada en el libro mayor.</li>
+      <li>Políticas de conservación como «al menos una copia fuera de casa», comprobadas en el libro mayor, con un aviso antes de que se incumplan.</li>
+      <li>Carpetas de Strongroom que solo se abren con una llave de seguridad de hardware.</li>
+      <li>Un núcleo con el código fuente disponible y un formato de almacenamiento escrito (los clientes de Filen son de código abierto y sus planes son baratos; ver abajo).</li>
+    </ul>
+
+    <h2>Cómo funciona Filen</h2>
+    <p>Creas una cuenta y los archivos se guardan en los servidores de Filen en Alemania, cifrados en el cliente (AES-256 por fragmento) antes de subirlos. Los clientes y los SDK son de código abierto bajo AGPL-3.0. El cliente de línea de órdenes puede exponer tu almacenamiento de Filen en local por WebDAV o S3, pero los datos siguen en Filen. Consulta las condiciones actuales del proveedor para ver cuánto tiempo sigue activa una cuenta gratuita.</p>
+
+    <h2>Lado a lado</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Filen</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Dónde están tus archivos</th><td>En la nube de Filen en Alemania; sin backends propios.</td><td>En tus propios dispositivos y en los almacenamientos que elijas: buckets compatibles con S3, cualquier remoto de rclone, directorios locales o de red y grupos de discos extraíbles.</td></tr>
+      <tr><th scope="row">Cuenta o servidor central</th><td>Hace falta una cuenta.</td><td>Ninguno. No hay servidor de Varsto; los dispositivos se encuentran a través de tus almacenamientos y en la LAN.</td></tr>
+      <tr><th scope="row">Cifrado</th><td>De extremo a extremo, en el cliente (AES-256); clientes de código abierto.</td><td>De extremo a extremo, en el cliente, antes de que nada salga del dispositivo; cifrado híbrido poscuántico (ML-KEM para compartir claves, firmas Ed25519 + ML-DSA-65). Aún no auditado de forma independiente.</td></tr>
+      <tr><th scope="row">Dispositivos en línea a la vez</th><td>No hace falta: la copia está en la nube.</td><td>No hace falta: los dispositivos se sincronizan a través de tus almacenamientos y directamente de par a par cuando pueden alcanzarse.</td></tr>
+      <tr><th scope="row">Sabe dónde está cada copia</th><td>Una copia en el proveedor; no hay seguimiento de tus propios soportes.</td><td>Sí: un libro mayor firmado registra qué almacenamiento y qué dispositivo conserva cada bloque; las políticas de conservación (por defecto, 1 copia en cualquier sitio, 1 externa y 1 en tus propios discos, comprobada por otro dispositivo en un plazo de 30 días) avisan cuando no se cumple una regla.</td></tr>
+      <tr><th scope="row">Discos extraíbles y sin conexión</th><td>No hay un flujo de trabajo para discos extraíbles.</td><td>Sí: los grupos de discos se llenan, se comprueban y se reconocen cuando vuelven; los archivos que están en un disco ausente piden ese disco.</td></tr>
+      <tr><th scope="row">Copias de seguridad</th><td>La aplicación de escritorio tiene un modo de sincronización «Local Backup» que solo sube y nunca borra nada en la nube de Filen.</td><td>Sí: elige una carpeta en cualquier dispositivo. Varsto guarda de ella instantáneas cifradas y de solo lectura solo en tus almacenamientos externos, nunca en tus dispositivos. Las conserva el número de días que elijas (90 por defecto) y borra las caducadas. Puedes restaurar cualquier instantánea en un directorio que nombres, desde la aplicación o la línea de órdenes.</td></tr>
+            <tr><th scope="row">Licencia</th><td>Clientes AGPL-3.0.</td><td>Código fuente disponible (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Precio</th><td>Plan gratuito y planes de pago baratos.</td><td>Gratis; solo pagas a tu proveedor de almacenamiento</td></tr>
+      <tr><th scope="row">Madurez</th><td>Servicio asentado.</td><td>Alfa: no para datos de producción, y los formatos aún pueden cambiar.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Cuál te encaja</h2>
+    <div class="grid two">
+      <div class="card"><h3>Filen</h3><p>Elige Filen cuando quieres almacenamiento en la nube cifrado, barato y alojado en la UE, con clientes de código abierto, y te vale que un solo proveedor tenga la copia fuera de casa.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Elige Varsto cuando quieres elegir y cambiar tú el almacenamiento, quieres copias en varios proveedores y en tus propios discos, y quieres que se comprueben por ti reglas como «al menos una copia fuera de casa».</p></div>
+    </div>
+    <p class="note">Varsto es software en fase alfa: no le confíes datos de los que no tengas otra copia. Su criptografía tampoco se ha auditado de forma independiente. Los demás productos de aquí son maduros. Los datos sobre ellos se comprobaron en su propia documentación en octubre de 2026; los precios y los planes cambian a menudo, así que mira sus propias páginas para las cifras actuales. Las correcciones son bienvenidas como <a href="https://github.com/janttsu/varsto/issues" rel="noopener">issues de GitHub</a>.</p>
+
+    <h2>Fuentes</h2>
+    <ul>
+      <li><a href="https://filen.io/">Sitio web de Filen</a></li>
+      <li><a href="https://filen.io/pricing">Precios de Filen</a></li>
+      <li><a href="https://github.com/FilenCloudDienste">Código fuente de Filen</a></li>
+      <li><a href="https://docs.filen.io/docs/desktop/setup">Modos de sincronización de Filen Desktop (en)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../../es/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Sincronización y copia de seguridad de archivos cifradas en tu propio almacenamiento.</p></div>
+    <div><h2>Producto</h2><nav aria-label="Producto"><a href="../../../es/">Proyecto</a><a href="../../../es/features/">Funciones</a><a href="../../../es/use-cases/">Casos de uso</a><a href="../../../es/screenshots/">Capturas</a><a href="../../../es/downloads/">Descargas</a></nav></div>
+    <div><h2>Aprender</h2><nav aria-label="Aprender"><a href="../../../es/how-it-works/">Cómo funciona</a><a href="../../../es/compare/" aria-current="page">Comparación</a><a href="../../../es/videos/">Vídeos</a><a href="../../../docs/">Documentación (en)</a><a href="../../../blog/">Blog (en)</a></nav></div>
+    <div><h2>Comunidad</h2><nav aria-label="Comunidad"><a href="../../../forum/">Foro (en)</a><a href="../../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto es un nombre provisional. Código fuente: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, bajo la PolyForm Shield License 1.0.0 (código fuente disponible).</span>
+    <span>Sin cookies, sin seguimiento. El servidor web conserva un registro de acceso ordinario como máximo siete días.</span>
+    <span><a href="../../../docs/security-policy.html">Política de seguridad</a> · <a href="../../../docs/licence.html">Licencia</a> · <a href="../../../docs/trademark.html">Marca</a> (en inglés)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

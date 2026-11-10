@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ежедневные сборки: Varsto</title>
+<meta name="description" content="Сборки Varsto для разработки из основной ветки, со списком контрольных сумм, подписанным отдельным ежедневным ключом. Не выпуски и не для рабочих данных.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/ru/daily/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Ежедневные сборки: Varsto">
+<meta property="og:description" content="Сборки Varsto для разработки из основной ветки, со списком контрольных сумм, подписанным отдельным ежедневным ключом. Не выпуски и не для рабочих данных.">
+<meta property="og:url" content="https://varsto.net/ru/daily/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/daily/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/daily/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/daily/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/daily/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/daily/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/daily/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/daily/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/daily/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=74266d1106">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">К содержанию</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Альфа-версия, не для рабочих данных.</strong> Ошибки могут уничтожить данные, формат хранения может измениться без средства переноса, а шифрование ещё не проверяли. Храни собственные резервные копии и убедись, что из них можно восстановиться.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Главное меню">
+      <a href="../../ru/features/">Возможности</a>
+      <a href="../../ru/how-it-works/">Как это устроено</a>
+      <a href="../../ru/compare/">Сравнение</a>
+      <a href="../../docs/">Документация (en)</a>
+      <a href="../../blog/">Блог (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Язык">RU</summary>
+        <nav class="pop-body langs" aria-label="Язык"><a href="../../daily/" hreflang="en" lang="en">English</a><a href="../../fi/daily/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/daily/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/daily/" hreflang="fr" lang="fr">Français</a><a href="../../de/daily/" hreflang="de" lang="de">Deutsch</a><a href="../../es/daily/" hreflang="es" lang="es">Español</a><a href="../../ru/daily/" hreflang="ru" lang="ru" aria-current="true">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../ru/downloads/">Скачать</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Меню"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Меню"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/compare/">Сравнение</a><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../ru/videos/">Видео</a><a href="../../docs/">Документация (en)</a><a href="../../ru/downloads/" aria-current="page">Загрузки</a><a href="../../blog/">Блог (en)</a><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Ежедневные сборки</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>Это сборки для разработки из основной ветки, не выпуски.</strong></p>
+      <ul>
+        <li>Это не выпуски, и тестирования выпуска они не проходили. Подписи выпуска нет, подписи кода Apple и Microsoft нет. Не используй их для рабочих данных.</li>
+        <li>Формат хранения может смениться от сборки к сборке без миграции. Эти сборки пишут формат хранения 3: хранилище, созданное 0.0.1-alpha.15 или раньше, отклоняется, и его надо создать заново (<code>varsto reset --yes</code>, <code>varsto init</code>, затем снова синхронизировать файлы), а 0.0.1-alpha.15 отклоняет хранилище формата 3. Устройство, которое присоединяется, запрашивает каждую папку, и владелец подтверждает запрос. <code>varsto init</code> печатает второй набор из 24 слов восстановления, которые затем спрашивает <code>varsto folder add</code>.</li>
+        <li><code>varsto update --daily</code> ставит новейшую ежедневную сборку твоей платформы (командные сборки Linux и Windows; приложение macOS и Android-APK ставятся вручную). Обычный <code>varsto update</code> остаётся на выпусках и никогда не ставит ежедневную сборку.</li>
+        <li>Ежедневная сборка Android — debug-APK (<code>varsto-daily-android-debug.apk</code>), а APK выпуска подписан другим ключом, поэтому ни один не обновляется поверх другого: удали один, прежде чем ставить второй. Это удаляет копию хранилища на этом устройстве.</li>
+        <li>Храни свои резервные копии.</li>
+      </ul>
+      <p>Нужно то, на что можно опереться? Возьми вместо этого <a href="../downloads/">стабильные загрузки</a>.</p>
+    </div>
+    <p class="lead" id="daily-build" data-pre="../../" data-unavailable="Сведения о сборке сейчас не загрузились. Ссылки в таблице всё равно ведут на самую новую сборку." hidden>Последняя сборка <strong data-f="id"></strong>, <span data-f="date"></span>; строка версии <span data-f="version"></span>. <a href="../../daily/latest.json">latest.json</a> · <a href="../../daily/latest/SHA256SUMS">SHA256SUMS</a> · <a href="../../daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a></p>
+    <noscript><p class="lead">Ссылки в таблице всегда ведут на самую новую сборку. Идентификатор, размеры и контрольные суммы подставляет небольшой скрипт; без него читай <a href="../../daily/latest.json">latest.json</a> и <a href="../../daily/latest/SHA256SUMS">SHA256SUMS</a> напрямую.</p></noscript>
+    <table class="downloads" id="daily-table"><thead><tr><th>Платформа</th><th>Загрузка</th><th>Размер</th><th>Собрано из</th><th>SHA-256</th></tr></thead><tbody><tr data-file="varsto-daily-linux-x86_64.tar.gz"><th scope="row">Linux x86_64 (static, musl)</th><td><a href="../../daily/latest/varsto-daily-linux-x86_64.tar.gz">varsto-daily-linux-x86_64.tar.gz</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-android-debug.apk"><th scope="row">Android (debug APK)</th><td><a href="../../daily/latest/varsto-daily-android-debug.apk">varsto-daily-android-debug.apk</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-windows-setup.exe"><th scope="row">Windows installer</th><td><a href="../../daily/latest/varsto-daily-windows-setup.exe">varsto-daily-windows-setup.exe</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-macos-apple-silicon.dmg"><th scope="row">macOS Apple Silicon (dmg)</th><td><a href="../../daily/latest/varsto-daily-macos-apple-silicon.dmg">varsto-daily-macos-apple-silicon.dmg</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr>
+<tr data-file="varsto-daily-ios-unsigned.ipa"><th scope="row">iOS (unsigned ipa)</th><td><a href="../../daily/latest/varsto-daily-ios-unsigned.ipa">varsto-daily-ios-unsigned.ipa</a></td><td data-f="size">–</td><td data-f="commit">–</td><td><code class="sum" data-f="sha256">–</code></td></tr></tbody></table>
+    <h2>Проверка</h2>
+    <p>Положи <a href="../../daily/latest/SHA256SUMS">SHA256SUMS</a> рядом со скачанными файлами (имена в таблице постоянные) и выполни</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Не указывай <code>--ignore-missing</code>, если скачал каждый файл. Список подписан отдельным ежедневным ключом (<a href="../../daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, формат minisign; ключ — <a href="../../daily-key.pub">daily-key.pub</a>), и именно его проверяет <code>varsto update --daily</code>. Подпись не только говорит, что загрузка полная и целая: она показывает, что список вышел из собственной сборки проекта.</p>
+    <h2>Что внутри</h2>
+    <ul id="daily-included" hidden><li>Основная ветка на коммите <a data-f="commit"></a>.</li><li>Запуск CI: <a data-f="ci_run"></a></li></ul>
+    <h2>Известные пробелы</h2>
+    <ul><li>У сборок нет подписи выпуска и подписи кода Apple или Microsoft. Список контрольных сумм подписан отдельным ежедневным ключом (его проверяет varsto update --daily). Это показывает, что сборка пришла из CI проекта, а не то, что её тестировали.</li><li>macOS, Windows и iOS предупреждают о неподписанном ПО; на macOS это правый клик и «Открыть», на Windows — запрос SmartScreen.</li><li>Установщик Windows прошёл только дымовой тест в CI (установка, обновление, восстановление, отказ понизить версию, удаление), не на настоящей машине.</li><li>IPA для iOS не запускали на настоящем устройстве. Ставь его через AltStore, SideStore или Sideloadly.</li><li>Часть строк интерфейса ещё не переведена; они пишутся в журнал.</li><li>Эти сборки пишут формат хранения 3. Хранилище, созданное версией 0.0.1-alpha.15 или старше, отклоняется, и его нужно создать заново (varsto reset --yes, varsto init, синхронизировать файлы снова); обновления нет. У присоединившегося устройства нет папок, пока владелец не примет запрос.</li><li>Windows и iOS всё ещё из предыдущей сборки 20261016-316c579; в этом круге их не пересобирали.</li><li>Срок, после которого отстающее хранилище данных бросают (пакет E), по умолчанию 30 дней.</li><li>Полноэкранный код Kotlin, Swift и Windows и исправление сопряжения на настоящих устройствах не проверяли.</li><li>Первое обновление через --daily требует программу, в которой эта возможность уже есть, поэтому поставь эту сборку один раз вручную; дальше это делает varsto update --daily.</li></ul>
+    <h2>Прежние сборки</h2>
+    <p>Хранятся семь последних сборок с теми же именами файлов; у каждой свой подписанный список.</p>
+    <ul id="daily-history"></ul>
+    <script src="../../assets/js/daily.js?v=008e885cd7" defer></script>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Шифрованная синхронизация и резервное копирование файлов на твоём хранилище.</p></div>
+    <div><h2>Продукт</h2><nav aria-label="Продукт"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../ru/downloads/" aria-current="page">Загрузки</a></nav></div>
+    <div><h2>Изучить</h2><nav aria-label="Изучить"><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/compare/">Сравнение</a><a href="../../ru/videos/">Видео</a><a href="../../docs/">Документация (en)</a><a href="../../blog/">Блог (en)</a></nav></div>
+    <div><h2>Сообщество</h2><nav aria-label="Сообщество"><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto — рабочее название. Исходный код: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, по лицензии PolyForm Shield License 1.0.0 (исходный код доступен).</span>
+    <span>Без cookie и без слежения. Веб-сервер хранит обычный журнал доступа не дольше семи дней.</span>
+    <span><a href="../../docs/security-policy.html">Политика безопасности</a> · <a href="../../docs/licence.html">Лицензия</a> · <a href="../../docs/trademark.html">Товарный знак</a> (на английском)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

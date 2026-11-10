@@ -1,0 +1,45 @@
+---
+title: Alternativa a Cryptomator: Varsto y Cryptomator comparados
+nav: Compare
+output: compare/cryptomator/index.html
+description: ¿Buscas una alternativa a Cryptomator que sincronice además de cifrar, en tu propio almacenamiento (S3, NAS, discos, rclone)? Para qué sirve Cryptomator, cómo funciona y cómo se compara con Varsto.
+---
+    <p class="back-link"><a href="{{L}}compare/">Todas las comparaciones</a></p>
+    <h1>Varsto y Cryptomator</h1>
+    <p class="lead">Cryptomator cifra una carpeta, la bóveda, para poder guardarla en cualquier nube sin que el proveedor la lea. Es gratuito y de código abierto, tiene aplicaciones de escritorio y móvil, y hace una sola cosa: la bóveda. Llevar la bóveda a otro dispositivo queda en manos del propio cliente del proveedor de la nube.</p>
+
+    <h2>Cómo funciona Cryptomator</h2>
+    <p>Una bóveda es un directorio de archivos y directorios cifrados, con un archivo de configuración <code>vault.cryptomator</code> en la raíz. En el escritorio la bóveda se muestra como una unidad virtual: los archivos se cifran y se descifran de forma transparente al usarlos, y no quedan copias sin cifrar en el disco. Los nombres de archivo también se cifran. El contenido se cifra con AES (la combinación <code>SIV_GCM</code> o <code>SIV_CTRMAC</code>), y las claves maestras se protegen con una contraseña mediante scrypt y AES key wrap. Cryptomator no mueve la bóveda a ninguna parte: la pones en una carpeta que sincroniza Dropbox, Google Drive, OneDrive u otro cliente, y ese cliente lleva los archivos cifrados de un dispositivo a otro. No hay registro de qué dispositivos o almacenamientos tienen una copia, no hay un mecanismo propio para compartir (abre la bóveda quien tenga la carpeta y la contraseña; un producto aparte, Hub, gestiona el acceso en las organizaciones) y no hay reglas sobre cuántas copias debe haber.</p>
+
+    <h2>Lado a lado</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Cryptomator</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Dónde están tus archivos</th><td>En una carpeta de bóveda en tu dispositivo, y allí donde el cliente de nube que uses copie esa carpeta.</td><td>En tus propios dispositivos y en los almacenamientos que elijas: buckets compatibles con S3, cualquier remoto de rclone, directorios locales o de red y grupos de discos extraíbles.</td></tr>
+      <tr><th scope="row">Cuenta o servidor central</th><td>Ninguno para Cryptomator en sí; la nube donde guardas la bóveda tiene su propia cuenta.</td><td>Ninguno. No hay servidor de Varsto; los dispositivos se encuentran a través de tus almacenamientos y en la LAN.</td></tr>
+      <tr><th scope="row">Cifrado</th><td>En el cliente, antes de que el cliente de la nube vea los archivos: cifrado AES del contenido, nombres de archivo cifrados, claves maestras protegidas con contraseña. Maduro y muy revisado.</td><td>De extremo a extremo, en el cliente, antes de que nada salga del dispositivo; cifrado híbrido poscuántico (ML-KEM para compartir claves, firmas Ed25519 + ML-DSA-65). Aún no auditado de forma independiente.</td></tr>
+      <tr><th scope="row">Sincronización entre dispositivos</th><td>Ninguna propia: el cliente del proveedor sincroniza la carpeta de la bóveda.</td><td>Sí: los dispositivos se sincronizan a través de tus almacenamientos y directamente de par a par cuando pueden alcanzarse.</td></tr>
+      <tr><th scope="row">Sabe dónde está cada copia</th><td>No: Cryptomator solo ve la carpeta de la bóveda de este dispositivo.</td><td>Sí: un libro mayor firmado registra qué almacenamiento y qué dispositivo conserva cada bloque; las políticas de conservación (por defecto, 1 copia en cualquier sitio, 1 externa y 1 en tus propios discos, comprobada por otro dispositivo en un plazo de 30 días) avisan cuando no se cumple una regla.</td></tr>
+      <tr><th scope="row">Compartir con otras personas</th><td>No tiene un mecanismo propio para compartir: la bóveda la abre cualquiera que tenga la carpeta y la contraseña.</td><td>Sí: una carpeta se comparte con otro usuario mediante una clave sellada, se pueden quitar miembros y un miembro puede ser de solo lectura.</td></tr>
+      <tr><th scope="row">Discos extraíbles y sin conexión</th><td>Una bóveda puede estar en cualquier disco, pero nada sigue los discos que no están.</td><td>Sí: los grupos de discos se llenan, se comprueban y se reconocen cuando vuelven; los archivos que están en un disco ausente piden ese disco.</td></tr>
+      <tr><th scope="row">Copias de seguridad</th><td>Ninguna propia; el versionado del proveedor, si lo hay, se aplica a los archivos cifrados.</td><td>Sí: elige una carpeta en cualquier dispositivo. Varsto guarda de ella instantáneas cifradas y de solo lectura solo en tus almacenamientos externos, nunca en tus dispositivos. Las conserva el número de días que elijas (90 por defecto) y borra las caducadas. Puedes restaurar cualquier instantánea en un directorio que nombres, desde la aplicación o la línea de órdenes.</td></tr>
+            <tr><th scope="row">Licencia</th><td>Código abierto (GPL-3.0); se ofrece una licencia comercial a quienes fabrican software.</td><td>Código fuente disponible (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Precio</th><td>Gratis.</td><td>Gratis; solo pagas a tu proveedor de almacenamiento</td></tr>
+      <tr><th scope="row">Madurez</th><td>Maduro, un proyecto de larga trayectoria.</td><td>Alfa: no para datos de producción, y los formatos aún pueden cambiar.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Cuál te encaja</h2>
+    <div class="grid two">
+      <div class="card"><h3>Cryptomator</h3><p>Elige Cryptomator cuando ya usas un cliente de nube que te convence y quieres cifrar su carpeta con una herramienta madura y de código abierto, y no necesitas saber dónde están las copias ni compartir con otras personas.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Elige Varsto cuando el cifrado deba ir con la propia sincronización, entre buckets, recursos compartidos de NAS y discos extraíbles, con un registro de dónde está cada copia, políticas que avisan cuando falta una copia y uso compartido con otras personas.</p></div>
+    </div>
+    <p class="note">Varsto es software en fase alfa: no le confíes datos de los que no tengas otra copia. Su criptografía tampoco se ha auditado de forma independiente. Los demás productos de aquí son maduros. Los datos sobre ellos se comprobaron en su propia documentación en octubre de 2026; los precios y los planes cambian a menudo, así que mira sus propias páginas para las cifras actuales. Las correcciones son bienvenidas en el <a href="{{P}}forum/">foro</a> o en GitHub.</p>
+
+    <h2>Fuentes</h2>
+    <ul>
+      <li><a href="https://cryptomator.org/">Sitio web de Cryptomator</a></li>
+      <li><a href="https://docs.cryptomator.org/">Documentación de Cryptomator (en)</a></li>
+      <li><a href="https://docs.cryptomator.org/security/architecture/">Arquitectura de seguridad: formato de la bóveda, cifrados, protección de claves (en)</a></li>
+      <li><a href="https://github.com/cryptomator/cryptomator">Repositorio del código (licencia: GPL-3.0)</a></li>
+    </ul>

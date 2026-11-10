@@ -11,20 +11,25 @@ import ServiceManagement
 import WebKit
 
 /// The interface language the user picked in Varsto's window (the web UI
-/// writes `<home>/ui-language`): "en", "fi" or "sv". Menus, alerts and the
-/// start page follow it; the app re-reads it on every status refresh.
+/// writes `<home>/ui-language`): "en", "fi", "sv", "de", "es" or "ru".
+/// French is a website language only. Menus, alerts and the start page
+/// follow it; the app re-reads it on every status refresh.
 var uiLang = "en"
 
 func readUILang(_ home: URL) -> String {
     let s = (try? String(contentsOf: home.appendingPathComponent("ui-language"), encoding: .utf8))?
         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    return s == "fi" || s == "sv" ? s : "en"
+    return ["fi", "sv", "de", "es", "ru"].contains(s) ? s : "en"
 }
 
 /// `en` in the interface language, each `{}` replaced by the next of `args`.
 func tr(_ en: String, _ args: String...) -> String {
     var s = en
-    if let t = translations[en] { s = uiLang == "fi" ? t.fi : uiLang == "sv" ? t.sv : en }
+    if uiLang == "de" || uiLang == "es" || uiLang == "ru" {
+        if let t = translationsDeEsRu[en]?[uiLang] { s = t }
+    } else if let t = translations[en] {
+        s = uiLang == "fi" ? t.fi : uiLang == "sv" ? t.sv : en
+    }
     for a in args {
         if let r = s.range(of: "{}") { s.replaceSubrange(r, with: a) }
     }
@@ -118,6 +123,107 @@ let translations: [String: (fi: String, sv: String)] = [
     "Add Varsto to Login Items in System Settings instead.":
         ("Lisää Varsto sen sijaan Järjestelmäasetusten kirjautumiskohteisiin.",
          "Lägg till Varsto bland inloggningsobjekten i Systeminställningar i stället."),
+]
+
+/// German, Spanish and Russian for the same English keys as `translations`.
+let translationsDeEsRu: [String: [String: String]] = [
+    "Starting the Varsto service…": ["de": "Der Varsto-Dienst startet…", "es": "El servicio de Varsto se está iniciando…", "ru": "Служба Varsto запускается…"],
+    "This window fills in a moment.": ["de": "Dieses Fenster füllt sich gleich.", "es": "Esta ventana se completará en un momento.", "ru": "Это окно заполнится через мгновение."],
+    "OK": ["de": "OK", "es": "OK", "ru": "OK"],
+    "Cancel": ["de": "Abbrechen", "es": "Cancelar", "ru": "Отмена"],
+    "Later": ["de": "Später", "es": "Más tarde", "ru": "Позже"],
+    "Starting…": ["de": "Startet…", "es": "Iniciando…", "ru": "Запуск…"],
+    "Service starting…": ["de": "Dienst startet…", "es": "El servicio se está iniciando…", "ru": "Служба запускается…"],
+    "Open Varsto": ["de": "Varsto öffnen", "es": "Abrir Varsto", "ru": "Открыть Varsto"],
+    "Pause syncing": ["de": "Synchronisierung pausieren", "es": "Pausar la sincronización", "ru": "Приостановить синхронизацию"],
+    "Install update…": ["de": "Aktualisierung installieren…", "es": "Instalar la actualización…", "ru": "Установить обновление…"],
+    "Install Varsto {}…": ["de": "Varsto {} installieren…", "es": "Instalar Varsto {}…", "ru": "Установить Varsto {}…"],
+    "Install command-line tool…": ["de": "Befehlszeilenwerkzeug installieren…", "es": "Instalar la herramienta de línea de comandos…", "ru": "Установить инструмент командной строки…"],
+    "Start at login": ["de": "Beim Anmelden starten", "es": "Iniciar al iniciar sesión", "ru": "Запускать при входе"],
+    "Quit Varsto": ["de": "Varsto beenden", "es": "Salir de Varsto", "ru": "Выйти из Varsto"],
+    "About Varsto": ["de": "Über Varsto", "es": "Acerca de Varsto", "ru": "О Varsto"],
+    "Hide Varsto": ["de": "Varsto ausblenden", "es": "Ocultar Varsto", "ru": "Скрыть Varsto"],
+    "Edit": ["de": "Bearbeiten", "es": "Edición", "ru": "Правка"],
+    "Cut": ["de": "Ausschneiden", "es": "Cortar", "ru": "Вырезать"],
+    "Copy": ["de": "Kopieren", "es": "Copiar", "ru": "Копировать"],
+    "Paste": ["de": "Einfügen", "es": "Pegar", "ru": "Вставить"],
+    "Select All": ["de": "Alles auswählen", "es": "Seleccionar todo", "ru": "Выбрать всё"],
+    "Window": ["de": "Fenster", "es": "Ventana", "ru": "Окно"],
+    "Minimize": ["de": "Minimieren", "es": "Minimizar", "ru": "Свернуть"],
+    "Could not download": ["de": "Herunterladen fehlgeschlagen", "es": "No se pudo descargar", "ru": "Не удалось скачать"],
+    "Could not free up space": ["de": "Speicherplatz konnte nicht freigegeben werden", "es": "No se pudo liberar espacio", "ru": "Не удалось освободить место"],
+    "The Varsto service did not answer. Open Varsto and try again.": [
+        "de": "Der Varsto-Dienst hat nicht geantwortet. Öffne Varsto und versuche es erneut.",
+        "es": "El servicio de Varsto no respondió. Abre Varsto e inténtalo de nuevo.",
+        "ru": "Служба Varsto не ответила. Открой Varsto и попробуй снова.",
+    ],
+    "failed": ["de": "fehlgeschlagen", "es": "falló", "ru": "не удалось"],
+    "Not set up yet: open Varsto": ["de": "Noch nicht eingerichtet: Varsto öffnen", "es": "Aún no está configurado: abre Varsto", "ru": "Ещё не настроено: открой Varsto"],
+    "Locked": ["de": "Gesperrt", "es": "Bloqueado", "ru": "Заблокировано"],
+    "Paused": ["de": "Pausiert", "es": "En pausa", "ru": "На паузе"],
+    "Up to date": ["de": "Auf dem neuesten Stand", "es": "Al día", "ru": "Актуально"],
+    "Problem: {}": ["de": "Problem: {}", "es": "Problema: {}", "ru": "Проблема: {}"],
+    "{} · last sync {}": ["de": "{} · letzte Synchronisierung {}", "es": "{} · última sincronización {}", "ru": "{} · последняя синхронизация {}"],
+    "{} s ago": ["de": "vor {} s", "es": "hace {} s", "ru": "{} с назад"],
+    "{} min ago": ["de": "vor {} min", "es": "hace {} min", "ru": "{} мин назад"],
+    "{} h ago": ["de": "vor {} h", "es": "hace {} h", "ru": "{} ч назад"],
+    "{} · policy {}": ["de": "{} · Aufbewahrungsregel {}", "es": "{} · política de conservación {}", "ru": "{} · правило хранения {}"],
+    "at risk": ["de": "gefährdet", "es": "en riesgo", "ru": "под угрозой"],
+    "violated": ["de": "verletzt", "es": "incumplida", "ru": "нарушено"],
+    "unknown": ["de": "unbekannt", "es": "desconocido", "ru": "неизвестно"],
+    "Unlock Varsto": ["de": "Varsto entsperren", "es": "Desbloquear Varsto", "ru": "Разблокировать Varsto"],
+    "Enter the passphrase of this device. It can be kept in your login keychain so the background service unlocks itself after login.": [
+        "de": "Gib die Passphrase dieses Geräts ein. Sie kann im Anmelde-Schlüsselbund bleiben, damit der Hintergrunddienst sich nach der Anmeldung selbst entsperrt.",
+        "es": "Escribe la frase de contraseña de este dispositivo. Puede guardarse en el llavero de inicio de sesión para que el servicio en segundo plano se desbloquee solo al iniciar sesión.",
+        "ru": "Введи парольную фразу этого устройства. Её можно хранить в связке ключей входа, чтобы фоновая служба снимала блокировку сама после входа.",
+    ],
+    "Remember in Keychain": ["de": "Im Schlüsselbund merken", "es": "Recordar en el Llavero", "ru": "Запомнить в Связке ключей"],
+    "Unlock": ["de": "Entsperren", "es": "Desbloquear", "ru": "Разблокировать"],
+    "Unlock failed": ["de": "Entsperren fehlgeschlagen", "es": "No se pudo desbloquear", "ru": "Не удалось разблокировать"],
+    "Wrong passphrase?": ["de": "Falsche Passphrase?", "es": "¿Frase de contraseña incorrecta?", "ru": "Неверная парольная фраза?"],
+    "Checking…": ["de": "Prüfen…", "es": "Comprobando…", "ru": "Проверка…"],
+    "Update check failed": ["de": "Suche nach Aktualisierungen fehlgeschlagen", "es": "La búsqueda de actualizaciones falló", "ru": "Проверка обновлений не удалась"],
+    "Could not check for updates": ["de": "Nach Aktualisierungen konnte nicht gesucht werden", "es": "No se pudo buscar actualizaciones", "ru": "Не удалось проверить обновления"],
+    "The background service did not answer. Is it running? Try again in a moment.": [
+        "de": "Der Hintergrunddienst hat nicht geantwortet. Läuft er? Versuche es gleich noch einmal.",
+        "es": "El servicio en segundo plano no respondió. ¿Está en ejecución? Inténtalo dentro de un momento.",
+        "ru": "Фоновая служба не ответила. Она запущена? Попробуй через мгновение.",
+    ],
+    "Update available: {}": ["de": "Aktualisierung verfügbar: {}", "es": "Actualización disponible: {}", "ru": "Доступно обновление: {}"],
+    "Varsto {} is available": ["de": "Varsto {} ist verfügbar", "es": "Varsto {} está disponible", "ru": "Доступна версия Varsto {}"],
+    "You have {}. Varsto downloads the new version, checks its signature, replaces Varsto.app and starts again.": [
+        "de": "Du hast {}. Varsto lädt die neue Version herunter, prüft ihre Signatur, ersetzt Varsto.app und startet neu.",
+        "es": "Tienes {}. Varsto descarga la nueva versión, comprueba su firma, sustituye Varsto.app y vuelve a iniciarse.",
+        "ru": "У тебя {}. Varsto скачает новую версию, проверит её подпись, заменит Varsto.app и запустится снова.",
+    ],
+    "Update now": ["de": "Jetzt aktualisieren", "es": "Actualizar ahora", "ru": "Обновить сейчас"],
+    "Updated to {}": ["de": "Aktualisiert auf {}", "es": "Actualizado a {}", "ru": "Обновлено до {}"],
+    "Update failed": ["de": "Aktualisierung fehlgeschlagen", "es": "La actualización falló", "ru": "Обновление не удалось"],
+    "no details": ["de": "keine Einzelheiten", "es": "sin detalles", "ru": "нет подробностей"],
+    "You have {}. Download the new disk image and drag Varsto to Applications again; your vault and settings stay as they are.": [
+        "de": "Du hast {}. Lade das neue Volume-Image herunter und ziehe Varsto erneut in Programme; dein Tresor und deine Einstellungen bleiben.",
+        "es": "Tienes {}. Descarga la nueva imagen de disco y arrastra Varsto a Aplicaciones otra vez; tu bóveda y tus ajustes se quedan como están.",
+        "ru": "У тебя {}. Скачай новый образ диска и снова перетащи Varsto в Программы; хранилище и настройки останутся как есть.",
+    ],
+    "Open download page": ["de": "Download-Seite öffnen", "es": "Abrir la página de descargas", "ru": "Открыть страницу загрузки"],
+    "Up to date ({})": ["de": "Auf dem neuesten Stand ({})", "es": "Al día ({})", "ru": "Актуально ({})"],
+    "Varsto is up to date": ["de": "Varsto ist auf dem neuesten Stand", "es": "Varsto está al día", "ru": "Varsto актуален"],
+    "Installed: {}. Latest: {}.": ["de": "Installiert: {}. Aktuell: {}.", "es": "Instalado: {}. Último: {}.", "ru": "Установлено: {}. Последняя: {}."],
+    "Could not install the command-line tool": ["de": "Das Befehlszeilenwerkzeug konnte nicht installiert werden", "es": "No se pudo instalar la herramienta de línea de comandos", "ru": "Не удалось установить инструмент командной строки"],
+    "Run this in Terminal instead:": ["de": "Führe das stattdessen im Terminal aus:", "es": "Ejecuta esto en Terminal en su lugar:", "ru": "Выполни это в Терминале:"],
+    "Command-line tool installed": ["de": "Befehlszeilenwerkzeug installiert", "es": "Herramienta de línea de comandos instalada", "ru": "Инструмент командной строки установлен"],
+    "Open Terminal and run: varsto --help\nIt uses the same vault as this app (~/Library/Application Support/Varsto).": [
+        "de": "Öffne das Terminal und führe aus: varsto --help\nEs nutzt denselben Tresor wie diese App (~/Library/Application Support/Varsto).",
+        "es": "Abre Terminal y ejecuta: varsto --help\nUsa la misma bóveda que esta app (~/Library/Application Support/Varsto).",
+        "ru": "Открой Терминал и выполни: varsto --help\nОн использует то же хранилище, что и это приложение (~/Library/Application Support/Varsto).",
+    ],
+    "Could not change the login item": ["de": "Der Anmeldeobjekt-Eintrag konnte nicht geändert werden", "es": "No se pudo cambiar el ítem de inicio", "ru": "Не удалось изменить объект входа"],
+    "Start at login needs macOS 13 or newer": ["de": "Start bei der Anmeldung braucht macOS 13 oder neuer", "es": "Iniciar al iniciar sesión requiere macOS 13 o posterior", "ru": "Запуск при входе требует macOS 13 или новее"],
+    "Add Varsto to Login Items in System Settings instead.": [
+        "de": "Füge Varsto stattdessen bei den Anmeldeobjekten in den Systemeinstellungen hinzu.",
+        "es": "Añade Varsto a los ítems de inicio en Ajustes del Sistema.",
+        "ru": "Добавь Varsto в объекты входа в Системных настройках.",
+    ],
 ]
 
 // ----- Debug log -------------------------------------------------------------

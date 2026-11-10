@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Альтернатива Cryptomator: Varsto и Cryptomator в сравнении</title>
+<meta name="description" content="Ищешь альтернативу Cryptomator, которая и шифрует, и синхронизирует, на своём хранилище данных (S3, NAS, диски, rclone)? Для чего Cryptomator, как он работает и как он соотносится с Varsto.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/ru/compare/cryptomator/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Альтернатива Cryptomator: Varsto и Cryptomator в сравнении">
+<meta property="og:description" content="Ищешь альтернативу Cryptomator, которая и шифрует, и синхронизирует, на своём хранилище данных (S3, NAS, диски, rclone)? Для чего Cryptomator, как он работает и как он соотносится с Varsto.">
+<meta property="og:url" content="https://varsto.net/ru/compare/cryptomator/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/compare/cryptomator/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/compare/cryptomator/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/cryptomator/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/cryptomator/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/cryptomator/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/compare/cryptomator/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/cryptomator/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/cryptomator/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=74266d1106">
+<script src="../../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">К содержанию</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Альфа-версия, не для рабочих данных.</strong> Ошибки могут уничтожить данные, формат хранения может измениться без средства переноса, а шифрование ещё не проверяли. Храни собственные резервные копии и убедись, что из них можно восстановиться.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../../ru/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Главное меню">
+      <a href="../../../ru/features/">Возможности</a>
+      <a href="../../../ru/how-it-works/">Как это устроено</a>
+      <a href="../../../ru/compare/" aria-current="page">Сравнение</a>
+      <a href="../../../docs/">Документация (en)</a>
+      <a href="../../../blog/">Блог (en)</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Язык">RU</summary>
+        <nav class="pop-body langs" aria-label="Язык"><a href="../../../compare/cryptomator/" hreflang="en" lang="en">English</a><a href="../../../fi/compare/cryptomator/" hreflang="fi" lang="fi">Suomi</a><a href="../../../sv/compare/cryptomator/" hreflang="sv" lang="sv">Svenska</a><a href="../../../fr/compare/cryptomator/" hreflang="fr" lang="fr">Français</a><a href="../../../de/compare/cryptomator/" hreflang="de" lang="de">Deutsch</a><a href="../../../es/compare/cryptomator/" hreflang="es" lang="es">Español</a><a href="../../../ru/compare/cryptomator/" hreflang="ru" lang="ru" aria-current="true">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../../ru/downloads/">Скачать</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Меню"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Меню"><a href="../../../ru/">Проект</a><a href="../../../ru/features/">Возможности</a><a href="../../../ru/use-cases/">Сценарии</a><a href="../../../ru/compare/" aria-current="page">Сравнение</a><a href="../../../ru/how-it-works/">Как это устроено</a><a href="../../../ru/screenshots/">Снимки экрана</a><a href="../../../ru/videos/">Видео</a><a href="../../../docs/">Документация (en)</a><a href="../../../ru/downloads/">Загрузки</a><a href="../../../blog/">Блог (en)</a><a href="../../../forum/">Форум (en)</a><a href="../../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <p class="back-link"><a href="../../compare/">Все сравнения</a></p>
+    <h1>Varsto и Cryptomator</h1>
+    <p class="lead">Cryptomator шифрует папку, хранилище, так чтобы её можно было держать в любом облаке и провайдер её не прочитал. Он бесплатный и с открытым исходным кодом, есть приложения для компьютера и телефона, и делает он одно: хранилище. Доставить хранилище на другое устройство остаётся собственному клиенту облачного провайдера.</p>
+
+    <h2>Как работает Cryptomator</h2>
+    <p>Хранилище — это каталог зашифрованных файлов и каталогов, в корне которого лежит файл настроек <code>vault.cryptomator</code>. На компьютере хранилище показано как виртуальный диск: файлы шифруются и расшифровываются прозрачно, пока ты ими пользуешься, и на диске не остаётся незашифрованных копий. Имена файлов тоже шифруются. Содержимое шифруется AES (сочетание <code>SIV_GCM</code> или <code>SIV_CTRMAC</code>), а мастер-ключи защищены паролем через scrypt и AES key wrap. Cryptomator никуда хранилище не переносит: ты кладёшь его в папку, которую синхронизирует Dropbox, Google Drive, OneDrive или другой клиент, и этот клиент возит зашифрованные файлы между устройствами. Нет записи о том, какие устройства или хранилища данных держат копию, нет своего механизма общего доступа (хранилище открывает тот, у кого есть папка и пароль; отдельный продукт Hub управляет доступом в организациях), и нет правил о том, сколько копий должно существовать.</p>
+
+    <h2>Рядом</h2>
+    <table class="compare-table">
+      <thead><tr><th scope="col"></th><th scope="col">Cryptomator</th><th scope="col">Varsto</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">Где лежат твои файлы</th><td>В папке хранилища на твоём устройстве и везде, куда используемый тобой клиент облака копирует эту папку.</td><td>На твоих устройствах и в выбранных тобой хранилищах данных: S3-совместимые бакеты, любой удалённый ресурс rclone, локальные или сетевые каталоги и пулы съёмных дисков.</td></tr>
+      <tr><th scope="row">Учётная запись или центральный сервер</th><td>У самого Cryptomator нет; у облака, где лежит хранилище, своя учётная запись.</td><td>Ни того ни другого. Сервера Varsto нет; устройства находят друг друга через твои хранилища данных и в LAN.</td></tr>
+      <tr><th scope="row">Шифрование</th><td>На стороне клиента, до того как клиент облака видит файлы: шифрование содержимого AES, зашифрованные имена файлов, мастер-ключи под паролем. Зрелое, и его широко разбирали.</td><td>Сквозное, на стороне клиента, до того как что-либо покидает устройство; постквантовое гибридное (ML-KEM для обмена ключами, подписи Ed25519 + ML-DSA-65). Ещё нет независимого аудита.</td></tr>
+      <tr><th scope="row">Синхронизация между устройствами</th><td>Своей нет: клиент облачного провайдера синхронизирует папку хранилища.</td><td>Да: устройства синхронизируются через твои хранилища данных и напрямую между узлами, когда могут достучаться друг до друга.</td></tr>
+      <tr><th scope="row">Знает, где каждая копия</th><td>Нет: Cryptomator видит только папку хранилища на этом устройстве.</td><td>Да: подписанный журнал учёта записывает, какое хранилище данных и какое устройство держит каждый блок; правила хранения (по умолчанию 1 копия где угодно, 1 внешняя, 1 на твоих дисках, проверенная другим устройством в течение 30 дней) предупреждают, когда правило не выполнено.</td></tr>
+      <tr><th scope="row">Общий доступ другим людям</th><td>Своего механизма общего доступа нет: хранилище открывает любой, у кого есть папка и пароль.</td><td>Да: общий доступ к папке другому пользователю даётся запечатанным ключом, участников можно удалять, и участник может быть только читателем.</td></tr>
+      <tr><th scope="row">Съёмные диски и диски не в сети</th><td>Хранилище можно держать на любом диске, но отсутствующие диски ничто не отслеживает.</td><td>Да: пулы дисков заполняются, проверяются и распознаются, когда диски возвращаются; файлы на отсутствующем диске просят этот диск.</td></tr>
+      <tr><th scope="row">Резервные копии</th><td>Своих нет; версионирование облачного провайдера, если оно есть, применяется к зашифрованным файлам.</td><td>Да: выбери папку на любом устройстве, и Varsto хранит её зашифрованные снимки только для чтения лишь во внешних хранилищах данных, никогда не на устройствах, столько дней, сколько ты выберешь (по умолчанию 90), а затем удаляет просроченные. Любой снимок восстанавливается в каталог, который ты назовёшь, из приложения или из командной строки.</td></tr>
+            <tr><th scope="row">Лицензия</th><td>Открытый исходный код (GPL-3.0); поставщикам ПО предлагают коммерческую лицензию.</td><td>Исходный код доступен (PolyForm Shield 1.0.0)</td></tr>
+      <tr><th scope="row">Цена</th><td>Бесплатно</td><td>Бесплатно; платишь только провайдеру хранилища данных</td></tr>
+      <tr><th scope="row">Зрелость</th><td>Зрелый, давно идущий проект.</td><td>Альфа: не для рабочих данных, форматы ещё могут измениться.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Что подойдёт</h2>
+    <div class="grid two">
+      <div class="card"><h3>Cryptomator</h3><p>Выбирай Cryptomator, когда ты уже пользуешься клиентом облака, который тебя устраивает, и хочешь зашифровать его папку зрелым инструментом с открытым исходным кодом, а знать, где копии, и давать общий доступ другим тебе не нужно.</p></div>
+      <div class="card"><h3>Varsto</h3><p>Выбирай Varsto, когда шифрование должно идти вместе с самой синхронизацией, через бакеты, общие ресурсы NAS и съёмные диски, с записью о том, где каждая копия, с правилами, которые предупреждают, если копии не хватает, и с общим доступом другим людям.</p></div>
+    </div>
+    <p class="note">Varsto — программа в стадии альфа: не доверяй ей данные, у которых нет другой копии; её криптография не проходила независимый аудит. Остальные продукты здесь зрелые. Факты о них сверены с их собственной документацией в октябре 2026 года; цены и тарифы меняются часто, актуальные цифры смотри на их страницах. Исправления приветствуются на <a href="../../../forum/">форуме</a> или на GitHub.</p>
+
+    <h2>Источники</h2>
+    <ul>
+      <li><a href="https://cryptomator.org/">Сайт Cryptomator</a></li>
+      <li><a href="https://docs.cryptomator.org/">Документация Cryptomator (en)</a></li>
+      <li><a href="https://docs.cryptomator.org/security/architecture/">Архитектура безопасности: формат хранилища, шифры, защита ключей (en)</a></li>
+      <li><a href="https://github.com/cryptomator/cryptomator">Репозиторий исходного кода (лицензия: GPL-3.0)</a></li>
+    </ul>
+
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../../ru/"><img src="../../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Шифрованная синхронизация и резервное копирование файлов на твоём хранилище.</p></div>
+    <div><h2>Продукт</h2><nav aria-label="Продукт"><a href="../../../ru/">Проект</a><a href="../../../ru/features/">Возможности</a><a href="../../../ru/use-cases/">Сценарии</a><a href="../../../ru/screenshots/">Снимки экрана</a><a href="../../../ru/downloads/">Загрузки</a></nav></div>
+    <div><h2>Изучить</h2><nav aria-label="Изучить"><a href="../../../ru/how-it-works/">Как это устроено</a><a href="../../../ru/compare/" aria-current="page">Сравнение</a><a href="../../../ru/videos/">Видео</a><a href="../../../docs/">Документация (en)</a><a href="../../../blog/">Блог (en)</a></nav></div>
+    <div><h2>Сообщество</h2><nav aria-label="Сообщество"><a href="../../../forum/">Форум (en)</a><a href="../../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto — рабочее название. Исходный код: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, по лицензии PolyForm Shield License 1.0.0 (исходный код доступен).</span>
+    <span>Без cookie и без слежения. Веб-сервер хранит обычный журнал доступа не дольше семи дней.</span>
+    <span><a href="../../../docs/security-policy.html">Политика безопасности</a> · <a href="../../../docs/licence.html">Лицензия</a> · <a href="../../../docs/trademark.html">Товарный знак</a> (на английском)</span>
+  </div>
+  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
+</footer>
+<script src="../../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_running">Varsto синхронизирует в фоне</string>
+    <string name="choose_files">Добавить файлы в Varsto</string>
+    <string name="open_with">Открыть с помощью</string>
+    <string name="share_with">Поделиться</string>
+    <string name="file_missing">%1$s ещё нет на этом телефоне</string>
+    <string name="file_not_shareable">Этот файл нельзя передать другим приложениям: %1$s</string>
+    <string name="camera_uploading">Загрузка %1$d из %2$d в %3$s</string>
+    <string name="service_did_not_start">Служба Varsto не запустилась</string>
+</resources>

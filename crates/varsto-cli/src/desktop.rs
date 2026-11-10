@@ -26,14 +26,18 @@ const FOLDERS_JS: &str = include_str!("../ui/folders.js");
 const I18N_JS: &str = include_str!("../ui/i18n.js");
 const I18N_FI: &str = include_str!("../ui/i18n/fi.json");
 const I18N_SV: &str = include_str!("../ui/i18n/sv.json");
+const I18N_DE: &str = include_str!("../ui/i18n/de.json");
+const I18N_ES: &str = include_str!("../ui/i18n/es.json");
+const I18N_RU: &str = include_str!("../ui/i18n/ru.json");
 
-/// The interface language chosen in the page ("en", "fi" or "sv"), for the
-/// tray and the menu bar: `home/ui-language`. English when unset.
+/// The interface language chosen in the page, for the tray and the menu bar:
+/// `home/ui-language`. English, Finnish, Swedish, German, Spanish or Russian.
+/// English when unset. French is a website language only.
 pub fn ui_language(home: &std::path::Path) -> String {
     std::fs::read_to_string(home.join("ui-language"))
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|l| matches!(l.as_str(), "en" | "fi" | "sv"))
+        .filter(|l| matches!(l.as_str(), "en" | "fi" | "sv" | "de" | "es" | "ru"))
         .unwrap_or_else(|| "en".to_string())
 }
 const APP_CSS: &str = include_str!("../ui/app.css");
@@ -1029,6 +1033,9 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         "/i18n.js" => request.respond(text(I18N_JS, "text/javascript; charset=utf-8"))?,
         "/i18n/fi.json" => request.respond(text(I18N_FI, "application/json; charset=utf-8"))?,
         "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
+        "/i18n/de.json" => request.respond(text(I18N_DE, "application/json; charset=utf-8"))?,
+        "/i18n/es.json" => request.respond(text(I18N_ES, "application/json; charset=utf-8"))?,
+        "/i18n/ru.json" => request.respond(text(I18N_RU, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
         "/viz.js" => request.respond(text(VIZ_JS, "text/javascript; charset=utf-8"))?,
         "/viz.css" => request.respond(text(VIZ_CSS, "text/css; charset=utf-8"))?,
@@ -2588,7 +2595,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         (Method::Get, "/api/providers") => Ok(providers_json(varsto_core::util::now_utc())),
         (Method::Post, "/api/ui-language") => {
             let l = s(input, "language")?;
-            if !matches!(l.as_str(), "en" | "fi" | "sv") {
+            if !matches!(l.as_str(), "en" | "fi" | "sv" | "de" | "es" | "ru") {
                 bail!("unknown language {l}");
             }
             std::fs::create_dir_all(&st.home)?;
@@ -6178,7 +6185,7 @@ mod tests {
             }
         }
         assert!(found.len() > 150, "{}", found.len());
-        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV)] {
+        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV), ("de", I18N_DE), ("es", I18N_ES), ("ru", I18N_RU)] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let missing: Vec<&String> = found
                 .iter()
@@ -6359,7 +6366,7 @@ mod tests {
             );
         }
         assert!(used.len() > 800, "{}", used.len());
-        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV)] {
+        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV), ("de", I18N_DE), ("es", I18N_ES), ("ru", I18N_RU)] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let top: Vec<&String> = d.as_object().unwrap().keys().collect();
             // i18n.js reads only these three; a string next to them is never shown.
