@@ -1,7 +1,7 @@
 // One clip per measured scenario on the Resilio comparison.
 // Each figure plays once when it scrolls into view, then stays on the last frame.
-// Blocky cubes, no words in the picture. The numbers under the picture are the
-// published 8 Nov 2026 times.
+// Blocky cubes, no words in the picture. Finish time and the byte count come
+// from each figure's data attributes. A note after the unit is not part of the count.
 (function () {
   var W = 360, H = 188;
   var SPAN = 8000;
@@ -352,7 +352,7 @@
     return {
       s: parseFloat(m[1].replace(",", ".")),
       n: parseFloat(nraw.replace(",", ".")),
-      unit: m[3],
+      unit: m[3].replace(/,$/, ""),
       dec: parts[1] ? parts[1].length : 0,
       comma: comma
     };
