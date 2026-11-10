@@ -406,16 +406,20 @@ a.card:hover { border-color: var(--accent, currentColor); }
 @media (prefers-reduced-motion: reduce) { .stage .window::after { display: none; } }
 
 /* Two lanes of blocks on the Resilio comparison. One figure per measured scenario. */
-.pace { margin: 1.75rem 0 2.25rem; max-width: 52rem; }
+.pace-set { margin: 1.75rem 0 2.25rem; max-width: 52rem; }
+.pace { position: relative; margin: 0; }
 .pace h3 { margin: 0 0 .65rem; font-size: 1.05rem; }
-.pace-top { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .7rem; }
+.pace-top { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .85rem; }
 .pace-top button { font: 500 .85rem var(--font); color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: .35rem .8rem; cursor: pointer; }
-.pace-top button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pace-top button[aria-selected="true"] { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .pace canvas { display: block; width: 100%; height: auto; background: var(--raise); border: 1px solid var(--border); border-radius: var(--radius); }
-.pace-readout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: .7rem 0 .4rem; }
+.pace-play { position: absolute; top: .7rem; right: .7rem; z-index: 1; font: 600 .85rem var(--font); color: var(--text); background: color-mix(in srgb, var(--raise) 88%, transparent); border: 1px solid var(--border-2); border-radius: 999px; padding: .35rem .85rem; cursor: pointer; }
+.pace-play[hidden] { display: none; }
+.pace-readout { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; margin: .7rem 0 .4rem; }
 .pace-readout p { margin: 0; display: flex; justify-content: space-between; gap: .6rem; font: 500 .9rem var(--mono); }
 .pace-readout span { color: var(--muted); font-family: var(--font); }
-.pace figcaption { color: var(--muted); font-size: .95rem; margin-top: .6rem; }
+.pace-why { color: var(--muted); font-size: .95rem; margin: .7rem 0 0; max-width: 48rem; }
+.pace-panel[hidden] { display: none; }
 
 /* Disclosure rows (the download list, the verification steps). */
 details.dl-all > summary, main details:not(.pop) > summary { cursor: pointer; color: var(--muted); font-weight: 550; padding: .5rem 0; }

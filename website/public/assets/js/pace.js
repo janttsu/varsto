@@ -235,16 +235,23 @@
 
       if (scene === "slow") {
         var post = [96, 104, 118];
-        box(ox, 2.02, 0, 0.12, 0.12, 1.2, 0.12, post);
-        box(ox, 2.5, 0, 0.12, 0.12, 1.2, 0.12, post);
-        var heavy = name !== "varsto";
-        for (var s = 0; s < 6; s++) {
-          var uSlow = hop(s, 6, p, 0.02, doneAt);
-          if (heavy && uSlow > 0 && uSlow < 1) {
-            var trip = 0.3 + (s % 3) * 0.14;
-            if (uSlow > trip && uSlow < trip + 0.16) { uSlow = trip - 0.22; }
+        // A gap in the link. Cubes that are in it while the link is cut vanish.
+        box(ox, 1.55, 0.2, 0.2, 0.1, 0.85, 0.1, post);
+        box(ox, 2.55, 0.2, 0.2, 0.1, 0.85, 0.1, post);
+        var chop = ((p * 5) % 1) < 0.22;
+        for (var s = 0; s < 5; s++) {
+          var uSlow = hop(s, 5, p, 0.02, doneAt);
+          var inGap = uSlow > 0.38 && uSlow < 0.68;
+          var drop = inGap && (chop || s % 2 === 0);
+          if (drop) {
+            var left = 1 - (uSlow - 0.38) / 0.3;
+            var gs = 0.4 * clamp(left, 0.05, 1);
+            var ghost = slot(s, 1.85, 0.4);
+            box(ox, ghost[0], ghost[1] + (1 - left) * 0.35, ghost[2], gs, gs, gs, mixArr(tone, [160, 64, 64], 0.65));
+          } else {
+            var again = chop && uSlow >= 0.68 ? uSlow - 0.28 : uSlow;
+            travel(ox, slot(s, 0.06, 0.4), slot(s, 2.85, 0.4), again, 0.4, tone);
           }
-          travel(ox, slot(s, 0.08, 0.48), slot(s, 3.3, 0.48), uSlow, 0.48, tone);
         }
         return p >= doneAt;
       }
@@ -275,14 +282,14 @@
       ctx.fillStyle = "rgb(" + bg[0] + "," + bg[1] + "," + bg[2] + ")";
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = mix(rgb(css("--faint", "#687083")), [0, 0, 0], 0.25);
-      ctx.fillRect((W / 2) | 0, 16, 1, H - 32);
-      var rDone = lane("resilio", p, 18);
-      var vDone = lane("varsto", p, 196);
+      ctx.fillRect((W / 2) | 0, 28, 1, H - 56);
+      var rDone = lane("resilio", p, 6);
+      var vDone = lane("varsto", p, 214);
       flush();
       var tickX = scene === "readers" ? 5.15 : 3.7;
       var tickY = (scene === "files" || scene === "text" || scene === "dup" || scene === "slow") ? 2.7 : 1.65;
-      if (rDone) { var rp = P(18, tickX, tickY, 0.2); tick(rp[0], rp[1]); }
-      if (vDone) { var vp = P(196, tickX, tickY, 0.2); tick(vp[0], vp[1]); }
+      if (rDone) { var rp = P(6, tickX, tickY, 0.2); tick(rp[0], rp[1]); }
+      if (vDone) { var vp = P(214, tickX, tickY, 0.2); tick(vp[0], vp[1]); }
       show("resilio", resilioRaw, p, rAt);
       show("varsto", varstoRaw, p, vAt);
     }
@@ -290,19 +297,34 @@
       var p = reduce ? 1 : Math.min(1, (now - t0) / SPAN);
       paint(p);
       if (!reduce && p < 1) { requestAnimationFrame(frame); }
-      else { running = false; }
+      else { running = false; showPlay(true); }
     }
+    var play = document.createElement("button");
+    play.type = "button";
+    play.className = "pace-play";
+    play.textContent = fig.getAttribute("data-play") || "Play";
+    fig.appendChild(play);
+    function showPlay(on) { play.hidden = !on; }
     function start() {
       if (started) { return; }
       started = true;
-      if (reduce) { paint(1); return; }
+      showPlay(false);
+      if (reduce) { paint(1); showPlay(true); return; }
       running = true;
       t0 = performance.now();
       requestAnimationFrame(frame);
     }
+    function replay() {
+      started = false;
+      running = false;
+      start();
+    }
+    play.addEventListener("click", replay);
+    fig.replay = replay;
 
     paint(reduce ? 1 : 0);
-    if (reduce) { started = true; }
+    showPlay(false);
+    if (reduce) { started = true; showPlay(true); }
     else if (!("IntersectionObserver" in window)) { start(); }
     else {
       var io = new IntersectionObserver(function (entries) {
@@ -346,4 +368,25 @@
   }
 
   document.querySelectorAll("figure.pace").forEach(mount);
+  document.querySelectorAll(".pace-set").forEach(function (set) {
+    var tabs = set.querySelectorAll("[data-tab]");
+    var panels = set.querySelectorAll("[data-panel]");
+    function show(id) {
+      for (var i = 0; i < tabs.length; i++) {
+        var on = tabs[i].getAttribute("data-tab") === id;
+        tabs[i].setAttribute("aria-selected", on ? "true" : "false");
+      }
+      for (var j = 0; j < panels.length; j++) {
+        var open = panels[j].getAttribute("data-panel") === id;
+        panels[j].hidden = !open;
+        if (open) {
+          var fig = panels[j].querySelector("figure.pace");
+          if (fig && fig.replay) { fig.replay(); }
+        }
+      }
+    }
+    for (var t = 0; t < tabs.length; t++) {
+      tabs[t].addEventListener("click", function () { show(this.getAttribute("data-tab")); });
+    }
+  });
 })();
