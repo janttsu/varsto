@@ -89,7 +89,7 @@
       <li>Content is encrypted with XChaCha20-Poly1305 under keys derived from a random vault key that only your devices hold; a storage sees ciphertext objects named by their hash and nothing else. <a href="how-it-works/">How it works</a>, step by step.</li>
       <li>Every stored signature is hybrid (Ed25519 + ML-DSA-65, both must verify) and every sealed key is hybrid (X25519 + ML-KEM-768): post-quantum hybrid cryptography, designed for, not audited. Transport (direct connections carry only encrypted blocks over TLS 1.3 with pinned certificates, on TCP or, through NAT, QUIC) and release signing (minisign) use classical algorithms.</li>
       <li>Strongroom folders open only with a FIDO2 security key; the enforcement is cryptographic, not a dialog.</li>
-      <li>AI assistance stays local: the MCP server is meant for language models that run on your own machine, inside the folders you grant and never a Strongroom. Nothing is sent to a model provider.</li>
+      <li>No assistant is given access to the vault. There is no MCP server and no key a language model can use to read your files.</li>
       <li>A lost device is removed with a signed revocation and the vault moves to new keys; a wipe order runs when the device next reaches a storage. There is no account and no escrow: the recovery kit, 24 words or three shares, is yours to keep.</li>
       <li>Neither the design nor the code has been reviewed or audited. The <a href="docs/threat-model.html">threat model</a> and the <a href="docs/failure-model.html">failure model</a> say what the design intends, what each party can see, and where it stops.</li>
     </ul>
@@ -116,7 +116,7 @@
 
     <h2 id="status">Honest status</h2>
     <ul>
-      <li>Released version: 0.0.1-alpha.16. The alpha is a vertical slice: core library, command line, background service, tray and menu-bar shells, Android shell, about 242 000 lines of Rust, 1293 automated tests and a lab of 59 scenarios on virtual machines behind home and office NAT: offline convergence, conflicts, a restored-device fence, replicas, sharing, policies, peers, Strongrooms, disk pools, backups and more. Use it with test data only.</li>
+      <li>Released version: 0.0.1-alpha.16. The alpha is a vertical slice: core library, command line, background service, tray and menu-bar shells, Android shell, about 239 000 lines of Rust, 1287 automated tests and a lab of 59 scenarios on virtual machines behind home and office NAT: offline convergence, conflicts, a restored-device fence, replicas, sharing, policies, peers, Strongrooms, disk pools, backups and more. Use it with test data only.</li>
       <li>The cryptographic design has not been reviewed or audited. The <a href="docs/threat-model.html">threat model</a> and the <a href="docs/failure-model.html">failure model</a> say what the design intends and where it stops.</li>
       <li>The source is public at <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> under the <a href="docs/licence.html">PolyForm Shield License 1.0.0</a> (source-available, not open source); bugs and questions go to the issue tracker there. The storage format is <a href="docs/alpha-0-format.html">documented</a> so that your data stays recoverable.</li>
       <li>Varsto is written in Rust, with Swift and Kotlin shells and a plain web interface. Security review, platform work, network and storage testing, packaging and translations are all welcome: <a href="contribute/">how to contribute</a>.</li>

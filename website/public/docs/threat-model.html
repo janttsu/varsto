@@ -247,7 +247,7 @@
 <tr>
 <td>Daemon control socket (Unix socket, named pipe; today an HTTP API on 127.0.0.1 with a per-session token and a Host check, spec section 10)</td>
 <td>Only the OS user boundary.</td>
-<td>CLI, UI and MCP server requests.</td>
+<td>CLI and UI requests.</td>
 <td>Any process of the same user can reach it (A10). Level-3 actions need confirmation outside the socket (separate UI process, OS prompt or security-key touch). Peer-process checks and token storage are <strong>TBD</strong> (plan section 8, "local control API trust model").</td>
 </tr>
 <tr>

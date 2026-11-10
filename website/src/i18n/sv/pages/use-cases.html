@@ -64,13 +64,11 @@ description: Tretton situationer som Varsto är utformat för, från ett flygpla
     </section>
 
     <section class="feature" id="uc-7">
-      <h2>7. ”Städa den här mappen åt mig”</h2>
-      <picture class="theme-light"><source type="image/webp" srcset="{{P}}assets/img/usecases/tidy.webp"><img src="{{P}}assets/img/usecases/tidy.png" alt="En chatt med en assistent som arbetar i en beviljad mapp och föreslår en snyggare struktur, med en Bekräfta-knapp." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="{{P}}assets/img/usecases/tidy-dark.webp"><img src="{{P}}assets/img/usecases/tidy-dark.png" alt="En chatt med en assistent som arbetar i en beviljad mapp och föreslår en snyggare struktur, med en Bekräfta-knapp." width="640" height="320" loading="lazy"></picture>
+      <h2>7. Filer du inte har öppnat på flera månader</h2>
       <div>
-        <p>Tio års skannade brev, kvitton och anteckningar i en enda mapp. Du ger en språkmodell åtkomst till just den mappen via Varstos MCP-server: en lokal modell på din egen dator (Ollama, LM Studio eller vad som helst som talar Model Context Protocol). Innehållet lämnar aldrig dina enheter: ingen molnassistent är inblandad, inget skickas till någon modelleverantör, och modellen ser bara den enda mapp du har beviljat. Den läser filerna, listar ut vad de är och vad som hör ihop, och föreslår en struktur med dina egna ord: per år, per motpart, per projekt, ”skattepapper per år, allt annat efter avsändare”. När du har bekräftat skapar den katalogerna, flyttar och byter namn på filerna in i dem och skriver ett register över vad som hamnade var. Den nya strukturen synkroniseras till dina andra enheter som vilken ändring du själv gör.</p>
-        <p>Reglerna är fastlagda i Varsto, inte överlämnade åt modellen: den ser bara de mappar du har beviljat, skrivskyddat om du inte tillåter ändringar, aldrig dina Strongrooms, och den kan inte förstöra något. Det finns inget raderingsverktyg; skrivning skapar bara nya filer, och en flytt eller ett namnbyte görs bara till ett namn som är ledigt på alla enheter, så ingen fil ersätts någonsin av en annan. Om modellen gör fel finns allt fortfarande kvar, under en annan sökväg.</p>
-        <p>Var inaktiva data ska ligga avgör Varsto själv, inte assistenten: appen håller reda på när varje fil senast användes och föreslår i gränssnittet vad som inte har rörts på månader och vad det skulle kosta i en kall lagringsklass, med källor och datum.</p>
-        <p class="note">I dag: <code>varsto mcp</code> med åtkomst per mapp (<code>varsto mcp grant Letters --write</code>): läsa, lista, skapa kataloger, flytta och byta namn till lediga namn samt skapa nya anteckningar, utan möjlighet att radera eller skriva över; Varstos egen placeringsuppskattning i gränssnittet och på kommandoraden, prissatt med dina egna lagringspriser, ett klick (eller <code>varsto advice apply</code>) för att frigöra inaktiva filer på den här enheten när deras kopior är verifierade och mappens regel fortfarande uppfylls, och, när du har en billigare kall lagring, ett klick för att flytta de inaktiva filernas block dit så att själva kostnaden sjunker, aldrig under mappens regel (<code>varsto move Letters --from box --to glacier --idle-days 180</code> gör detsamma för hand, med <code>--dry-run</code> för att se kostnaderna först).</p>
+        <p>Tio års skannade brev, kvitton och anteckningar ligger i en mapp. De flesta har inte öppnats på flera månader, och de tar fortfarande plats på den bärbara datorn.</p>
+        <p>Varsto håller en senast-använd-post för varje fil, sammanslagen mellan dina enheter, så en fil räknas som oanvänd bara om ingen enhet har använt den. Gränssnittet föreslår vad som inte har rörts och vad det skulle kosta i en kallare lagringsklass, med källor och datum. Ett klick, eller <code>varsto advice apply</code>, frigör de oanvända filerna på den här enheten när deras kopior är verifierade och mappens regel fortfarande gäller. Om du har en billigare kall lagring flyttar ett klick blocken dit. Kostnaden kan sjunka. Den går aldrig under mappens regel.</p>
+        <p class="note"><code>varsto move Letters --from box --to glacier --idle-days 180</code> gör detsamma för hand. <code>--dry-run</code> visar kostnaden först. Inget här ger en språkmodell dina filer. Varsto har ingen MCP-server.</p>
       </div>
     </section>
 
@@ -126,6 +124,14 @@ description: Tretton situationer som Varsto är utformat för, från ett flygpla
       <picture class="theme-light"><source type="image/webp" srcset="{{P}}assets/img/usecases/reader.webp"><img src="{{P}}assets/img/usecases/reader.png" alt="En stationär dator skapar miniatyrbilder och lagrar dem krypterade, och en telefon visar förhandsvisningar av filer som den inte har laddat ned." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="{{P}}assets/img/usecases/reader-dark.webp"><img src="{{P}}assets/img/usecases/reader-dark.png" alt="En stationär dator skapar miniatyrbilder och lagrar dem krypterade, och en telefon visar förhandsvisningar av filer som den inte har laddat ned." width="640" height="320" loading="lazy"></picture>
       <div>
         <p>Enheten som har fotona och videorna skapar miniatyrbilder en gång, krypterar dem under mappnyckeln och lagrar dem bredvid data. Varje annan enhet med nyckeln, även en telefon vars mapp bara består av platshållare, visar förhandsvisningarna utan att hämta en enda bild. Lagringsleverantörerna ser bara chiffertext, för miniatyrbilderna som för allt annat.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-14">
+      <h2>14. En Raspberry Pi som står på</h2>
+      <div>
+        <p><strong>Situationen.</strong> Du låter en Raspberry Pi, eller en annan liten dator, köra Varsto hemma. Dess SD-kort eller en billig USB-disk är inte hårdvara du skulle anförtro den enda kopian av en fil.</p>
+        <p><strong>Så hjälper Varsto.</strong> Bakgrundstjänsten läser lagrade kopior och jämför varje block med hashen i dess namn. En kopia som inte längre stämmer är skadad, och Varsto ersätter den från en intakt kopia på en annan enhet eller lagring. Pi:n behöver inte vara tillförlitlig lagring. Den måste fortsätta kontrollen. Du behåller ändå en andra kopia någon annanstans: kontrollen kan reparera ett block bara när en annan hel kopia finns.</p>
       </div>
     </section>
 

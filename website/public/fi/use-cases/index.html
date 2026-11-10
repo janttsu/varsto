@@ -118,13 +118,11 @@
     </section>
 
     <section class="feature" id="uc-7">
-      <h2>7. ”Siivoa tämä kansio puolestani”</h2>
-      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/tidy.webp?v=f843b65187"><img src="../../assets/img/usecases/tidy.png?v=a03202d808" alt="Keskustelu avustajan kanssa, joka toimii yhdessä sille myönnetyssä kansiossa ja ehdottaa siistimpää rakennetta, sekä Vahvista-painike." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/tidy-dark.webp?v=1735fe9174"><img src="../../assets/img/usecases/tidy-dark.png?v=3e91d9c283" alt="Keskustelu avustajan kanssa, joka toimii yhdessä sille myönnetyssä kansiossa ja ehdottaa siistimpää rakennetta, sekä Vahvista-painike." width="640" height="320"></picture>
+      <h2>7. Tiedostot, joita ei ole avattu kuukausiin</h2>
       <div>
-        <p>Kymmenen vuoden skannatut kirjeet, kuitit ja muistiinpanot yhdessä kansiossa. Myönnät kielimallille pääsyn tuohon yhteen kansioon Varston MCP-palvelimen kautta: paikalliselle mallille omalla koneellasi (Ollama, LM Studio tai mikä tahansa Model Context Protocolia puhuva). Sisältö ei koskaan poistu laitteiltasi: mukana ei ole pilviavustajaa, mitään ei lähetetä mallin tarjoajalle, ja malli näkee vain sen yhden kansion, jonka myönsit. Se lukee tiedostot, päättelee, mitä ne ovat ja mitkä kuuluvat yhteen, ja ehdottaa rakennetta sinun sanoillasi: vuosittain, vastapuolittain, projekteittain, ”veropaperit vuosittain, kaikki muu lähettäjän mukaan”. Kun vahvistat, se luo hakemistot, siirtää ja nimeää tiedostot niihin ja kirjoittaa hakemiston siitä, mikä meni minne. Uusi järjestys synkronoituu muille laitteillesi kuten mikä tahansa itse tekemäsi muutos.</p>
-        <p>Säännöt on lyöty lukkoon Varstossa, eikä niitä jätetä mallin varaan: se näkee vain myöntämäsi kansiot, vain luku -tilassa, ellet salli muutoksia, ei koskaan Strongroomejasi, eikä se voi tuhota mitään. Poistotyökalua ei ole; kirjoittaminen vain luo uusia tiedostoja, ja siirto tai uudelleennimeäminen menee vain nimeen, joka on vapaa jokaisella laitteella, joten mitään tiedostoa ei koskaan korvata toisella. Jos malli tekee virheen, kaikki on yhä tallessa, vain toisessa polussa.</p>
-        <p>Se, missä käyttämättömän datan pitäisi olla, on Varston oma päätös, ei avustajan: sovellus pitää kirjaa jokaisen tiedoston viimeisestä käytöstä ja ehdottaa käyttöliittymässä, mihin ei ole koskettu kuukausiin ja mitä se maksaisi kylmätallennusluokassa, lähteineen ja päivämäärineen.</p>
-        <p class="note">Nyt: <code>varsto mcp</code> kansiokohtaisin käyttöoikeuksin (<code>varsto mcp grant Letters --write</code>): lukeminen, listaaminen, hakemistojen luominen, siirtäminen ja uudelleennimeäminen vapaisiin nimiin sekä uusien muistiinpanojen luominen, ilman mitään tapaa poistaa tai korvata; Varston oma sijoitusarvio käyttöliittymässä ja komentorivillä omilla tallennuspaikkahinnoillasi laskettuna, yksi napsautus (tai <code>varsto advice apply</code>) vapauttaa käyttämättömät tiedostot tältä laitteelta, kun niiden kopiot on tarkistettu ja kansion säilytyssääntö yhä täyttyy, ja kun sinulla on halvempi kylmätallennus, yksi napsautus siirtää käyttämättömien tiedostojen lohkot sinne, jolloin itse laskukin pienenee, koskaan alittamatta kansion säilytyssääntöä (<code>varsto move Letters --from box --to glacier --idle-days 180</code> tekee saman käsin, ja <code>--dry-run</code> näyttää ensin kustannukset).</p>
+        <p>Kymmenen vuoden skannatut kirjeet, kuitit ja muistiinpanot ovat yhdessä kansiossa. Useimpia ei ole avattu kuukausiin, ja ne vievät yhä tilaa kannettavalla.</p>
+        <p>Varsto pitää jokaisesta tiedostosta kirjaa viimeisestä käytöstä, ja tiedot yhdistyvät laitteidesi kesken, joten tiedosto on käyttämätön vain jos mikään laite ei ole käyttänyt sitä. Käyttöliittymä ehdottaa, mitä ei ole koskettu ja mitä se maksaisi kylmemmässä tallennusluokassa, lähteineen ja päivämäärineen. Yksi napsautus tai <code>varsto advice apply</code> vapauttaa käyttämättömät tiedostot tältä laitteelta, kun niiden kopiot on tarkistettu ja kansion säilytyssääntö yhä täyttyy. Jos sinulla on halvempi kylmätallennus, yksi napsautus siirtää lohkot sinne. Lasku voi pienentyä. Se ei koskaan alita kansion säilytyssääntöä.</p>
+        <p class="note"><code>varsto move Letters --from box --to glacier --idle-days 180</code> tekee saman käsin. <code>--dry-run</code> näyttää ensin kustannukset. Mikään tässä ei anna kielimallille tiedostojasi. Varstossa ei ole MCP-palvelinta.</p>
       </div>
     </section>
 
@@ -180,6 +178,14 @@
       <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/reader.webp?v=b0cecd824e"><img src="../../assets/img/usecases/reader.png?v=31cea47963" alt="Pöytäkone luo esikatselukuvat ja tallentaa ne salattuina, ja puhelin näyttää esikatselut tiedostoista, joita se ei ole ladannut." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/reader-dark.webp?v=eca1b5945e"><img src="../../assets/img/usecases/reader-dark.png?v=8642bee0fc" alt="Pöytäkone luo esikatselukuvat ja tallentaa ne salattuina, ja puhelin näyttää esikatselut tiedostoista, joita se ei ole ladannut." width="640" height="320"></picture>
       <div>
         <p>Laite, jolla kuvat ja videot ovat, luo esikatselukuvat kerran, salaa ne kansioavaimella ja tallentaa ne datan viereen. Jokainen muu avaimen omaava laite, myös puhelin, jonka kansio on pelkkiä paikkamerkkejä, näyttää esikatselut hakematta yhtäkään kuvaa. Tallennuspalvelujen tarjoajat näkevät vain salakirjoitettua dataa, esikatselukuvista samoin kuin kaikesta muusta.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="uc-14">
+      <h2>14. Raspberry Pi, joka jää päälle</h2>
+      <div>
+        <p><strong>Tilanne.</strong> Jätät Raspberry Pin tai muun pienen koneen ajamaan Varstoa kotiin. Sen muistikortti tai halpa USB-levy ei ole laite, jolle jättäisit tiedoston ainoan kopion.</p>
+        <p><strong>Miten Varsto auttaa.</strong> Taustapalvelu lukee tallennettuja kopioita ja vertaa jokaista lohkoa nimen tiivisteeseen. Kopio, joka ei enää täsmää, on vaurioitunut, ja Varsto korvaa sen ehjällä kopiolla toiselta laitteelta tai tallennuspaikasta. Pin ei tarvitse olla luotettava levy. Sen pitää jatkaa tarkistusta. Toinen kopio pidetään silti muualla: tarkistus voi korjata lohkon vain, jos ehjä kopio on olemassa.</p>
       </div>
     </section>
 
