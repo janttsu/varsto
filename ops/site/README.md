@@ -21,16 +21,17 @@
   the server: `python3 -I ops/site/tests/test_screenshots_sync.py`.
 
 - `daily-sync.py` (and `test_daily_sync.py`): the daily channel. The workflow
-  `.github/workflows/daily.yml` builds all platforms at 03:00 UTC when `main`
-  has moved, signs the file list with the daily key (secret
+  `.github/workflows/daily.yml` builds all platforms when someone starts
+  Daily builds by hand, signs the file list with the daily key (secret
   `VARSTO_DAILY_KEY` of the `daily` environment, which only runs from `main`
   receive) and publishes it as the assets of the rolling GitHub
-  pre-release `daily` (recreated each run, `v*` tags untouched). The server
-  pulls it from cron; nothing on GitHub can write to the server:
+  pre-release `daily` (recreated each run, `v*` tags untouched). There is
+  no schedule. The server pulls it from cron; nothing on GitHub can write
+  to the server:
 
   ```
   install -m 755 ops/site/daily-sync.py ~/bin/varsto-daily-sync.py
-  # crontab -e (the build starts 03:00 UTC and takes a while; hourly is enough)
+  # crontab -e (a build takes a while; hourly is enough)
   17 * * * * /usr/bin/python3 $HOME/bin/varsto-daily-sync.py $HOME/sites/varsto/public >> $HOME/.cache/varsto-daily-sync.log 2>&1
   ```
 

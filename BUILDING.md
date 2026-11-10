@@ -138,7 +138,7 @@ Three workflows in `.github/workflows/`. All use `permissions: contents: read` b
 | Workflow | Triggers |
 |---|---|
 | `ci.yml` (CI) | push to `main`, push of a tag `v*`, **every pull request**, manual run (`workflow_dispatch`), and `workflow_call` from `daily.yml` |
-| `daily.yml` (Daily builds) | every day at 03:00 UTC (`schedule`), manual run with inputs `ref` (default `main`) and `publish` (default true) |
+| `daily.yml` (Daily builds) | manual run with inputs `ref` (default `main`) and `publish` (default true). No schedule |
 | `ios-ipa.yml` (iOS .ipa) | manual run (inputs `ref`, `release_tag`), push of a tag `ios-v*`, and `workflow_call` from `daily.yml`. Never on a plain push. |
 
 A push to a branch that is not `main` and has no pull request starts nothing. Open a pull request (draft is enough), or start CI by hand: `gh workflow run ci.yml --ref <branch>`. Runs of the same workflow and ref queue instead of cancelling (`cancel-in-progress: false`). `gh run list`, `gh run watch <id>` and `gh run download <id> --name <artifact>` follow and fetch runs.
@@ -229,10 +229,10 @@ Local test of one part: build the Linux binary, run `scripts/screenshots/demo-va
 
 A development build of `main` for every platform, signed with a daily key (not the release key), at <https://varsto.net/daily/>; `varsto update --daily` installs from it. [RELEASING.md](RELEASING.md) ("Daily builds") has the keys, the signature format and what the updater checks. The pipeline:
 
-1. `daily.yml` runs at 03:00 UTC. Job `check` resolves `main` (or the `ref` input) and stops the scheduled run if that commit is already the one in the notes of the published `daily` pre-release (a manual run always builds). It also validates the version string from `Cargo.toml`.
+1. Someone starts `daily.yml` by hand (Actions, Daily builds, Run workflow). Job `check` resolves `main` (or the `ref` input) and validates the version string from `Cargo.toml`. A manual run always builds.
 2. Job `ci` calls `ci.yml` for that commit and job `ipa` calls `ios-ipa.yml`.
 3. Job `package`: `scripts/daily-assemble.py` collects the artifacts under stable names (`varsto-daily-linux-x86_64.tar.gz`, `-windows-setup.exe`, `-macos-apple-silicon.dmg`, `-android-debug.apk` (release bytes; the name is kept so the signed list stays valid), `-ios-unsigned.ipa`, `-rendezvous-linux-x86_64`, `-screenshots.tar.gz`) and writes an unsigned `SHA256SUMS` and `latest.json`; every file must be found exactly once or the script stops. `scripts/sign-daily.sh` signs the list with the key from the secret `VARSTO_DAILY_KEY`, refusing a key that does not match `daily-key.pub`, and the step verifies it. The files go to the artifact `daily-assets` (14 days).
-4. If publishing is on (always for the schedule; the `publish` input for a manual run), the old `daily` release and tag are deleted and a new pre-release `daily` is created with the files; its notes start with `commit: <sha>` and `build: <id>` (`YYYYMMDD-<short sha>`).
+4. If publishing is on (the `publish` input, default true), the old `daily` release and tag are deleted and a new pre-release `daily` is created with the files; its notes start with `commit: <sha>` and `build: <id>` (`YYYYMMDD-<short sha>`).
 5. On the web server, `ops/site/daily-sync.py` (cron, hourly) fetches the release, verifies `SHA256SUMS.sig` against the built-in daily public key and every size and hash, and only then writes `daily/builds/<id>/` and the `daily/latest/` links; it keeps the newest 7 builds and refuses a rollback. Setup of the cron line and the one-time secret: [ops/site/README.md](ops/site/README.md). Nothing on GitHub writes to the server.
 
 Rehearse with a manual run with `publish` off (Actions, Daily builds, Run workflow): the result stays an artifact. The manual path for a build made elsewhere is `website/tools/daily/make_daily.py` plus `scripts/sign-daily.sh` (see its header). Tests: `python3 -I -m unittest discover -s ops/site -p 'test_*.py'` (needs OpenSSL 3; CI runs them).
