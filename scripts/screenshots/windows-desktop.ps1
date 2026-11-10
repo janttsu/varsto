@@ -3,7 +3,10 @@
 # on a Windows machine with a desktop session (a GitHub runner or a VM).
 #   scripts/screenshots/windows-desktop.ps1 -Exe <varsto.exe> -Work <dir> -Out <dir>
 # Creates a small invented vault, starts the tray app (which starts the
-# service), and writes windows-tray.png and windows-app.png.
+# service), and writes windows-tray.png and the app window both light and
+# dark (windows-app-light.png, windows-app-dark.png). windows-app.png stays
+# a copy of the light window so a page that still names that file keeps
+# showing a picture.
 param([Parameter(Mandatory)] [string]$Exe, [Parameter(Mandatory)] [string]$Work, [Parameter(Mandatory)] [string]$Out)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -74,14 +77,23 @@ try {
   } else { Write-Host "no Show Hidden Icons button" }
 } catch { Write-Host "overflow capture: $($_.Exception.Message)" }
 $sf = Get-Content "$h\service.json" | ConvertFrom-Json
-$boot = (Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$($sf.port)/api/session/boot" -Headers @{ "X-Varsto-Token" = $sf.token } -Body "{}").boot
-$url = "http://127.0.0.1:$($sf.port)/?boot=$boot"
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $edge) { throw "Edge is not installed" }
 $w = [Math]::Min(1280, $screen.Width); $hh = [Math]::Min(752, $screen.Height - 60)
-$p = Start-Process -FilePath $edge -PassThru -ArgumentList "--app=$url", "--no-first-run", "--user-data-dir=$Work\edge-profile", "--window-size=$w,$hh", "--window-position=0,0"
-Start-Sleep 15
-$win = Get-Process msedge -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-if ($win) {
+# ?theme= is read by the page (app.js). A fresh profile each time, and a new
+# one-time start code, because the previous code was already traded.
+function Capture-App([string]$Scheme) {
+  $boot = (Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$($sf.port)/api/session/boot" -Headers @{ "X-Varsto-Token" = $sf.token } -Body "{}").boot
+  $url = "http://127.0.0.1:$($sf.port)/?boot=$boot&theme=$Scheme"
+  $profile = Join-Path $Work "edge-$Scheme"
+  if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
+  Start-Process -FilePath $edge -ArgumentList "--app=$url", "--no-first-run", "--user-data-dir=$profile", "--window-size=$w,$hh", "--window-position=0,0" | Out-Null
+  $win = $null
+  for ($i = 0; $i -lt 20 -and -not $win; $i++) {
+    Start-Sleep 2
+    $win = Get-Process msedge -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+  }
+  if (-not $win) { throw "Edge window not found ($Scheme)" }
   [W32]::MoveWindow($win.MainWindowHandle, 0, 0, $w, $hh, $true) | Out-Null
   [W32]::SetForegroundWindow($win.MainWindowHandle) | Out-Null
   Start-Sleep 3
@@ -89,10 +101,29 @@ if ($win) {
   [W32]::GetWindowRect($win.MainWindowHandle, [ref]$r) | Out-Null
   # Windows 11 windows carry an invisible 7 px resize border left, right and bottom.
   $x = [Math]::Max(0, $r.L + 7); $y = [Math]::Max(0, $r.T); $cw = [Math]::Min($r.R - $r.L - 14, $screen.Width - $x); $ch = [Math]::Min($r.B - $r.T - 7, $screen.Height - $y)
-  Shot "$Out\windows-app.png" (New-Object System.Drawing.Rectangle $x, $y, $cw, $ch)
-  Write-Host "app window $cw x $ch at $x,$y"
-} else {
-  Write-Host "Edge window not found"
+  if ($cw -lt 200 -or $ch -lt 200) { throw "Edge window is too small ($Scheme): $cw x $ch" }
+  $dest = Join-Path $Out "windows-app-$Scheme.png"
+  Shot $dest (New-Object System.Drawing.Rectangle $x, $y, $cw, $ch)
+  if ((Get-Item $dest).Length -lt 20000) { throw "$Scheme window shot is too small to be the interface" }
+  Write-Host "app window $Scheme $cw x $ch at $x,$y"
+  Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep 2
+}
+# A failed second theme removes the light window too, so the pack step does
+# not see one side of the pair and hold back every other picture.
+$appOk = $false
+try {
+  Capture-App "light"
+  Copy-Item (Join-Path $Out "windows-app-light.png") (Join-Path $Out "windows-app.png") -Force
+  Capture-App "dark"
+  $lightHash = (Get-FileHash (Join-Path $Out "windows-app-light.png") -Algorithm SHA256).Hash
+  $darkHash = (Get-FileHash (Join-Path $Out "windows-app-dark.png") -Algorithm SHA256).Hash
+  if ($lightHash -eq $darkHash) { throw "the light and dark Windows windows are the same picture" }
+  $appOk = $true
+} finally {
+  if (-not $appOk) {
+    Remove-Item (Join-Path $Out "windows-app-light.png"), (Join-Path $Out "windows-app-dark.png"), (Join-Path $Out "windows-app.png") -ErrorAction SilentlyContinue
+  }
 }
 Shot "$Out\raw\windows-desktop-app.png" $screen
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$($sf.port)/api/quit" -Headers @{ "X-Varsto-Token" = $sf.token } -ErrorAction SilentlyContinue | Out-Null

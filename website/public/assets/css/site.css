@@ -244,6 +244,20 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 .dl-all { margin:1rem 0; }
 .dl-all table { margin-top:.5rem; }
 
+/* Downloads page: desktop and phone are separate panels. The home page keeps one .dl-grid. */
+.dl-groups { display:grid; gap:1.25rem; margin:.25rem 0 1.75rem; }
+.dl-group { border:1px solid var(--border); border-radius:var(--radius); background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, var(--surface)), var(--surface) 5.5rem); padding:1.15rem 1.15rem .2rem; box-shadow:inset 3px 0 0 var(--accent); }
+.dl-group-mobile { background:linear-gradient(180deg, color-mix(in srgb, var(--accent-2) 9%, var(--surface)), var(--surface) 5.5rem); box-shadow:inset 3px 0 0 var(--accent-2); }
+.dl-group h2 { margin:0; font-size:1.35rem; letter-spacing:-.02em; }
+.dl-group-lead { margin:.35rem 0 1rem; color:var(--muted); max-width:46rem; }
+.dl-group .dl-grid { margin:0 0 1rem; }
+.dl-group-desktop .dl-grid { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+.dl-group-mobile .dl-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); max-width:44rem; }
+.dl-group-mobile .dl-icon { fill:var(--accent-2); }
+@media (max-width: 52rem) {
+  .dl-group-desktop .dl-grid, .dl-group-mobile .dl-grid { grid-template-columns:1fr; max-width:none; }
+}
+
 .shots-single { grid-template-columns: 1fr; max-width: 20rem; }
 
 /* On-this-page table of contents (How it works). */

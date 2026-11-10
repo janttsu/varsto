@@ -426,20 +426,18 @@ def rewrite_links(body: str, slug_by_name: dict[str, str], docs_prefix: str = ""
 IOS_NOT_YET = "Not downloadable yet: the app shell is in the repository (apps/ios) and needs a Mac with Xcode to build. The unsigned .ipa comes with the next release."
 
 PLATFORMS = [
-    # (title, icon, matcher for the primary file, matchers for alternatives, status line)
-    ("Linux", "linux", lambda n: n.endswith("-x86_64-unknown-linux-musl.tar.gz"), [],
+    # (title, icon, group, matcher for the primary file, matchers for alternatives, status line)
+    ("Linux", "linux", "desktop", lambda n: n.endswith("-x86_64-unknown-linux-musl.tar.gz"), [],
      "x86_64, static binary. Unpack and run ./varsto once: it installs itself for your user (varsto on your PATH, the background service as a systemd user unit, the tray at login, Varsto in the application menu; no root). Tray icon, background service, browser interface and command line in one file."),
-    ("macOS", "macos", lambda n: n.endswith("-macos.dmg") or n.endswith("-macos.zip") or n.endswith("-macos-apple-silicon-lite.zip"),
+    ("macOS", "macos", "desktop", lambda n: n.endswith("-macos.dmg") or n.endswith("-macos.zip") or n.endswith("-macos-apple-silicon-lite.zip"),
      [("Command line only (Apple Silicon)", lambda n: n.endswith("-aarch64-apple-darwin.tar.gz"))],
      "Apple Silicon. Open the disk image and drag Varsto to Applications. The app has its own window, a menu-bar item, Finder actions (right-click a file: Download or Free up space with Varsto; double-click a placeholder to download and open it), the background service and the varsto command line inside the bundle. Unsigned: right-click, Open the first time."),
-    ("Windows", "windows", lambda n: n.endswith("-setup.exe"), [],
+    ("Windows", "windows", "desktop", lambda n: n.endswith("-setup.exe"), [],
      "x86_64 installer. Installs for your user without administrator rights (or for everyone): Start menu and desktop icons, Varsto in its own window, the background service and tray at login, automatic updates. Run it again to upgrade or repair; your data stays. Not code-signed, so SmartScreen may ask you to confirm. Built and smoke-tested on Windows Server 2025 in CI; not yet through the manual checklist on a real machine."),
-    ("Android", "android", lambda n: n.endswith("-android.apk") or n.endswith("-android-debug.apk"), [],
+    ("Android", "android", "mobile", lambda n: n.endswith("-android.apk") or n.endswith("-android-debug.apk"), [],
      "Release-signed APK for sideloading: allow the install when the phone asks. Not a debug build, so an update replaces the previous install. Runs the same core as a foreground service."),
-    ("iOS", "ios", lambda n: n.endswith("-ios-unsigned.ipa"), [],
+    ("iOS", "ios", "mobile", lambda n: n.endswith("-ios-unsigned.ipa"), [],
      "Unsigned .ipa for iPhone and iPad. It does not install by itself: AltStore, SideStore or Sideloadly sign it with your own Apple ID. A Sideloadly error about signing, an Apple ID limit, an expired install or an untrusted developer comes from that tool or from Apple, not from a broken package. Built by CI on a Mac runner; not yet run on a real device."),
-    ("Source", "source", lambda n: n.endswith("-source.tar.gz"), [],
-     "Git archive of the tagged release. Build with a stable Rust toolchain: cargo build --release."),
 ]
 
 ICONS = {
@@ -448,7 +446,6 @@ ICONS = {
     "windows": '<path d="M3 5.5 11 4.4v7.1H3zm0 13 8 1.1v-7H3zm9 1.2L22 21v-8.4h-10zm0-15.4V11h10V3z"/>',
     "android": '<path d="M7 9h10v8a2 2 0 0 1-2 2h-1v3h-2v-3h-1v3H9v-3H8a1 1 0 0 1-1-1zm10.6-1H6.4c.3-1.9 1.4-3.5 3-4.4L8.3 2.5l.9-.5 1.2 2.2c.5-.1 1-.2 1.6-.2s1.1.1 1.6.2l1.2-2.2.9.5-1.1 2.1c1.6.9 2.7 2.5 3 4.4zM9.5 6.5a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4zm5 0a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4zM4 10h2v7H4zm14 0h2v7h-2z"/>',
     "ios": '<path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v15h8V4zm3 16.5h2v1h-2z"/>',
-    "source": '<path d="m8.5 7-5 5 5 5 1.4-1.4L6.3 12l3.6-3.6zm7 0-1.4 1.4 3.6 3.6-3.6 3.6L15.5 17l5-5z"/>',
 }
 
 
@@ -504,7 +501,30 @@ def remote_download_set() -> dict | None:
     return _REMOTE_SET
 
 
-def downloads_table(depth: int) -> str:
+# Download cards are one list on the home page. The downloads page splits them
+# into these groups so a phone build is not sitting in the same row as Linux.
+DOWNLOAD_GROUPS = ("desktop", "mobile")
+GROUP_COPY = {
+    "en": {
+        "desktop": ("Desktop", "The service, the interface and the command line in one package."),
+        "mobile": ("Phone and tablet", "Android installs as an APK. iOS is an unsigned package you sign with your own Apple ID."),
+    },
+    "fi": {
+        "desktop": ("Työpöytä", "Palvelu, käyttöliittymä ja komentorivi samassa paketissa."),
+        "mobile": ("Puhelin ja tabletti", "Android asentuu APK:na. iOS on allekirjoittamaton ipa, jonka allekirjoitat omalla Apple ID:llä."),
+    },
+    "sv": {
+        "desktop": ("Skrivbord", "Tjänsten, gränssnittet och kommandoraden i samma paket."),
+        "mobile": ("Telefon och surfplatta", "Android installeras som en APK. iOS är en osignerad ipa som du signerar med ditt eget Apple-ID."),
+    },
+    "fr": {
+        "desktop": ("Ordinateur", "Le service, l’interface et la ligne de commande dans un même paquet."),
+        "mobile": ("Téléphone et tablette", "Android s’installe en APK. iOS est un ipa non signé que vous signez avec votre identifiant Apple."),
+    },
+}
+
+
+def downloads_table(depth: int, lang: str = "en", grouped: bool = False) -> str:
     sums = OUT / "downloads" / "SHA256SUMS"
     manifest = OUT / "downloads" / "manifest.json"
     remote = None if sums.exists() else remote_download_set()
@@ -524,6 +544,10 @@ def downloads_table(depth: int) -> str:
             size = remote["sizes"].get(name, 0)
         else:
             size = (OUT / "downloads" / name).stat().st_size if (OUT / "downloads" / name).exists() else 0
+        # The source archive stays on the release. The site does not offer it;
+        # the repository is the place to get the source.
+        if name.endswith("-source.tar.gz"):
+            continue
         files.append((name, digest, size))
     version = notes.get("_version", "")
     pre = "../" * depth
@@ -533,8 +557,8 @@ def downloads_table(depth: int) -> str:
             return ""
         return f"{n / 1048576:.1f} MB" if n >= 1048576 else f"{n // 1024} KB"
 
-    cards = []
-    for title, icon, primary, alts, status in PLATFORMS:
+    cards_by_group: dict[str, list[str]] = {g: [] for g in DOWNLOAD_GROUPS}
+    for title, icon, group, primary, alts, status in PLATFORMS:
         candidates = [(n, d, sz) for n, d, sz in files if primary and primary(n)]
         # The Mac-built app before the interim lite apps.
         candidates.sort(key=lambda t: (t[0].endswith("-android-debug.apk"), t[0].endswith("-lite.zip")))
@@ -545,8 +569,6 @@ def downloads_table(depth: int) -> str:
             label = "Download the unsigned .ipa" if title == "iOS" else ("Download Varsto.app (Apple Silicon)" if not name.endswith("-lite.zip") else "Download Varsto.app (interim, Apple Silicon)") if title == "macOS" else "Download the Windows installer" if title == "Windows" else f"Download for {html.escape(title)}"
             button = (f'<a class="dl-primary" href="{pre}downloads/{html.escape(name)}">{label}</a>'
                       f'<p class="dl-meta">{html.escape(name)}<br>{human(size)} · <span class="sum" title="{digest}">SHA-256 {digest[:12]}…</span></p>')
-        elif title == "Source":
-            button = f'<a class="dl-primary" href="{pre}downloads/">Source</a>'
         else:
             button = f'<a class="dl-primary dl-disabled" href="{pre}docs/">Not available yet</a>'
             if title == "iOS":  # a release without an .ipa (the live set before this one is published)
@@ -557,13 +579,37 @@ def downloads_table(depth: int) -> str:
             if hit:
                 alt_links.append(f'<li><a href="{pre}downloads/{html.escape(hit[0])}">{html.escape(label)}</a> <span class="dl-meta">{human(hit[2])}</span></li>')
         alt_html = f'<ul class="dl-alt">{"".join(alt_links)}</ul>' if alt_links else ""
-        cards.append(f'<section class="dl-card"><div class="dl-head">{icon_svg}<h3>{html.escape(title)}</h3></div>{button}{alt_html}<p class="dl-status">{html.escape(status)}</p></section>')
+        card = f'<section class="dl-card"><div class="dl-head">{icon_svg}<h3>{html.escape(title)}</h3></div>{button}{alt_html}<p class="dl-status">{html.escape(status)}</p></section>'
+        cards_by_group.setdefault(group, []).append(card)
     rows = "\n".join(
         f'<tr><td><a href="{pre}downloads/{html.escape(n)}">{html.escape(n)}</a></td><td>{html.escape(notes.get(n, {}).get("platform", ""))}</td>'
         f'<td>{human(sz)}</td><td><code class="sum">{d}</code></td></tr>' for n, d, sz in files)
+    flat = [card for group in DOWNLOAD_GROUPS for card in cards_by_group.get(group, [])]
+    for group, group_cards in cards_by_group.items():
+        if group not in DOWNLOAD_GROUPS:
+            flat.extend(group_cards)
+    if grouped:
+        copy = GROUP_COPY.get(lang) or GROUP_COPY["en"]
+        sections = []
+        for group in DOWNLOAD_GROUPS:
+            group_cards = cards_by_group.get(group) or []
+            if not group_cards:
+                continue
+            heading, blurb = copy[group]
+            gid = f"dl-{group}"
+            sections.append(
+                f'<section class="dl-group dl-group-{group}" aria-labelledby="{gid}">'
+                f'<h2 id="{gid}">{html.escape(heading)}</h2>'
+                f'<p class="dl-group-lead">{html.escape(blurb)}</p>'
+                f'<div class="dl-grid">{"".join(group_cards)}</div>'
+                f'</section>'
+            )
+        cards_html = f'<div class="dl-groups">{"".join(sections)}</div>' if sections else f'<div class="dl-grid">{"".join(flat)}</div>'
+    else:
+        cards_html = f'<div class="dl-grid">{"".join(flat)}</div>'
     return (
         f'<p class="dl-release">Release <strong>{html.escape(version)}</strong> · <a href="{pre}downloads/SHA256SUMS">SHA256SUMS</a> · <a href="{pre}downloads/manifest.json">manifest.json</a></p>'
-        f'<div class="dl-grid">{"".join(cards)}</div>'
+        f'{cards_html}'
         f'<details class="dl-all"><summary>All files and checksums</summary><table class="downloads"><thead><tr><th>File</th><th>Platform</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>{rows}</tbody></table></details>'
         + verify_section(pre, version)
     )
@@ -756,7 +802,9 @@ def daily_blocks(lang: str, depth: int) -> dict[str, str]:
 
 def fill(body: str, depth: int, lang: str = "en") -> str:
     """The placeholders every page body may use."""
-    body = body.replace("{{DOWNLOADS}}", downloads_table(depth)).replace("{{POSTS}}", posts_list(depth))
+    # GROUPED is a longer token than DOWNLOADS, so it has to go first.
+    body = body.replace("{{DOWNLOADS_GROUPED}}", downloads_table(depth, lang, grouped=True))
+    body = body.replace("{{DOWNLOADS}}", downloads_table(depth, lang)).replace("{{POSTS}}", posts_list(depth))
     if "{{DAILY_" in body:
         for key, value in daily_blocks(lang, depth).items():
             body = body.replace("{{DAILY_" + key + "}}", value)
@@ -945,7 +993,10 @@ def build_sitemap() -> None:
     pages = []
     for f in sorted(OUT.rglob("*.html")):
         rel = f.relative_to(OUT).as_posix()
-        if rel == "404.html" or rel.startswith("downloads/"):
+        # The English download page is downloads/index.html. Other files under
+        # downloads/ are the binaries, not pages. The translated pages live at
+        # fi/downloads/ and are not under this prefix, so they were already listed.
+        if rel == "404.html" or (rel.startswith("downloads/") and rel != "downloads/index.html"):
             continue
         text = f.read_text(errors="ignore")
         if 'http-equiv="refresh"' in text or re.search(r'<meta name="robots" content="[^"]*noindex', text):

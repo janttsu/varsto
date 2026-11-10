@@ -24,7 +24,7 @@
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/features/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/features/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../assets/css/site.css?v=35b89a42ea">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -139,7 +139,7 @@
 
     <section class="feature" id="organizations">
       <h2>Organizations: administrators, approvals and a signed log, for business use</h2>
-      <picture><img src="../assets/img/screenshots/desktop-organization-light.png?v=15b7b2b466" alt="The Organization page: people and their devices, a form that approves a device, what members may do, administrators and the signed log." width="1280" height="860" loading="lazy"></picture>
+      <picture class="theme-light"><img src="../assets/img/screenshots/desktop-organization-light.png?v=15b7b2b466" alt="The Organization page: people and their devices, a form that approves a device, what members may do, administrators and the signed log." width="1280" height="860" loading="lazy"></picture><picture class="theme-dark"><img src="../assets/img/screenshots/desktop-organization-dark.png?v=ac0392c559" alt="The same Organization page in dark mode." width="1280" height="860"></picture>
       <div>
         <p><strong>Use case.</strong> A small firm keeps its project folders in its own bucket. The office manager is the administrator: a new employee installs Varsto, sends a request code, and the manager compares six words with them on the phone and approves the laptop. When someone leaves, one action removes them and every device of theirs, and the remaining devices get new keys.</p>
         <p>A vault has devices, not people, and every full device is equal. An organization adds the layer a company needs: administrators who approve devices for named people, remove a person with every device of theirs in one step (the vault gets new keys that only the remaining devices receive; with a wipe order the removed devices delete their keys and folder contents), set what members may do on their own (share outside the vault, add storages, set policies, add devices), and keep a log of it that is signed by their devices and chained, so nobody can change it afterwards unnoticed. A device joins with a request code and a six-word fingerprint the administrator compares with the person; the approval token, sealed to that device's key, carries the vault key and the storage settings. A device that joined with the vault key alone is ignored by the others until an administrator adds it. The root key that appoints administrators is 24 words on paper, never on a device.</p>

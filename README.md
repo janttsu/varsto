@@ -9,7 +9,7 @@
 
 Source: <https://github.com/janttsu/varsto> (issues and pull requests welcome). Website: <https://varsto.net>.
 
-Varsto is an end-to-end encrypted file sync, sharing and backup app that **uses your own devices and storage services of your choice**. You bring the storage; the app does the rest.
+Varsto is an end-to-end encrypted file sync, sharing and backup app that **uses your own devices and storage services of your choice**. You bring the storage; the app does the rest. How it differs from [Syncthing](https://varsto.net/compare/syncthing/) and [Resilio Sync](https://varsto.net/compare/resilio-sync/).
 
 ## Goals
 
