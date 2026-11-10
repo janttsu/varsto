@@ -98,8 +98,8 @@
         <tr><th scope="row">537 MB loggliknande text</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
         <tr><th scope="row">816 MB, hälften kopior</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
         <tr><th scope="row">Två läsare samtidigt (Amsterdam, Warszawa)</th><td class="win">Amsterdam 70 s, Warszawa 118 s; skrivaren sände 3 685 MB</td><td class="win">Amsterdam 76 s, Warszawa 118 s; skrivaren sände 3 636 MB</td></tr>
-        <tr><th scope="row">11 MiB ändrade inuti 1,13 GiB</th><td class="win">12 s · 26 MB, en körning</td><td>15 s · 12 MB, 8 nov.</td></tr>
-        <tr><th scope="row">En katalog på 1,13 GiB bytte namn</th><td class="win">10 s · 0 MB fildata</td><td>67 s · 1 269 MB, 8 nov.</td></tr>
+        <tr><th scope="row">11 MiB ändrade inuti 1,13 GiB</th><td class="win">12 s · 26 MB, en körning</td><td>15 s · 12 MB</td></tr>
+        <tr><th scope="row">En katalog på 1,13 GiB bytte namn</th><td class="win">10 s · 0 MB fildata</td><td>67 s · 1 269 MB</td></tr>
         <tr><th scope="row">100 Mbit/s, 40 ms, 1 % förlust, avbrott 0,3 s var 4:e sekund (de små filerna)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
@@ -179,7 +179,7 @@
       <p class="pace-why">Den långsammare läsaren blev klar på ungefär 118 s med båda verktygen. Amsterdam var snabbare än Warszawa för båda. Varje skrivare sände ungefär 3,6 GB. Två läsare hämtade samma stora filer samtidigt, och byte rörde sig också mellan läsarna, så skrivarens summa är mer än en kopia av filerna.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Spela" data-pace data-scene="edit" data-resilio="15 s · 12 MB, 8 nov." data-varsto="12 s · 26 MB, en körning">
+    <figure class="pace" data-play="Spela" data-pace data-scene="edit" data-resilio="15 s · 12 MB" data-varsto="12 s · 26 MB, en körning">
       <h3>En liten ändring</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -190,7 +190,7 @@
       <p class="pace-why">Resilio Syncs siffra är från den 8 november, medan fallet körs om. Då blev det klart på 15 s och flyttade 12 MB: det skickar den ändrade biten och slutar. Varstos enda räknade körning den 10 november flyttade 26 MB på 12 s. Varsto överför också bara de ändrade blocken, men skrivaren synkroniserar varje mapp den har och läsaren räknar om kontrollsummor för block den redan har. Det kan kosta mer än själva överföringen. Den andra Varsto-körningen flyttade inget och räknades inte.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Spela" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB, 8 nov." data-varsto="10 s · 0 MB fildata">
+    <figure class="pace" data-play="Spela" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB" data-varsto="10 s · 0 MB fildata">
       <h3>En katalog bytte namn</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -245,6 +245,6 @@
 </footer>
 <script src="../../../assets/js/field.js?v=cd646cd0a5" defer></script>
 <script src="../../../assets/js/motion.js?v=a547492b3b" defer></script>
-<script src="../../../assets/js/pace.js?v=53a50aaf6a" defer></script>
+<script src="../../../assets/js/pace.js?v=2341c054a9" defer></script>
 </body>
 </html>

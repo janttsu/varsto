@@ -98,8 +98,8 @@
         <tr><th scope="row">537 MB of log-like text</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
         <tr><th scope="row">816 MB, half of it copies</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
         <tr><th scope="row">Two readers at once (Amsterdam, Warsaw)</th><td class="win">Amsterdam 70 s, Warsaw 118 s; writer sent 3 685 MB</td><td class="win">Amsterdam 76 s, Warsaw 118 s; writer sent 3 636 MB</td></tr>
-        <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td class="win">12 s · 26 MB, one run</td><td>15 s · 12 MB, 8 Nov</td></tr>
-        <tr><th scope="row">A 1.13 GiB directory renamed</th><td class="win">10 s · 0 MB of file data</td><td>67 s · 1 269 MB, 8 Nov</td></tr>
+        <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td class="win">12 s · 26 MB, one run</td><td>15 s · 12 MB</td></tr>
+        <tr><th scope="row">A 1.13 GiB directory renamed</th><td class="win">10 s · 0 MB of file data</td><td>67 s · 1 269 MB</td></tr>
         <tr><th scope="row">100 Mbit/s, 40 ms, 1% loss, cut 0.3 s every 4 s (the small files)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
@@ -179,7 +179,7 @@
       <p class="pace-why">The slower reader finished in about 118 s with both tools. Amsterdam was quicker than Warsaw for both. Each writer sent about 3.6 GB. Two readers pulled the same large files at once, and bytes also moved between the readers, so the writer's total is more than one copy of the files.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="edit" data-resilio="15 s · 12 MB, 8 Nov" data-varsto="12 s · 26 MB, one run">
+    <figure class="pace" data-play="Play" data-pace data-scene="edit" data-resilio="15 s · 12 MB" data-varsto="12 s · 26 MB, one run">
       <h3>A small change</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -190,7 +190,7 @@
       <p class="pace-why">Resilio Sync's figure is from 8 November, while this case is being run again. Then it finished in 15 s and moved 12 MB: it sends the changed piece and stops. Varsto's one counted run on 10 November moved 26 MB in 12 s. Varsto also transfers only the changed blocks, but the writer syncs every folder it holds and the reader re-hashes blocks it already has, which can cost more than the transfer. The other Varsto run moved nothing and was not counted.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB, 8 Nov" data-varsto="10 s · 0 MB of file data">
+    <figure class="pace" data-play="Play" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB" data-varsto="10 s · 0 MB of file data">
       <h3>A directory renamed</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -245,6 +245,6 @@
 </footer>
 <script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
 <script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
-<script src="../../assets/js/pace.js?v=53a50aaf6a" defer></script>
+<script src="../../assets/js/pace.js?v=2341c054a9" defer></script>
 </body>
 </html>

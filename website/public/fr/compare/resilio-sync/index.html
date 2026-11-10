@@ -98,8 +98,8 @@
         <tr><th scope="row">537 Mo de texte de type journal</th><td class="win">17 s · 169 Mo</td><td>47 s · 563 Mo</td></tr>
         <tr><th scope="row">816 Mo, dont la moitié de copies</th><td class="win">13 s · 419 Mo</td><td>62 s · 856 Mo</td></tr>
         <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td class="win">Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 76 s, Varsovie 118 s ; l’émetteur a envoyé 3 636 Mo</td></tr>
-        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td class="win">12 s · 26 Mo, un essai</td><td>15 s · 12 Mo, 8 nov.</td></tr>
-        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td class="win">10 s · 0 Mo de données</td><td>67 s · 1 269 Mo, 8 nov.</td></tr>
+        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td class="win">12 s · 26 Mo, un essai</td><td>15 s · 12 Mo</td></tr>
+        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td class="win">10 s · 0 Mo de données</td><td>67 s · 1 269 Mo</td></tr>
         <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td>934 s · 328 Mo</td></tr>
       </tbody>
     </table>
@@ -179,7 +179,7 @@
       <p class="pace-why">Le lecteur le plus lent a fini en environ 118 s avec les deux outils. Amsterdam a été plus rapide que Varsovie pour les deux. Chaque émetteur a envoyé environ 3,6 Go. Deux lecteurs ont récupéré les mêmes gros fichiers en même temps, et des octets ont aussi circulé entre les lecteurs, donc le total de l’émetteur dépasse une copie des fichiers.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="edit" data-resilio="15 s · 12 Mo, 8 nov." data-varsto="12 s · 26 Mo, un essai">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="edit" data-resilio="15 s · 12 Mo" data-varsto="12 s · 26 Mo, un essai">
       <h3>Une petite modification</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -190,7 +190,7 @@
       <p class="pace-why">Le chiffre de Resilio Sync date du 8 novembre, pendant que ce cas est relancé. Alors il a fini en 15 s et a déplacé 12 Mo : il envoie le morceau modifié et s’arrête. Le seul essai compté de Varsto le 10 novembre a déplacé 26 Mo en 12 s. Varsto ne transfère aussi que les blocs modifiés, mais l’émetteur synchronise chaque dossier qu’il détient et le lecteur recalcule les empreintes des blocs qu’il a déjà. Cela peut coûter plus que le transfert. L’autre essai de Varsto n’a rien déplacé et n’a pas été compté.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="rename" data-resilio="67 s · 1 269 Mo, 8 nov." data-varsto="10 s · 0 Mo de données">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="rename" data-resilio="67 s · 1 269 Mo" data-varsto="10 s · 0 Mo de données">
       <h3>Un répertoire renommé</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -245,6 +245,6 @@
 </footer>
 <script src="../../../assets/js/field.js?v=cd646cd0a5" defer></script>
 <script src="../../../assets/js/motion.js?v=a547492b3b" defer></script>
-<script src="../../../assets/js/pace.js?v=53a50aaf6a" defer></script>
+<script src="../../../assets/js/pace.js?v=2341c054a9" defer></script>
 </body>
 </html>
