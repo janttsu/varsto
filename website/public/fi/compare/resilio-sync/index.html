@@ -98,15 +98,15 @@
         <tr><th scope="row">537 MB lokimaista tekstiä</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
         <tr><th scope="row">816 MB, josta puolet kopioita</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
         <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td class="win">Amsterdam 70 s, Varsova 118 s; kirjoittaja lähetti 3 685 MB</td><td class="win">Amsterdam 76 s, Varsova 118 s; kirjoittaja lähetti 3 636 MB</td></tr>
-        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>12 s · 26 MB, yksi ajo</td><td>ei valmistunut</td></tr>
-        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td class="win">10 s · 0 MB tiedostodataa</td><td>ei mitattu</td></tr>
+        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td class="win">12 s · 26 MB, yksi ajo</td><td>15 s · 12 MB, 8.11.</td></tr>
+        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td class="win">10 s · 0 MB tiedostodataa</td><td>67 s · 1 269 MB, 8.11.</td></tr>
         <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä merkitsee nopeamman sarakkeen. Tasapelissä vihreä on molemmissa.</p>
     <ul>
       <li><strong>Varsto oli nopeampi</strong> kahdella suurella tiedostolla, lokitekstillä, kopioilla ja yhteydellä, joka katkaistiin tahallaan. Teksti vie noin kolmasosan tavuista, koska lohkot pakataan ennen salausta. Kopiot siirtävät vähemmän, koska lukijan levyllä jo olevat lohkot käytetään uudelleen.</li>
-      <li><strong>Pienet tiedostot olivat tasoissa</strong> 25 sekunnissa, eikä Resilio Sync jumittunut. Pienelle muutokselle ei ole Resilio Syncin aikaa: molemmat sen ajot jättivät lukijan kansion erilaiseksi. Varston yksi laskettu muutos siirsi 26 MB 12 sekunnissa.</li>
+      <li><strong>Pienet tiedostot olivat tasoissa</strong> 25 sekunnissa, eikä Resilio Sync jumittunut. Pienen muutoksen ja uudelleennimeämisen Resilio Sync -luvut ovat 8.11. siksi aikaa, kun tapaus ajetaan uudelleen: muutos 15 s ja 12 MB, uudelleennimeäminen 67 s ja 1 269 MB. Varston 10.11. muutos, yksi laskettu ajo, oli 12 s ja 26 MB.</li>
       <li><strong>Kaksi lukijaa</strong> valmistuivat yhdessä noin kahdessa minuutissa kummallakin ohjelmalla. Varsova oli hitaampi. Kirjoittajat lähettivät noin 3,6 GB kumpikin.</li>
       <li><strong>Muisti:</strong> Varston kirjoittajapalvelu käytti enimmillään 360–800 MiB, Resilio Sync 70–250 MiB.</li>
     </ul>
@@ -179,7 +179,7 @@
       <p class="pace-why">Hitaampi lukija valmistui noin 118 sekunnissa kummallakin ohjelmalla. Amsterdam oli Varsovaa nopeampi molemmilla. Kumpikin kirjoittaja lähetti noin 3,6 GB. Kaksi lukijaa nouti samat suuret tiedostot yhtä aikaa, ja tavuja liikkui myös lukijoiden välillä, joten kirjoittajan kokonaismäärä on enemmän kuin yksi kopio tiedostoista.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Toista" data-pace data-scene="edit" data-resilio="ei valmistunut" data-varsto="12 s · 26 MB, yksi ajo">
+    <figure class="pace" data-play="Toista" data-pace data-scene="edit" data-resilio="15 s · 12 MB, 8.11." data-varsto="12 s · 26 MB, yksi ajo">
       <h3>Pieni muutos</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -187,10 +187,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Resilio Syncin muutos ei valmistunut: molemmilla kierroksilla lukijan kansio erosi tiedostoissa dir/app.log ja dir/big.bin, joten aikaa ei ole. Varston yksi onnistunut ajo siirsi 26 MB 12 sekunnissa ja täsmäsi sitten. Varsto siirtää muuttuneet lohkot, mutta kirjoittaja synkronoi myös jokaisen kansion ja lukija laskee uudelleen tiivisteet lohkoille, jotka sillä jo on. Siksi pieni muutos voi kestää kauemmin kuin tavut antavat olettaa. Toinen Varston ajo ei siirtänyt mitään, eikä sitä laskettu.</p>
+      <p class="pace-why">Resilio Syncin luku on 8.11., kun tapausta ajetaan uudelleen. Silloin se valmistui 15 sekunnissa ja siirsi 12 MB: se lähettää muuttuneen palan ja lopettaa. Varston yksi laskettu ajo 10.11. siirsi 26 MB 12 sekunnissa. Varsto siirtää myös vain muuttuneet lohkot, mutta kirjoittaja synkronoi jokaisen kansion ja lukija laskee uudelleen tiivisteet lohkoille, jotka sillä jo on. Se voi maksaa enemmän kuin itse siirto. Toinen Varston ajo ei siirtänyt mitään, eikä sitä laskettu.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Toista" data-pace data-scene="rename" data-resilio="ei mitattu" data-varsto="10 s · 0 MB tiedostodataa">
+    <figure class="pace" data-play="Toista" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB, 8.11." data-varsto="10 s · 0 MB tiedostodataa">
       <h3>Hakemisto nimetty uudelleen</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -198,7 +198,7 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varston uudelleennimeäminen valmistui 10 sekunnissa, eikä lukija noutanut tiedostodataa: uusi nimi koskee lohkoja, jotka sillä jo on, ja Varsto siirtää paikalliset tiedostot. Resilio Syncin uudelleennimeämistä ei mitattu, koska sen muutos ei valmistunut. Marraskuun 8. päivänä, ennen tätä uusintaa, Resilio Sync lähetti uudelleennimetyn hakemiston uudelleen.</p>
+      <p class="pace-why">Resilio Syncin luku on 8.11., kun tapausta ajetaan uudelleen. Silloin se käsitteli uuden hakemiston uutena datana ja lähetti sen uudelleen, 67 s ja 1 269 MB. Varston uudelleennimeäminen 10.11. valmistui 10 sekunnissa, eikä lukija noutanut tiedostodataa: uusi nimi koskee lohkoja, jotka sillä jo on, ja Varsto siirtää paikalliset tiedostot.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
     <figure class="pace" data-play="Toista" data-pace data-scene="slow" data-resilio="934 s · 328 MB" data-varsto="432 s · 336 MB">

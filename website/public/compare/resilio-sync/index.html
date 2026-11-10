@@ -98,15 +98,15 @@
         <tr><th scope="row">537 MB of log-like text</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
         <tr><th scope="row">816 MB, half of it copies</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
         <tr><th scope="row">Two readers at once (Amsterdam, Warsaw)</th><td class="win">Amsterdam 70 s, Warsaw 118 s; writer sent 3 685 MB</td><td class="win">Amsterdam 76 s, Warsaw 118 s; writer sent 3 636 MB</td></tr>
-        <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td>12 s · 26 MB, one run</td><td>did not finish</td></tr>
-        <tr><th scope="row">A 1.13 GiB directory renamed</th><td class="win">10 s · 0 MB of file data</td><td>not measured</td></tr>
+        <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td class="win">12 s · 26 MB, one run</td><td>15 s · 12 MB, 8 Nov</td></tr>
+        <tr><th scope="row">A 1.13 GiB directory renamed</th><td class="win">10 s · 0 MB of file data</td><td>67 s · 1 269 MB, 8 Nov</td></tr>
         <tr><th scope="row">100 Mbit/s, 40 ms, 1% loss, cut 0.3 s every 4 s (the small files)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green marks the faster column. A tie is green in both.</p>
     <ul>
       <li><strong>Varsto was faster</strong> on the two large files, on log text, on copies, and on the link that was cut on purpose. Text costs about a third of the bytes, because blocks are compressed before they are encrypted. Copies move less data, because blocks already on the reader's disk are reused.</li>
-      <li><strong>Small files were a tie</strong> at 25 s, and neither Resilio Sync run stalled. A small change has no Resilio Sync time: both of its runs left the reader's folder different. Varsto's one counted change moved 26 MB in 12 s.</li>
+      <li><strong>Small files were a tie</strong> at 25 s, and neither Resilio Sync run stalled. For the small change and the rename, Resilio Sync's figures are from 8 November while that case is run again: 15 s and 12 MB for the change, 67 s and 1 269 MB for the rename. Varsto's 10 November change, one counted run, was 12 s and 26 MB.</li>
       <li><strong>Two readers</strong> finished together in about two minutes with both tools. Warsaw was the slow one. The writers sent about 3.6 GB each.</li>
       <li><strong>Memory:</strong> Varsto's writer service peaked at 360–800 MiB against Resilio Sync's 70–250 MiB.</li>
     </ul>
@@ -179,7 +179,7 @@
       <p class="pace-why">The slower reader finished in about 118 s with both tools. Amsterdam was quicker than Warsaw for both. Each writer sent about 3.6 GB. Two readers pulled the same large files at once, and bytes also moved between the readers, so the writer's total is more than one copy of the files.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="edit" data-resilio="did not finish" data-varsto="12 s · 26 MB, one run">
+    <figure class="pace" data-play="Play" data-pace data-scene="edit" data-resilio="15 s · 12 MB, 8 Nov" data-varsto="12 s · 26 MB, one run">
       <h3>A small change</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -187,10 +187,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Resilio Sync did not finish the change: on both runs the reader's folder differed in dir/app.log and dir/big.bin, so there is no time. Varsto's one successful run moved 26 MB in 12 s and then matched. Varsto transfers the changed blocks, but the writer also syncs every folder it holds and the reader re-hashes blocks it already has, which is why a small edit can take longer than the bytes suggest. The other Varsto run moved nothing and was not counted.</p>
+      <p class="pace-why">Resilio Sync's figure is from 8 November, while this case is being run again. Then it finished in 15 s and moved 12 MB: it sends the changed piece and stops. Varsto's one counted run on 10 November moved 26 MB in 12 s. Varsto also transfers only the changed blocks, but the writer syncs every folder it holds and the reader re-hashes blocks it already has, which can cost more than the transfer. The other Varsto run moved nothing and was not counted.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="rename" data-resilio="not measured" data-varsto="10 s · 0 MB of file data">
+    <figure class="pace" data-play="Play" data-pace data-scene="rename" data-resilio="67 s · 1 269 MB, 8 Nov" data-varsto="10 s · 0 MB of file data">
       <h3>A directory renamed</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -198,7 +198,7 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto's rename finished in 10 s and the reader pulled no file data: a rename is a new name for blocks it already stored, and Varsto moves the local files. Resilio Sync's rename was not measured, because its change did not complete. On 8 November, before this repeat, Resilio Sync sent the renamed directory again.</p>
+      <p class="pace-why">Resilio Sync's figure is from 8 November, while this case is being run again. Then it treated the new directory as new data and sent it again, 67 s and 1 269 MB. Varsto's rename on 10 November finished in 10 s and the reader pulled no file data: a rename is a new name for blocks already stored, and Varsto moves the local files.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
     <figure class="pace" data-play="Play" data-pace data-scene="slow" data-resilio="934 s · 328 MB" data-varsto="432 s · 336 MB">

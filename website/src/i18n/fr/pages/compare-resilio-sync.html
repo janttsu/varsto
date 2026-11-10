@@ -47,15 +47,15 @@ description: Vous cherchez une alternative à Resilio Sync avec chiffrement de b
         <tr><th scope="row">537 Mo de texte de type journal</th><td class="win">17 s · 169 Mo</td><td>47 s · 563 Mo</td></tr>
         <tr><th scope="row">816 Mo, dont la moitié de copies</th><td class="win">13 s · 419 Mo</td><td>62 s · 856 Mo</td></tr>
         <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td class="win">Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 76 s, Varsovie 118 s ; l’émetteur a envoyé 3 636 Mo</td></tr>
-        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>12 s · 26 Mo, un essai</td><td>pas terminé</td></tr>
-        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td class="win">10 s · 0 Mo de données</td><td>non mesuré</td></tr>
+        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td class="win">12 s · 26 Mo, un essai</td><td>15 s · 12 Mo, 8 nov.</td></tr>
+        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td class="win">10 s · 0 Mo de données</td><td>67 s · 1 269 Mo, 8 nov.</td></tr>
         <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td>934 s · 328 Mo</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque la colonne la plus rapide. En cas d'égalité, les deux sont vertes.</p>
     <ul>
       <li><strong>Varsto a été plus rapide</strong> sur les deux gros fichiers, sur le texte de journal, sur les copies et sur la liaison coupée exprès. Le texte coûte environ un tiers des octets, car les blocs sont compressés avant d’être chiffrés. Les copies déplacent moins de données, car les blocs déjà présents sur le disque du lecteur sont réutilisés.</li>
-      <li><strong>Les petits fichiers sont à égalité</strong> à 25 s, et Resilio Sync ne s’est pas bloqué. Une petite modification n’a pas de temps pour Resilio Sync : ses deux essais ont laissé le dossier du lecteur différent. La seule modification comptée de Varsto a déplacé 26 Mo en 12 s.</li>
+      <li><strong>Les petits fichiers sont à égalité</strong> à 25 s, et Resilio Sync ne s’est pas bloqué. Pour la petite modification et le renommage, les chiffres de Resilio Sync datent du 8 novembre pendant que le cas est relancé : 15 s et 12 Mo pour la modification, 67 s et 1 269 Mo pour le renommage. La modification de Varsto du 10 novembre, un essai compté, était de 12 s et 26 Mo.</li>
       <li><strong>Deux lecteurs</strong> ont fini ensemble en environ deux minutes avec les deux outils. Varsovie était le plus lent. Les émetteurs ont envoyé environ 3,6 Go chacun.</li>
       <li><strong>Mémoire :</strong> le service émetteur de Varsto a culminé à 360–800 Mio contre 70–250 Mio pour Resilio Sync.</li>
     </ul>
@@ -128,7 +128,7 @@ description: Vous cherchez une alternative à Resilio Sync avec chiffrement de b
       <p class="pace-why">Le lecteur le plus lent a fini en environ 118 s avec les deux outils. Amsterdam a été plus rapide que Varsovie pour les deux. Chaque émetteur a envoyé environ 3,6 Go. Deux lecteurs ont récupéré les mêmes gros fichiers en même temps, et des octets ont aussi circulé entre les lecteurs, donc le total de l’émetteur dépasse une copie des fichiers.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="edit" data-resilio="pas terminé" data-varsto="12 s · 26 Mo, un essai">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="edit" data-resilio="15 s · 12 Mo, 8 nov." data-varsto="12 s · 26 Mo, un essai">
       <h3>Une petite modification</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -136,10 +136,10 @@ description: Vous cherchez une alternative à Resilio Sync avec chiffrement de b
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
       </div>
     </figure>
-      <p class="pace-why">La modification de Resilio Sync ne s’est pas terminée : dans les deux essais, le dossier du lecteur différait pour dir/app.log et dir/big.bin, donc il n’y a pas de temps. Le seul essai réussi de Varsto a déplacé 26 Mo en 12 s, puis a concordé. Varsto transfère les blocs modifiés, mais l’émetteur synchronise aussi chaque dossier qu’il détient et le lecteur recalcule les empreintes des blocs qu’il a déjà. C’est pourquoi une petite modification peut durer plus longtemps que les octets ne le suggèrent. L’autre essai de Varsto n’a rien déplacé et n’a pas été compté.</p>
+      <p class="pace-why">Le chiffre de Resilio Sync date du 8 novembre, pendant que ce cas est relancé. Alors il a fini en 15 s et a déplacé 12 Mo : il envoie le morceau modifié et s’arrête. Le seul essai compté de Varsto le 10 novembre a déplacé 26 Mo en 12 s. Varsto ne transfère aussi que les blocs modifiés, mais l’émetteur synchronise chaque dossier qu’il détient et le lecteur recalcule les empreintes des blocs qu’il a déjà. Cela peut coûter plus que le transfert. L’autre essai de Varsto n’a rien déplacé et n’a pas été compté.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="rename" data-resilio="non mesuré" data-varsto="10 s · 0 Mo de données">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="rename" data-resilio="67 s · 1 269 Mo, 8 nov." data-varsto="10 s · 0 Mo de données">
       <h3>Un répertoire renommé</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -147,7 +147,7 @@ description: Vous cherchez une alternative à Resilio Sync avec chiffrement de b
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
       </div>
     </figure>
-      <p class="pace-why">Le renommage de Varsto s’est terminé en 10 s et le lecteur n’a récupéré aucune donnée de fichier : un renommage est un nouveau nom pour des blocs déjà stockés, et Varsto déplace les fichiers locaux. Le renommage de Resilio Sync n’a pas été mesuré, parce que sa modification ne s’est pas terminée. Le 8 novembre, avant cette répétition, Resilio Sync a renvoyé le répertoire renommé.</p>
+      <p class="pace-why">Le chiffre de Resilio Sync date du 8 novembre, pendant que ce cas est relancé. Alors il a traité le nouveau répertoire comme des données nouvelles et l’a renvoyé, 67 s et 1 269 Mo. Le renommage de Varsto le 10 novembre s’est terminé en 10 s et le lecteur n’a récupéré aucune donnée de fichier : un renommage est un nouveau nom pour des blocs déjà stockés, et Varsto déplace les fichiers locaux.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
     <figure class="pace" data-play="Lecture" data-pace data-scene="slow" data-resilio="934 s · 328 Mo" data-varsto="432 s · 336 Mo">
