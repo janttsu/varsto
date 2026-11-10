@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: PolyForm-Shield-1.0.0
 # Helper that runs on every benchmark machine (see p2p-bench.py). The varsto
-# binary is /bench/varsto; every device directory lives under /bench.
+# binary is $BENCH_ROOT/varsto; every device directory lives under that root.
+# BENCH_ROOT defaults to /bench. A home server without root sets another directory.
 #
 #   bench-node.sh setup                       packages, directories
 #   bench-node.sh svc-start <home>            background service, under /usr/bin/time -v
@@ -20,7 +21,8 @@
 #   bench-node.sh netem-off
 #   bench-node.sh rsl-install <url>           Resilio Sync into /bench/rslsync; prints its version
 set -euo pipefail
-B=/bench/varsto
+ROOT=${BENCH_ROOT:-/bench}
+B=$ROOT/varsto
 export VARSTO_PASSPHRASE=${VARSTO_PASSPHRASE:-bench-passphrase}
 
 svc_field() { python3 -c "import json,sys;print(json.load(open(sys.argv[1]+'/service.json'))[sys.argv[2]])" "$1" "$2"; }
@@ -39,10 +41,12 @@ api() {
 
 case "$1" in
   setup)
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq >/dev/null
-    apt-get install -y -qq iperf3 rclone time python3 openssl iptables >/dev/null
-    mkdir -p /bench
+    mkdir -p "$ROOT"
+    if [ "$(id -u)" -eq 0 ]; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq >/dev/null
+      apt-get install -y -qq iperf3 rclone time python3 openssl iptables >/dev/null
+    fi
     ;;
   iface)
     ip route get 1.1.1.1 | grep -oP 'dev \K\S+'
@@ -78,16 +82,22 @@ case "$1" in
     tc qdisc show dev "$dev"
     ;;
   rsl-install)
-    mkdir -p /bench/rsl-dl && cd /bench/rsl-dl
-    curl -fsSL -o rsl.tgz "$2" && tar xzf rsl.tgz && install -m 755 rslsync /bench/rslsync
+    mkdir -p "$ROOT/rsl-dl" && cd "$ROOT/rsl-dl"
+    curl -fsSL -o rsl.tgz "$2" && tar xzf rsl.tgz && install -m 755 rslsync "$ROOT/rslsync"
     sha256sum rsl.tgz | cut -c1-64
-    /bench/rslsync --help 2>&1 | grep -m1 'Resilio Sync' || true
+    "$ROOT/rslsync" --help 2>&1 | grep -m1 'Resilio Sync' || true
     ;;
   svc-start)
     home=$2
     rm -f "$home/service.json"
-    nohup /usr/bin/time -v -o "$home.time" "$B" --home "$home" service run --port 0 --interval 3600 \
-      > "$home.log" 2>&1 < /dev/null &
+    if [ -x /usr/bin/time ]; then
+      nohup /usr/bin/time -v -o "$home.time" "$B" --home "$home" service run --port 0 --interval 3600 \
+        > "$home.log" 2>&1 < /dev/null &
+    else
+      : > "$home.time"
+      nohup "$B" --home "$home" service run --port 0 --interval 3600 \
+        > "$home.log" 2>&1 < /dev/null &
+    fi
     for _ in $(seq 1 120); do
       if [ -f "$home/service.json" ] && api "$home" GET /api/service >/dev/null 2>&1; then exit 0; fi
       sleep 0.5
@@ -103,6 +113,14 @@ case "$1" in
       kill "$pid" 2>/dev/null || true
       sleep 1
     fi
+    # service.json is removed on the way out. A start that failed after the
+    # process was up used to leave it sleeping, and the next run then bound
+    # a second listener. This home only.
+    pkill -f -- "${B} --home ${home} " || true
+    # A sync in progress ignores SIGTERM until it finishes, and the next
+    # start then shares the vault with it. Kill it before that start.
+    sleep 0.3
+    pkill -9 -f -- "${B} --home ${home} " || true
     cat "$home.time" 2>/dev/null || true
     ;;
   wait-sync)

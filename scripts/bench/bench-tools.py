@@ -155,6 +155,16 @@ def wait(a):
                     st = have[p]
                     if b and (st.st_ino, st.st_mtime_ns) == b:
                         ok = False
+                        break
+            # The writer may already have finished, so the new bytes can be
+            # in place before this loop's first look. A matching hash counts.
+            if not ok and base and polls % 4 == 1 and temp_files(root) == 0:
+                checks += 1
+                v, detail = compare(root, want)
+                if v == "identical":
+                    print(json.dumps({"done": now, "started": t_start, "bytes99": t99, "polls": polls, "hash_checks": checks,
+                                      "verified": v, "checked_at": time.time()}))
+                    return
             if ok and temp_files(root) == 0:
                 checks += 1
                 v, detail = compare(root, want)

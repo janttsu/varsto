@@ -27,7 +27,20 @@ every block came from a peer.
                                     V R / R V; starts no run after --stop-after-min from `up`
     resilio-vs-varsto.py report [--detail]  medians per scenario, tool and step as Markdown
                                     (--detail: every run too)
-    resilio-vs-varsto.py down       p2p-bench down (machines, volumes, IPs, bucket)
+    resilio-vs-varsto.py down       p2p-bench down (machines, volumes, IPs, bucket).
+                                    An --orca host is not a Scaleway machine: down
+                                    only stops the bench processes there and removes /bench.
+
+With --orca local the machine running this script is an extra reader, after
+the Scaleway scenarios. It is never created or deleted with the VMs. Its runs
+are separate scenarios (home-files, home-large, home-text, home-dup,
+home-change), so they are not averaged into the Paris–Amsterdam medians.
+netem is not applied on it, its page cache is not dropped, and it does not
+need root. The bench directory is VARSTO_LOCAL_BENCH, or varsto-bench
+in the repository when that variable is unset. Its Varsto port is 18793 and
+its Resilio port is 18794, so a Varsto already listening on 17893 is left
+alone. `--orca HOST` is an SSH alias for some other machine
+and is not used for the home server.
 
 Per run and reader the record (kind "rvv" in <work>/results.jsonl) has the
 wall seconds to a verified folder (every sha256 equal to the writer's
@@ -35,21 +48,17 @@ manifest), the bytes on the reader's public interface (/proc/net/dev) and,
 from an iptables chain, the bytes exchanged with the writer and the other
 reader; CPU seconds and peak RSS of the daemon on the reader and the writer.
 
-Timing, both tools alike: from the moment the reader is told about the
-folder (Varsto: `POST /api/folder/attach` on its running service, which
-starts the pull; Resilio Sync: starting `rslsync`) to the first poll
-(every 0.25 s) that sees every file at its size with no temporary file,
-confirmed by the sha256 check after it. Varsto's pull report (blocks from
-peers, reused local blocks) is read from its service log. Resilio Sync: from starting
-`rslsync` on the reader to the first poll (every 0.25 s) that sees every
-file at its size with no temporary file, confirmed by the sha256 check
-after it. Changes after the initial sync (set `mut`): Varsto's time is
-from the change to the end of the writer's push (`POST /api/sync`, the
-writer's own watcher may have started it) plus, after the bucket's new
-blocks are deleted (not timed), from the reader's service start to the
-complete folder; Resilio's is from the change on the writer to the
-reader's verified folder, its own detection included. No service is
-paused: a paused service stops serving peers in this build.
+Timing, both tools alike. The writer is already finished and, for Varsto,
+the bucket has no file blocks, before the clock starts. The clock is only
+the reader's transfer: Varsto from `POST /api/folder/attach` or
+`POST /api/sync` on its running service, Resilio Sync from starting
+`rslsync`, until the first poll (every 0.25 s) that sees every file at its
+size with no temporary file, confirmed by the sha256 check after it.
+Publishing a change and deleting the bucket's blocks happen before that
+clock and are recorded separately (`fair` in the result). On a change,
+Resilio's readers are stopped while the writer indexes, then started when
+the writer has gone idle, so they do not finish before the clock. The hold
+on a Varsto reader is cleared after the folder matches.
 """
 import argparse
 import concurrent.futures as cf
@@ -57,7 +66,9 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shlex
+import shutil
 import statistics
 import subprocess
 import threading
@@ -72,6 +83,22 @@ log = pb.log
 
 VPORT = pb.PORT
 RPORT = 17894
+# The home server may already be listening on the bench ports. A local reader
+# uses these instead, and never signals the process that holds 17893.
+LOCAL_VPORT = 18793
+LOCAL_RPORT = 18794
+LOCAL_ROOT = os.environ.get("VARSTO_LOCAL_BENCH") or str(pathlib.Path(__file__).resolve().parents[2] / "varsto-bench")
+
+
+def rewrite_bench(cmd, root):
+    """Map the VM path /bench onto this machine.
+
+    A plain replace of the text '/bench' also matches the '/bench' inside
+    '/bench/bench-tools.py', and the path gets doubled. Only the directory
+    prefix is rewritten.
+    """
+    root = root.rstrip("/")
+    return re.sub(r"/bench(?=/|\s|$)", root, cmd)
 # The last 2.x release. The current stable (3.1.2 (1076), stable/linux/x64/0/...) did not
 # sync a folder from a configuration file at all in 2026-11 (it logs "Stop
 # synchronization" and never dials the folder's known hosts, with or without
@@ -94,6 +121,15 @@ PLAN = [
     ("netem", "files", ["ams"], "delay 40ms loss 1% rate 100mbit"),
 ]
 
+# The home desktop, alone, after the VM plan. Not shaped, not cache-dropped.
+HOME_PLAN = [
+    ("home-files", "files", ["orca"], None),
+    ("home-large", "pair", ["orca"], None),
+    ("home-text", "text", ["orca"], None),
+    ("home-dup", "dup", ["orca"], None),
+    ("home-change", "mut", ["orca"], None),
+]
+
 
 class RvV(pb.Bench):
     # ----- helpers --------------------------------------------------------------
@@ -109,6 +145,93 @@ class RvV(pb.Bench):
 
     def others(self, node):
         return [self.ip(n) for n in pb.ZONES if n != node]
+
+    def external(self, node):
+        return (self.state.get("external") or {}).get(node)
+
+    def listen_port(self, node, tool):
+        ext = self.external(node)
+        if ext and ext.get("local"):
+            return LOCAL_VPORT if tool == "varsto" else LOCAL_RPORT
+        return VPORT if tool == "varsto" else RPORT
+
+    def ssh(self, node, cmd, check=True, capture=True):
+        ext = self.external(node)
+        if not ext:
+            return super().ssh(node, cmd, check=check, capture=capture)
+        if ext.get("local"):
+            cmd = rewrite_bench(cmd, ext["root"])
+            env = os.environ.copy()
+            env["HOME"] = os.environ.get("HOME", "/")
+            env["BENCH_ROOT"] = ext["root"]
+            p = subprocess.run(["bash", "-c", cmd], capture_output=capture, text=True, env=env)
+        else:
+            remote = "sudo -n bash -c " + shlex.quote(cmd) if ext.get("sudo") else cmd
+            p = subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", ext["ssh_host"], remote],
+                capture_output=capture, text=True)
+        if check and p.returncode != 0:
+            what = "(command with credentials)" if "VARSTO_S3_SECRET" in cmd or "RCLONE_" in cmd else cmd
+            raise SystemExit(f"{node}: command failed ({p.returncode}): {what[:80]}\n{(p.stderr or '')[-2000:]}")
+        return p.stdout if capture else ""
+
+    def ip(self, node):
+        ext = self.external(node)
+        if ext:
+            if not ext.get("ip"):
+                raise SystemExit(f"{node} has no public address yet (setup learns it)")
+            return ext["ip"]
+        return super().ip(node)
+
+    def push_file(self, node, local, remote):
+        ext = self.external(node)
+        if not ext:
+            sb.scp(str(local), f"root@{self.ip(node)}:{remote}")
+            return
+        if ext.get("local"):
+            dest = pathlib.Path(rewrite_bench(remote, ext["root"]))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(local, dest)
+            dest.chmod(0o755)
+            return
+        tmp = "/tmp/" + pathlib.Path(str(local)).name + ".varsto-bench"
+        subprocess.run(
+            ["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", str(local), f"{ext['ssh_host']}:{tmp}"],
+            check=True)
+        self.ssh(node, f"mv {shlex.quote(tmp)} {shlex.quote(remote)}")
+
+    def probe_orca(self, host):
+        """Fail before any Scaleway machine exists when the extra reader is not usable."""
+        if host in ("local", "self", "orca"):
+            st = os.statvfs(LOCAL_ROOT if os.path.isdir(LOCAL_ROOT) else os.path.dirname(LOCAL_ROOT) or ".")
+            free = st.f_bavail * st.f_frsize
+            if free < 20 * 1024 ** 3:
+                raise SystemExit(f"{LOCAL_ROOT} has {free} bytes free; the home reader needs 20 GiB.")
+            self.state.setdefault("external", {})["orca"] = {
+                "local": True, "root": LOCAL_ROOT, "sudo": False, "ssh_host": "local",
+                "cache": "not dropped", "acct": "none",
+                "note": "this host; the user's Varsto on port 17893 is not the bench",
+            }
+            self.save()
+            log(f"orca: this machine, bench dir {LOCAL_ROOT}, {free / 1024 ** 3:.0f} GiB free")
+            return
+        p = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=12", host,
+             "echo OK; sudo -n true && echo SUDO; df -B1 --output=avail / | tail -1"],
+            capture_output=True, text=True)
+        out = p.stdout or ""
+        if p.returncode != 0 or "OK" not in out:
+            raise SystemExit(
+                f"orca ({host}) is not reachable ({(p.stderr or '').strip()[-300:]}). "
+                "Open the reverse tunnel before creating the machines.")
+        if "SUDO" not in out:
+            raise SystemExit(f"orca ({host}) answered, but passwordless sudo is required for /bench.")
+        free = int(out.strip().splitlines()[-1])
+        if free < 20 * 1024 ** 3:
+            raise SystemExit(f"orca has {free} bytes free on /, and the bench needs 20 GiB under /bench.")
+        self.state.setdefault("external", {})["orca"] = {"ssh_host": host, "sudo": True}
+        self.save()
+        log(f"orca: {host} answers, sudo works, {free / 1024 ** 3:.0f} GiB free")
 
     def net(self, node):
         return self.jtools(node, "net", self.iface(node), *self.others(node))
@@ -128,20 +251,51 @@ class RvV(pb.Bench):
             subprocess.run(sb.ssh_base("root", self.ip("par")) + [f"cat {path}"], stdout=f, check=True)
         for r in ("ams", "waw"):
             sb.scp(str(local), f"root@{self.ip(r)}:{path}")
+        for r in self.state.get("external") or {}:
+            self.push_file(r, local, path)
+
+    def bench_nodes(self):
+        return list(pb.ZONES) + list(self.state.get("external") or {})
+
+    def ensure_packs_gone(self):
+        """Delete file blocks from the bucket and refuse to time a run while any remain.
+
+        Metadata stays, so the devices can still find each other. The returned
+        dict is the state at the moment the reader's clock is allowed to start.
+        """
+        t0 = time.time()
+        self.purge_chunks()
+        env, _, _ = self.s3_env()
+        left = subprocess.run(["rclone", "lsf", "-R", f"scw:{self.state['bucket']}/packs"],
+                              env=env, capture_output=True, text=True).stdout.split()
+        if left:
+            raise SystemExit(f"s3 still has {len(left)} packs after purge")
+        return {"clock": "reader", "s3_packs_at_clock": 0, "prep_purge_s": round(time.time() - t0, 2),
+                "writer_ready_before_clock": True}
+
+    def stop_resilio_readers(self, readers):
+        """Stop bench readers only. The writer on Paris keeps running."""
+        for r in readers:
+            self.ssh(r, "if [ -f /bench/rsl-r.pid ]; then kill $(cat /bench/rsl-r.pid) 2>/dev/null || true; fi; "
+                        "pkill -f '/bench/rslsync --nodaemon --config /bench/rsl-r/config.json' || true; "
+                        "rm -f /bench/rsl-r.pid", check=False)
 
     def stop_resilio(self):
         for n in pb.ZONES:
             self.ssh(n, "pkill -x rslsync; for i in $(seq 1 40); do pgrep -x rslsync >/dev/null || exit 0; sleep 0.25; done; pkill -9 -x rslsync; true", check=False)
+        # Only the bench copy. A pkill by name would also hit a Resilio the user runs.
+        for n in self.state.get("external") or {}:
+            self.ssh(n, "pkill -f /bench/rslsync || true", check=False)
 
     def stop_varsto(self):
         self.node_sh("par", "svc-stop", "/bench/w", check=False)
-        for r in ("ams", "waw"):
+        for r in ["ams", "waw", *list(self.state.get("external") or {})]:
             self.ssh(r, "for h in /bench/h-*; do [ -f $h/service.json ] && bash /bench/bench-node.sh svc-stop $h >/dev/null; done; true", check=False)
 
     def clocks(self):
         """Clock offset of every machine against this one (midpoint of an SSH round trip)."""
         out = {}
-        for n in pb.ZONES:
+        for n in self.bench_nodes():
             a = time.time()
             t = float(self.ssh(n, "date +%s.%N"))
             b = time.time()
@@ -161,7 +315,24 @@ class RvV(pb.Bench):
     def up(self):
         self.state.setdefault("t_up", time.time())
         self.save()
+        # The desktop is checked before any VM, so a closed tunnel does not leave machines running.
+        if self.args.orca:
+            self.probe_orca(self.args.orca)
         super().up()
+
+    def down(self):
+        for n in list(self.state.get("external") or {}):
+            log(f"{n}: stopping the bench and removing /bench; the machine stays")
+            ext = self.external(n) or {}
+            if ext.get("local"):
+                # This host also runs the user's own Varsto. Never pkill by name.
+                # The bracket keeps pgrep from matching this shell and dying before rm.
+                self.ssh(n, "for p in $(pgrep -f '/benc[h]/varsto --home' || true); do kill \"$p\" 2>/dev/null || true; done; "
+                            "for p in $(pgrep -f '/benc[h]/rslsync' || true); do kill \"$p\" 2>/dev/null || true; done; "
+                            "sleep 1; rm -rf /bench", check=False)
+            else:
+                self.ssh(n, "pkill -x rslsync || true; pkill -f '/bench/varsto --home' || true; rm -rf /bench", check=False)
+        super().down()
 
     def setup(self):
         super().setup()
@@ -171,6 +342,9 @@ class RvV(pb.Bench):
             ip = self.ip(n)
             sb.scp(str(HERE / "bench-tools.py"), f"root@{ip}:/bench/bench-tools.py")
             self.state["iface"][n] = self.node_sh(n, "iface").strip()
+            # Resilio watches one file at a time. The default table is too
+            # small for the 10 000-file set, so later folders never see a change.
+            self.ssh(n, "sysctl -w fs.inotify.max_user_watches=1048576 fs.inotify.max_user_instances=1024 >/dev/null || true")
             self.node_sh(n, "acct", *self.others(n))
             out = self.node_sh(n, "rsl-install", RSL_URL).strip().splitlines()
             self.state["rsl_sha256"] = out[0]
@@ -181,10 +355,49 @@ class RvV(pb.Bench):
             nm[r] = self.ssh(r, "modprobe sch_netem && modprobe ifb && modprobe act_mirred && modprobe cls_u32 && echo ok "
                                 "|| (apt-get install -y -qq linux-modules-extra-$(uname -r) >/dev/null 2>&1; "
                                 "modprobe sch_netem && modprobe ifb && modprobe act_mirred && modprobe cls_u32 && echo ok-extra)", check=False).strip()
+        self.setup_orca()
         self.save()
         self.record({"kind": "tools", "versions": self.versions(), "resilio_tarball_sha256": self.state["rsl_sha256"],
-                     "resilio_url": RSL_URL, "iface": self.state["iface"], "netem": nm})
+                     "resilio_url": RSL_URL, "iface": self.state["iface"], "netem": nm,
+                     "external": self.state.get("external") or {}})
         log(f"versions {self.versions()}; netem {nm}")
+
+    def setup_orca(self):
+        ext = self.external("orca")
+        if not ext:
+            return
+        self.ssh("orca", "mkdir -p /bench && chmod 755 /bench")
+        for name in ("bench-node.sh", "bench-tools.py", "gen-data.py"):
+            self.push_file("orca", HERE / name, f"/bench/{name}")
+        self.push_file("orca", self.args.binary, "/bench/varsto")
+        self.ssh("orca", "chmod 755 /bench/varsto /bench/bench-node.sh /bench/bench-tools.py /bench/gen-data.py")
+        self.node_sh("orca", "setup")
+        self.state["iface"]["orca"] = self.node_sh("orca", "iface").strip()
+        ip = self.ssh("orca", "curl -4 -fsS --max-time 15 https://ifconfig.me || curl -4 -fsS --max-time 15 https://api.ipify.org").strip()
+        if not ip or " " in ip or len(ip) > 64:
+            raise SystemExit(f"orca: could not read a public address ({ip!r})")
+        ext["ip"] = ip
+        # The writer's byte counters should see the desktop too. Orca is not in the zone list.
+        for n in pb.ZONES:
+            self.node_sh(n, "acct", *self.others(n), ip)
+        try:
+            self.node_sh("orca", "acct", *self.others("orca"))
+        except SystemExit:
+            log("orca: iptables accounting skipped (no root); byte counts are the whole interface")
+        out = self.node_sh("orca", "rsl-install", RSL_URL).strip().splitlines()
+        if out and out[0] != self.state.get("rsl_sha256"):
+            raise SystemExit(f"orca: Resilio tarball sha256 {out[0]} != {self.state.get('rsl_sha256')}")
+        par = self.ip("par")
+        reach = self.ssh(
+            "orca",
+            f"timeout 5 bash -c 'echo >/dev/tcp/{par}/22' && echo ssh-ok || echo ssh-closed",
+            check=False).strip()
+        info = self.ssh("orca", "nproc; free -g | sed -n 2p; lscpu | grep 'Model name'; uname -r").strip()
+        ext["reach_par_ssh"] = reach
+        ext["info"] = info
+        ext["cache"] = "not dropped"
+        self.save()
+        log(f"orca: public {ip}; {reach}; {info.replace(chr(10), ' | ')}")
 
     # ----- data -------------------------------------------------------------------
 
@@ -218,12 +431,13 @@ class RvV(pb.Bench):
         after about 65 s with some 1 150 files "not available on any
         readable storage", twice (see docs/testing/resilio-vs-varsto-2026-11.md)."""
         ip = self.ip(node)
+        port = self.listen_port(node, "varsto")
         if os.environ.get("BENCH_VARSTO_DEFAULTS"):  # p2p-bench.py's settings, to compare
-            for c in (f"p2p enable --port {VPORT}", "verify set --off"):
+            for c in (f"p2p enable --port {port}", "verify set --off"):
                 self.ssh(node, f"{PP} /bench/varsto --home {home} {c} >/dev/null")
             return
         for c in ("config auto-update off", "scrub set --off", "forward set --off", "mailbox set --off",
-                  (f"p2p enable --port {VPORT} --public {ip}:{VPORT} --no-stun" if os.environ.get("BENCH_VARSTO_NO_STUN") else f"p2p enable --port {VPORT}"),
+                  (f"p2p enable --port {port} --public {ip}:{port} --no-stun" if os.environ.get("BENCH_VARSTO_NO_STUN") else f"p2p enable --port {port}"),
                   "p2p rendezvous off",
                   "p2p port-mapping off", "verify set --off"):
             self.ssh(node, f"{PP} /bench/varsto --home {home} {c} >/dev/null")
@@ -245,6 +459,10 @@ class RvV(pb.Bench):
     def rsl_config(self, name, storage, folders, port=RPORT):
         return {"device_name": name, "listening_port": port, "storage_path": storage, "pid_file": f"{storage}/rslsync.pid",
                 "use_upnp": False, "download_limit": 0, "upload_limit": 0,
+                # The default rescan is ten minutes. A change that inotify misses
+                # (the watch table fills up on the 10 000-file set) would then
+                # never reach the reader before this bench gives up.
+                "folder_rescan_interval": 5,
                 "shared_folders": [dict({"use_relay_server": False, "use_tracker": False, "search_lan": False,
                                          "use_sync_trash": False, "overwrite_changes": False, "selective_sync": False}, **f)
                                    for f in folders]}
@@ -259,7 +477,7 @@ class RvV(pb.Bench):
 
     def rsl_secrets(self):
         sec = self.state.setdefault("rsl", {})
-        for s in SETS:
+        for s in self.args.sets.split(","):
             if s in sec:
                 continue
             rw = self.ssh("par", "/bench/rslsync --generate-secret").strip()
@@ -272,7 +490,8 @@ class RvV(pb.Bench):
     def rsl_writer_start(self):
         """Start Resilio Sync on the writer with every data set's folder; returns its pid once idle."""
         sec = self.rsl_secrets()
-        folders = [{"secret": sec[s]["rw"], "dir": f"/bench/rdata/{s}", "known_hosts": []} for s in SETS]
+        sets = [s for s in self.args.sets.split(",") if s]
+        folders = [{"secret": sec[s]["rw"], "dir": f"/bench/rdata/{s}", "known_hosts": []} for s in sets]
         self.ssh("par", "mkdir -p /bench/rsl-w/storage")
         self.put_config("par", self.rsl_config("writer-paris", "/bench/rsl-w/storage", folders), "/bench/rsl-w/config.json")
         pid = self.ssh("par", "cd /bench/rsl-w && (setsid nohup /bench/rslsync --nodaemon --config /bench/rsl-w/config.json "
@@ -310,12 +529,18 @@ class RvV(pb.Bench):
         finally:
             if netem:
                 for r in readers:
+                    if self.external(r):
+                        continue
                     self.node_sh(r, "netem-off", check=False)
 
     def netem_on(self, readers, netem):
-        if netem:
-            for r in readers:
-                log(f"{r}: " + self.node_sh(r, "netem-on", *netem.split()).strip())
+        if not netem:
+            return
+        for r in readers:
+            if self.external(r):
+                log(f"{r}: netem skipped (home machine)")
+                continue
+            log(f"{r}: " + self.node_sh(r, "netem-on", *netem.split()).strip())
 
     def reader_entry(self, wall, n0, n1, cpu, hwm_kib, verified, extra=None):
         peers = {ip: {"rx": n1["peers"][ip]["rx"] - n0["peers"][ip]["rx"], "tx": n1["peers"][ip]["tx"] - n0["peers"][ip]["tx"]}
@@ -383,21 +608,7 @@ class RvV(pb.Bench):
                                      + shlex.quote(json.dumps({"name_or_id": s, "path": datas[r], "plain": True})) for r in readers})
             if s in MUTABLE:
                 for what in ("change", "rename"):
-                    # The readers are stopped while the writer publishes the
-                    # change and the bucket's new blocks are deleted (an
-                    # unpaused reader would pull at once, from the bucket).
-                    # They start again for the timed pull: their first sync.
-                    for r in readers:
-                        self.node_sh(r, "svc-stop", homes[r], check=False)
-                    out = self.mutate("varsto", s, rep, what)
-                    t = json.loads(self.node_sh("par", "timed-sync", "/bench/w", s))
-                    push = t["report"][0].get("push") if isinstance(t["report"], list) and t["report"] else t["report"]
-                    writer_wall = t["t1"] - out["t0"]  # the writer's clock: from the change to the push's end
-                    self.purge_chunks()
-                    hints = ["--changed", *out["changed"]] if what == "change" else ["--gone", out["from"]]
-                    self.varsto_step(what, scenario, s, readers, rep, netem, homes, datas, tag, writer_wall=writer_wall,
-                                     run={r: f"bash /bench/bench-node.sh svc-start {homes[r]}" for r in readers}, env=se, hints=hints,
-                                     extra={"writer_push": push, "writer_sync_wall_s": round(t["wall"], 2), "mutation": out})
+                    self.varsto_mutation(what, scenario, s, readers, rep, netem, homes, datas, tag)
         finally:
             for r in readers:
                 self.node_sh(r, "svc-stop", homes[r], check=False)
@@ -430,8 +641,96 @@ class RvV(pb.Bench):
         total["pulls"] = n
         return total
 
+    def varsto_mutation(self, step, scenario, s, readers, rep, netem, homes, datas, tag):
+        """Publish the change and empty the bucket, then time only the reader.
+
+        The reader is held so it cannot pull while the writer publishes and
+        the bench deletes every block from the bucket. The clock starts at
+        the sync request, once the bucket has no file blocks.
+        """
+        man = self.man("varsto", s)
+        old = [json.loads(l)["path"] for l in self.ssh("par", f"cat {man}").splitlines()]
+        src = "dir" if any(p.startswith("dir/") for p in old) else "dir-moved"
+        hints = ["--changed", f"{src}/big.bin", f"{src}/app.log"] if step == "change" else ["--gone", src]
+        tree = f"/bench/data/{s}"
+        self.tools("par", "mutate", tree, man, man + ".new", str(rep), step, "--dry")
+        self.spread(man + ".new")
+        for r in readers:
+            self.ssh(r, f"cp {man} {man}.old && mv {man}.new {man}")
+            self.node_sh(r, "api", homes[r], "POST", "/api/service/hold", json.dumps({"hold": True}))
+        seen = {}
+        wb = wn0 = None
+
+        def observe(r):
+            args = ["observe", datas[r], man, "--iface", self.iface(r), "--ips", *self.others(r),
+                    "--service-json", f"{homes[r]}/service.json", "--timeout", "900", *hints]
+            return r, json.loads(self.ssh(r, "python3 /bench/bench-tools.py " + " ".join(shlex.quote(a) for a in args)))
+
+        try:
+            out = self.mutate("varsto", s, rep, step)
+            t = json.loads(self.node_sh("par", "timed-sync", "/bench/w", s))
+            push = t["report"][0].get("push") if isinstance(t["report"], list) and t["report"] else t["report"]
+            fair = self.ensure_packs_gone()
+            fair["prep_writer_sync_s"] = round(t["wall"], 2)
+            wb, wn0 = self.writer_proc(), self.net("par")
+            with cf.ThreadPoolExecutor(len(readers) + 1) as ex:
+                futs = [ex.submit(observe, r) for r in readers]
+                time.sleep(0.5)  # one look at the old files, then the clock's sync request
+                def pull(r):
+                    self.node_sh(r, "api", homes[r], "POST", "/api/sync", json.dumps({"folder": s}))
+                with cf.ThreadPoolExecutor(len(readers)) as ex2:
+                    list(ex2.map(pull, readers))
+                for f in futs:
+                    r, o = f.result()
+                    seen[r] = o
+        finally:
+            for r in readers:
+                self.node_sh(r, "api", homes[r], "POST", "/api/service/hold", json.dumps({"hold": False}), check=False)
+        wa, wn1 = self.writer_proc(), self.net("par")
+        per = {}
+        for r in readers:
+            o = seen[r]
+            w = o["wait"]
+            pull = self.pull_report(r, homes[r], s, o["t0"])
+            traffic = json.loads(self.node_sh(r, "api", homes[r], "GET", "/api/p2p/traffic", check=False) or "{}")
+            routes = self.ssh(r, f"grep -oE ': (tcp|quic|relay) [^ ]+ answered' {homes[r]}/logs/varsto-service.log | sort | uniq -c", check=False).strip()
+            p0, p1 = o["proc_before"], o["proc_after"] or o["proc_before"]
+            wall = (w["done"] - o["t0"]) if w.get("done") else None
+            per[r] = self.reader_entry(
+                wall, o["net_before"], o["net_after"],
+                p1["user_s"] + p1["sys_s"] - p0["user_s"] - p0["sys_s"], p1["hwm_kib"], w["verified"],
+                {"reader_wall_s": None if wall is None else round(wall, 2),
+                 "prep_writer_sync_s": round(t["wall"], 2),
+                 "files": pull.get("files_updated", 0), "chunks": pull.get("chunks_downloaded", 0),
+                 "chunks_from_peers": pull.get("chunks_from_peers", 0), "bytes_pulled": pull.get("bytes_downloaded", 0),
+                 "chunks_reused_local": pull.get("chunks_reused_local", 0), "bytes_reused_local": pull.get("bytes_reused_local", 0),
+                 "unavailable": pull.get("files_unavailable", 0),
+                 "pull_report": pull, "wait": w,
+                 "p2p_in_bytes": sum(p.get("rx_total", 0) for p in traffic.get("peers", [])),
+                 "paths": [(p.get("name"), p.get("path"), str(p.get("addr"))) for p in traffic.get("peers", [])],
+                 "routes": routes})
+        wr = {"cpu_s": round(wa["user_s"] + wa["sys_s"] - wb["user_s"] - wb["sys_s"], 2) if wa and wb else None,
+              "peak_rss_mib": round(wa["hwm_kib"] / 1024, 1) if wa else None,
+              "sent_to": {ip: wn1["peers"][ip]["tx"] - wn0["peers"][ip]["tx"] for ip in wn0["peers"]},
+              "iface_tx": wn1["iface_tx"] - wn0["iface_tx"]}
+        for r in readers:
+            e = per[r]
+            no_report = not e["pull_report"].get("pulls")
+            if step == "change" and ((e.get("bytes_pulled") or 0) < 1_000_000 or (e.get("wall_s") or 0) < 0.5):
+                raise SystemExit(f"varsto {r} change: not a transfer ({e.get('wall_s')} s, {e.get('bytes_pulled')} bytes)")
+            if e["chunks_from_peers"] != e["chunks"] or e["verified"] != "identical" or e["unavailable"] or e["wall_s"] is None or no_report:
+                raise SystemExit(f"varsto {r} {step}: not every block from a peer, folder different, or no pull report: "
+                                 + json.dumps({k: e.get(k) for k in ('chunks', 'chunks_from_peers', 'verified', 'unavailable', 'wall_s', 'pull_report')}))
+        self.record_rvv({"tool": "varsto", "scenario": scenario, "set": s, "step": step, "readers": readers, "rep": rep,
+                         "netem": netem, "per_reader": per, "writer": wr,
+                         "extra": {"writer_push": push, "prep_writer_sync_s": round(t["wall"], 2),
+                                   "mutation": out, "fair": fair}})
+
     def varsto_step(self, step, scenario, s, readers, rep, netem, homes, datas, tag, writer_wall, run, env="", hints=(), extra=None):
+        fair = None
         if step == "initial":
+            # The writer already published this folder. Empty the bucket before the clock.
+            fair = self.ensure_packs_gone()
             self.dropcaches()
         wb, wn0 = self.writer_proc(), self.net("par")
 
@@ -468,8 +767,11 @@ class RvV(pb.Bench):
              "peak_rss_mib": round(wa["hwm_kib"] / 1024, 1) if wa else None,
              "sent_to": {ip: wn1["peers"][ip]["tx"] - wn0["peers"][ip]["tx"] for ip in wn0["peers"]},
              "iface_tx": wn1["iface_tx"] - wn0["iface_tx"]}
+        extra = dict(extra or {})
+        if fair:
+            extra["fair"] = fair
         self.record_rvv({"tool": "varsto", "scenario": scenario, "set": s, "step": step, "readers": readers, "rep": rep,
-                         "netem": netem, "per_reader": per, "writer": w, "extra": extra or {}})
+                         "netem": netem, "per_reader": per, "writer": w, "extra": extra})
         for r in readers:
             e = per[r]
             no_report = not e["pull_report"].get("pulls") or (step == "initial" and e["chunks"] == 0)
@@ -496,9 +798,10 @@ class RvV(pb.Bench):
         datas = {r: f"/bench/{tag}" for r in readers}
         for r in readers:
             self.ssh(r, f"rm -rf /bench/r-* /bench/rr-* /bench/rsl-r && mkdir -p /bench/rsl-r/storage {datas[r]}")
-            hosts = [f"{self.ip('par')}:{RPORT}"] + [f"{self.ip(o)}:{RPORT}" for o in readers if o != r]
+            hosts = [f"{self.ip('par')}:{RPORT}"] + [f"{self.ip(o)}:{self.listen_port(o, 'resilio')}" for o in readers if o != r]
             self.put_config(r, self.rsl_config(f"{r}-{tag}", "/bench/rsl-r/storage",
-                                               [{"secret": sec[s]["ro"], "dir": datas[r], "known_hosts": hosts}]),
+                                               [{"secret": sec[s]["ro"], "dir": datas[r], "known_hosts": hosts}],
+                                               port=self.listen_port(r, "resilio")),
                             "/bench/rsl-r/config.json")
         wpid, idle = self.rsl_writer_start()
         log(f"resilio writer idle: {idle.get('idle_after_s')} s")
@@ -530,9 +833,24 @@ class RvV(pb.Bench):
                 wait_args = ["--changed", f"{src}/big.bin", f"{src}/app.log"]
             else:
                 wait_args = ["--gone", src]
-        wb, wn0 = self.jtools("par", "proc", wpid), self.net("par")
         result = {}
         mut_out = {}
+        fair = {"clock": "reader", "s3": "not used", "writer_ready_before_clock": True}
+        if step == "initial":
+            wb, wn0 = self.jtools("par", "proc", wpid), self.net("par")
+        else:
+            # The writer applies the change and goes idle before the clock.
+            # Readers are stopped for that, so they cannot finish early.
+            self.stop_resilio_readers(readers)
+            mut_out = self.mutate("resilio", s, rep, step)
+            # One rescan interval, then wait until the writer has finished
+            # hashing. The clock starts only after that, with the readers down.
+            time.sleep(8)
+            idle = self.jtools("par", "idle", wpid, "--quiet", "5", "--max", "900")
+            log(f"resilio writer idle before the clock: {idle.get('idle_after_s')} s")
+            fair["prep_writer_idle_s"] = idle.get("idle_after_s")
+            start = "exec /bench/rslsync --nodaemon --config /bench/rsl-r/config.json"
+            wb, wn0 = self.jtools("par", "proc", wpid), self.net("par")
 
         def observe(r):
             args = ["observe", datas[r], man, "--iface", self.iface(r), "--ips", *self.others(r),
@@ -541,30 +859,25 @@ class RvV(pb.Bench):
                 args += ["--start", start, "--log", "/bench/rsl-r.log"]
             return r, self.jtools(r, *args)
 
-        if step == "initial":
-            with cf.ThreadPoolExecutor(len(readers)) as ex:
-                result = dict(ex.map(observe, readers))
-        else:
-            # The expected manifest has to be on the readers before their waiters
-            # start, and the waiters have to start before the change: write it
-            # first (mutate computes it before changing anything), then start them.
-            mut_out = self.mutate_resilio_then_wait(s, rep, step, readers, observe, result)
+        with cf.ThreadPoolExecutor(len(readers)) as ex:
+            result = dict(ex.map(observe, readers))
         wa, wn1 = self.jtools("par", "proc", wpid), self.net("par")
         per = {}
         for r in readers:
             o = result[r]
             w = o["wait"]
-            t0 = o["t0"] if step == "initial" else mut_out["t0"]
+            t0 = o["t0"]
             wall = (w["done"] - t0) if w.get("done") else None
-            p0 = o["proc_before"] if step != "initial" else {"user_s": 0, "sys_s": 0}
-            p1 = o["proc_after"] or o["proc_before"]
+            p0 = o["proc_before"] or {"user_s": 0, "sys_s": 0}
+            p1 = o["proc_after"] or p0
             per[r] = self.reader_entry(wall, o["net_before"], o["net_after"], p1["user_s"] + p1["sys_s"] - p0["user_s"] - p0["sys_s"],
                                        p1["hwm_kib"], w["verified"], {"wait": w})
         wr = {"cpu_s": round(wa["user_s"] + wa["sys_s"] - wb["user_s"] - wb["sys_s"], 2), "peak_rss_mib": round(wa["hwm_kib"] / 1024, 1),
               "sent_to": {ip: wn1["peers"][ip]["tx"] - wn0["peers"][ip]["tx"] for ip in wn0["peers"]},
               "iface_tx": wn1["iface_tx"] - wn0["iface_tx"]}
         self.record_rvv({"tool": "resilio", "scenario": scenario, "set": s, "step": step, "readers": readers, "rep": rep,
-                         "netem": netem, "per_reader": per, "writer": wr, "extra": dict(extra or {}, mutation=mut_out, clocks=self.clocks())})
+                         "netem": netem, "per_reader": per, "writer": wr,
+                         "extra": dict(extra or {}, mutation=mut_out, fair=fair, clocks=self.clocks())})
         for r in readers:
             if per[r]["verified"] != "identical" or per[r]["wall_s"] is None:
                 raise SystemExit(f"resilio {r} {step}: folder incomplete or different: {per[r]['wait']}")
@@ -594,7 +907,10 @@ class RvV(pb.Bench):
         only = set(self.args.only.split(",")) if self.args.only else None
         t_up = self.state.get("t_up", time.time())
         failures = []
-        for scenario, s, readers, netem in PLAN:
+        scenarios = list(PLAN)
+        if self.external("orca"):
+            scenarios += HOME_PLAN
+        for scenario, s, readers, netem in scenarios:
             if only and scenario not in only:
                 continue
             for rep in range(self.args.rep_start, self.args.rep_start + self.args.reps):
@@ -623,6 +939,14 @@ class RvV(pb.Bench):
             print(report_runs(self.work / "results.jsonl"))
 
 
+def reader_label(readers, r):
+    """Amsterdam alone keeps a blank reader cell, as the earlier tables did.
+    A second cloud reader, or the home desktop, is named."""
+    if len(readers) > 1 or r != "ams":
+        return r
+    return ""
+
+
 def unavailable_count(v):
     """`files_unavailable` of a pull report: a list, or in the service log a
     summary `{"len": n, "first": [...]}` when the list is long."""
@@ -642,7 +966,7 @@ def report_markdown(path):
             continue
         t0_mut = (e.get("extra") or {}).get("mutation", {}).get("t0") if e["tool"] == "resilio" else None
         for r, pr in e["per_reader"].items():
-            key = (e["scenario"], e["step"], r if len(e["readers"]) > 1 else "", e["tool"])
+            key = (e["scenario"], e["step"], reader_label(e["readers"], r), e["tool"])
             if pr.get("verified") != "identical" or pr.get("wall_s") is None:
                 bad[key] = bad.get(key, 0) + 1
                 continue
@@ -686,7 +1010,7 @@ def collect(path):
         if e.get("kind") != "rvv":
             continue
         for r, pr in e["per_reader"].items():
-            key = (e["scenario"], e["step"], r if len(e["readers"]) > 1 else "", e["tool"])
+            key = (e["scenario"], e["step"], reader_label(e["readers"], r), e["tool"])
             if pr.get("verified") != "identical" or pr.get("wall_s") is None:
                 bad[key] = bad.get(key, 0) + 1
             else:
@@ -764,6 +1088,8 @@ def main():
     ap.add_argument("--scenario")
     ap.add_argument("--set", choices=SETS)
     ap.add_argument("--readers", default="ams")
+    ap.add_argument("--orca", default=os.environ.get("BENCH_ORCA", ""),
+                    help="local = this machine as an extra reader. Not created or deleted with the VMs.")
     ap.add_argument("--reps", type=int, default=2)
     ap.add_argument("--rep-start", type=int, default=1)
     ap.add_argument("--netem", default=None)
