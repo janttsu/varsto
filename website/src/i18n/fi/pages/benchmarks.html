@@ -323,17 +323,17 @@ description: Varsto mitattuna Pariisin, Amsterdamin ja Varsovan välillä 9. ja 
     <table class="compare-table bench-vs">
       <thead><tr><th>Skenaario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td>25 s · 292 MB</td><td>25 s · 313 MB</td></tr>
+        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td class="win">25 s · 292 MB</td><td class="win">25 s · 313 MB</td></tr>
         <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td class="win">44 s · 2 178 MB</td><td>90 s · 2 226 MB</td></tr>
         <tr><th scope="row">537 MB lokimaista tekstiä</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
         <tr><th scope="row">816 MB, josta puolet kopioita</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
-        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>Amsterdam 70 s, Varsova 118 s; kirjoittaja lähetti 3 685 MB</td><td>Amsterdam 76 s, Varsova 118 s; kirjoittaja lähetti 3 636 MB</td></tr>
+        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td class="win">Amsterdam 70 s, Varsova 118 s; kirjoittaja lähetti 3 685 MB</td><td class="win">Amsterdam 76 s, Varsova 118 s; kirjoittaja lähetti 3 636 MB</td></tr>
         <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>12 s · 26 MB, yksi ajo</td><td>ei valmistunut</td></tr>
         <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td class="win">10 s · 0 MB tiedostodataa</td><td>ei mitattu</td></tr>
         <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä merkitsee rivin, jolla Varsto oli nopeampi.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä merkitsee nopeamman sarakkeen. Tasapelissä vihreä on molemmissa.</p>
     <ul>
       <li><strong>Varsto on nopeampi</strong> kaikissa isojen, pakkautuvien tai duplikaattia sisältävien aineistojen ensimmäisissä synkronoinneissa sekä hitaalla, hävikkisellä yhteydellä. Teksti vie kolmasosan tavuista, koska lohkot pakataan ennen salausta; uudelleennimetty hakemisto ja kopiotiedostot siirtävät lähes nolla dataa, koska lukijan levyllä jo olevat lohkot käytetään uudelleen.</li>
       <li><strong>Resilio Sync on nopeampi</strong> monien pienten tiedostojen kanssa silloin, kun se ei jumitu (se jumittui yhdessä ajossa kahdesta), ja pienen muutoksen välittämisessä: Varsto hakee nyt vain muuttuneet lohkot (22 MB, kun edellinen käännös haki koko 1,1 GiB), mutta kestää yhä kolmesta viiteen kertaa kauemmin, koska kirjoittajan oma kaikkien kansioiden synkka ja lukijan omien lohkojen uudelleentiivistys maksavat enemmän kuin siirto.</li>

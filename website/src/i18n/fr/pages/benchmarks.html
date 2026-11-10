@@ -323,17 +323,17 @@ description: Varsto mesuré entre Paris, Amsterdam et Varsovie les 9 et 10 octob
     <table class="compare-table bench-vs">
       <thead><tr><th>Scénario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td>25 s · 292 Mo</td><td>25 s · 313 Mo</td></tr>
+        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td class="win">25 s · 292 Mo</td><td class="win">25 s · 313 Mo</td></tr>
         <tr><th scope="row">Deux fichiers de 1 Gio</th><td class="win">44 s · 2 178 Mo</td><td>90 s · 2 226 Mo</td></tr>
         <tr><th scope="row">537 Mo de texte de type journal</th><td class="win">17 s · 169 Mo</td><td>47 s · 563 Mo</td></tr>
         <tr><th scope="row">816 Mo, dont la moitié de copies</th><td class="win">13 s · 419 Mo</td><td>62 s · 856 Mo</td></tr>
-        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td>Amsterdam 76 s, Varsovie 118 s ; l’émetteur a envoyé 3 636 Mo</td></tr>
+        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td class="win">Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 76 s, Varsovie 118 s ; l’émetteur a envoyé 3 636 Mo</td></tr>
         <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>12 s · 26 Mo, un essai</td><td>pas terminé</td></tr>
         <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td class="win">10 s · 0 Mo de données</td><td>non mesuré</td></tr>
         <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td>934 s · 328 Mo</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque une ligne où Varsto a été plus rapide.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque la colonne la plus rapide. En cas d'égalité, les deux sont vertes.</p>
     <ul>
       <li><strong>Varsto est plus rapide</strong> dans chaque synchronisation initiale de données volumineuses, compressibles ou dupliquées, et sur la liaison lente avec pertes. Le texte coûte un tiers des octets, car les blocs sont compressés avant d’être chiffrés ; un répertoire renommé et des fichiers en double ne déplacent presque aucune donnée, car les blocs déjà présents sur le disque du lecteur sont réutilisés.</li>
       <li><strong>Resilio Sync est plus rapide</strong> sur beaucoup de petits fichiers quand il ne se bloque pas (il l’a fait dans une exécution sur deux), et pour propager une petite modification : Varsto ne récupère plus que les blocs modifiés (22 Mo au lieu de tout le 1,1 Gio dans la version précédente), mais met encore trois à cinq fois plus de temps, car la synchronisation de tous les dossiers par l’émetteur et le re-hachage des blocs locaux par le lecteur coûtent plus que le transfert.</li>

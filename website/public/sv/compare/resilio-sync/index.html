@@ -93,17 +93,17 @@
     <table class="compare-table bench-vs">
       <thead><tr><th>Scenario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 små filer (313 MB)</th><td>25 s · 292 MB</td><td>25 s · 313 MB</td></tr>
+        <tr><th scope="row">10 000 små filer (313 MB)</th><td class="win">25 s · 292 MB</td><td class="win">25 s · 313 MB</td></tr>
         <tr><th scope="row">Två filer på 1 GiB</th><td class="win">44 s · 2 178 MB</td><td>90 s · 2 226 MB</td></tr>
         <tr><th scope="row">537 MB loggliknande text</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
         <tr><th scope="row">816 MB, hälften kopior</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
-        <tr><th scope="row">Två läsare samtidigt (Amsterdam, Warszawa)</th><td>Amsterdam 70 s, Warszawa 118 s; skrivaren sände 3 685 MB</td><td>Amsterdam 76 s, Warszawa 118 s; skrivaren sände 3 636 MB</td></tr>
+        <tr><th scope="row">Två läsare samtidigt (Amsterdam, Warszawa)</th><td class="win">Amsterdam 70 s, Warszawa 118 s; skrivaren sände 3 685 MB</td><td class="win">Amsterdam 76 s, Warszawa 118 s; skrivaren sände 3 636 MB</td></tr>
         <tr><th scope="row">11 MiB ändrade inuti 1,13 GiB</th><td>12 s · 26 MB, en körning</td><td>blev inte klar</td></tr>
         <tr><th scope="row">En katalog på 1,13 GiB bytte namn</th><td class="win">10 s · 0 MB fildata</td><td>mättes inte</td></tr>
         <tr><th scope="row">100 Mbit/s, 40 ms, 1 % förlust, avbrott 0,3 s var 4:e sekund (de små filerna)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grönt markerar en rad där Varsto var snabbare.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grönt markerar den snabbare kolumnen. Vid lika är båda gröna.</p>
     <ul>
       <li><strong>Varsto var snabbare</strong> på de två stora filerna, på loggtext, på kopior och på länken som klipptes avsiktligt. Text kostar ungefär en tredjedel av bytena, eftersom blocken komprimeras innan de krypteras. Kopior flyttar mindre data, eftersom block som redan finns på läsarens disk återanvänds.</li>
       <li><strong>Små filer var oavgjort</strong> på 25 s, och Resilio Sync fastnade inte. En liten ändring har ingen tid för Resilio Sync: båda körningarna lämnade läsarens mapp olika. Varstos enda räknade ändring flyttade 26 MB på 12 s.</li>
