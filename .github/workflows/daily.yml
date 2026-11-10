@@ -1,10 +1,11 @@
-# The daily channel: when main has moved, build every platform, sign the list
-# of files with the dedicated daily key and publish them as the assets of ONE
+# The daily channel: a manual run builds every platform, signs the list
+# of files with the dedicated daily key and publishes them as the assets of ONE
 # rolling GitHub pre-release with the tag `daily` (recreated on every run; no
-# v* tag is touched). The web server pulls it (ops/site/daily-sync.py, from
-# cron) and checks the signature before it serves anything under /daily/.
-# Nothing on GitHub writes to the server. The stable updater never reads this
-# channel. Setup and rehearsal: ops/site/README.md and RELEASING.md (Daily builds).
+# v* tag is touched). There is no schedule. The web server pulls it
+# (ops/site/daily-sync.py, from cron) and checks the signature before it
+# serves anything under /daily/. Nothing on GitHub writes to the server. The
+# stable updater never reads this channel. Setup and rehearsal:
+# ops/site/README.md and RELEASING.md (Daily builds).
 #
 # Manual run (Actions, Daily builds, Run workflow):
 #   ref      branch, tag or commit to build (default main)
@@ -12,8 +13,6 @@
 name: Daily builds
 
 on:
-  schedule:
-    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       ref:
@@ -129,10 +128,10 @@ jobs:
       SHA: ${{ needs.check.outputs.sha }}
       DATE: ${{ needs.check.outputs.date }}
       VERSION: ${{ needs.check.outputs.version }}
-      PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+      PUBLISH: ${{ inputs.publish }}
     steps:
-      # The workflow's own ref (main for the schedule): the scripts and
-      # daily-key.pub come from there, whatever commit is being built.
+      # The workflow file's ref: the scripts and daily-key.pub come from
+      # there, whatever commit is being built.
       # No git push here; gh uses GH_TOKEN only on the publish step.
       - uses: actions/checkout@v4
         with:
