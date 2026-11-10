@@ -35,8 +35,6 @@ mod drive_mount;
 mod filemanager;
 #[path = "../../varsto-cli/src/import_jobs.rs"]
 mod import_jobs;
-#[path = "../../varsto-cli/src/mcp_keys.rs"]
-mod mcp_keys;
 #[path = "../../varsto-cli/src/notify_api.rs"]
 mod notify_api;
 #[path = "../../varsto-cli/src/readcache.rs"]

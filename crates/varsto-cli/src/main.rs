@@ -29,8 +29,6 @@ mod import;
 mod import_jobs;
 mod import_jobs_cmd;
 mod logcmd;
-mod mcp;
-mod mcp_keys;
 mod notifications;
 mod notify_api;
 mod placing;
@@ -501,7 +499,7 @@ enum Cmd {
         cmd: PolicyCmd,
     },
     /// File analyses: what a file contains, in words and tags, recorded by
-    /// an assistant (MCP) or by hand; synced encrypted to every device.
+    /// hand; synced encrypted to every device.
     Analysis {
         #[command(subcommand)]
         cmd: AnalysisCmd,
@@ -516,17 +514,6 @@ enum Cmd {
         /// Only files with this tag (repeatable).
         #[arg(long = "tag")]
         tags: Vec<String>,
-    },
-    /// MCP server for AI assistants (stdio), with per-folder grants and
-    /// scoped keys. See docs/mcp.md in the repository (https://github.com/janttsu/varsto).
-    Mcp {
-        /// File with the MCP key (from `varsto mcp key create`); its scope
-        /// replaces the grants file. Without it Varsto reads VARSTO_MCP_KEY.
-        /// The key is never taken from the command line.
-        #[arg(long, value_name = "FILE")]
-        key_file: Option<PathBuf>,
-        #[command(subcommand)]
-        cmd: Option<McpCmd>,
     },
     /// Forwarding: carry other devices' blocks to this device's storages
     /// (also for folders kept selective here): show, run now, turn on or off.
@@ -959,80 +946,6 @@ enum PolicyCmd {
     Show,
     /// Evaluate every policy from the ledger. Exit code: 0 ok, 1 at risk, 2 violated, 3 unknown.
     Check,
-}
-
-#[derive(Subcommand)]
-enum McpCmd {
-    /// Serve MCP over stdin/stdout (default). Point your assistant at `varsto --home <dir> mcp`.
-    Serve,
-    /// Let the assistant see a folder (or `all`); --analyse also allows
-    /// recording file analyses, --write also moving, renaming and creating files.
-    Grant {
-        folder: String,
-        #[arg(long)]
-        write: bool,
-        #[arg(long, alias = "analyze", conflicts_with = "write")]
-        analyse: bool,
-    },
-    /// Remove a grant (or `all`).
-    Revoke { folder: String },
-    /// Show current grants.
-    List,
-    /// Scoped keys that let an MCP client use the running service.
-    Key {
-        #[command(subcommand)]
-        cmd: McpKeyCmd,
-    },
-    /// Print a ready-to-paste configuration for an MCP client.
-    Config {
-        /// claude (Claude Desktop and Claude Code), opencode, crush, qwen or generic.
-        #[arg(long, default_value = "generic")]
-        client: String,
-        /// Create a key now and put it in the configuration (else a placeholder).
-        #[arg(long)]
-        create_key: bool,
-        /// Name of the key to create.
-        #[arg(long, requires = "create_key")]
-        key_name: Option<String>,
-        /// Folders of the new key, comma-separated, or all (default: the current grants).
-        #[arg(long, value_delimiter = ',', requires = "create_key")]
-        folders: Vec<String>,
-        #[arg(long, requires = "create_key")]
-        write: bool,
-        #[arg(
-            long,
-            alias = "analyze",
-            requires = "create_key",
-            conflicts_with = "write"
-        )]
-        analyse: bool,
-        #[arg(long, requires = "create_key")]
-        expires_days: Option<i64>,
-    },
-}
-
-#[derive(Subcommand)]
-enum McpKeyCmd {
-    /// Create a key and print it once. Its scope: --folders at the level of
-    /// --write or --analyse (read-only otherwise), or the current grants.
-    Create {
-        #[arg(long)]
-        name: Option<String>,
-        /// Comma-separated folder names, or all.
-        #[arg(long, value_delimiter = ',')]
-        folders: Vec<String>,
-        #[arg(long)]
-        write: bool,
-        #[arg(long, alias = "analyze", conflicts_with = "write")]
-        analyse: bool,
-        /// The key stops working after this many days.
-        #[arg(long)]
-        expires_days: Option<i64>,
-    },
-    /// List keys (never the keys themselves).
-    List,
-    /// Revoke a key by name or id; clients using it are refused at once.
-    Revoke { name_or_id: String },
 }
 
 #[derive(Subcommand)]
@@ -2039,26 +1952,6 @@ fn vault_key_from_text(text: &str) -> Result<zeroize::Zeroizing<String>> {
         .context("this is neither 64 hex digits nor 24 recovery words")
 }
 
-/// The MCP key for `varsto mcp`: from `--key-file`, else `VARSTO_MCP_KEY`.
-fn mcp_key_input(file: Option<&Path>) -> Result<Option<zeroize::Zeroizing<String>>> {
-    if let Some(f) = file {
-        let text = std::fs::read_to_string(f).with_context(|| format!("read {}", f.display()))?;
-        let k = text.trim();
-        if k.is_empty() {
-            bail_usage::<()>("the MCP key file is empty")?;
-        }
-        varsto_core::logging::register_secret(k);
-        return Ok(Some(zeroize::Zeroizing::new(k.to_string())));
-    }
-    Ok(std::env::var("VARSTO_MCP_KEY")
-        .ok()
-        .filter(|k| !k.trim().is_empty())
-        .map(|k| {
-            varsto_core::logging::register_secret(k.trim());
-            zeroize::Zeroizing::new(k.trim().to_string())
-        }))
-}
-
 /// Ask a yes/no question on the terminal; without one the answer is no.
 /// Ask on standard error and read the answer from standard input, also
 /// when it is not a terminal (a script or a test answers through a pipe).
@@ -2532,74 +2425,18 @@ fn print<T: serde::Serialize>(
     Ok(())
 }
 
-/// `varsto mcp key`.
-fn run_mcp_key(cli: &Cli, home: &Path, cmd: &McpKeyCmd) -> Result<()> {
-    match cmd {
-        McpKeyCmd::Create {
-            name,
-            folders,
-            write,
-            analyse,
-            expires_days,
-        } => {
-            let scope = mcp_keys::scope_for(home, folders, *write, *analyse)?;
-            let (k, secret) = mcp_keys::create(home, name.as_deref(), scope, *expires_days)?;
-            if cli.json {
-                let mut v = k.summary();
-                v["key"] = serde_json::json!(secret);
-                println!("{}", serde_json::to_string_pretty(&v)?);
-            } else {
-                println!(
-                    "MCP key {} ({}) created; it is shown only now:\n\n  {secret}\n\nGive it to the MCP client as VARSTO_MCP_KEY (varsto mcp config prints a configuration). It works while the Varsto service runs{}.",
-                    k.name,
-                    k.id,
-                    k.expires_utc
-                        .map(|e| format!(", until {}", backup::fmt_utc(e)))
-                        .unwrap_or_default()
-                );
+/// Percent-encode a query value, leaving `/` so a file path stays readable.
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(b as char)
             }
-        }
-        McpKeyCmd::List => {
-            let keys = mcp_keys::list(home)?;
-            let rows: Vec<serde_json::Value> = keys.iter().map(|k| k.summary()).collect();
-            print(cli, &rows, |_| {
-                if keys.is_empty() {
-                    return "no MCP keys (varsto mcp key create)".into();
-                }
-                let now = varsto_core::util::now_utc();
-                keys.iter()
-                    .map(|k| {
-                        let mut scope: Vec<String> = Vec::new();
-                        if let Some(a) = &k.scope.all {
-                            scope.push(format!("all: {a}"));
-                        }
-                        scope.extend(k.scope.folders.iter().map(|(f, l)| format!("{f}: {l}")));
-                        format!(
-                            "{} ({}): {}; created {}{}{}",
-                            k.name,
-                            k.id,
-                            scope.join(", "),
-                            backup::fmt_utc(k.created_utc),
-                            match k.expires_utc {
-                                Some(_) if k.expired(now) => "; EXPIRED".to_string(),
-                                Some(e) => format!("; expires {}", backup::fmt_utc(e)),
-                                None => String::new(),
-                            },
-                            k.last_used_utc
-                                .map(|t| format!("; last used {}", backup::fmt_utc(t)))
-                                .unwrap_or_else(|| "; never used".into())
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })?;
-        }
-        McpKeyCmd::Revoke { name_or_id } => {
-            let k = mcp_keys::revoke(home, name_or_id)?;
-            println!("revoked MCP key {} ({})", k.name, k.id);
+            _ => out.push_str(&format!("%{b:02X}")),
         }
     }
-    Ok(())
+    out
 }
 
 /// A call to the running service's local API, if it runs.
@@ -2651,8 +2488,8 @@ fn run_analysis(cli: &Cli, home: &Path, cmd: &AnalysisCmd) -> Result<()> {
                         "GET",
                         &format!(
                             "/api/analysis?folder={}&path={}",
-                            mcp::urlencode(folder),
-                            mcp::urlencode(path)
+                            urlencode(folder),
+                            urlencode(path)
                         ),
                         serde_json::Value::Null,
                     )?["analysis"]
@@ -2735,7 +2572,7 @@ fn run_analysis(cli: &Cli, home: &Path, cmd: &AnalysisCmd) -> Result<()> {
             let all: Vec<FileAnalysis> = match &call {
                 Some(call) => serde_json::from_value(call(
                     "GET",
-                    &format!("/api/analyses?folder={}", mcp::urlencode(folder)),
+                    &format!("/api/analyses?folder={}", urlencode(folder)),
                     serde_json::Value::Null,
                 )?)?,
                 None => Engine::open(home, &passphrase()?)?.analyses(folder)?,
@@ -5848,83 +5685,6 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::Mcp { key_file, cmd } => match cmd.as_ref().unwrap_or(&McpCmd::Serve) {
-            McpCmd::Serve => {
-                let key = mcp_key_input(key_file.as_deref())?;
-                mcp::serve(&home, key.as_deref().map(|k| k.as_str()))?
-            }
-            McpCmd::Key { cmd } => run_mcp_key(cli, &home, cmd)?,
-            McpCmd::Config {
-                client,
-                create_key,
-                key_name,
-                folders,
-                write,
-                analyse,
-                expires_days,
-            } => {
-                let secret = if *create_key {
-                    let scope = mcp_keys::scope_for(&home, folders, *write, *analyse)?;
-                    let (k, secret) =
-                        mcp_keys::create(&home, key_name.as_deref(), scope, *expires_days)?;
-                    eprintln!(
-                        "created MCP key {} ({}); it is in the configuration below and is not shown again",
-                        k.name, k.id
-                    );
-                    Some(secret)
-                } else {
-                    None
-                };
-                let custom_home = (default_home().ok().as_deref() != Some(home.as_path()))
-                    .then_some(home.as_path());
-                println!(
-                    "{}",
-                    mcp::client_config(client, secret.as_deref(), custom_home)?
-                );
-            }
-            McpCmd::Grant {
-                folder,
-                write,
-                analyse,
-            } => {
-                mcp::grant(&home, folder, *write, *analyse)?;
-                println!(
-                    "granted {} access to {folder} (recorded in {})",
-                    if *write {
-                        "read-write"
-                    } else if *analyse {
-                        "read and analyze"
-                    } else {
-                        "read-only"
-                    },
-                    mcp::grants_path(&home).display()
-                );
-            }
-            McpCmd::Revoke { folder } => {
-                mcp::revoke(&home, folder)?;
-                println!("revoked {folder}");
-            }
-            McpCmd::List => {
-                let g = mcp::Grants::load(&home)?;
-                print(cli, &g, |g| {
-                    let mut lines = Vec::new();
-                    if let Some(all) = &g.all {
-                        lines.push(format!(
-                            "all folders (not Strongrooms): {all} ({})",
-                            mcp::level_words(all)
-                        ));
-                    }
-                    for (f, l) in &g.folders {
-                        lines.push(format!("{f}: {l} ({})", mcp::level_words(l)));
-                    }
-                    if lines.is_empty() {
-                        "no grants: the assistant sees nothing (varsto mcp grant <folder>)".into()
-                    } else {
-                        lines.join("\n")
-                    }
-                })?;
-            }
-        },
         Cmd::Update {
             daily: true, check, ..
         } => {
@@ -6344,7 +6104,6 @@ fn init_logging(cli: &Cli) {
         service_run,
         desktop,
         matches!(cli.cmd, Cmd::Tray { .. }),
-        matches!(cli.cmd, Cmd::Mcp { .. }),
     );
     // The service keeps writing notable events to stderr too (service.log).
     if let Err(e) = logcmd::init(

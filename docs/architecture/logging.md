@@ -2,12 +2,12 @@
 
 Status: implemented; section 45 of [the specification](../spec/alpha-0-format.md) records what is built.
 
-Every Varsto program (background service, CLI, tray, desktop app, MCP server, mobile library, app shells) keeps a **local debug log, on by default at level `debug`**, so that a problem can be investigated after the fact on the device where it happened. The log is for the owner of the device: it stays on that device and is never uploaded. Logging must never weaken the security model: the things that protect the data never appear in it.
+Every Varsto program (background service, CLI, tray, desktop app, mobile library, app shells) keeps a **local debug log, on by default at level `debug`**, so that a problem can be investigated after the fact on the device where it happened. The log is for the owner of the device: it stays on that device and is never uploaded. Logging must never weaken the security model: the things that protect the data never appear in it.
 
 ## Where
 
 - `<home>/logs/varsto-<component>.log`. Homes: Linux `~/.local/share/varsto`, macOS `~/Library/Application Support/Varsto`, Windows `%APPDATA%\Varsto`, Android `<app files>/vault`, iOS the app's vault directory, or `--home`/`VARSTO_HOME`.
-- Components: `service` (`varsto service run`), `desktop-app` (`varsto desktop`, which runs the service in-process), `cli` (every other command), `tray`, `mcp`, `ffi-ios` / `ffi-android` (the mobile library, with the iOS app's own lines under module `app`), `app` (the macOS menu bar app and the Android shell, written by small native loggers in the same format).
+- Components: `service` (`varsto service run`), `desktop-app` (`varsto desktop`, which runs the service in-process), `cli` (every other command), `tray`, `ffi-ios` / `ffi-android` (the mobile library, with the iOS app's own lines under module `app`), `app` (the macOS menu bar app and the Android shell, written by small native loggers in the same format).
 - The directory is mode 0700 and the files 0600. `varsto log path` prints the directory.
 - The service still writes its notable events (info and above) to stderr, which the launch agent, systemd unit, tray or Android shell keep in `<home>/service.log` as before.
 

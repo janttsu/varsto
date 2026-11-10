@@ -234,8 +234,8 @@ struct FolderState {
     thumbs_replicated: BTreeSet<String>,
     /// Varsto's own "last accessed" record per path (seconds since the Unix
     /// epoch): updated when a file is fetched, opened or read through Varsto
-    /// (interface, CLI, MCP) and from the filesystem access time seen at scan.
-    /// Kept per device; it feeds the cold-storage advice (MCP).
+    /// (interface and CLI) and from the filesystem access time seen at scan.
+    /// Kept per device; it feeds the cold-storage advice.
     #[serde(default)]
     accessed: BTreeMap<String, i64>,
     /// Remote versions that could not be downloaded yet (no readable copy);
@@ -7139,7 +7139,7 @@ impl Engine {
     }
 
     /// Create or overwrite a file inside a folder (relative path), then push.
-    /// Used by the MCP server for notes and reorganisation; refuses to leave the folder.
+    /// Refuses a path that leaves the folder.
     pub fn write_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
         self.write_from_reader_sized(folder, path, bytes, Some(bytes.len() as u64))
     }
@@ -7221,7 +7221,7 @@ impl Engine {
 
     /// Create a new file inside a folder, never replacing one: refused when
     /// the path exists here, as a placeholder, or as a file another device
-    /// published. The assistant (MCP) writes only through this.
+    /// published. Callers that must not overwrite use this.
     pub fn create_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
         self.ensure_path_free(folder, path)?;
         self.write_file(folder, path, bytes)
@@ -8304,6 +8304,8 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
         "devices.json",
         "clock.json",
         "mcp-grants.json",
+        "mcp-keys.json",
+        "mcp-keys-used.json",
         "share-request.enc",
         "share-request.json",
         crate::org::LEGACY_REQUEST_FILE,

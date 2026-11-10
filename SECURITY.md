@@ -10,7 +10,7 @@ A dedicated security contact is not available yet (2026-10-13); until then, repo
 
 ## Scope
 
-In scope: the core library, the CLI, the desktop and mobile apps, the storage format and protocols, the MCP server, the website and the release process.
+In scope: the core library, the CLI, the desktop and mobile apps, the storage format and protocols, the website and the release process.
 
 ## Threat model
 

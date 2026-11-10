@@ -2790,8 +2790,8 @@ pub fn run(opts: Options) -> Result<()> {
             last_change = None;
             // The whole round (peer records, ledger, the sync itself, the
             // upkeep) runs with the engine and the service's state taken out
-            // of the shared state: the interface, the tray, the command line
-            // and MCP get the summary from before the round (marked busy) and
+            // of the shared state: the interface, the tray and the command line
+            // get the summary from before the round (marked busy) and
             // the cached reads, and pause, lock and quit answer at once.
             let mut st = desktop::checkout(&state, "sync");
             st.service.sync_requested = false;

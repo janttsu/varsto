@@ -87,8 +87,6 @@ impl Engine {
             copies_bytes: loc.copies.bytes,
             replicas: self.devices.replicas.len(),
             home_space: crate::pool::disk_space(&self.home).map(|s| (s.free, s.total)),
-            mcp_used: self.home.join("mcp-keys.json").exists()
-                || self.home.join("mcp-grants.json").exists(),
             quota_full: std::mem::take(&mut observed.quota_full),
             restic: self.restic_config().is_some(),
             restic_text: observed.restic_text.take(),

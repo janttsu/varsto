@@ -309,8 +309,6 @@ pub struct Inputs {
     pub service: Option<ServiceIn>,
     /// Free and total bytes of the disk holding this device's directory.
     pub home_space: Option<(u64, u64)>,
-    /// MCP access was set up (grants or keys).
-    pub mcp_used: bool,
     /// Storages at their quota during the last sync (from the service).
     pub quota_full: Vec<String>,
     /// Folders paused on this device.
@@ -1953,14 +1951,6 @@ fn steps(h: &mut HelpState, i: &Inputs, storages: &[&StorageIn], offsite_configu
         .guide("imports")
         .0,
     );
-    if !i.mcp_used {
-        tips.push(
-            StepB::new("tip:mcp", "tip", t0("Let an AI assistant work with your files"), t0("The MCP server lets an assistant of your choice read, sort and annotate the folders you allow, and nothing else."))
-                .cmd("varsto mcp grant <folder>")
-                .guide("mcp")
-                .0,
-        );
-    }
     if !i.restic {
         tips.push(
             StepB::new("tip:restic", "tip", t0("Mirror your folders to restic"), t0("A restic repository gives you a second, independent way to get your files back, without Varsto."))
