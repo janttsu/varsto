@@ -97,19 +97,19 @@
       <thead><tr><th>Tilanne</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
         <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
-        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td>44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
+        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td class="win">44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
         <tr><th scope="row">537 MB lokimaista tekstiä</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
         <tr><th scope="row">816 MB, josta puolet kopioita</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
         <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>Amsterdam 70 s, Varsova 118 s; kirjoittaja lähetti 3 685 MB</td><td class="win">Amsterdam 47 s, Varsova 59 s; kirjoittaja lähetti 2 738 MB</td></tr>
         <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>12 s · 26 MB, yksi ajo</td><td class="win">6 s · 12 MB</td></tr>
         <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td>10 s · 0 MB tiedostodataa</td><td>tiedostot täsmäsivät, noin 0,2 MB, ei valmistumiskelloa</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">432 s · 336 MB</td><td>466 s · 298 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">432 s · 336 MB</td><td class="win">466 s · 298 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä on nopeampi sarake. Tasapeli on vihreä molemmissa. Uudelleennimeämisellä ei ole valmistumiskelloa, joten kumpikaan sarake ei ole vihreä.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä on nopeampi valmistuminen. Jos hitaampi aika on enintään 10 % hitaampaa, molemmat sarakkeet ovat vihreät. Uudelleennimeämisellä ei ole valmistumiskelloa, joten kumpikaan sarake ei ole vihreä.</p>
     <ul>
-      <li><strong>Varsto oli nopeampi</strong> 10 000 pienessä tiedostossa, 25 s vastaan 60 s, suunnilleen samoilla tavuilla, ja tahallaan katkotulla yhteydellä, 432 s vastaan 466 s.</li>
-      <li><strong>Syncthing oli nopeampi</strong> kahdessa isossa tiedostossa (41 s vastaan 44 s), lokitekstissä (7 s vastaan 17 s), kopioissa (9 s vastaan 13 s), kahdella lukijalla (Varsova 59 s vastaan 118 s) ja pienessä muutoksessa (6 s vastaan 12 s).</li>
+      <li><strong>Varsto oli nopeampi</strong> 10 000 pienessä tiedostossa, 25 s vastaan 60 s, suunnilleen samoilla tavuilla.</li>
+      <li><strong>Syncthing oli nopeampi</strong> lokitekstissä (7 s vastaan 17 s), kopioissa (9 s vastaan 13 s), kahdella lukijalla (Varsova 59 s vastaan 118 s) ja pienessä muutoksessa (6 s vastaan 12 s).</li>
       <li><strong>Lokiteksti on tavuissa poikkeus.</strong> Syncthing lähetti 549 MB ja valmistui 7 sekunnissa. Varsto lähetti 169 MB ja vei 17 s, koska lohko pakataan ennen salausta. Syncthing lähettää tekstin sellaisena kuin se on tallennettu.</li>
       <li><strong>Kopiot:</strong> Syncthing valmistui ensin ja lähetti 630 MB. Varsto lähetti 419 MB, koska lukijan levyllä jo olevat lohkot käytetään uudelleen.</li>
       <li><strong>Kaksi lukijaa:</strong> Syncthingin lukijat voivat lähettää toisilleen, ja kirjoittaja lähetti 2 738 MB. Varston kirjoittaja lähetti 3 685 MB, ja Varsova vei 118 s.</li>
@@ -147,7 +147,7 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Syncthing oli nopeampi, 41 s vastaan 44 s, ja molemmat siirsivät noin 2,2 GB. Tiedostot ovat isoja, joten yhteys on raja. Kellot olivat lähellä toisiaan.</p>
+      <p class="pace-why">Kellot ovat 10 %:n sisällä (41 s ja 44 s), joten molemmat on merkitty tasavertaisiksi. Molemmat siirsivät noin 2,2 GB. Tiedostot ovat isoja, joten yhteys on raja. Kellot olivat lähellä toisiaan.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
     <figure class="pace" data-play="Toista" data-pace data-scene="text" data-resilio="7 s · 549 MB" data-varsto="17 s · 169 MB">
@@ -213,7 +213,7 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Lukijan yhteys pidettiin 100 Mbit/s:ssa, viiveellä 40 ms ja 1 %:n satunnaisella hävikillä, ja se katkaistiin tahallaan 0,3 sekunniksi joka neljäs sekunti. SSH jätettiin rauhaan. Molemmat siirsivät noin 300 MB. Varsto valmistui 432 sekunnissa ja Syncthing 466 sekunnissa. Kuvassa kuutiot, jotka osuvat katkoon, kutistuvat ja katoavat ja lähtevät sitten uudelleen.</p>
+      <p class="pace-why">Lukijan yhteys pidettiin 100 Mbit/s:ssa, viiveellä 40 ms ja 1 %:n satunnaisella hävikillä, ja se katkaistiin tahallaan 0,3 sekunniksi joka neljäs sekunti. SSH jätettiin rauhaan. Molemmat siirsivät noin 300 MB. Kellot ovat 10 %:n sisällä (432 s ja 466 s), joten molemmat on merkitty tasavertaisiksi. Kuvassa kuutiot, jotka osuvat katkoon, kutistuvat ja katoavat ja lähtevät sitten uudelleen.</p>
     </div>
     </div>
     <h2>Kumpi sopii sinulle</h2>

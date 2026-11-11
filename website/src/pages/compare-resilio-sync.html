@@ -52,7 +52,7 @@ description: Looking for a Resilio Sync alternative with end-to-end encryption o
         <tr><th scope="row">100 Mbit/s, 40 ms, 1% loss, cut 0.3 s every 4 s (the small files)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green marks the faster column. A tie is green in both.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green marks the faster finish. If the slower time is within 10% of the faster one, both columns are green.</p>
     <ul>
       <li><strong>Varsto was faster</strong> on the two large files, on log text, on copies, and on the link that was cut on purpose. Text costs about a third of the bytes, because blocks are compressed before they are encrypted. Copies move less data, because blocks already on the reader's disk are reused.</li>
       <li><strong>Small files were a tie</strong> at 25 s, and neither Resilio Sync run stalled. For the small change and the rename, Resilio Sync's figures are from 8 November while that case is run again: 15 s and 12 MB for the change, 67 s and 1 269 MB for the rename. Varsto's 10 November change, one counted run, was 12 s and 26 MB.</li>

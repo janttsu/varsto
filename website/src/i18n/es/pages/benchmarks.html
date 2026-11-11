@@ -334,7 +334,7 @@ description: Varsto medido entre París, Ámsterdam y Varsovia el 9 y el 10 de o
         <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pérdida, corte de 0,3 s cada 4 s (los archivos pequeños)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> El verde marca la columna más rápida. En un empate, las dos están en verde.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> El verde marca el tiempo más corto. Si el tiempo más largo es como máximo un 10 % más largo, las dos columnas van en verde.</p>
     <ul>
       <li><strong>Varsto es más rápido</strong> en cada sincronización inicial de datos grandes, comprimibles o duplicados, y por el enlace lento con pérdidas. El texto cuesta un tercio de los bytes, porque los bloques se comprimen antes de cifrarse; un directorio renombrado y los archivos duplicados mueven casi ningún dato, porque se reutilizan los bloques que ya están en el disco del lector.</li>
       <li><strong>Resilio Sync es más rápido</strong> con muchos archivos pequeños cuando no se atasca (lo hizo en una de las dos ejecuciones), y al propagar un cambio pequeño: Varsto ahora solo trae los bloques cambiados (22 MB en lugar del 1.1 GiB entero de la compilación anterior), pero sigue tardando de tres a cinco veces más, porque la propia sincronización del escritor de todas las carpetas y el nuevo hash de los bloques locales del lector cuestan más que la transferencia.</li>
@@ -349,19 +349,19 @@ description: Varsto medido entre París, Ámsterdam y Varsovia el 9 y el 10 de o
       <thead><tr><th>Caso</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
         <tr><th scope="row">10 000 archivos pequeños (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
-        <tr><th scope="row">Dos archivos de 1 GiB</th><td>44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
+        <tr><th scope="row">Dos archivos de 1 GiB</th><td class="win">44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
         <tr><th scope="row">537 MB de texto de registro</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
         <tr><th scope="row">816 MB, la mitad copias</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
         <tr><th scope="row">Dos lectores a la vez (Ámsterdam, Varsovia)</th><td>Ámsterdam 70 s, Varsovia 118 s; el escritor envió 3 685 MB</td><td class="win">Ámsterdam 47 s, Varsovia 59 s; el escritor envió 2 738 MB</td></tr>
         <tr><th scope="row">11 MiB cambiados dentro de 1,13 GiB</th><td>12 s · 26 MB, una ejecución</td><td class="win">6 s · 12 MB</td></tr>
         <tr><th scope="row">Un directorio de 1,13 GiB renombrado</th><td>10 s · 0 MB de datos de archivo</td><td>los archivos coincidían, unos 0,2 MB, sin reloj de llegada</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pérdida, corte de 0,3 s cada 4 s (los archivos pequeños)</th><td class="win">432 s · 336 MB</td><td>466 s · 298 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pérdida, corte de 0,3 s cada 4 s (los archivos pequeños)</th><td class="win">432 s · 336 MB</td><td class="win">466 s · 298 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> El verde marca la columna más rápida. Un empate es verde en las dos. El renombrado no tiene reloj de llegada, así que ninguna columna es verde.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> El verde marca el tiempo más corto. Si el tiempo más largo es como máximo un 10 % más largo, las dos columnas van en verde. El renombrado no tiene reloj de llegada, así que ninguna columna es verde.</p>
     <ul>
-      <li><strong>Varsto fue más rápido</strong> en los 10 000 archivos pequeños, 25 s frente a 60 s, con unos bytes parecidos, y en el enlace cortado a propósito, 432 s frente a 466 s.</li>
-      <li><strong>Syncthing fue más rápido</strong> en los dos archivos grandes (41 s frente a 44 s), en el texto de registro (7 s frente a 17 s), en las copias (9 s frente a 13 s), con dos lectores (Varsovia 59 s frente a 118 s) y en el cambio pequeño (6 s frente a 12 s).</li>
+      <li><strong>Varsto fue más rápido</strong> en los 10 000 archivos pequeños, 25 s frente a 60 s, con unos bytes parecidos.</li>
+      <li><strong>Syncthing fue más rápido</strong> en el texto de registro (7 s frente a 17 s), en las copias (9 s frente a 13 s), con dos lectores (Varsovia 59 s frente a 118 s) y en el cambio pequeño (6 s frente a 12 s).</li>
       <li><strong>El texto de registro es la excepción en bytes.</strong> Syncthing envió 549 MB y terminó en 7 s. Varsto envió 169 MB y tardó 17 s, porque un bloque se comprime antes de cifrarse. Syncthing envía el texto tal como está guardado.</li>
       <li><strong>Copias:</strong> Syncthing terminó antes y envió 630 MB. Varsto envió 419 MB, porque los bloques que ya están en el disco del lector se reutilizan.</li>
       <li><strong>Dos lectores:</strong> los lectores de Syncthing pueden enviarse entre sí, y el escritor envió 2 738 MB. El escritor de Varsto envió 3 685 MB, y Varsovia tardó 118 s.</li>

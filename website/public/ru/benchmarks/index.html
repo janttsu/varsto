@@ -27,7 +27,7 @@
 <link rel="alternate" hreflang="es" href="https://varsto.net/es/benchmarks/">
 <link rel="alternate" hreflang="ru" href="https://varsto.net/ru/benchmarks/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=9fd5de25f8">
+<link rel="stylesheet" href="../../assets/css/site.css?v=a790f8ed10">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -388,7 +388,7 @@
         <tr><th scope="row">100 Mbit/s, 40 ms, потери 1%, обрыв 0.3 s каждые 4 s (маленькие файлы)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Зелёный отмечает более быстрый столбец. Ничья — зелёный в обоих.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Зелёный — более короткое время. Если более долгое время больше не более чем на 10 %, оба столбца зелёные.</p>
     <ul>
       <li><strong>Varsto быстрее</strong> в каждой первой синхронизации больших, сжимаемых или дублированных данных и по медленному каналу с потерями. Текст стоит трети байтов, потому что блоки сжимаются до шифрования; переименованный каталог и файлы-копии переносят почти ноль данных, потому что блоки, уже лежащие на диске читателя, используются снова.</li>
       <li><strong>Resilio Sync быстрее</strong> на многих маленьких файлах, когда он не зависает (он завис в одном прогоне из двух), и в распространении маленького изменения: Varsto теперь забирает только изменившиеся блоки (22 MB вместо целого 1.1 GiB в сборке до этого), но всё ещё занимает в три–пять раз больше времени, потому что собственная синхронизация всех папок у писателя и повторный пересчёт хеша локальных блоков у читателя стоят больше, чем передача.</li>
@@ -403,19 +403,19 @@
       <thead><tr><th>Сценарий</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
         <tr><th scope="row">10 000 маленьких файлов (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
-        <tr><th scope="row">Два файла по 1 GiB</th><td>44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
+        <tr><th scope="row">Два файла по 1 GiB</th><td class="win">44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
         <tr><th scope="row">537 MB текста вроде журнала</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
         <tr><th scope="row">816 MB, половина копии</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
         <tr><th scope="row">Два читателя сразу (Амстердам, Варшава)</th><td>Амстердам 70 s, Варшава 118 s; писатель отправил 3 685 MB</td><td class="win">Амстердам 47 s, Варшава 59 s; писатель отправил 2 738 MB</td></tr>
         <tr><th scope="row">11 MiB изменено внутри 1,13 GiB</th><td>12 s · 26 MB, один прогон</td><td class="win">6 s · 12 MB</td></tr>
         <tr><th scope="row">Каталог 1,13 GiB переименован</th><td>10 s · 0 MB файловых данных</td><td>файлы совпали, около 0,2 MB, без часов финиша</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % потерь, обрыв 0,3 s каждые 4 s (маленькие файлы)</th><td class="win">432 s · 336 MB</td><td>466 s · 298 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % потерь, обрыв 0,3 s каждые 4 s (маленькие файлы)</th><td class="win">432 s · 336 MB</td><td class="win">466 s · 298 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Зелёный — более быстрый столбец. Ничья зелёная в обоих. У переименования нет часов финиша, поэтому ни один столбец не зелёный.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Зелёный — более короткое время. Если более долгое время больше не более чем на 10 %, оба столбца зелёные. У переименования нет часов финиша, поэтому ни один столбец не зелёный.</p>
     <ul>
-      <li><strong>Varsto был быстрее</strong> на 10 000 маленьких файлах, 25 s против 60 s, примерно с тем же числом байтов, и на специально обрываемой линии, 432 s против 466 s.</li>
-      <li><strong>Syncthing был быстрее</strong> на двух больших файлах (41 s против 44 s), на тексте журнала (7 s против 17 s), на копиях (9 s против 13 s), с двумя читателями (Варшава 59 s против 118 s) и на небольшом изменении (6 s против 12 s).</li>
+      <li><strong>Varsto был быстрее</strong> на 10 000 маленьких файлах, 25 s против 60 s, примерно с тем же числом байтов.</li>
+      <li><strong>Syncthing был быстрее</strong> на тексте журнала (7 s против 17 s), на копиях (9 s против 13 s), с двумя читателями (Варшава 59 s против 118 s) и на небольшом изменении (6 s против 12 s).</li>
       <li><strong>Текст журнала — исключение по байтам.</strong> Syncthing отправил 549 MB и закончил за 7 s. Varsto отправил 169 MB и занял 17 s, потому что блок сжимается до шифрования. Syncthing отправляет текст как он хранится.</li>
       <li><strong>Копии:</strong> Syncthing закончил раньше и отправил 630 MB. Varsto отправил 419 MB, потому что блоки, уже лежащие на диске читателя, используются снова.</li>
       <li><strong>Два читателя:</strong> читатели Syncthing могут слать друг другу, и писатель отправил 2 738 MB. Писатель Varsto отправил 3 685 MB, и Варшава заняла 118 s.</li>

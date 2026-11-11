@@ -27,7 +27,7 @@
 <link rel="alternate" hreflang="es" href="https://varsto.net/es/benchmarks/">
 <link rel="alternate" hreflang="ru" href="https://varsto.net/ru/benchmarks/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=9fd5de25f8">
+<link rel="stylesheet" href="../../assets/css/site.css?v=a790f8ed10">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -388,7 +388,7 @@
         <tr><th scope="row">100 Mbit/s, 40 ms, 1 % Verlust, Unterbrechung 0,3 s alle 4 s (die kleinen Dateien)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grün markiert die schnellere Spalte. Bei Gleichstand sind beide grün.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grün ist die schnellere Zeit. Liegt die langsamere Zeit höchstens 10 % darüber, sind beide Spalten grün.</p>
     <ul>
       <li><strong>Varsto ist schneller</strong> bei jeder ersten Synchronisierung großer, komprimierbarer oder duplizierter Daten und über die langsame, verlustbehaftete Verbindung. Text kostet ein Drittel der Bytes, weil Blöcke vor der Verschlüsselung komprimiert werden; ein umbenanntes Verzeichnis und Duplikate bewegen fast keine Daten, weil Blöcke, die schon auf der Platte des Lesers liegen, wiederverwendet werden.</li>
       <li><strong>Resilio Sync ist schneller</strong> bei vielen kleinen Dateien, wenn es nicht hängen bleibt (das tat es in einem von zwei Läufen), und beim Weitergeben einer kleinen Änderung: Varsto holt jetzt nur die geänderten Blöcke (22 MB statt der ganzen 1.1 GiB im Build davor), braucht aber immer noch drei- bis fünfmal so lange, weil die eigene Synchronisierung aller Ordner beim Schreiber und das erneute Hashen der lokalen Blöcke beim Leser mehr kosten als die Übertragung.</li>
@@ -403,19 +403,19 @@
       <thead><tr><th>Fall</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
         <tr><th scope="row">10 000 kleine Dateien (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
-        <tr><th scope="row">Zwei Dateien à 1 GiB</th><td>44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
+        <tr><th scope="row">Zwei Dateien à 1 GiB</th><td class="win">44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
         <tr><th scope="row">537 MB logähnlicher Text</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
         <tr><th scope="row">816 MB, zur Hälfte Kopien</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
         <tr><th scope="row">Zwei Leser gleichzeitig (Amsterdam, Warschau)</th><td>Amsterdam 70 s, Warschau 118 s; der Schreiber sendete 3 685 MB</td><td class="win">Amsterdam 47 s, Warschau 59 s; der Schreiber sendete 2 738 MB</td></tr>
         <tr><th scope="row">11 MiB geändert innerhalb von 1,13 GiB</th><td>12 s · 26 MB, ein Lauf</td><td class="win">6 s · 12 MB</td></tr>
         <tr><th scope="row">Ein Verzeichnis von 1,13 GiB umbenannt</th><td>10 s · 0 MB Dateidaten</td><td>Dateien stimmten, etwa 0,2 MB, keine Zieluhr</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % Verlust, Unterbrechung 0,3 s alle 4 s (die kleinen Dateien)</th><td class="win">432 s · 336 MB</td><td>466 s · 298 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % Verlust, Unterbrechung 0,3 s alle 4 s (die kleinen Dateien)</th><td class="win">432 s · 336 MB</td><td class="win">466 s · 298 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grün ist die schnellere Spalte. Ein Gleichstand ist in beiden grün. Die Umbenennung hat keine Zieluhr, also ist keine Spalte grün.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grün ist die schnellere Zeit. Liegt die langsamere Zeit höchstens 10 % darüber, sind beide Spalten grün. Die Umbenennung hat keine Zieluhr, also ist keine Spalte grün.</p>
     <ul>
-      <li><strong>Varsto war schneller</strong> bei 10 000 kleinen Dateien, 25 s gegen 60 s, bei etwa gleich vielen Bytes, und auf der absichtlich unterbrochenen Leitung, 432 s gegen 466 s.</li>
-      <li><strong>Syncthing war schneller</strong> bei den zwei großen Dateien (41 s gegen 44 s), beim Logtext (7 s gegen 17 s), bei Kopien (9 s gegen 13 s), mit zwei Lesern (Warschau 59 s gegen 118 s) und bei der kleinen Änderung (6 s gegen 12 s).</li>
+      <li><strong>Varsto war schneller</strong> bei 10 000 kleinen Dateien, 25 s gegen 60 s, bei etwa gleich vielen Bytes.</li>
+      <li><strong>Syncthing war schneller</strong> beim Logtext (7 s gegen 17 s), bei Kopien (9 s gegen 13 s), mit zwei Lesern (Warschau 59 s gegen 118 s) und bei der kleinen Änderung (6 s gegen 12 s).</li>
       <li><strong>Beim Logtext sind die Bytes die Ausnahme.</strong> Syncthing sendete 549 MB und war in 7 s fertig. Varsto sendete 169 MB und brauchte 17 s, weil ein Block vor der Verschlüsselung komprimiert wird. Syncthing sendet den Text, wie er gespeichert ist.</li>
       <li><strong>Kopien:</strong> Syncthing war früher fertig und sendete 630 MB. Varsto sendete 419 MB, weil Blöcke, die schon auf der Platte des Lesers liegen, wiederverwendet werden.</li>
       <li><strong>Zwei Leser:</strong> Syncthings Leser können einander senden, und der Schreiber sendete 2 738 MB. Varstos Schreiber sendete 3 685 MB, und Warschau brauchte 118 s.</li>

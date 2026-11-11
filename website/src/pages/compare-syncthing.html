@@ -43,19 +43,19 @@ description: Looking for a Syncthing alternative with end-to-end encryption on y
       <thead><tr><th>Scenario</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
         <tr><th scope="row">10 000 small files (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
-        <tr><th scope="row">Two 1 GiB files</th><td>44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
+        <tr><th scope="row">Two 1 GiB files</th><td class="win">44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
         <tr><th scope="row">537 MB of log-like text</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
         <tr><th scope="row">816 MB, half of it copies</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
         <tr><th scope="row">Two readers at once (Amsterdam, Warsaw)</th><td>Amsterdam 70 s, Warsaw 118 s; writer sent 3 685 MB</td><td class="win">Amsterdam 47 s, Warsaw 59 s; writer sent 2 738 MB</td></tr>
         <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td>12 s · 26 MB, one run</td><td class="win">6 s · 12 MB</td></tr>
         <tr><th scope="row">A 1.13 GiB directory renamed</th><td>10 s · 0 MB of file data</td><td>files matched, about 0.2 MB, no finish clock</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1% loss, cut 0.3 s every 4 s (the small files)</th><td class="win">432 s · 336 MB</td><td>466 s · 298 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1% loss, cut 0.3 s every 4 s (the small files)</th><td class="win">432 s · 336 MB</td><td class="win">466 s · 298 MB</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green marks the faster column. A tie is green in both. The rename has no finish clock, so neither column is green.</p>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green marks the faster finish. If the slower time is within 10% of the faster one, both columns are green. The rename has no finish clock, so neither column is green.</p>
     <ul>
-      <li><strong>Varsto was faster</strong> on the 10 000 small files, 25 s against 60 s, with about the same bytes, and on the link that was cut on purpose, 432 s against 466 s.</li>
-      <li><strong>Syncthing was faster</strong> on the two large files (41 s against 44 s), on log text (7 s against 17 s), on copies (9 s against 13 s), with two readers (Warsaw 59 s against 118 s) and on the small change (6 s against 12 s).</li>
+      <li><strong>Varsto was faster</strong> on the 10 000 small files, 25 s against 60 s, with about the same bytes.</li>
+      <li><strong>Syncthing was faster</strong> on log text (7 s against 17 s), on copies (9 s against 13 s), with two readers (Warsaw 59 s against 118 s) and on the small change (6 s against 12 s).</li>
       <li><strong>Log text is the odd one on bytes.</strong> Syncthing sent 549 MB and finished in 7 s. Varsto sent 169 MB and took 17 s, because a block is compressed before it is encrypted. Syncthing sends the text as stored.</li>
       <li><strong>Copies:</strong> Syncthing finished sooner and sent 630 MB. Varsto sent 419 MB, because blocks already on the reader's disk are reused.</li>
       <li><strong>Two readers:</strong> Syncthing's readers can send to each other, and the writer sent 2 738 MB. Varsto's writer sent 3 685 MB, and Warsaw took 118 s.</li>
@@ -93,7 +93,7 @@ description: Looking for a Syncthing alternative with end-to-end encryption on y
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Syncthing was faster, 41 s against 44 s, and both tools moved about 2.2 GB. The files are large, so the link is the limit. The two clocks were close.</p>
+      <p class="pace-why">The clocks are within 10% (41 s and 44 s), so both are marked equal. Both tools moved about 2.2 GB. The files are large, so the link is the limit. The two clocks were close.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
     <figure class="pace" data-play="Play" data-pace data-scene="text" data-resilio="7 s · 549 MB" data-varsto="17 s · 169 MB">
@@ -159,7 +159,7 @@ description: Looking for a Syncthing alternative with end-to-end encryption on y
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">The reader's link was held at 100 Mbit/s, with 40 ms of delay and 1% of packets dropped at random, and it was cut on purpose for 0.3 seconds every 4 seconds. SSH was left alone. Both tools moved about 300 MB. Varsto finished in 432 s and Syncthing in 466 s. In the picture the cubes that reach the gap while the link is cut shrink and vanish, then start again.</p>
+      <p class="pace-why">The reader's link was held at 100 Mbit/s, with 40 ms of delay and 1% of packets dropped at random, and it was cut on purpose for 0.3 seconds every 4 seconds. SSH was left alone. Both tools moved about 300 MB. The clocks are within 10% (432 s and 466 s), so both are marked equal. In the picture the cubes that reach the gap while the link is cut shrink and vanish, then start again.</p>
     </div>
     </div>
     <h2>Which one fits</h2>
