@@ -348,7 +348,7 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
     robots_meta = f'<meta name="robots" content="{html.escape(robots)}">\n' if robots else ""
     is_home = nav == "Project" and rel in ("", "index.html")
     scripts = ["field.js", "motion.js"]
-    if rel.startswith("compare/resilio-sync"):
+    if rel.startswith("compare/resilio-sync") or rel.startswith("compare/syncthing"):
         scripts.append("pace.js")
     home_script = "".join(
         f'<script src="{p}assets/js/{js}?v={asset_version("assets/js/" + js)}" defer></script>\n'
