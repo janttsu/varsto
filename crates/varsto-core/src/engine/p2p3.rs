@@ -733,6 +733,43 @@ impl Engine {
         self.fresh.add(&rec.folder_id, keys, pieces);
     }
 
+    /// One block of a file this pull is still writing, at `offset` in
+    /// `path` (the temporary file, retargeted when it is renamed into
+    /// place). Another device pulling the same folder can take it now
+    /// instead of waiting until the whole file is in place.
+    pub(super) fn note_fresh_piece(
+        &self,
+        rec: &FolderRecord,
+        path: &Path,
+        cref: &crate::manifest::ChunkRef,
+        offset: u64,
+    ) {
+        if self.snapshot_sink.is_none()
+            || !self.has_peers()
+            || self.mount_is_encrypted(&rec.folder_id)
+        {
+            return;
+        }
+        let keys = if self.fresh.has_keys(&rec.folder_id) {
+            None
+        } else {
+            match self.folder_keys(rec) {
+                Ok(k) => Some(k),
+                Err(_) => return,
+            }
+        };
+        let piece = crate::p2p::Piece {
+            folder: rec.folder_id.clone(),
+            chunk: cref.chunk.clone(),
+            epoch: cref.epoch,
+            path: path.to_path_buf(),
+            offset,
+            len: cref.size,
+        };
+        self.fresh
+            .add(&rec.folder_id, keys, [(cref.object.clone(), piece)]);
+    }
+
     /// "Sync now": peers resting after a failure are tried again
     /// (`Peers::wake`), as `retry_storages_now` does for storages, so a
     /// sync right after a peer restarted asks it instead of giving its

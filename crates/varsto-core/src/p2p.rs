@@ -155,6 +155,16 @@ impl FreshPieces {
         }
     }
 
+    /// The file these pieces were read from was renamed into place.
+    pub fn retarget(&self, from: &std::path::Path, to: &std::path::Path) {
+        let mut g = self.inner.lock().unwrap();
+        for piece in g.pieces.values_mut() {
+            if piece.path == from {
+                piece.path = to.to_path_buf();
+            }
+        }
+    }
+
     /// Forget every piece (a new snapshot covers them).
     pub fn clear(&self) {
         let mut g = self.inner.lock().unwrap();
@@ -315,6 +325,43 @@ mod served {
         c.bytes += bytes.len();
         c.order.push_back(name.clone());
         c.map.insert(name.clone(), Arc::new(bytes.to_vec()));
+    }
+}
+
+/// Remember a sealed object so a peer is served the bytes already
+/// produced, instead of reading the file and sealing it again.
+/// `home/p2p-serve` is one of the snapshot's local roots. Capped so a
+/// vault does not keep a second copy of everything.
+pub fn keep_sealed(home: &std::path::Path, name: &crate::ids::ObjectName, bytes: &[u8]) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static KEPT: AtomicU64 = AtomicU64::new(0);
+    const CAP: u64 = 8 << 30;
+    let hex = name.as_str();
+    if hex.len() < 2 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return;
+    }
+    let path = home
+        .join("p2p-serve")
+        .join("chunks")
+        .join(&hex[..2])
+        .join(hex);
+    if path.is_file() {
+        return;
+    }
+    let n = bytes.len() as u64;
+    let prev = KEPT.fetch_add(n, Ordering::Relaxed);
+    if prev.saturating_add(n) > CAP {
+        KEPT.fetch_sub(n, Ordering::Relaxed);
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            KEPT.fetch_sub(n, Ordering::Relaxed);
+            return;
+        }
+    }
+    if std::fs::write(&path, bytes).is_err() {
+        KEPT.fetch_sub(n, Ordering::Relaxed);
     }
 }
 

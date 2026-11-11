@@ -3984,7 +3984,9 @@ impl Engine {
                             fk.epoch,
                             &chunk,
                         )?;
-                        (ObjectName::from_bytes(&crypto::hash(&ct)), fk.epoch)
+                        let object = ObjectName::from_bytes(&crypto::hash(&ct));
+                        crate::p2p::keep_sealed(self.home(), &object, &ct);
+                        (object, fk.epoch)
                     }
                 };
                 // A backup's blocks are kept on storages only: no device
@@ -4718,6 +4720,7 @@ impl Engine {
                         &chunk,
                     )?;
                     let object = ObjectName::from_bytes(&crypto::hash(&ct));
+                    crate::p2p::keep_sealed(self.home(), &object, &ct);
                     let targets: Vec<String> = targets
                         .into_iter()
                         .filter(|t| gate.take(t, ct.len() as u64))
@@ -5893,6 +5896,17 @@ impl Engine {
             if let Some(dir) = disk.parent() {
                 local.begin_temp(dir, &tmp);
             }
+            let fresh = std::sync::Arc::clone(&self.fresh);
+            let share_now = self.snapshot_sink.is_some()
+                && self.has_peers()
+                && !self.mount_is_encrypted(&rec.folder_id);
+            let share_keys = std::cell::RefCell::new(if share_now {
+                self.folder_keys(rec).ok()
+            } else {
+                None
+            });
+            let wrote_at = std::cell::Cell::new(0u64);
+            let tmp_share = tmp.clone();
             let mut write_chunk = |cref: &ChunkRef, got: Got| -> Result<()> {
                 let (plain, from_peer, reused) = match got {
                     Got::Local(plain) => (plain, false, true),
@@ -5955,6 +5969,23 @@ impl Engine {
                         size: cref.size,
                     });
                 }
+                if share_now {
+                    let offset = wrote_at.get();
+                    let piece = crate::p2p::Piece {
+                        folder: rec.folder_id.clone(),
+                        chunk: cref.chunk.clone(),
+                        epoch: cref.epoch,
+                        path: tmp_share.clone(),
+                        offset,
+                        len: cref.size,
+                    };
+                    fresh.add(
+                        &rec.folder_id,
+                        share_keys.borrow_mut().take(),
+                        [(cref.object.clone(), piece)],
+                    );
+                }
+                wrote_at.set(wrote_at.get() + cref.size);
                 Ok(())
             };
             // In order: a block fetched ahead is taken (it was paid for); a
@@ -6084,6 +6115,7 @@ impl Engine {
         }
         cleanup.keep();
         local.finish_temp(disk);
+        self.fresh.retarget(&tmp, disk);
         if self.share_read_only(rec) {
             share_roles::set_read_only(disk, true);
         }
@@ -7077,6 +7109,10 @@ impl Engine {
         let mut local_roots: Vec<PathBuf> = Vec::new();
         if self.block_cache_root().is_dir() {
             local_roots.push(self.block_cache_root());
+        }
+        let sealed = self.home().join("p2p-serve");
+        if sealed.is_dir() {
+            local_roots.push(sealed);
         }
         // Blocks the mailbox staged (section 78): the device where their
         // target is docked takes them from here.

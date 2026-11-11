@@ -45,6 +45,39 @@ struct Loc {
     size: u32,
 }
 
+/// inode, length and mtime of a source the last time a block from it
+/// matched its chunk id. A later read skips the hash when these still
+/// match: the scan uses the same three to decide a file has not changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Stamp {
+    ino: u64,
+    len: u64,
+    mtime_sec: u64,
+    mtime_nsec: u32,
+}
+
+fn stamp_of(meta: &fs::Metadata) -> Stamp {
+    #[cfg(unix)]
+    let ino = {
+        use std::os::unix::fs::MetadataExt;
+        meta.ino()
+    };
+    #[cfg(not(unix))]
+    let ino = 0;
+    let (mtime_sec, mtime_nsec) = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| (d.as_secs(), d.subsec_nanos()))
+        .unwrap_or((0, 0));
+    Stamp {
+        ino,
+        len: meta.len(),
+        mtime_sec,
+        mtime_nsec,
+    }
+}
+
 #[derive(Debug)]
 struct Source {
     disk: PathBuf,
@@ -53,6 +86,8 @@ struct Source {
     /// False once the file is known to hold something else (overwritten,
     /// failed its check, a download that did not finish).
     live: bool,
+    /// Set after a block from this file hashed to its chunk id.
+    stamp: Option<Stamp>,
 }
 
 /// What a pull can copy locally, by chunk id (see the module comment).
@@ -151,6 +186,7 @@ impl LocalBlocks {
             disk: disk.to_path_buf(),
             base,
             live: true,
+            stamp: None,
         });
         Some(src)
     }
@@ -199,6 +235,7 @@ impl LocalBlocks {
                 let s = &mut self.sources[src as usize];
                 s.disk = to.to_path_buf();
                 s.base = base;
+                s.stamp = None;
                 if self.open.as_ref().is_some_and(|(o, _)| *o == src) {
                     self.open = None;
                 }
@@ -241,6 +278,15 @@ impl LocalBlocks {
         }
     }
 
+    fn stamp_now(&self, src: u32) -> Option<Stamp> {
+        let disk = &self.sources.get(src as usize)?.disk;
+        Some(stamp_of(&fs::metadata(disk).ok()?))
+    }
+
+    fn still(&self, src: u32, stamp: Stamp) -> bool {
+        self.stamp_now(src) == Some(stamp)
+    }
+
     /// Whether some live source is thought to hold `c` (not checked).
     pub(super) fn has(&self, c: &ChunkRef) -> bool {
         self.blocks.get(&key(&c.chunk)).is_some_and(|l| {
@@ -260,10 +306,15 @@ impl LocalBlocks {
             .copied()
             .collect();
         for loc in cands {
+            let trusted = self.sources[loc.src as usize].stamp;
             match self.read_at(loc) {
                 Some(buf)
-                    if ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &buf)) == c.chunk =>
+                    if trusted.is_some_and(|s| self.still(loc.src, s))
+                        || ChunkId::from_bytes(&crypto::keyed_hash(&fk.hash, &buf)) == c.chunk =>
                 {
+                    if let Some(s) = self.stamp_now(loc.src) {
+                        self.sources[loc.src as usize].stamp = Some(s);
+                    }
                     return Some(buf);
                 }
                 // Unreadable, or not what the index says (changed since):
