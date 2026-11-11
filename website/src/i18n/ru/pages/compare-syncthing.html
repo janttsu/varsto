@@ -37,6 +37,123 @@ description: Ищешь альтернативу Syncthing со сквозным
       </tbody>
     </table>
 
+    <h2 id="measured">Измерено против Syncthing (ноябрь 2026)</h2>
+    <p>10 ноября 2026 оба инструмента передали одни и те же данные между теми же тремя арендованными машинами (писатель в Париже, читатели в Амстердаме и Варшаве, по 2 vCPU), по одному инструменту за раз. У Syncthing 2.1.7 глобальное и локальное обнаружение и реле были выключены, устройства обращались друг к другу напрямую. Varsto был ежедневной сборкой 20261109-c1cf5c2; это те же прогоны Varsto, что уже опубликованы против Resilio Sync, не новое измерение. Медианы двух прогонов. «Байты» — то, что писатель отправил со своего сетевого интерфейса. Каждый завершённый прогон проверен хешем. Метод тот же, что в <a href="{{P}}docs/resilio-vs-varsto.html">измерении Resilio Sync</a>.</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Сценарий</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 маленьких файлов (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
+        <tr><th scope="row">Два файла по 1 GiB</th><td>44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
+        <tr><th scope="row">537 MB текста вроде журнала</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
+        <tr><th scope="row">816 MB, половина копии</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
+        <tr><th scope="row">Два читателя сразу (Амстердам, Варшава)</th><td>Амстердам 70 s, Варшава 118 s; писатель отправил 3 685 MB</td><td class="win">Амстердам 47 s, Варшава 59 s; писатель отправил 2 738 MB</td></tr>
+        <tr><th scope="row">11 MiB изменено внутри 1,13 GiB</th><td>12 s · 26 MB, один прогон</td><td class="win">6 s · 12 MB</td></tr>
+        <tr><th scope="row">Каталог 1,13 GiB переименован</th><td>10 s · 0 MB файловых данных</td><td>файлы совпали, около 0,2 MB, без часов финиша</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % потерь, обрыв 0,3 s каждые 4 s (маленькие файлы)</th><td class="win">432 s · 336 MB</td><td>466 s · 298 MB</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Зелёный — более быстрый столбец. Ничья зелёная в обоих. У переименования нет часов финиша, поэтому ни один столбец не зелёный.</p>
+    <ul>
+      <li><strong>Varsto был быстрее</strong> на 10 000 маленьких файлах, 25 s против 60 s, примерно с тем же числом байтов, и на специально обрываемой линии, 432 s против 466 s.</li>
+      <li><strong>Syncthing был быстрее</strong> на двух больших файлах (41 s против 44 s), на тексте журнала (7 s против 17 s), на копиях (9 s против 13 s), с двумя читателями (Варшава 59 s против 118 s) и на небольшом изменении (6 s против 12 s).</li>
+      <li><strong>Текст журнала — исключение по байтам.</strong> Syncthing отправил 549 MB и закончил за 7 s. Varsto отправил 169 MB и занял 17 s, потому что блок сжимается до шифрования. Syncthing отправляет текст как он хранится.</li>
+      <li><strong>Копии:</strong> Syncthing закончил раньше и отправил 630 MB. Varsto отправил 419 MB, потому что блоки, уже лежащие на диске читателя, используются снова.</li>
+      <li><strong>Два читателя:</strong> читатели Syncthing могут слать друг другу, и писатель отправил 2 738 MB. Писатель Varsto отправил 3 685 MB, и Варшава заняла 118 s.</li>
+      <li><strong>Переименование</strong> закончилось теми же файлами и примерно 0,2 MB в сети в обоих прогонах Syncthing. Часы финиша не записаны: оставшийся пустой каталог держал проверку открытой до предела времени. Переименование Varsto в тот же день заняло 10 s, и читатель не забирал файловые данные.</li>
+    </ul>
+    <p class="note">Один день, один поставщик, два прогона и альфа: это указания, не приговор.</p>
+    <div class="pace-set" data-play="Пуск">
+      <div class="pace-top" role="tablist">
+      <button type="button" role="tab" data-tab="files" aria-selected="true">10 000 маленьких файлов</button>
+      <button type="button" role="tab" data-tab="pair" aria-selected="false">Два файла по 1 GiB</button>
+      <button type="button" role="tab" data-tab="text" aria-selected="false">Текст журнала</button>
+      <button type="button" role="tab" data-tab="dup" aria-selected="false">Половина копии</button>
+      <button type="button" role="tab" data-tab="readers" aria-selected="false">Два читателя сразу</button>
+      <button type="button" role="tab" data-tab="edit" aria-selected="false">Небольшое изменение</button>
+      <button type="button" role="tab" data-tab="rename" aria-selected="false">Каталог переименован</button>
+      <button type="button" role="tab" data-tab="slow" aria-selected="false">Медленная линия с потерями</button>
+      </div>
+    <div class="pace-panel" role="tabpanel" data-panel="files">
+    <figure class="pace" data-play="Пуск" data-pace data-scene="files" data-resilio="60 s · 282 MB" data-varsto="25 s · 292 MB">
+      <h3>10 000 маленьких файлов</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Varsto был быстрее, 25 s против 60 s. Оба передали около 280–290 MB. Десять тысяч маленьких файлов — это всё ещё работа на каждый файл. На этом пути Syncthing занял около минуты, а Varsto 25 s.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="pair" hidden>
+    <figure class="pace" data-play="Пуск" data-pace data-scene="pair" data-resilio="41 s · 2 187 MB" data-varsto="44 s · 2 178 MB">
+      <h3>Два файла по 1 GiB</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Syncthing был быстрее, 41 s против 44 s, и оба инструмента передали около 2,2 GB. Файлы большие, поэтому предел — линия. Часы были близко.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
+    <figure class="pace" data-play="Пуск" data-pace data-scene="text" data-resilio="7 s · 549 MB" data-varsto="17 s · 169 MB">
+      <h3>Текст журнала</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Syncthing был быстрее по часам, 7 s против 17 s, и отправил 549 MB. Varsto отправил 169 MB, потому что сжимает каждый блок до шифрования. Syncthing отправляет текст как он хранится, и на этой линии лишние байты всё равно пришли раньше.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="dup" hidden>
+    <figure class="pace" data-play="Пуск" data-pace data-scene="dup" data-resilio="9 s · 630 MB" data-varsto="13 s · 419 MB">
+      <h3>Половина копии</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Syncthing был быстрее, 9 s против 13 s, но отправил 630 MB против 419 MB у Varsto. Половина файлов — копии. Varsto снова использует блоки, уже лежащие на диске читателя. Syncthing отправил копии ещё раз и всё равно закончил первым.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="readers" hidden>
+    <figure class="pace" data-play="Пуск" data-pace data-scene="readers" data-resilio="59 s · 2 738 MB" data-varsto="118 s · 3 685 MB">
+      <h3>Два читателя сразу</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Более медленный читатель закончил за 59 s у Syncthing и за 118 s у Varsto. Варшава была медленной у обоих. Читатели Syncthing тоже отправляют, поэтому они помогали друг другу, и писатель отправил 2 738 MB. Писатель Varsto отправил 3 685 MB.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
+    <figure class="pace" data-play="Пуск" data-pace data-scene="edit" data-resilio="6 s · 12 MB" data-varsto="12 s · 26 MB, один прогон">
+      <h3>Небольшое изменение</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Syncthing закончил за 6 s и отправил 12 MB. Единственный засчитанный прогон Varsto отправил 26 MB за 12 s. Оба передают только изменившееся. Писатель Varsto ещё синхронизирует каждую свою папку, а читатель заново считает хеш блоков, которые у него уже есть.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
+      <p class="pace-why">Оба прогона Syncthing закончились теми же файлами и примерно 0,2 MB в сети. Часы финиша не записаны: оставшийся пустой каталог держал проверку открытой до предела времени, поэтому ни один столбец не отмечен как более быстрый. Переименование Varsto в тот же день заняло 10 s, и читатель не забирал файловые данные.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
+    <figure class="pace" data-play="Пуск" data-pace data-scene="slow" data-resilio="466 s · 298 MB" data-varsto="432 s · 336 MB">
+      <h3>Медленная линия с потерями</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Линию читателя держали на 100 Mbit/s, с задержкой 40 ms и 1 % случайных потерь, и её специально обрывали на 0,3 секунды каждые 4 секунды. SSH не трогали. Оба инструмента передали около 300 MB. Varsto закончил за 432 s, Syncthing за 466 s. На картинке кубики, которые попадают в разрыв, пока линия оборвана, сжимаются и исчезают, потом начинают снова.</p>
+    </div>
+    </div>
     <h2>Что подойдёт</h2>
     <div class="grid two">
       <div class="card"><h3>Syncthing</h3><p>Выбирай Syncthing, когда каждая копия должна оставаться на машинах, которые ведёшь ты, хотя бы одна из них всегда включена, и тебе нужен зрелый инструмент с открытым исходным кодом совсем без учётных записей.</p></div>

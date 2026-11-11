@@ -26,6 +26,7 @@ description: Varsto gemessen zwischen Paris, Amsterdam und Warschau am 9. und 10
         <li><a href="#bottlenecks">Immer noch langsam, und warum</a></li>
         <li><a href="#when">Wann die Gegenstelle gewinnt und wann der Bucket</a></li>
         <li><a href="#resilio">Gemessen gegen Resilio Sync</a></li>
+        <li><a href="#syncthing">Gemessen gegen Syncthing</a></li>
         <li><a href="#cost">Kosten</a></li>
         <li><a href="#limits">Grenzen dieser Messung</a></li>
       </ol>
@@ -342,7 +343,32 @@ description: Varsto gemessen zwischen Paris, Amsterdam und Warschau am 9. und 10
     </ul>
     <p class="note">Ein Tag, ein Anbieter, zwei Läufe je Fall und eine Alpha: das sind Hinweise, kein Urteil. Der Bericht zählt alles auf, was sie begrenzt.</p>
 
-    <h2 id="cost">Kosten</h2>
+    <h2 id="syncthing">Gemessen gegen Syncthing (November 2026)</h2>
+    <p>Am 10. November 2026 bewegten beide Werkzeuge dieselben Daten zwischen denselben drei gemieteten Rechnern (ein Schreiber in Paris, Leser in Amsterdam und Warschau, je 2 vCPU), ein Werkzeug nach dem anderen. Syncthing 2.1.7 hatte globale und lokale Suche sowie Relais aus, und die Geräte sprachen einander direkt an. Varsto war der Daily-Build 20261109-c1cf5c2; das sind dieselben Varsto-Läufe, die schon gegen Resilio Sync veröffentlicht sind, keine neue Messung. Mediane aus zwei Läufen. „Bytes“ ist, was der Schreiber auf seiner Netzwerkschnittstelle gesendet hat. Jeder fertige Lauf wurde per Hash geprüft. Die Methode ist dieselbe wie bei <a href="{{P}}docs/resilio-vs-varsto.html">der Resilio-Sync-Messung</a>.</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Fall</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 kleine Dateien (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
+        <tr><th scope="row">Zwei Dateien à 1 GiB</th><td>44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
+        <tr><th scope="row">537 MB logähnlicher Text</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
+        <tr><th scope="row">816 MB, zur Hälfte Kopien</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
+        <tr><th scope="row">Zwei Leser gleichzeitig (Amsterdam, Warschau)</th><td>Amsterdam 70 s, Warschau 118 s; der Schreiber sendete 3 685 MB</td><td class="win">Amsterdam 47 s, Warschau 59 s; der Schreiber sendete 2 738 MB</td></tr>
+        <tr><th scope="row">11 MiB geändert innerhalb von 1,13 GiB</th><td>12 s · 26 MB, ein Lauf</td><td class="win">6 s · 12 MB</td></tr>
+        <tr><th scope="row">Ein Verzeichnis von 1,13 GiB umbenannt</th><td>10 s · 0 MB Dateidaten</td><td>Dateien stimmten, etwa 0,2 MB, keine Zieluhr</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % Verlust, Unterbrechung 0,3 s alle 4 s (die kleinen Dateien)</th><td class="win">432 s · 336 MB</td><td>466 s · 298 MB</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grün ist die schnellere Spalte. Ein Gleichstand ist in beiden grün. Die Umbenennung hat keine Zieluhr, also ist keine Spalte grün.</p>
+    <ul>
+      <li><strong>Varsto war schneller</strong> bei 10 000 kleinen Dateien, 25 s gegen 60 s, bei etwa gleich vielen Bytes, und auf der absichtlich unterbrochenen Leitung, 432 s gegen 466 s.</li>
+      <li><strong>Syncthing war schneller</strong> bei den zwei großen Dateien (41 s gegen 44 s), beim Logtext (7 s gegen 17 s), bei Kopien (9 s gegen 13 s), mit zwei Lesern (Warschau 59 s gegen 118 s) und bei der kleinen Änderung (6 s gegen 12 s).</li>
+      <li><strong>Beim Logtext sind die Bytes die Ausnahme.</strong> Syncthing sendete 549 MB und war in 7 s fertig. Varsto sendete 169 MB und brauchte 17 s, weil ein Block vor der Verschlüsselung komprimiert wird. Syncthing sendet den Text, wie er gespeichert ist.</li>
+      <li><strong>Kopien:</strong> Syncthing war früher fertig und sendete 630 MB. Varsto sendete 419 MB, weil Blöcke, die schon auf der Platte des Lesers liegen, wiederverwendet werden.</li>
+      <li><strong>Zwei Leser:</strong> Syncthings Leser können einander senden, und der Schreiber sendete 2 738 MB. Varstos Schreiber sendete 3 685 MB, und Warschau brauchte 118 s.</li>
+      <li><strong>Die Umbenennung</strong> endete in beiden Syncthing-Läufen mit denselben Dateien und etwa 0,2 MB auf der Leitung. Die Zieluhr wurde nicht aufgezeichnet: ein zurückgebliebenes leeres Verzeichnis hielt die Prüfung bis zum Zeitlimit offen. Varstos Umbenennung am selben Tag war 10 s, und der Leser holte keine Dateidaten.</li>
+    </ul>
+    <p class="note">Ein Tag, ein Anbieter, zwei Läufe und eine Alpha: das sind Hinweise, kein Urteil.</p>
+        <h2 id="cost">Kosten</h2>
     <p>Die öffentliche Preisliste von Scaleway (gelesen am 9. Oktober 2026, Region Paris, ohne Steuer): Object Storage Standard Multi-AZ €0.000022 je GB-Stunde (etwa €0.016 je GB-Monat), Anfragen enthalten, eingehender Verkehr enthalten, ausgehender Verkehr die ersten 75 GB im Monat kostenlos und danach €0.01 je GB. Übertragungen zwischen Regionen (Paris – Amsterdam, Paris – Warschau) zählen als ausgehender Verkehr; innerhalb einer Region sind sie kostenlos.</p>
     <p>Ein Leser in Amsterdam, der den Satz von 4 GiB aus dem Bucket in Paris herunterlädt, kostet also etwa €0.04, sobald die kostenlosen 75 GB aufgebraucht sind, und ein Haushalt, der 500 GB im Monat auf Geräte außerhalb der Region des Buckets synchronisiert, zahlt etwa €4 im Monat an ausgehendem Verkehr. Die Gegenstelle bewegt dieselben Bytes über die eigenen Verbindungen der Geräte und fügt der Speicherrechnung nichts hinzu. Andere Anbieter verlangen mehr für ausgehenden Verkehr oder je Anfrage; die Methode oben gilt für sie unverändert. Die Maschinen für diese Messung (drei Instanzen zu €0.147 je Stunde, etwa siebeneinhalb Stunden über die beiden Tage) kosteten etwa €3.50.</p>
 

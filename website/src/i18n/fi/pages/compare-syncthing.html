@@ -37,6 +37,123 @@ description: Etsitkö Syncthing-vaihtoehtoa, joka salaa päästä päähän ja t
       </tbody>
     </table>
 
+    <h2 id="measured">Mitattu Syncthingiä vastaan (marraskuu 2026)</h2>
+    <p>10. marraskuuta 2026 molemmat työkalut siirsivät saman datan samojen kolmen vuokratun koneen välillä (kirjoittaja Pariisissa, lukijat Amsterdamissa ja Varsovassa, 2 vCPU kukin), yksi työkalu kerrallaan. Syncthing 2.1.7:ssä yleinen ja paikallinen etsintä sekä välittimet olivat pois, ja laitteet osoittivat toisensa suoraan. Varsto oli daily-kooste 20261109-c1cf5c2; nämä ovat samat Varsto-ajot, jotka on jo julkaistu Resilio Synciä vastaan, ei uusi mittaus. Kahden ajon mediaanit. "Tavut" ovat se, mitä kirjoittaja lähetti verkkorajapinnastaan. Jokainen valmis ajo tarkistettiin tiivisteellä. Menetelmä on sama kuin <a href="{{P}}docs/resilio-vs-varsto.html">Resilio Sync -mittauksessa</a>.</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Tilanne</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
+        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td>44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
+        <tr><th scope="row">537 MB lokimaista tekstiä</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
+        <tr><th scope="row">816 MB, josta puolet kopioita</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
+        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>Amsterdam 70 s, Varsova 118 s; kirjoittaja lähetti 3 685 MB</td><td class="win">Amsterdam 47 s, Varsova 59 s; kirjoittaja lähetti 2 738 MB</td></tr>
+        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>12 s · 26 MB, yksi ajo</td><td class="win">6 s · 12 MB</td></tr>
+        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td>10 s · 0 MB tiedostodataa</td><td>tiedostot täsmäsivät, noin 0,2 MB, ei valmistumiskelloa</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">432 s · 336 MB</td><td>466 s · 298 MB</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä on nopeampi sarake. Tasapeli on vihreä molemmissa. Uudelleennimeämisellä ei ole valmistumiskelloa, joten kumpikaan sarake ei ole vihreä.</p>
+    <ul>
+      <li><strong>Varsto oli nopeampi</strong> 10 000 pienessä tiedostossa, 25 s vastaan 60 s, suunnilleen samoilla tavuilla, ja tahallaan katkotulla yhteydellä, 432 s vastaan 466 s.</li>
+      <li><strong>Syncthing oli nopeampi</strong> kahdessa isossa tiedostossa (41 s vastaan 44 s), lokitekstissä (7 s vastaan 17 s), kopioissa (9 s vastaan 13 s), kahdella lukijalla (Varsova 59 s vastaan 118 s) ja pienessä muutoksessa (6 s vastaan 12 s).</li>
+      <li><strong>Lokiteksti on tavuissa poikkeus.</strong> Syncthing lähetti 549 MB ja valmistui 7 sekunnissa. Varsto lähetti 169 MB ja vei 17 s, koska lohko pakataan ennen salausta. Syncthing lähettää tekstin sellaisena kuin se on tallennettu.</li>
+      <li><strong>Kopiot:</strong> Syncthing valmistui ensin ja lähetti 630 MB. Varsto lähetti 419 MB, koska lukijan levyllä jo olevat lohkot käytetään uudelleen.</li>
+      <li><strong>Kaksi lukijaa:</strong> Syncthingin lukijat voivat lähettää toisilleen, ja kirjoittaja lähetti 2 738 MB. Varston kirjoittaja lähetti 3 685 MB, ja Varsova vei 118 s.</li>
+      <li><strong>Uudelleennimeäminen</strong> päättyi samoihin tiedostoihin ja noin 0,2 MB:iin verkossa molemmissa Syncthing-ajoissa. Valmistumiskelloa ei kirjattu: jäljelle jäänyt tyhjä hakemisto piti tarkistuksen auki aikarajaan asti. Varston uudelleennimeäminen samana päivänä oli 10 s, eikä lukija hakenut tiedostodataa.</li>
+    </ul>
+    <p class="note">Yksi päivä, yksi palveluntarjoaja, kaksi ajoa ja alfa: nämä ovat viitteitä, eivät tuomio.</p>
+    <div class="pace-set" data-play="Toista">
+      <div class="pace-top" role="tablist">
+      <button type="button" role="tab" data-tab="files" aria-selected="true">10 000 pientä tiedostoa</button>
+      <button type="button" role="tab" data-tab="pair" aria-selected="false">Kaksi 1 GiB:n tiedostoa</button>
+      <button type="button" role="tab" data-tab="text" aria-selected="false">Lokimainen teksti</button>
+      <button type="button" role="tab" data-tab="dup" aria-selected="false">Puolet kopioita</button>
+      <button type="button" role="tab" data-tab="readers" aria-selected="false">Kaksi lukijaa yhtä aikaa</button>
+      <button type="button" role="tab" data-tab="edit" aria-selected="false">Pieni muutos</button>
+      <button type="button" role="tab" data-tab="rename" aria-selected="false">Hakemisto nimetty uudelleen</button>
+      <button type="button" role="tab" data-tab="slow" aria-selected="false">Hidas, hävikkinen yhteys</button>
+      </div>
+    <div class="pace-panel" role="tabpanel" data-panel="files">
+    <figure class="pace" data-play="Toista" data-pace data-scene="files" data-resilio="60 s · 282 MB" data-varsto="25 s · 292 MB">
+      <h3>10 000 pientä tiedostoa</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Varsto oli nopeampi, 25 s vastaan 60 s. Molemmat siirsivät noin 280–290 MB. Kymmenentuhatta pientä tiedostoa on yhä työtä tiedostoa kohti. Tällä polulla se vei Syncthingiltä noin minuutin ja Varstolta 25 s.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="pair" hidden>
+    <figure class="pace" data-play="Toista" data-pace data-scene="pair" data-resilio="41 s · 2 187 MB" data-varsto="44 s · 2 178 MB">
+      <h3>Kaksi 1 GiB:n tiedostoa</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Syncthing oli nopeampi, 41 s vastaan 44 s, ja molemmat siirsivät noin 2,2 GB. Tiedostot ovat isoja, joten yhteys on raja. Kellot olivat lähellä toisiaan.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
+    <figure class="pace" data-play="Toista" data-pace data-scene="text" data-resilio="7 s · 549 MB" data-varsto="17 s · 169 MB">
+      <h3>Lokimainen teksti</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Syncthing oli kellossa nopeampi, 7 s vastaan 17 s, ja se lähetti 549 MB. Varsto lähetti 169 MB, koska se pakkaa jokaisen lohkon ennen salausta. Syncthing lähettää tekstin sellaisena kuin se on tallennettu, ja tällä yhteydellä ylimääräiset tavut ehtivät silti ensin.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="dup" hidden>
+    <figure class="pace" data-play="Toista" data-pace data-scene="dup" data-resilio="9 s · 630 MB" data-varsto="13 s · 419 MB">
+      <h3>Puolet kopioita</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Syncthing oli nopeampi, 9 s vastaan 13 s, mutta se lähetti 630 MB Varston 419 MB:a vastaan. Puolet tiedostoista on kopioita. Varsto käyttää uudelleen lukijan levyllä jo olevat lohkot. Syncthing lähetti kopiot uudestaan ja valmistui silti ensin.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="readers" hidden>
+    <figure class="pace" data-play="Toista" data-pace data-scene="readers" data-resilio="59 s · 2 738 MB" data-varsto="118 s · 3 685 MB">
+      <h3>Kaksi lukijaa yhtä aikaa</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Hitaampi lukija valmistui Syncthingillä 59 sekunnissa ja Varstolla 118 sekunnissa. Varsova oli molemmilla hitaampi. Syncthingin lukijat myös lähettävät, joten ne auttoivat toisiaan ja kirjoittaja lähetti 2 738 MB. Varston kirjoittaja lähetti 3 685 MB.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
+    <figure class="pace" data-play="Toista" data-pace data-scene="edit" data-resilio="6 s · 12 MB" data-varsto="12 s · 26 MB, yksi ajo">
+      <h3>Pieni muutos</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Syncthing valmistui 6 sekunnissa ja lähetti 12 MB. Varston yksi laskettu ajo lähetti 26 MB 12 sekunnissa. Molemmat siirtävät vain muuttuneen. Varston kirjoittaja synkkaa myös kaikki kansionsa, ja lukija tiivistää uudelleen lohkot, jotka sillä jo on.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
+      <p class="pace-why">Molemmat Syncthing-ajot päättyivät samoihin tiedostoihin ja noin 0,2 MB:iin verkossa. Valmistumiskelloa ei kirjattu: jäljelle jäänyt tyhjä hakemisto piti tarkistuksen auki aikarajaan asti, joten kumpaakaan saraketta ei ole merkitty nopeammaksi. Varston uudelleennimeäminen samana päivänä oli 10 s, eikä lukija hakenut tiedostodataa.</p>
+    </div>
+    <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
+    <figure class="pace" data-play="Toista" data-pace data-scene="slow" data-resilio="466 s · 298 MB" data-varsto="432 s · 336 MB">
+      <h3>Hidas, hävikkinen yhteys</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>0 s · 0 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
+      <p class="pace-why">Lukijan yhteys pidettiin 100 Mbit/s:ssa, viiveellä 40 ms ja 1 %:n satunnaisella hävikillä, ja se katkaistiin tahallaan 0,3 sekunniksi joka neljäs sekunti. SSH jätettiin rauhaan. Molemmat siirsivät noin 300 MB. Varsto valmistui 432 sekunnissa ja Syncthing 466 sekunnissa. Kuvassa kuutiot, jotka osuvat katkoon, kutistuvat ja katoavat ja lähtevät sitten uudelleen.</p>
+    </div>
+    </div>
     <h2>Kumpi sopii sinulle</h2>
     <div class="grid two">
       <div class="card"><h3>Syncthing</h3><p>Valitse Syncthing, kun jokaisen kopion pitää pysyä itse ylläpitämilläsi koneilla, ainakin yksi niistä on aina päällä ja haluat kypsän avoimen lähdekoodin työkalun ilman minkäänlaisia tilejä.</p></div>

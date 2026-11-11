@@ -26,6 +26,7 @@ description: Varsto uppmätt mellan Paris, Amsterdam och Warszawa den 9 och 10 o
         <li><a href="#bottlenecks">Fortfarande långsamt, och varför</a></li>
         <li><a href="#when">När peer-to-peer vinner, och när bucketen gör det</a></li>
         <li><a href="#resilio">Mätt mot Resilio Sync</a></li>
+        <li><a href="#syncthing">Mätt mot Syncthing</a></li>
         <li><a href="#cost">Kostnad</a></li>
         <li><a href="#limits">Begränsningar i den här mätningen</a></li>
       </ol>
@@ -342,7 +343,32 @@ description: Varsto uppmätt mellan Paris, Amsterdam och Warszawa den 9 och 10 o
     </ul>
     <p class="note">En dag, en leverantör, två körningar per fall och en alfa: det här är indikationer, inte en dom. Rapporten räknar upp allt som begränsar dem.</p>
 
-    <h2 id="cost">Kostnad</h2>
+    <h2 id="syncthing">Mätt mot Syncthing (november 2026)</h2>
+    <p>Den 10 november 2026 flyttade båda verktygen samma data mellan samma tre hyrda datorer (en skrivare i Paris, läsare i Amsterdam och Warszawa, 2 vCPU var), ett verktyg i taget. Syncthing 2.1.7 hade global och lokal upptäckt och reläer av, och enheterna adresserade varandra direkt. Varsto var daily-bygget 20261109-c1cf5c2; det är samma Varsto-körningar som redan publicerats mot Resilio Sync, inte en ny mätning. Medianer av två körningar. "Byte" är det skrivaren skickade på sitt nätverkskort. Varje avslutad körning kontrollerades med hash. Metoden är densamma som i <a href="{{P}}docs/resilio-vs-varsto.html">Resilio Sync-mätningen</a>.</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Fall</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 små filer (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
+        <tr><th scope="row">Två filer på 1 GiB</th><td>44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
+        <tr><th scope="row">537 MB loggliknande text</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
+        <tr><th scope="row">816 MB, hälften kopior</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
+        <tr><th scope="row">Två läsare samtidigt (Amsterdam, Warszawa)</th><td>Amsterdam 70 s, Warszawa 118 s; skrivaren skickade 3 685 MB</td><td class="win">Amsterdam 47 s, Warszawa 59 s; skrivaren skickade 2 738 MB</td></tr>
+        <tr><th scope="row">11 MiB ändrades i 1,13 GiB</th><td>12 s · 26 MB, en körning</td><td class="win">6 s · 12 MB</td></tr>
+        <tr><th scope="row">En katalog på 1,13 GiB bytte namn</th><td>10 s · 0 MB fildata</td><td>filerna stämde, omkring 0,2 MB, ingen slutklocka</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % förlust, avbrott 0,3 s var 4:e sekund (småfilerna)</th><td class="win">432 s · 336 MB</td><td>466 s · 298 MB</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Grönt är den snabbare kolumnen. Oavgjort är grönt i båda. Namnbytet har ingen slutklocka, så ingen kolumn är grön.</p>
+    <ul>
+      <li><strong>Varsto var snabbare</strong> på 10 000 små filer, 25 s mot 60 s, med ungefär samma byte, och på länken som bröts med avsikt, 432 s mot 466 s.</li>
+      <li><strong>Syncthing var snabbare</strong> på de två stora filerna (41 s mot 44 s), på loggtext (7 s mot 17 s), på kopior (9 s mot 13 s), med två läsare (Warszawa 59 s mot 118 s) och på den lilla ändringen (6 s mot 12 s).</li>
+      <li><strong>Loggtexten är udda i byte.</strong> Syncthing skickade 549 MB och blev klar på 7 s. Varsto skickade 169 MB och tog 17 s, eftersom blocket komprimeras före krypteringen. Syncthing skickar texten som den är lagrad.</li>
+      <li><strong>Kopior:</strong> Syncthing blev klar först och skickade 630 MB. Varsto skickade 419 MB, eftersom block som redan finns på läsarens disk återanvänds.</li>
+      <li><strong>Två läsare:</strong> Syncthings läsare kan skicka till varandra, och skrivaren skickade 2 738 MB. Varstos skrivare skickade 3 685 MB, och Warszawa tog 118 s.</li>
+      <li><strong>Namnbytet</strong> slutade med samma filer och omkring 0,2 MB på nätet i båda Syncthing-körningarna. Slutklockan antecknades inte: en tom katalog som blev kvar höll kontrollen öppen tills tidsgränsen. Varstos namnbyte samma dag var 10 s, och läsaren hämtade ingen fildata.</li>
+    </ul>
+    <p class="note">En dag, en leverantör, två körningar och en alfa: detta är tecken, inte en dom.</p>
+        <h2 id="cost">Kostnad</h2>
     <p>Scaleways publika prislista (läst den 9 oktober 2026, regionen Paris, exklusive moms): Object Storage Standard Multi-AZ €0.000022 per GB-timme (omkring €0.016 per GB-månad), begäranden ingår, inkommande trafik ingår, utgående trafik gratis för de första 75 GB i månaden och därefter €0.01 per GB. Överföringar mellan regioner (Paris – Amsterdam, Paris – Warszawa) räknas som utgående trafik; inom en region är de gratis.</p>
     <p>En läsare i Amsterdam som laddar ned mängden på 4 GiB från bucketen i Paris kostar alltså omkring €0.04 när de fria 75 GB är förbrukade, och ett hushåll som synkroniserar 500 GB i månaden till enheter utanför bucketens region betalar omkring €4 i månaden för utgående trafik. Peer-to-peer flyttar samma byte över enheternas egna anslutningar och lägger inget till lagringsräkningen. Andra leverantörer tar mer betalt för utgående trafik eller per begäran; metoden ovan gäller för dem oförändrad. Maskinerna för den här mätningen (tre instanser à €0.147 i timmen, omkring sju och en halv timme under de två dagarna) kostade omkring €3.50.</p>
 

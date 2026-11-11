@@ -80,6 +80,7 @@
         <li><a href="#bottlenecks">Toujours lent, et pourquoi</a></li>
         <li><a href="#when">Quand le pair à pair gagne, et quand c’est le bucket</a></li>
         <li><a href="#resilio">Mesuré face à Resilio Sync</a></li>
+        <li><a href="#syncthing">Mesuré face à Syncthing</a></li>
         <li><a href="#cost">Coût</a></li>
         <li><a href="#limits">Limites de ce benchmark</a></li>
       </ol>
@@ -396,7 +397,32 @@
     </ul>
     <p class="note">Un jour, un fournisseur, deux exécutions par cas et une alpha : ce sont des indications, pas un verdict. Le rapport énumère tout ce qui les limite.</p>
 
-    <h2 id="cost">Coût</h2>
+    <h2 id="syncthing">Mesuré face à Syncthing (novembre 2026)</h2>
+    <p>Le 10 novembre 2026 les deux outils ont déplacé les mêmes données entre les trois mêmes machines louées (un émetteur à Paris, des lecteurs à Amsterdam et à Varsovie, 2 vCPU chacun), un outil à la fois. Syncthing 2.1.7 avait la découverte globale, la découverte locale et les relais coupés, et les appareils s'adressaient directement. Varsto était la version daily 20261109-c1cf5c2 ; ce sont les mêmes essais Varsto déjà publiés face à Resilio Sync, pas une nouvelle mesure. Médianes de deux essais. Les « octets » sont ce que l'émetteur a envoyé sur son interface réseau. Chaque essai terminé a été vérifié par hachage. La méthode est la même que <a href="../../docs/resilio-vs-varsto.html">la mesure Resilio Sync</a>.</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Scénario</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td class="win">25 s · 292 Mo</td><td>60 s · 282 Mo</td></tr>
+        <tr><th scope="row">Deux fichiers de 1 Gio</th><td>44 s · 2 178 Mo</td><td class="win">41 s · 2 187 Mo</td></tr>
+        <tr><th scope="row">537 Mo de texte de type journal</th><td>17 s · 169 Mo</td><td class="win">7 s · 549 Mo</td></tr>
+        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td>13 s · 419 Mo</td><td class="win">9 s · 630 Mo</td></tr>
+        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 47 s, Varsovie 59 s ; l’émetteur a envoyé 2 738 Mo</td></tr>
+        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>12 s · 26 Mo, un essai</td><td class="win">6 s · 12 Mo</td></tr>
+        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td>10 s · 0 Mo de données</td><td>fichiers identiques, environ 0,2 Mo, pas d'horloge de fin</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td>466 s · 298 Mo</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque la colonne la plus rapide. Une égalité est verte dans les deux. Le renommage n'a pas d'horloge de fin, donc aucune colonne n'est verte.</p>
+    <ul>
+      <li><strong>Varsto a été plus rapide</strong> sur les 10 000 petits fichiers, 25 s contre 60 s, avec à peu près les mêmes octets, et sur le lien coupé exprès, 432 s contre 466 s.</li>
+      <li><strong>Syncthing a été plus rapide</strong> sur les deux gros fichiers (41 s contre 44 s), sur le texte de journal (7 s contre 17 s), sur les copies (9 s contre 13 s), avec deux lecteurs (Varsovie 59 s contre 118 s) et sur le petit changement (6 s contre 12 s).</li>
+      <li><strong>Le texte de journal est l'exception pour les octets.</strong> Syncthing a envoyé 549 Mo et a fini en 7 s. Varsto a envoyé 169 Mo et a pris 17 s, parce qu'un bloc est compressé avant d'être chiffré. Syncthing envoie le texte tel qu'il est stocké.</li>
+      <li><strong>Copies :</strong> Syncthing a fini plus tôt et a envoyé 630 Mo. Varsto a envoyé 419 Mo, parce que les blocs déjà sur le disque du lecteur sont réutilisés.</li>
+      <li><strong>Deux lecteurs :</strong> les lecteurs de Syncthing peuvent s'envoyer des données, et l'émetteur a envoyé 2 738 Mo. L'émetteur de Varsto a envoyé 3 685 Mo, et Varsovie a pris 118 s.</li>
+      <li><strong>Le renommage</strong> s'est terminé avec les mêmes fichiers et environ 0,2 Mo sur le réseau dans les deux essais Syncthing. L'horloge de fin n'a pas été notée : un répertoire vide resté en place a gardé la vérification ouverte jusqu'à la limite de temps. Le renommage de Varsto le même jour a pris 10 s, et le lecteur n'a tiré aucune donnée de fichier.</li>
+    </ul>
+    <p class="note">Un jour, un fournisseur, deux essais et une alpha : ce sont des indications, pas un verdict.</p>
+        <h2 id="cost">Coût</h2>
     <p>Liste de prix publique de Scaleway (consultée le 9 octobre 2026, région de Paris, hors taxes) : Object Storage Standard Multi-AZ 0.000022 € par Go-heure (environ 0.016 € par Go-mois), requêtes comprises, entrée comprise, sortie les 75 premiers Go par mois gratuits puis 0.01 € par Go. Les transferts entre régions (Paris – Amsterdam, Paris – Varsovie) comptent comme sortie ; au sein d’une région, ils sont gratuits.</p>
     <p>Ainsi, un lecteur à Amsterdam qui télécharge le jeu de 4 Gio depuis le bucket de Paris coûte environ 0.04 € une fois les 75 Go gratuits utilisés, et un foyer qui synchronise 500 Go par mois vers des appareils hors de la région du bucket paie environ 4 € par mois de sortie. Le pair à pair déplace les mêmes octets sur les propres connexions des appareils et n’ajoute rien à la facture de stockage. D’autres fournisseurs facturent davantage la sortie ou chaque requête ; la méthode ci-dessus s’y applique sans changement. Les machines de ce benchmark (trois instances à 0.147 € l’heure, environ sept heures et demie sur les deux jours) ont coûté environ 3.50 €.</p>
 
