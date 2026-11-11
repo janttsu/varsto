@@ -344,28 +344,28 @@ description: Varsto medido entre París, Ámsterdam y Varsovia el 9 y el 10 de o
     <p class="note">Un día, un proveedor, dos ejecuciones por caso, y una alfa: son indicios, no un veredicto. El informe enumera todo lo que los limita.</p>
 
     <h2 id="syncthing">Medido frente a Syncthing (noviembre de 2026)</h2>
-    <p>El 10 de noviembre de 2026 las dos herramientas movieron los mismos datos entre las mismas tres máquinas alquiladas (un escritor en París, lectores en Ámsterdam y Varsovia, 2 vCPU cada una), una herramienta cada vez. Syncthing 2.1.7 tenía el descubrimiento global, el local y los relés apagados, y los dispositivos se dirigían entre sí directamente. Varsto era la compilación daily 20261109-c1cf5c2; son las mismas ejecuciones de Varsto ya publicadas frente a Resilio Sync, no una medición nueva. Medianas de dos ejecuciones. Los «bytes» son lo que el escritor envió por su interfaz de red. Cada ejecución terminada se comprobó por hash. El método es el mismo que <a href="{{P}}docs/resilio-vs-varsto.html">la medición de Resilio Sync</a>.</p>
+    <p>Las cifras de Varsto son del 10 de noviembre de 2026. Syncthing se midió de nuevo el 11 de noviembre de 2026. Las dos herramientas movieron los mismos datos entre las mismas tres máquinas alquiladas (un escritor en París, lectores en Ámsterdam y Varsovia, 2 vCPU cada una), una herramienta cada vez. Syncthing 2.1.7 tenía el descubrimiento global, el local y los relés apagados, y los dispositivos se dirigían entre sí directamente. Varsto era la compilación daily 20261109-c1cf5c2; son las mismas ejecuciones de Varsto ya publicadas frente a Resilio Sync, no una medición nueva. Medianas de dos ejecuciones. Los «bytes» son lo que el escritor envió por su interfaz de red. Cada ejecución terminada se comprobó por hash. El método es el mismo que <a href="{{P}}docs/resilio-vs-varsto.html">la medición de Resilio Sync</a>.</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Caso</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 archivos pequeños (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
-        <tr><th scope="row">Dos archivos de 1 GiB</th><td class="win">44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
-        <tr><th scope="row">537 MB de texto de registro</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
-        <tr><th scope="row">816 MB, la mitad copias</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
-        <tr><th scope="row">Dos lectores a la vez (Ámsterdam, Varsovia)</th><td>Ámsterdam 70 s, Varsovia 118 s; el escritor envió 3 685 MB</td><td class="win">Ámsterdam 47 s, Varsovia 59 s; el escritor envió 2 738 MB</td></tr>
-        <tr><th scope="row">11 MiB cambiados dentro de 1,13 GiB</th><td>12 s · 26 MB, una ejecución</td><td class="win">6 s · 12 MB</td></tr>
-        <tr><th scope="row">Un directorio de 1,13 GiB renombrado</th><td>10 s · 0 MB de datos de archivo</td><td>los archivos coincidían, unos 0,2 MB, sin reloj de llegada</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pérdida, corte de 0,3 s cada 4 s (los archivos pequeños)</th><td class="win">432 s · 336 MB</td><td class="win">466 s · 298 MB</td></tr>
+        <tr><th scope="row">10 000 archivos pequeños (313 MB)</th><td class="win">25 s · 292 MB</td><td>61 s · 282 MB</td></tr>
+        <tr><th scope="row">Dos archivos de 1 GiB</th><td class="win">44 s · 2 178 MB</td><td class="win">40 s · 2 177 MB</td></tr>
+        <tr><th scope="row">537 MB de texto de registro</th><td>17 s · 169 MB</td><td class="win">7 s · 547 MB</td></tr>
+        <tr><th scope="row">816 MB, la mitad copias</th><td>13 s · 419 MB</td><td class="win">8 s · 615 MB</td></tr>
+        <tr><th scope="row">Dos lectores a la vez (Ámsterdam, Varsovia)</th><td>Ámsterdam 70 s, Varsovia 118 s; el escritor envió 3 685 MB</td><td class="win">Ámsterdam 49 s, Varsovia 59 s; el escritor envió 2 839 MB</td></tr>
+        <tr><th scope="row">11 MiB cambiados dentro de 1,13 GiB</th><td>12 s · 26 MB, una ejecución</td><td class="win">7 s · 12 MB</td></tr>
+        <tr><th scope="row">Un directorio de 1,13 GiB renombrado</th><td>10 s · 0 MB de datos de archivo</td><td>los archivos coincidían, unos 0,1 MB, sin reloj de llegada</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pérdida, corte de 0,3 s cada 4 s (los archivos pequeños)</th><td class="win">432 s · 336 MB</td><td>489 s · 299 MB</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> El verde marca el tiempo más corto. Si el tiempo más largo es como máximo un 10 % más largo, las dos columnas van en verde. El renombrado no tiene reloj de llegada, así que ninguna columna es verde.</p>
     <ul>
-      <li><strong>Varsto fue más rápido</strong> en los 10 000 archivos pequeños, 25 s frente a 60 s, con unos bytes parecidos.</li>
-      <li><strong>Syncthing fue más rápido</strong> en el texto de registro (7 s frente a 17 s), en las copias (9 s frente a 13 s), con dos lectores (Varsovia 59 s frente a 118 s) y en el cambio pequeño (6 s frente a 12 s).</li>
-      <li><strong>El texto de registro es la excepción en bytes.</strong> Syncthing envió 549 MB y terminó en 7 s. Varsto envió 169 MB y tardó 17 s, porque un bloque se comprime antes de cifrarse. Syncthing envía el texto tal como está guardado.</li>
-      <li><strong>Copias:</strong> Syncthing terminó antes y envió 630 MB. Varsto envió 419 MB, porque los bloques que ya están en el disco del lector se reutilizan.</li>
-      <li><strong>Dos lectores:</strong> los lectores de Syncthing pueden enviarse entre sí, y el escritor envió 2 738 MB. El escritor de Varsto envió 3 685 MB, y Varsovia tardó 118 s.</li>
-      <li><strong>El renombrado</strong> acabó con los mismos archivos y unos 0,2 MB en la red en las dos ejecuciones de Syncthing. El reloj de llegada no se anotó: un directorio vacío que quedó atrás mantuvo la comprobación abierta hasta el límite de tiempo. El renombrado de Varsto el mismo día fue 10 s, y el lector no trajo datos de archivo.</li>
+      <li><strong>Varsto fue más rápido</strong> en los 10 000 archivos pequeños, 25 s frente a 61 s, con unos bytes parecidos, y en el enlace cortado, 432 s frente a 489 s.</li>
+      <li><strong>Syncthing fue más rápido</strong> en el texto de registro (7 s frente a 17 s), en las copias (8 s frente a 13 s), con dos lectores (Varsovia 59 s frente a 118 s) y en el cambio pequeño (7 s frente a 12 s).</li>
+      <li><strong>El texto de registro es la excepción en bytes.</strong> Syncthing envió 547 MB y terminó en 7 s. Varsto envió 169 MB y tardó 17 s, porque un bloque se comprime antes de cifrarse. Syncthing envía el texto tal como está guardado.</li>
+      <li><strong>Copias:</strong> Syncthing terminó antes y envió 615 MB. Varsto envió 419 MB, porque los bloques que ya están en el disco del lector se reutilizan.</li>
+      <li><strong>Dos lectores:</strong> los lectores de Syncthing pueden enviarse entre sí, y el escritor envió 2 839 MB. El escritor de Varsto envió 3 685 MB, y Varsovia tardó 118 s.</li>
+      <li><strong>El renombrado</strong> acabó con los mismos archivos y unos 0,1 MB en la red en las dos ejecuciones de Syncthing. El reloj de llegada no se anotó: un directorio vacío que quedó atrás mantuvo la comprobación abierta hasta el límite de tiempo. El renombrado de Varsto el mismo día fue 10 s, y el lector no trajo datos de archivo.</li>
     </ul>
     <p class="note">Un día, un proveedor, dos ejecuciones y una alfa: son indicios, no un veredicto.</p>
         <h2 id="cost">Coste</h2>

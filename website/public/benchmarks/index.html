@@ -398,28 +398,28 @@
     <p class="note">One day, one provider, two runs per case, and an alpha: these are indications, not a verdict. The report lists everything that limits them.</p>
 
     <h2 id="syncthing">Measured against Syncthing (November 2026)</h2>
-    <p>On 10 November 2026 both tools moved the same data between the same three rented machines (a writer in Paris, readers in Amsterdam and Warsaw, 2 vCPU each), one tool at a time. Syncthing 2.1.7 had global discovery, local discovery and relays off, and the devices addressed each other directly. Varsto was the daily build 20261109-c1cf5c2; these are the same Varsto runs already published against Resilio Sync, not a new measurement. Medians of two runs. "Bytes" is what the writer sent on its network interface. Every finished run was checked by hash. The method is the same as <a href="../docs/resilio-vs-varsto.html">the Resilio Sync measurement</a>.</p>
+    <p>Varsto's figures are from 10 November 2026. Syncthing was measured again on 11 November 2026. Both tools moved the same data between the same three rented machines (a writer in Paris, readers in Amsterdam and Warsaw, 2 vCPU each), one tool at a time. Syncthing 2.1.7 had global discovery, local discovery and relays off, and the devices addressed each other directly. Varsto was the daily build 20261109-c1cf5c2; these are the same Varsto runs already published against Resilio Sync, not a new measurement. Medians of two runs. "Bytes" is what the writer sent on its network interface. Every finished run was checked by hash. The method is the same as <a href="../docs/resilio-vs-varsto.html">the Resilio Sync measurement</a>.</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Scenario</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 small files (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
-        <tr><th scope="row">Two 1 GiB files</th><td class="win">44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
-        <tr><th scope="row">537 MB of log-like text</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
-        <tr><th scope="row">816 MB, half of it copies</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
-        <tr><th scope="row">Two readers at once (Amsterdam, Warsaw)</th><td>Amsterdam 70 s, Warsaw 118 s; writer sent 3 685 MB</td><td class="win">Amsterdam 47 s, Warsaw 59 s; writer sent 2 738 MB</td></tr>
-        <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td>12 s · 26 MB, one run</td><td class="win">6 s · 12 MB</td></tr>
-        <tr><th scope="row">A 1.13 GiB directory renamed</th><td>10 s · 0 MB of file data</td><td>files matched, about 0.2 MB, no finish clock</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1% loss, cut 0.3 s every 4 s (the small files)</th><td class="win">432 s · 336 MB</td><td class="win">466 s · 298 MB</td></tr>
+        <tr><th scope="row">10 000 small files (313 MB)</th><td class="win">25 s · 292 MB</td><td>61 s · 282 MB</td></tr>
+        <tr><th scope="row">Two 1 GiB files</th><td class="win">44 s · 2 178 MB</td><td class="win">40 s · 2 177 MB</td></tr>
+        <tr><th scope="row">537 MB of log-like text</th><td>17 s · 169 MB</td><td class="win">7 s · 547 MB</td></tr>
+        <tr><th scope="row">816 MB, half of it copies</th><td>13 s · 419 MB</td><td class="win">8 s · 615 MB</td></tr>
+        <tr><th scope="row">Two readers at once (Amsterdam, Warsaw)</th><td>Amsterdam 70 s, Warsaw 118 s; writer sent 3 685 MB</td><td class="win">Amsterdam 49 s, Warsaw 59 s; writer sent 2 839 MB</td></tr>
+        <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td>12 s · 26 MB, one run</td><td class="win">7 s · 12 MB</td></tr>
+        <tr><th scope="row">A 1.13 GiB directory renamed</th><td>10 s · 0 MB of file data</td><td>files matched, about 0.1 MB, no finish clock</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1% loss, cut 0.3 s every 4 s (the small files)</th><td class="win">432 s · 336 MB</td><td>489 s · 299 MB</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green marks the faster finish. If the slower time is within 10% of the faster one, both columns are green. The rename has no finish clock, so neither column is green.</p>
     <ul>
-      <li><strong>Varsto was faster</strong> on the 10 000 small files, 25 s against 60 s, with about the same bytes.</li>
-      <li><strong>Syncthing was faster</strong> on log text (7 s against 17 s), on copies (9 s against 13 s), with two readers (Warsaw 59 s against 118 s) and on the small change (6 s against 12 s).</li>
-      <li><strong>Log text is the odd one on bytes.</strong> Syncthing sent 549 MB and finished in 7 s. Varsto sent 169 MB and took 17 s, because a block is compressed before it is encrypted. Syncthing sends the text as stored.</li>
-      <li><strong>Copies:</strong> Syncthing finished sooner and sent 630 MB. Varsto sent 419 MB, because blocks already on the reader's disk are reused.</li>
-      <li><strong>Two readers:</strong> Syncthing's readers can send to each other, and the writer sent 2 738 MB. Varsto's writer sent 3 685 MB, and Warsaw took 118 s.</li>
-      <li><strong>The rename</strong> ended with the same files and about 0.2 MB on the wire in both Syncthing runs. The finish clock was not recorded: an empty directory left behind kept the check open until the time limit. Varsto's rename the same day was 10 s, and the reader pulled no file data.</li>
+      <li><strong>Varsto was faster</strong> on the 10 000 small files, 25 s against 61 s, with about the same bytes, and on the cut link, 432 s against 489 s.</li>
+      <li><strong>Syncthing was faster</strong> on log text (7 s against 17 s), on copies (8 s against 13 s), with two readers (Warsaw 59 s against 118 s) and on the small change (7 s against 12 s).</li>
+      <li><strong>Log text is the odd one on bytes.</strong> Syncthing sent 547 MB and finished in 7 s. Varsto sent 169 MB and took 17 s, because a block is compressed before it is encrypted. Syncthing sends the text as stored.</li>
+      <li><strong>Copies:</strong> Syncthing finished sooner and sent 615 MB. Varsto sent 419 MB, because blocks already on the reader's disk are reused.</li>
+      <li><strong>Two readers:</strong> Syncthing's readers can send to each other, and the writer sent 2 839 MB. Varsto's writer sent 3 685 MB, and Warsaw took 118 s.</li>
+      <li><strong>The rename</strong> ended with the same files and about 0.1 MB on the wire in both Syncthing runs. The finish clock was not recorded: an empty directory left behind kept the check open until the time limit. Varsto's rename the same day was 10 s, and the reader pulled no file data.</li>
     </ul>
     <p class="note">One day, one provider, two runs per case, and an alpha: these are indications, not a verdict.</p>
         <h2 id="cost">Cost</h2>

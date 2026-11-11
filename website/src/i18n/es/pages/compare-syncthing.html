@@ -38,28 +38,28 @@ description: ¿Buscas una alternativa a Syncthing con cifrado de extremo a extre
     </table>
 
     <h2 id="measured">Medido frente a Syncthing (noviembre de 2026)</h2>
-    <p>El 10 de noviembre de 2026 las dos herramientas movieron los mismos datos entre las mismas tres máquinas alquiladas (un escritor en París, lectores en Ámsterdam y Varsovia, 2 vCPU cada una), una herramienta cada vez. Syncthing 2.1.7 tenía el descubrimiento global, el local y los relés apagados, y los dispositivos se dirigían entre sí directamente. Varsto era la compilación daily 20261109-c1cf5c2; son las mismas ejecuciones de Varsto ya publicadas frente a Resilio Sync, no una medición nueva. Medianas de dos ejecuciones. Los «bytes» son lo que el escritor envió por su interfaz de red. Cada ejecución terminada se comprobó por hash. El método es el mismo que <a href="{{P}}docs/resilio-vs-varsto.html">la medición de Resilio Sync</a>.</p>
+    <p>Las cifras de Varsto son del 10 de noviembre de 2026. Syncthing se midió de nuevo el 11 de noviembre de 2026. Las dos herramientas movieron los mismos datos entre las mismas tres máquinas alquiladas (un escritor en París, lectores en Ámsterdam y Varsovia, 2 vCPU cada una), una herramienta cada vez. Syncthing 2.1.7 tenía el descubrimiento global, el local y los relés apagados, y los dispositivos se dirigían entre sí directamente. Varsto era la compilación daily 20261109-c1cf5c2; son las mismas ejecuciones de Varsto ya publicadas frente a Resilio Sync, no una medición nueva. Medianas de dos ejecuciones. Los «bytes» son lo que el escritor envió por su interfaz de red. Cada ejecución terminada se comprobó por hash. El método es el mismo que <a href="{{P}}docs/resilio-vs-varsto.html">la medición de Resilio Sync</a>.</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Caso</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 archivos pequeños (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
-        <tr><th scope="row">Dos archivos de 1 GiB</th><td class="win">44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
-        <tr><th scope="row">537 MB de texto de registro</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
-        <tr><th scope="row">816 MB, la mitad copias</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
-        <tr><th scope="row">Dos lectores a la vez (Ámsterdam, Varsovia)</th><td>Ámsterdam 70 s, Varsovia 118 s; el escritor envió 3 685 MB</td><td class="win">Ámsterdam 47 s, Varsovia 59 s; el escritor envió 2 738 MB</td></tr>
-        <tr><th scope="row">11 MiB cambiados dentro de 1,13 GiB</th><td>12 s · 26 MB, una ejecución</td><td class="win">6 s · 12 MB</td></tr>
-        <tr><th scope="row">Un directorio de 1,13 GiB renombrado</th><td>10 s · 0 MB de datos de archivo</td><td>los archivos coincidían, unos 0,2 MB, sin reloj de llegada</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pérdida, corte de 0,3 s cada 4 s (los archivos pequeños)</th><td class="win">432 s · 336 MB</td><td class="win">466 s · 298 MB</td></tr>
+        <tr><th scope="row">10 000 archivos pequeños (313 MB)</th><td class="win">25 s · 292 MB</td><td>61 s · 282 MB</td></tr>
+        <tr><th scope="row">Dos archivos de 1 GiB</th><td class="win">44 s · 2 178 MB</td><td class="win">40 s · 2 177 MB</td></tr>
+        <tr><th scope="row">537 MB de texto de registro</th><td>17 s · 169 MB</td><td class="win">7 s · 547 MB</td></tr>
+        <tr><th scope="row">816 MB, la mitad copias</th><td>13 s · 419 MB</td><td class="win">8 s · 615 MB</td></tr>
+        <tr><th scope="row">Dos lectores a la vez (Ámsterdam, Varsovia)</th><td>Ámsterdam 70 s, Varsovia 118 s; el escritor envió 3 685 MB</td><td class="win">Ámsterdam 49 s, Varsovia 59 s; el escritor envió 2 839 MB</td></tr>
+        <tr><th scope="row">11 MiB cambiados dentro de 1,13 GiB</th><td>12 s · 26 MB, una ejecución</td><td class="win">7 s · 12 MB</td></tr>
+        <tr><th scope="row">Un directorio de 1,13 GiB renombrado</th><td>10 s · 0 MB de datos de archivo</td><td>los archivos coincidían, unos 0,1 MB, sin reloj de llegada</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pérdida, corte de 0,3 s cada 4 s (los archivos pequeños)</th><td class="win">432 s · 336 MB</td><td>489 s · 299 MB</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> El verde marca el tiempo más corto. Si el tiempo más largo es como máximo un 10 % más largo, las dos columnas van en verde. El renombrado no tiene reloj de llegada, así que ninguna columna es verde.</p>
     <ul>
-      <li><strong>Varsto fue más rápido</strong> en los 10 000 archivos pequeños, 25 s frente a 60 s, con unos bytes parecidos.</li>
-      <li><strong>Syncthing fue más rápido</strong> en el texto de registro (7 s frente a 17 s), en las copias (9 s frente a 13 s), con dos lectores (Varsovia 59 s frente a 118 s) y en el cambio pequeño (6 s frente a 12 s).</li>
-      <li><strong>El texto de registro es la excepción en bytes.</strong> Syncthing envió 549 MB y terminó en 7 s. Varsto envió 169 MB y tardó 17 s, porque un bloque se comprime antes de cifrarse. Syncthing envía el texto tal como está guardado.</li>
-      <li><strong>Copias:</strong> Syncthing terminó antes y envió 630 MB. Varsto envió 419 MB, porque los bloques que ya están en el disco del lector se reutilizan.</li>
-      <li><strong>Dos lectores:</strong> los lectores de Syncthing pueden enviarse entre sí, y el escritor envió 2 738 MB. El escritor de Varsto envió 3 685 MB, y Varsovia tardó 118 s.</li>
-      <li><strong>El renombrado</strong> acabó con los mismos archivos y unos 0,2 MB en la red en las dos ejecuciones de Syncthing. El reloj de llegada no se anotó: un directorio vacío que quedó atrás mantuvo la comprobación abierta hasta el límite de tiempo. El renombrado de Varsto el mismo día fue 10 s, y el lector no trajo datos de archivo.</li>
+      <li><strong>Varsto fue más rápido</strong> en los 10 000 archivos pequeños, 25 s frente a 61 s, con unos bytes parecidos, y en el enlace cortado, 432 s frente a 489 s.</li>
+      <li><strong>Syncthing fue más rápido</strong> en el texto de registro (7 s frente a 17 s), en las copias (8 s frente a 13 s), con dos lectores (Varsovia 59 s frente a 118 s) y en el cambio pequeño (7 s frente a 12 s).</li>
+      <li><strong>El texto de registro es la excepción en bytes.</strong> Syncthing envió 547 MB y terminó en 7 s. Varsto envió 169 MB y tardó 17 s, porque un bloque se comprime antes de cifrarse. Syncthing envía el texto tal como está guardado.</li>
+      <li><strong>Copias:</strong> Syncthing terminó antes y envió 615 MB. Varsto envió 419 MB, porque los bloques que ya están en el disco del lector se reutilizan.</li>
+      <li><strong>Dos lectores:</strong> los lectores de Syncthing pueden enviarse entre sí, y el escritor envió 2 839 MB. El escritor de Varsto envió 3 685 MB, y Varsovia tardó 118 s.</li>
+      <li><strong>El renombrado</strong> acabó con los mismos archivos y unos 0,1 MB en la red en las dos ejecuciones de Syncthing. El reloj de llegada no se anotó: un directorio vacío que quedó atrás mantuvo la comprobación abierta hasta el límite de tiempo. El renombrado de Varsto el mismo día fue 10 s, y el lector no trajo datos de archivo.</li>
     </ul>
     <p class="note">Un día, un proveedor, dos ejecuciones y una alfa: son indicios, no un veredicto.</p>
     <div class="pace-set" data-play="Reproducir">
@@ -74,7 +74,7 @@ description: ¿Buscas una alternativa a Syncthing con cifrado de extremo a extre
       <button type="button" role="tab" data-tab="slow" aria-selected="false">Un enlace lento con pérdidas</button>
       </div>
     <div class="pace-panel" role="tabpanel" data-panel="files">
-    <figure class="pace" data-play="Reproducir" data-pace data-scene="files" data-resilio="60 s · 282 MB" data-varsto="25 s · 292 MB">
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="files" data-resilio="61 s · 282 MB" data-varsto="25 s · 292 MB">
       <h3>10 000 archivos pequeños</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -82,10 +82,10 @@ description: ¿Buscas una alternativa a Syncthing con cifrado de extremo a extre
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto fue más rápido, 25 s frente a 60 s. Los dos movieron unos 280–290 MB. Diez mil archivos pequeños siguen siendo trabajo por archivo. En este camino Syncthing tardó cerca de un minuto y Varsto 25 s.</p>
+      <p class="pace-why">Varsto fue más rápido, 25 s frente a 61 s. Los dos movieron unos 280–290 MB. Diez mil archivos pequeños siguen siendo trabajo por archivo. En este camino Syncthing tardó cerca de un minuto y Varsto 25 s.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="pair" hidden>
-    <figure class="pace" data-play="Reproducir" data-pace data-scene="pair" data-resilio="41 s · 2 187 MB" data-varsto="44 s · 2 178 MB">
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="pair" data-resilio="40 s · 2 177 MB" data-varsto="44 s · 2 178 MB">
       <h3>Dos archivos de 1 GiB</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -93,10 +93,10 @@ description: ¿Buscas una alternativa a Syncthing con cifrado de extremo a extre
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Los tiempos están dentro del 10 % (41 s y 44 s), así que ambos quedan marcados como iguales. Las dos herramientas movieron unos 2,2 GB. Los archivos son grandes, así que el enlace es el límite. Los relojes quedaron cerca.</p>
+      <p class="pace-why">Los tiempos están dentro del 10 % (40 s y 44 s), así que ambos quedan marcados como iguales. Las dos herramientas movieron unos 2,2 GB. Los archivos son grandes, así que el enlace es el límite. Los relojes quedaron cerca.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
-    <figure class="pace" data-play="Reproducir" data-pace data-scene="text" data-resilio="7 s · 549 MB" data-varsto="17 s · 169 MB">
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="text" data-resilio="7 s · 547 MB" data-varsto="17 s · 169 MB">
       <h3>Texto de registro</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -104,10 +104,10 @@ description: ¿Buscas una alternativa a Syncthing con cifrado de extremo a extre
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Syncthing fue más rápido en el reloj, 7 s frente a 17 s, y envió 549 MB. Varsto envió 169 MB, porque comprime cada bloque antes de cifrarlo. Syncthing envía el texto tal como está guardado, y en este enlace los bytes de más llegaron igual antes.</p>
+      <p class="pace-why">Syncthing fue más rápido en el reloj, 7 s frente a 17 s, y envió 547 MB. Varsto envió 169 MB, porque comprime cada bloque antes de cifrarlo. Syncthing envía el texto tal como está guardado, y en este enlace los bytes de más llegaron igual antes.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="dup" hidden>
-    <figure class="pace" data-play="Reproducir" data-pace data-scene="dup" data-resilio="9 s · 630 MB" data-varsto="13 s · 419 MB">
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="dup" data-resilio="8 s · 615 MB" data-varsto="13 s · 419 MB">
       <h3>La mitad copias</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -115,10 +115,10 @@ description: ¿Buscas una alternativa a Syncthing con cifrado de extremo a extre
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Syncthing fue más rápido, 9 s frente a 13 s, pero envió 630 MB frente a 419 MB de Varsto. La mitad de los archivos son copias. Varsto reutiliza los bloques que ya están en el disco del lector. Syncthing volvió a enviar las copias y aun así terminó primero.</p>
+      <p class="pace-why">Syncthing fue más rápido, 8 s frente a 13 s, pero envió 615 MB frente a 419 MB de Varsto. La mitad de los archivos son copias. Varsto reutiliza los bloques que ya están en el disco del lector. Syncthing volvió a enviar las copias y aun así terminó primero.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="readers" hidden>
-    <figure class="pace" data-play="Reproducir" data-pace data-scene="readers" data-resilio="59 s · 2 738 MB" data-varsto="118 s · 3 685 MB">
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="readers" data-resilio="59 s · 2 839 MB" data-varsto="118 s · 3 685 MB">
       <h3>Dos lectores a la vez</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -126,10 +126,10 @@ description: ¿Buscas una alternativa a Syncthing con cifrado de extremo a extre
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">El lector más lento terminó en 59 s con Syncthing y en 118 s con Varsto. Varsovia fue el lento en los dos. Los lectores de Syncthing también envían, así que se ayudaron y el escritor envió 2 738 MB. El escritor de Varsto envió 3 685 MB.</p>
+      <p class="pace-why">El lector más lento terminó en 59 s con Syncthing y en 118 s con Varsto. Varsovia fue el lento en los dos. Los lectores de Syncthing también envían, así que se ayudaron y el escritor envió 2 839 MB. El escritor de Varsto envió 3 685 MB.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Reproducir" data-pace data-scene="edit" data-resilio="6 s · 12 MB" data-varsto="12 s · 26 MB, una ejecución">
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="edit" data-resilio="7 s · 12 MB" data-varsto="12 s · 26 MB, una ejecución">
       <h3>Un cambio pequeño</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -140,18 +140,18 @@ description: ¿Buscas una alternativa a Syncthing con cifrado de extremo a extre
       <p class="pace-why">Syncthing terminó en 6 s y envió 12 MB. La única ejecución contada de Varsto envió 26 MB en 12 s. Los dos mueven solo lo que cambió. El escritor de Varsto también sincroniza cada carpeta que tiene, y el lector vuelve a hacer el hash de los bloques que ya tiene.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Reproducir" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0,2 MB" data-varsto="10 s · 0 MB de datos de archivo">
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0,1 MB" data-varsto="10 s · 0 MB de datos de archivo">
       <h3>Un directorio renombrado</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
-        <p data-side="resilio"><span>Syncthing</span> <b>— · 0,2 MB</b></p>
+        <p data-side="resilio"><span>Syncthing</span> <b>— · 0,1 MB</b></p>
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Las dos ejecuciones de Syncthing acabaron con los mismos archivos y unos 0,2 MB en la red. El reloj de llegada no se anotó: un directorio vacío que quedó atrás mantuvo la comprobación abierta hasta el límite de tiempo, así que ninguna columna se marca como más rápida. El renombrado de Varsto el mismo día fue 10 s y el lector no trajo datos de archivo.</p>
+      <p class="pace-why">Las dos ejecuciones de Syncthing acabaron con los mismos archivos y unos 0,1 MB en la red. El reloj de llegada no se anotó: un directorio vacío que quedó atrás mantuvo la comprobación abierta hasta el límite de tiempo, así que ninguna columna se marca como más rápida. El renombrado de Varsto el mismo día fue 10 s y el lector no trajo datos de archivo.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
-    <figure class="pace" data-play="Reproducir" data-pace data-scene="slow" data-resilio="466 s · 298 MB" data-varsto="432 s · 336 MB">
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="slow" data-resilio="489 s · 299 MB" data-varsto="432 s · 336 MB">
       <h3>Un enlace lento con pérdidas</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -159,7 +159,7 @@ description: ¿Buscas una alternativa a Syncthing con cifrado de extremo a extre
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">El enlace del lector se mantuvo a 100 Mbit/s, con 40 ms de retraso y un 1 % de paquetes perdidos al azar, y se cortó a propósito 0,3 segundos cada 4 segundos. SSH se dejó en paz. Las dos herramientas movieron unos 300 MB. Los tiempos están dentro del 10 % (432 s y 466 s), así que ambos quedan marcados como iguales. En la imagen los cubos que llegan al corte mientras el enlace está cortado se encogen y desaparecen, y luego empiezan otra vez.</p>
+      <p class="pace-why">El enlace del lector se mantuvo a 100 Mbit/s, con 40 ms de retraso y un 1 % de paquetes perdidos al azar, y se cortó a propósito 0,3 segundos cada 4 segundos. SSH se dejó en paz. Las dos herramientas movieron unos 300 MB. Varsto fue más rápido, 432 s frente a 489 s, lo que supera el 10 %. En la imagen los cubos que llegan al corte mientras el enlace está cortado se encogen y desaparecen, y luego empiezan otra vez.</p>
     </div>
     </div>
     <h2>Cuál te encaja</h2>

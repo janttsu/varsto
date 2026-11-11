@@ -38,28 +38,28 @@ description: Vous cherchez une alternative à Syncthing avec chiffrement de bout
     </table>
 
     <h2 id="measured">Mesuré face à Syncthing (novembre 2026)</h2>
-    <p>Le 10 novembre 2026 les deux outils ont déplacé les mêmes données entre les trois mêmes machines louées (un émetteur à Paris, des lecteurs à Amsterdam et à Varsovie, 2 vCPU chacun), un outil à la fois. Syncthing 2.1.7 avait la découverte globale, la découverte locale et les relais coupés, et les appareils s'adressaient directement. Varsto était la version daily 20261109-c1cf5c2 ; ce sont les mêmes essais Varsto déjà publiés face à Resilio Sync, pas une nouvelle mesure. Médianes de deux essais. Les « octets » sont ce que l'émetteur a envoyé sur son interface réseau. Chaque essai terminé a été vérifié par hachage. La méthode est la même que <a href="{{P}}docs/resilio-vs-varsto.html">la mesure Resilio Sync</a>.</p>
+    <p>Les chiffres de Varsto datent du 10 novembre 2026. Syncthing a été mesuré de nouveau le 11 novembre 2026. Les deux outils ont déplacé les mêmes données entre les trois mêmes machines louées (un émetteur à Paris, des lecteurs à Amsterdam et à Varsovie, 2 vCPU chacun), un outil à la fois. Syncthing 2.1.7 avait la découverte globale, la découverte locale et les relais coupés, et les appareils s'adressaient directement. Varsto était la version daily 20261109-c1cf5c2 ; ce sont les mêmes essais Varsto déjà publiés face à Resilio Sync, pas une nouvelle mesure. Médianes de deux essais. Les « octets » sont ce que l'émetteur a envoyé sur son interface réseau. Chaque essai terminé a été vérifié par hachage. La méthode est la même que <a href="{{P}}docs/resilio-vs-varsto.html">la mesure Resilio Sync</a>.</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Scénario</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td class="win">25 s · 292 Mo</td><td>60 s · 282 Mo</td></tr>
-        <tr><th scope="row">Deux fichiers de 1 Gio</th><td class="win">44 s · 2 178 Mo</td><td class="win">41 s · 2 187 Mo</td></tr>
-        <tr><th scope="row">537 Mo de texte de type journal</th><td>17 s · 169 Mo</td><td class="win">7 s · 549 Mo</td></tr>
-        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td>13 s · 419 Mo</td><td class="win">9 s · 630 Mo</td></tr>
-        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 47 s, Varsovie 59 s ; l’émetteur a envoyé 2 738 Mo</td></tr>
-        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>12 s · 26 Mo, un essai</td><td class="win">6 s · 12 Mo</td></tr>
-        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td>10 s · 0 Mo de données</td><td>fichiers identiques, environ 0,2 Mo, pas d'horloge de fin</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td class="win">466 s · 298 Mo</td></tr>
+        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td class="win">25 s · 292 Mo</td><td>61 s · 282 Mo</td></tr>
+        <tr><th scope="row">Deux fichiers de 1 Gio</th><td class="win">44 s · 2 178 Mo</td><td class="win">40 s · 2 177 Mo</td></tr>
+        <tr><th scope="row">537 Mo de texte de type journal</th><td>17 s · 169 Mo</td><td class="win">7 s · 547 Mo</td></tr>
+        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td>13 s · 419 Mo</td><td class="win">8 s · 615 Mo</td></tr>
+        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 49 s, Varsovie 59 s ; l’émetteur a envoyé 2 839 Mo</td></tr>
+        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>12 s · 26 Mo, un essai</td><td class="win">7 s · 12 Mo</td></tr>
+        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td>10 s · 0 Mo de données</td><td>fichiers identiques, environ 0,1 Mo, pas d'horloge de fin</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td>489 s · 299 Mo</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque le temps le plus court. Si le temps le plus long dépasse d'au plus 10 %, les deux colonnes sont vertes. Le renommage n'a pas d'horloge de fin, donc aucune colonne n'est verte.</p>
     <ul>
-      <li><strong>Varsto a été plus rapide</strong> sur les 10 000 petits fichiers, 25 s contre 60 s, avec à peu près les mêmes octets.</li>
-      <li><strong>Syncthing a été plus rapide</strong> sur le texte de journal (7 s contre 17 s), sur les copies (9 s contre 13 s), avec deux lecteurs (Varsovie 59 s contre 118 s) et sur le petit changement (6 s contre 12 s).</li>
+      <li><strong>Varsto a été plus rapide</strong> sur les 10 000 petits fichiers, 25 s contre 61 s, avec à peu près les mêmes octets, et sur le lien coupé, 432 s contre 489 s.</li>
+      <li><strong>Syncthing a été plus rapide</strong> sur le texte de journal (7 s contre 17 s), sur les copies (8 s contre 13 s), avec deux lecteurs (Varsovie 59 s contre 118 s) et sur le petit changement (7 s contre 12 s).</li>
       <li><strong>Le texte de journal est l'exception pour les octets.</strong> Syncthing a envoyé 549 Mo et a fini en 7 s. Varsto a envoyé 169 Mo et a pris 17 s, parce qu'un bloc est compressé avant d'être chiffré. Syncthing envoie le texte tel qu'il est stocké.</li>
-      <li><strong>Copies :</strong> Syncthing a fini plus tôt et a envoyé 630 Mo. Varsto a envoyé 419 Mo, parce que les blocs déjà sur le disque du lecteur sont réutilisés.</li>
-      <li><strong>Deux lecteurs :</strong> les lecteurs de Syncthing peuvent s'envoyer des données, et l'émetteur a envoyé 2 738 Mo. L'émetteur de Varsto a envoyé 3 685 Mo, et Varsovie a pris 118 s.</li>
-      <li><strong>Le renommage</strong> s'est terminé avec les mêmes fichiers et environ 0,2 Mo sur le réseau dans les deux essais Syncthing. L'horloge de fin n'a pas été notée : un répertoire vide resté en place a gardé la vérification ouverte jusqu'à la limite de temps. Le renommage de Varsto le même jour a pris 10 s, et le lecteur n'a tiré aucune donnée de fichier.</li>
+      <li><strong>Copies :</strong> Syncthing a fini plus tôt et a envoyé 615 Mo. Varsto a envoyé 419 Mo, parce que les blocs déjà sur le disque du lecteur sont réutilisés.</li>
+      <li><strong>Deux lecteurs :</strong> les lecteurs de Syncthing peuvent s'envoyer des données, et l'émetteur a envoyé 2 839 Mo. L'émetteur de Varsto a envoyé 3 685 Mo, et Varsovie a pris 118 s.</li>
+      <li><strong>Le renommage</strong> s'est terminé avec les mêmes fichiers et environ 0,1 Mo sur le réseau dans les deux essais Syncthing. L'horloge de fin n'a pas été notée : un répertoire vide resté en place a gardé la vérification ouverte jusqu'à la limite de temps. Le renommage de Varsto le même jour a pris 10 s, et le lecteur n'a tiré aucune donnée de fichier.</li>
     </ul>
     <p class="note">Un jour, un fournisseur, deux essais et une alpha : ce sont des indications, pas un verdict.</p>
     <div class="pace-set" data-play="Lecture">
@@ -74,7 +74,7 @@ description: Vous cherchez une alternative à Syncthing avec chiffrement de bout
       <button type="button" role="tab" data-tab="slow" aria-selected="false">Un lien lent avec pertes</button>
       </div>
     <div class="pace-panel" role="tabpanel" data-panel="files">
-    <figure class="pace" data-play="Lecture" data-pace data-scene="files" data-resilio="60 s · 282 Mo" data-varsto="25 s · 292 Mo">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="files" data-resilio="61 s · 282 Mo" data-varsto="25 s · 292 Mo">
       <h3>10 000 petits fichiers</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -82,10 +82,10 @@ description: Vous cherchez une alternative à Syncthing avec chiffrement de bout
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto a été plus rapide, 25 s contre 60 s. Les deux ont déplacé environ 280–290 Mo. Dix mille petits fichiers restent du travail par fichier. Sur ce chemin Syncthing a pris environ une minute et Varsto 25 s.</p>
+      <p class="pace-why">Varsto a été plus rapide, 25 s contre 61 s. Les deux ont déplacé environ 280–290 Mo. Dix mille petits fichiers restent du travail par fichier. Sur ce chemin Syncthing a pris environ une minute et Varsto 25 s.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="pair" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="pair" data-resilio="41 s · 2 187 Mo" data-varsto="44 s · 2 178 Mo">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="pair" data-resilio="40 s · 2 177 Mo" data-varsto="44 s · 2 178 Mo">
       <h3>Deux fichiers de 1 Gio</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -93,10 +93,10 @@ description: Vous cherchez une alternative à Syncthing avec chiffrement de bout
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
       </div>
     </figure>
-      <p class="pace-why">Les temps sont à moins de 10 % (41 s et 44 s), donc les deux sont marqués à égalité. Les deux outils ont déplacé environ 2,2 Go. Les fichiers sont gros, donc le lien est la limite. Les deux horloges étaient proches.</p>
+      <p class="pace-why">Les temps sont à moins de 10 % (40 s et 44 s), donc les deux sont marqués à égalité. Les deux outils ont déplacé environ 2,2 Go. Les fichiers sont gros, donc le lien est la limite. Les deux horloges étaient proches.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="text" data-resilio="7 s · 549 Mo" data-varsto="17 s · 169 Mo">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="text" data-resilio="7 s · 547 Mo" data-varsto="17 s · 169 Mo">
       <h3>Texte de journal</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -107,7 +107,7 @@ description: Vous cherchez une alternative à Syncthing avec chiffrement de bout
       <p class="pace-why">Syncthing a été plus rapide à l'horloge, 7 s contre 17 s, et il a envoyé 549 Mo. Varsto a envoyé 169 Mo, parce qu'il compresse chaque bloc avant de le chiffrer. Syncthing envoie le texte tel qu'il est stocké, et sur ce lien les octets en plus sont quand même arrivés plus tôt.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="dup" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="dup" data-resilio="9 s · 630 Mo" data-varsto="13 s · 419 Mo">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="dup" data-resilio="8 s · 615 Mo" data-varsto="13 s · 419 Mo">
       <h3>Moitié de copies</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -115,10 +115,10 @@ description: Vous cherchez une alternative à Syncthing avec chiffrement de bout
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
       </div>
     </figure>
-      <p class="pace-why">Syncthing a été plus rapide, 9 s contre 13 s, mais il a envoyé 630 Mo contre 419 Mo pour Varsto. La moitié des fichiers sont des copies. Varsto réutilise les blocs déjà sur le disque du lecteur. Syncthing a renvoyé les copies et a quand même fini le premier.</p>
+      <p class="pace-why">Syncthing a été plus rapide, 8 s contre 13 s, mais il a envoyé 615 Mo contre 419 Mo pour Varsto. La moitié des fichiers sont des copies. Varsto réutilise les blocs déjà sur le disque du lecteur. Syncthing a renvoyé les copies et a quand même fini le premier.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="readers" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="readers" data-resilio="59 s · 2 738 Mo" data-varsto="118 s · 3 685 Mo">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="readers" data-resilio="59 s · 2 839 Mo" data-varsto="118 s · 3 685 Mo">
       <h3>Deux lecteurs à la fois</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -126,10 +126,10 @@ description: Vous cherchez une alternative à Syncthing avec chiffrement de bout
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
       </div>
     </figure>
-      <p class="pace-why">Le lecteur le plus lent a fini en 59 s avec Syncthing et en 118 s avec Varsto. Varsovie était le lent pour les deux. Les lecteurs de Syncthing envoient aussi, donc ils se sont aidés et l'émetteur a envoyé 2 738 Mo. L'émetteur de Varsto a envoyé 3 685 Mo.</p>
+      <p class="pace-why">Le lecteur le plus lent a fini en 59 s avec Syncthing et en 118 s avec Varsto. Varsovie était le lent pour les deux. Les lecteurs de Syncthing envoient aussi, donc ils se sont aidés et l'émetteur a envoyé 2 839 Mo. L'émetteur de Varsto a envoyé 3 685 Mo.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="edit" data-resilio="6 s · 12 Mo" data-varsto="12 s · 26 Mo, un essai">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="edit" data-resilio="7 s · 12 Mo" data-varsto="12 s · 26 Mo, un essai">
       <h3>Un petit changement</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -140,18 +140,18 @@ description: Vous cherchez une alternative à Syncthing avec chiffrement de bout
       <p class="pace-why">Syncthing a fini en 6 s et a envoyé 12 Mo. Le seul essai compté de Varsto a envoyé 26 Mo en 12 s. Les deux ne déplacent que ce qui a changé. L'émetteur de Varsto synchronise aussi chaque dossier qu'il tient, et le lecteur rehache les blocs qu'il a déjà.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0,2 Mo" data-varsto="10 s · 0 Mo de données">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0,1 Mo" data-varsto="10 s · 0 Mo de données">
       <h3>Un répertoire renommé</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
-        <p data-side="resilio"><span>Syncthing</span> <b>— · 0,2 Mo</b></p>
+        <p data-side="resilio"><span>Syncthing</span> <b>— · 0,1 Mo</b></p>
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Les deux essais Syncthing se sont terminés avec les mêmes fichiers et environ 0,2 Mo sur le réseau. L'horloge de fin n'a pas été notée : un répertoire vide resté en place a gardé la vérification ouverte jusqu'à la limite de temps, donc aucune colonne n'est marquée plus rapide. Le renommage de Varsto le même jour a pris 10 s et le lecteur n'a tiré aucune donnée de fichier.</p>
+      <p class="pace-why">Les deux essais Syncthing se sont terminés avec les mêmes fichiers et environ 0,1 Mo sur le réseau. L'horloge de fin n'a pas été notée : un répertoire vide resté en place a gardé la vérification ouverte jusqu'à la limite de temps, donc aucune colonne n'est marquée plus rapide. Le renommage de Varsto le même jour a pris 10 s et le lecteur n'a tiré aucune donnée de fichier.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
-    <figure class="pace" data-play="Lecture" data-pace data-scene="slow" data-resilio="466 s · 298 Mo" data-varsto="432 s · 336 Mo">
+    <figure class="pace" data-play="Lecture" data-pace data-scene="slow" data-resilio="489 s · 299 Mo" data-varsto="432 s · 336 Mo">
       <h3>Un lien lent avec pertes</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -159,7 +159,7 @@ description: Vous cherchez une alternative à Syncthing avec chiffrement de bout
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 Mo</b></p>
       </div>
     </figure>
-      <p class="pace-why">Le lien du lecteur était tenu à 100 Mbit/s, avec 40 ms de délai et 1 % de paquets perdus au hasard, et il était coupé exprès pendant 0,3 seconde toutes les 4 secondes. SSH a été laissé tranquille. Les deux outils ont déplacé environ 300 Mo. Les temps sont à moins de 10 % (432 s et 466 s), donc les deux sont marqués à égalité. Dans l'image les cubes qui atteignent la coupure pendant qu'elle dure rétrécissent et disparaissent, puis repartent.</p>
+      <p class="pace-why">Le lien du lecteur était tenu à 100 Mbit/s, avec 40 ms de délai et 1 % de paquets perdus au hasard, et il était coupé exprès pendant 0,3 seconde toutes les 4 secondes. SSH a été laissé tranquille. Les deux outils ont déplacé environ 300 Mo. Varsto a été plus rapide, 432 s contre 489 s, ce qui dépasse 10 %. Dans l'image les cubes qui atteignent la coupure pendant qu'elle dure rétrécissent et disparaissent, puis repartent.</p>
     </div>
     </div>
     <h2>Lequel choisir</h2>

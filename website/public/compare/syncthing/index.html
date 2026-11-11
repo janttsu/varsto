@@ -92,28 +92,28 @@
     </table>
 
     <h2 id="measured">Measured against Syncthing (November 2026)</h2>
-    <p>On 10 November 2026 both tools moved the same data between the same three rented machines (a writer in Paris, readers in Amsterdam and Warsaw, 2 vCPU each), one tool at a time. Syncthing 2.1.7 had global discovery, local discovery and relays off, and the devices addressed each other directly. Varsto was the daily build 20261109-c1cf5c2; these are the same Varsto runs already published against Resilio Sync, not a new measurement. Medians of two runs. "Bytes" is what the writer sent on its network interface. Every finished run was checked by hash. The method is the same as <a href="../../docs/resilio-vs-varsto.html">the Resilio Sync measurement</a>.</p>
+    <p>Varsto's figures are from 10 November 2026. Syncthing was measured again on 11 November 2026. Both tools moved the same data between the same three rented machines (a writer in Paris, readers in Amsterdam and Warsaw, 2 vCPU each), one tool at a time. Syncthing 2.1.7 had global discovery, local discovery and relays off, and the devices addressed each other directly. Varsto was the daily build 20261109-c1cf5c2; these are the same Varsto runs already published against Resilio Sync, not a new measurement. Medians of two runs. "Bytes" is what the writer sent on its network interface. Every finished run was checked by hash. The method is the same as <a href="../../docs/resilio-vs-varsto.html">the Resilio Sync measurement</a>.</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Scenario</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 small files (313 MB)</th><td class="win">25 s · 292 MB</td><td>60 s · 282 MB</td></tr>
-        <tr><th scope="row">Two 1 GiB files</th><td class="win">44 s · 2 178 MB</td><td class="win">41 s · 2 187 MB</td></tr>
-        <tr><th scope="row">537 MB of log-like text</th><td>17 s · 169 MB</td><td class="win">7 s · 549 MB</td></tr>
-        <tr><th scope="row">816 MB, half of it copies</th><td>13 s · 419 MB</td><td class="win">9 s · 630 MB</td></tr>
-        <tr><th scope="row">Two readers at once (Amsterdam, Warsaw)</th><td>Amsterdam 70 s, Warsaw 118 s; writer sent 3 685 MB</td><td class="win">Amsterdam 47 s, Warsaw 59 s; writer sent 2 738 MB</td></tr>
-        <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td>12 s · 26 MB, one run</td><td class="win">6 s · 12 MB</td></tr>
-        <tr><th scope="row">A 1.13 GiB directory renamed</th><td>10 s · 0 MB of file data</td><td>files matched, about 0.2 MB, no finish clock</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1% loss, cut 0.3 s every 4 s (the small files)</th><td class="win">432 s · 336 MB</td><td class="win">466 s · 298 MB</td></tr>
+        <tr><th scope="row">10 000 small files (313 MB)</th><td class="win">25 s · 292 MB</td><td>61 s · 282 MB</td></tr>
+        <tr><th scope="row">Two 1 GiB files</th><td class="win">44 s · 2 178 MB</td><td class="win">40 s · 2 177 MB</td></tr>
+        <tr><th scope="row">537 MB of log-like text</th><td>17 s · 169 MB</td><td class="win">7 s · 547 MB</td></tr>
+        <tr><th scope="row">816 MB, half of it copies</th><td>13 s · 419 MB</td><td class="win">8 s · 615 MB</td></tr>
+        <tr><th scope="row">Two readers at once (Amsterdam, Warsaw)</th><td>Amsterdam 70 s, Warsaw 118 s; writer sent 3 685 MB</td><td class="win">Amsterdam 49 s, Warsaw 59 s; writer sent 2 839 MB</td></tr>
+        <tr><th scope="row">11 MiB changed inside 1.13 GiB</th><td>12 s · 26 MB, one run</td><td class="win">7 s · 12 MB</td></tr>
+        <tr><th scope="row">A 1.13 GiB directory renamed</th><td>10 s · 0 MB of file data</td><td>files matched, about 0.1 MB, no finish clock</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1% loss, cut 0.3 s every 4 s (the small files)</th><td class="win">432 s · 336 MB</td><td>489 s · 299 MB</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green marks the faster finish. If the slower time is within 10% of the faster one, both columns are green. The rename has no finish clock, so neither column is green.</p>
     <ul>
-      <li><strong>Varsto was faster</strong> on the 10 000 small files, 25 s against 60 s, with about the same bytes.</li>
-      <li><strong>Syncthing was faster</strong> on log text (7 s against 17 s), on copies (9 s against 13 s), with two readers (Warsaw 59 s against 118 s) and on the small change (6 s against 12 s).</li>
-      <li><strong>Log text is the odd one on bytes.</strong> Syncthing sent 549 MB and finished in 7 s. Varsto sent 169 MB and took 17 s, because a block is compressed before it is encrypted. Syncthing sends the text as stored.</li>
-      <li><strong>Copies:</strong> Syncthing finished sooner and sent 630 MB. Varsto sent 419 MB, because blocks already on the reader's disk are reused.</li>
-      <li><strong>Two readers:</strong> Syncthing's readers can send to each other, and the writer sent 2 738 MB. Varsto's writer sent 3 685 MB, and Warsaw took 118 s.</li>
-      <li><strong>The rename</strong> ended with the same files and about 0.2 MB on the wire in both Syncthing runs. The finish clock was not recorded: an empty directory left behind kept the check open until the time limit. Varsto's rename the same day was 10 s, and the reader pulled no file data.</li>
+      <li><strong>Varsto was faster</strong> on the 10 000 small files, 25 s against 61 s, with about the same bytes, and on the cut link, 432 s against 489 s.</li>
+      <li><strong>Syncthing was faster</strong> on log text (7 s against 17 s), on copies (8 s against 13 s), with two readers (Warsaw 59 s against 118 s) and on the small change (7 s against 12 s).</li>
+      <li><strong>Log text is the odd one on bytes.</strong> Syncthing sent 547 MB and finished in 7 s. Varsto sent 169 MB and took 17 s, because a block is compressed before it is encrypted. Syncthing sends the text as stored.</li>
+      <li><strong>Copies:</strong> Syncthing finished sooner and sent 615 MB. Varsto sent 419 MB, because blocks already on the reader's disk are reused.</li>
+      <li><strong>Two readers:</strong> Syncthing's readers can send to each other, and the writer sent 2 839 MB. Varsto's writer sent 3 685 MB, and Warsaw took 118 s.</li>
+      <li><strong>The rename</strong> ended with the same files and about 0.1 MB on the wire in both Syncthing runs. The finish clock was not recorded: an empty directory left behind kept the check open until the time limit. Varsto's rename the same day was 10 s, and the reader pulled no file data.</li>
     </ul>
     <p class="note">One day, one provider, two runs per case, and an alpha: these are indications, not a verdict.</p>
     <div class="pace-set" data-play="Play">
@@ -128,7 +128,7 @@
       <button type="button" role="tab" data-tab="slow" aria-selected="false">A slow, lossy link</button>
       </div>
     <div class="pace-panel" role="tabpanel" data-panel="files">
-    <figure class="pace" data-play="Play" data-pace data-scene="files" data-resilio="60 s · 282 MB" data-varsto="25 s · 292 MB">
+    <figure class="pace" data-play="Play" data-pace data-scene="files" data-resilio="61 s · 282 MB" data-varsto="25 s · 292 MB">
       <h3>10 000 small files</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -136,10 +136,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Varsto was faster, 25 s against 60 s. Both moved about 280–290 MB. Ten thousand small files still mean work per file. On this path that work took Syncthing about a minute and Varsto 25 s.</p>
+      <p class="pace-why">Varsto was faster, 25 s against 61 s. Both moved about 280–290 MB. Ten thousand small files still mean work per file. On this path that work took Syncthing about a minute and Varsto 25 s.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="pair" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="pair" data-resilio="41 s · 2 187 MB" data-varsto="44 s · 2 178 MB">
+    <figure class="pace" data-play="Play" data-pace data-scene="pair" data-resilio="40 s · 2 177 MB" data-varsto="44 s · 2 178 MB">
       <h3>Two 1 GiB files</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -147,10 +147,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">The clocks are within 10% (41 s and 44 s), so both are marked equal. Both tools moved about 2.2 GB. The files are large, so the link is the limit. The two clocks were close.</p>
+      <p class="pace-why">The clocks are within 10% (40 s and 44 s), so both are marked equal. Both tools moved about 2.2 GB. The files are large, so the link is the limit. The two clocks were close.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="text" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="text" data-resilio="7 s · 549 MB" data-varsto="17 s · 169 MB">
+    <figure class="pace" data-play="Play" data-pace data-scene="text" data-resilio="7 s · 547 MB" data-varsto="17 s · 169 MB">
       <h3>Log-like text</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -158,10 +158,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Syncthing was faster on the clock, 7 s against 17 s, and it sent 549 MB. Varsto sent 169 MB, because it compresses each block before encrypting it. Syncthing sends the text as stored, and on this link the extra bytes still arrived sooner.</p>
+      <p class="pace-why">Syncthing was faster on the clock, 7 s against 17 s, and it sent 547 MB. Varsto sent 169 MB, because it compresses each block before encrypting it. Syncthing sends the text as stored, and on this link the extra bytes still arrived sooner.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="dup" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="dup" data-resilio="9 s · 630 MB" data-varsto="13 s · 419 MB">
+    <figure class="pace" data-play="Play" data-pace data-scene="dup" data-resilio="8 s · 615 MB" data-varsto="13 s · 419 MB">
       <h3>Half of it copies</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -169,10 +169,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Syncthing was faster, 9 s against 13 s, but it sent 630 MB against Varsto's 419 MB. Half the files are copies. Varsto reuses blocks already on the reader's disk. Syncthing sent the copies again and still finished first.</p>
+      <p class="pace-why">Syncthing was faster, 8 s against 13 s, but it sent 615 MB against Varsto's 419 MB. Half the files are copies. Varsto reuses blocks already on the reader's disk. Syncthing sent the copies again and still finished first.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="readers" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="readers" data-resilio="59 s · 2 738 MB" data-varsto="118 s · 3 685 MB">
+    <figure class="pace" data-play="Play" data-pace data-scene="readers" data-resilio="59 s · 2 839 MB" data-varsto="118 s · 3 685 MB">
       <h3>Two readers at once</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -180,10 +180,10 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">The slower reader finished in 59 s with Syncthing and in 118 s with Varsto. Warsaw was the slow one for both. Syncthing's readers send as well as receive, so they helped each other and the writer sent 2 738 MB. Varsto's writer sent 3 685 MB.</p>
+      <p class="pace-why">The slower reader finished in 59 s with Syncthing and in 118 s with Varsto. Warsaw was the slow one for both. Syncthing's readers send as well as receive, so they helped each other and the writer sent 2 839 MB. Varsto's writer sent 3 685 MB.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="edit" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="edit" data-resilio="6 s · 12 MB" data-varsto="12 s · 26 MB, one run">
+    <figure class="pace" data-play="Play" data-pace data-scene="edit" data-resilio="7 s · 12 MB" data-varsto="12 s · 26 MB, one run">
       <h3>A small change</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -194,18 +194,18 @@
       <p class="pace-why">Syncthing finished in 6 s and sent 12 MB. Varsto's one counted run sent 26 MB in 12 s. Both move only what changed. Varsto's writer also syncs every folder it holds, and the reader re-hashes blocks it already has.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0.2 MB" data-varsto="10 s · 0 MB of file data">
+    <figure class="pace" data-play="Play" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0.1 MB" data-varsto="10 s · 0 MB of file data">
       <h3>A directory renamed</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
-        <p data-side="resilio"><span>Syncthing</span> <b>— · 0.2 MB</b></p>
+        <p data-side="resilio"><span>Syncthing</span> <b>— · 0.1 MB</b></p>
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">Both Syncthing runs ended with the same files and about 0.2 MB on the wire. The finish clock was not recorded: an empty directory left behind kept the check open until the time limit, so neither column is marked faster. Varsto's rename the same day was 10 s and the reader pulled no file data.</p>
+      <p class="pace-why">Both Syncthing runs ended with the same files and about 0.1 MB on the wire. The finish clock was not recorded: an empty directory left behind kept the check open until the time limit, so neither column is marked faster. Varsto's rename the same day was 10 s and the reader pulled no file data.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>
-    <figure class="pace" data-play="Play" data-pace data-scene="slow" data-resilio="466 s · 298 MB" data-varsto="432 s · 336 MB">
+    <figure class="pace" data-play="Play" data-pace data-scene="slow" data-resilio="489 s · 299 MB" data-varsto="432 s · 336 MB">
       <h3>A slow, lossy link</h3>
       <canvas width="720" height="376" aria-hidden="true"></canvas>
       <div class="pace-readout" aria-hidden="true">
@@ -213,7 +213,7 @@
         <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
       </div>
     </figure>
-      <p class="pace-why">The reader's link was held at 100 Mbit/s, with 40 ms of delay and 1% of packets dropped at random, and it was cut on purpose for 0.3 seconds every 4 seconds. SSH was left alone. Both tools moved about 300 MB. The clocks are within 10% (432 s and 466 s), so both are marked equal. In the picture the cubes that reach the gap while the link is cut shrink and vanish, then start again.</p>
+      <p class="pace-why">The reader's link was held at 100 Mbit/s, with 40 ms of delay and 1% of packets dropped at random, and it was cut on purpose for 0.3 seconds every 4 seconds. SSH was left alone. Both tools moved about 300 MB. Varsto was faster, 432 s against 489 s, which is more than 10%. In the picture the cubes that reach the gap while the link is cut shrink and vanish, then start again.</p>
     </div>
     </div>
     <h2>Which one fits</h2>

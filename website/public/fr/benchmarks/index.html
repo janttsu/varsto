@@ -398,28 +398,28 @@
     <p class="note">Un jour, un fournisseur, deux exécutions par cas et une alpha : ce sont des indications, pas un verdict. Le rapport énumère tout ce qui les limite.</p>
 
     <h2 id="syncthing">Mesuré face à Syncthing (novembre 2026)</h2>
-    <p>Le 10 novembre 2026 les deux outils ont déplacé les mêmes données entre les trois mêmes machines louées (un émetteur à Paris, des lecteurs à Amsterdam et à Varsovie, 2 vCPU chacun), un outil à la fois. Syncthing 2.1.7 avait la découverte globale, la découverte locale et les relais coupés, et les appareils s'adressaient directement. Varsto était la version daily 20261109-c1cf5c2 ; ce sont les mêmes essais Varsto déjà publiés face à Resilio Sync, pas une nouvelle mesure. Médianes de deux essais. Les « octets » sont ce que l'émetteur a envoyé sur son interface réseau. Chaque essai terminé a été vérifié par hachage. La méthode est la même que <a href="../../docs/resilio-vs-varsto.html">la mesure Resilio Sync</a>.</p>
+    <p>Les chiffres de Varsto datent du 10 novembre 2026. Syncthing a été mesuré de nouveau le 11 novembre 2026. Les deux outils ont déplacé les mêmes données entre les trois mêmes machines louées (un émetteur à Paris, des lecteurs à Amsterdam et à Varsovie, 2 vCPU chacun), un outil à la fois. Syncthing 2.1.7 avait la découverte globale, la découverte locale et les relais coupés, et les appareils s'adressaient directement. Varsto était la version daily 20261109-c1cf5c2 ; ce sont les mêmes essais Varsto déjà publiés face à Resilio Sync, pas une nouvelle mesure. Médianes de deux essais. Les « octets » sont ce que l'émetteur a envoyé sur son interface réseau. Chaque essai terminé a été vérifié par hachage. La méthode est la même que <a href="../../docs/resilio-vs-varsto.html">la mesure Resilio Sync</a>.</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Scénario</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td class="win">25 s · 292 Mo</td><td>60 s · 282 Mo</td></tr>
-        <tr><th scope="row">Deux fichiers de 1 Gio</th><td class="win">44 s · 2 178 Mo</td><td class="win">41 s · 2 187 Mo</td></tr>
-        <tr><th scope="row">537 Mo de texte de type journal</th><td>17 s · 169 Mo</td><td class="win">7 s · 549 Mo</td></tr>
-        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td>13 s · 419 Mo</td><td class="win">9 s · 630 Mo</td></tr>
-        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 47 s, Varsovie 59 s ; l’émetteur a envoyé 2 738 Mo</td></tr>
-        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>12 s · 26 Mo, un essai</td><td class="win">6 s · 12 Mo</td></tr>
-        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td>10 s · 0 Mo de données</td><td>fichiers identiques, environ 0,2 Mo, pas d'horloge de fin</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td class="win">466 s · 298 Mo</td></tr>
+        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td class="win">25 s · 292 Mo</td><td>61 s · 282 Mo</td></tr>
+        <tr><th scope="row">Deux fichiers de 1 Gio</th><td class="win">44 s · 2 178 Mo</td><td class="win">40 s · 2 177 Mo</td></tr>
+        <tr><th scope="row">537 Mo de texte de type journal</th><td>17 s · 169 Mo</td><td class="win">7 s · 547 Mo</td></tr>
+        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td>13 s · 419 Mo</td><td class="win">8 s · 615 Mo</td></tr>
+        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 49 s, Varsovie 59 s ; l’émetteur a envoyé 2 839 Mo</td></tr>
+        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>12 s · 26 Mo, un essai</td><td class="win">7 s · 12 Mo</td></tr>
+        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td>10 s · 0 Mo de données</td><td>fichiers identiques, environ 0,1 Mo, pas d'horloge de fin</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td>489 s · 299 Mo</td></tr>
       </tbody>
     </table>
     <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque le temps le plus court. Si le temps le plus long dépasse d'au plus 10 %, les deux colonnes sont vertes. Le renommage n'a pas d'horloge de fin, donc aucune colonne n'est verte.</p>
     <ul>
-      <li><strong>Varsto a été plus rapide</strong> sur les 10 000 petits fichiers, 25 s contre 60 s, avec à peu près les mêmes octets.</li>
-      <li><strong>Syncthing a été plus rapide</strong> sur le texte de journal (7 s contre 17 s), sur les copies (9 s contre 13 s), avec deux lecteurs (Varsovie 59 s contre 118 s) et sur le petit changement (6 s contre 12 s).</li>
+      <li><strong>Varsto a été plus rapide</strong> sur les 10 000 petits fichiers, 25 s contre 61 s, avec à peu près les mêmes octets, et sur le lien coupé, 432 s contre 489 s.</li>
+      <li><strong>Syncthing a été plus rapide</strong> sur le texte de journal (7 s contre 17 s), sur les copies (8 s contre 13 s), avec deux lecteurs (Varsovie 59 s contre 118 s) et sur le petit changement (7 s contre 12 s).</li>
       <li><strong>Le texte de journal est l'exception pour les octets.</strong> Syncthing a envoyé 549 Mo et a fini en 7 s. Varsto a envoyé 169 Mo et a pris 17 s, parce qu'un bloc est compressé avant d'être chiffré. Syncthing envoie le texte tel qu'il est stocké.</li>
-      <li><strong>Copies :</strong> Syncthing a fini plus tôt et a envoyé 630 Mo. Varsto a envoyé 419 Mo, parce que les blocs déjà sur le disque du lecteur sont réutilisés.</li>
-      <li><strong>Deux lecteurs :</strong> les lecteurs de Syncthing peuvent s'envoyer des données, et l'émetteur a envoyé 2 738 Mo. L'émetteur de Varsto a envoyé 3 685 Mo, et Varsovie a pris 118 s.</li>
-      <li><strong>Le renommage</strong> s'est terminé avec les mêmes fichiers et environ 0,2 Mo sur le réseau dans les deux essais Syncthing. L'horloge de fin n'a pas été notée : un répertoire vide resté en place a gardé la vérification ouverte jusqu'à la limite de temps. Le renommage de Varsto le même jour a pris 10 s, et le lecteur n'a tiré aucune donnée de fichier.</li>
+      <li><strong>Copies :</strong> Syncthing a fini plus tôt et a envoyé 615 Mo. Varsto a envoyé 419 Mo, parce que les blocs déjà sur le disque du lecteur sont réutilisés.</li>
+      <li><strong>Deux lecteurs :</strong> les lecteurs de Syncthing peuvent s'envoyer des données, et l'émetteur a envoyé 2 839 Mo. L'émetteur de Varsto a envoyé 3 685 Mo, et Varsovie a pris 118 s.</li>
+      <li><strong>Le renommage</strong> s'est terminé avec les mêmes fichiers et environ 0,1 Mo sur le réseau dans les deux essais Syncthing. L'horloge de fin n'a pas été notée : un répertoire vide resté en place a gardé la vérification ouverte jusqu'à la limite de temps. Le renommage de Varsto le même jour a pris 10 s, et le lecteur n'a tiré aucune donnée de fichier.</li>
     </ul>
     <p class="note">Un jour, un fournisseur, deux essais et une alpha : ce sont des indications, pas un verdict.</p>
         <h2 id="cost">Coût</h2>
