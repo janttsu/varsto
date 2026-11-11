@@ -6000,7 +6000,13 @@ mod tests {
             }
         }
         assert!(found.len() > 150, "{}", found.len());
-        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV), ("de", I18N_DE), ("es", I18N_ES), ("ru", I18N_RU)] {
+        for (lang, dict) in [
+            ("fi", I18N_FI),
+            ("sv", I18N_SV),
+            ("de", I18N_DE),
+            ("es", I18N_ES),
+            ("ru", I18N_RU),
+        ] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let missing: Vec<&String> = found
                 .iter()
@@ -6181,7 +6187,13 @@ mod tests {
             );
         }
         assert!(used.len() > 800, "{}", used.len());
-        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV), ("de", I18N_DE), ("es", I18N_ES), ("ru", I18N_RU)] {
+        for (lang, dict) in [
+            ("fi", I18N_FI),
+            ("sv", I18N_SV),
+            ("de", I18N_DE),
+            ("es", I18N_ES),
+            ("ru", I18N_RU),
+        ] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let top: Vec<&String> = d.as_object().unwrap().keys().collect();
             // i18n.js reads only these three; a string next to them is never shown.

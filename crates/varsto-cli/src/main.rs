@@ -6100,11 +6100,8 @@ fn init_logging(cli: &Cli) {
         }
     );
     let desktop = matches!(cli.cmd, Cmd::Desktop { .. });
-    let component = logcmd::component_for(
-        service_run,
-        desktop,
-        matches!(cli.cmd, Cmd::Tray { .. }),
-    );
+    let component =
+        logcmd::component_for(service_run, desktop, matches!(cli.cmd, Cmd::Tray { .. }));
     // The service keeps writing notable events to stderr too (service.log).
     if let Err(e) = logcmd::init(
         &home,

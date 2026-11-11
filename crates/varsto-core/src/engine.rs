@@ -3984,9 +3984,7 @@ impl Engine {
                             fk.epoch,
                             &chunk,
                         )?;
-                        let object = ObjectName::from_bytes(&crypto::hash(&ct));
-                        crate::p2p::keep_sealed(self.home(), &object, &ct);
-                        (object, fk.epoch)
+                        (ObjectName::from_bytes(&crypto::hash(&ct)), fk.epoch)
                     }
                 };
                 // A backup's blocks are kept on storages only: no device
@@ -4720,7 +4718,6 @@ impl Engine {
                         &chunk,
                     )?;
                     let object = ObjectName::from_bytes(&crypto::hash(&ct));
-                    crate::p2p::keep_sealed(self.home(), &object, &ct);
                     let targets: Vec<String> = targets
                         .into_iter()
                         .filter(|t| gate.take(t, ct.len() as u64))
@@ -7109,10 +7106,6 @@ impl Engine {
         let mut local_roots: Vec<PathBuf> = Vec::new();
         if self.block_cache_root().is_dir() {
             local_roots.push(self.block_cache_root());
-        }
-        let sealed = self.home().join("p2p-serve");
-        if sealed.is_dir() {
-            local_roots.push(sealed);
         }
         // Blocks the mailbox staged (section 78): the device where their
         // target is docked takes them from here.
