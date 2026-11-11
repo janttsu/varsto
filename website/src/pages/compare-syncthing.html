@@ -140,6 +140,14 @@ description: Looking for a Syncthing alternative with end-to-end encryption on y
       <p class="pace-why">Syncthing finished in 6 s and sent 12 MB. Varsto's one counted run sent 26 MB in 12 s. Both move only what changed. Varsto's writer also syncs every folder it holds, and the reader re-hashes blocks it already has.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
+    <figure class="pace" data-play="Play" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0.2 MB" data-varsto="10 s · 0 MB of file data">
+      <h3>A directory renamed</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>— · 0.2 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
       <p class="pace-why">Both Syncthing runs ended with the same files and about 0.2 MB on the wire. The finish clock was not recorded: an empty directory left behind kept the check open until the time limit, so neither column is marked faster. Varsto's rename the same day was 10 s and the reader pulled no file data.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>

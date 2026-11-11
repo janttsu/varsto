@@ -140,6 +140,14 @@ description: Ищешь альтернативу Syncthing со сквозным
       <p class="pace-why">Syncthing закончил за 6 s и отправил 12 MB. Единственный засчитанный прогон Varsto отправил 26 MB за 12 s. Оба передают только изменившееся. Писатель Varsto ещё синхронизирует каждую свою папку, а читатель заново считает хеш блоков, которые у него уже есть.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
+    <figure class="pace" data-play="Пуск" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0,2 MB" data-varsto="10 s · 0 MB файловых данных">
+      <h3>Каталог переименован</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>— · 0,2 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
       <p class="pace-why">Оба прогона Syncthing закончились теми же файлами и примерно 0,2 MB в сети. Часы финиша не записаны: оставшийся пустой каталог держал проверку открытой до предела времени, поэтому ни один столбец не отмечен как более быстрый. Переименование Varsto в тот же день заняло 10 s, и читатель не забирал файловые данные.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>

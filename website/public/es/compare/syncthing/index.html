@@ -27,7 +27,7 @@
 <link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/syncthing/">
 <link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/syncthing/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
-<link rel="stylesheet" href="../../../assets/css/site.css?v=9fd5de25f8">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=a790f8ed10">
 <script src="../../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -194,6 +194,14 @@
       <p class="pace-why">Syncthing terminó en 6 s y envió 12 MB. La única ejecución contada de Varsto envió 26 MB en 12 s. Los dos mueven solo lo que cambió. El escritor de Varsto también sincroniza cada carpeta que tiene, y el lector vuelve a hacer el hash de los bloques que ya tiene.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
+    <figure class="pace" data-play="Reproducir" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0,2 MB" data-varsto="10 s · 0 MB de datos de archivo">
+      <h3>Un directorio renombrado</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>— · 0,2 MB</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
       <p class="pace-why">Las dos ejecuciones de Syncthing acabaron con los mismos archivos y unos 0,2 MB en la red. El reloj de llegada no se anotó: un directorio vacío que quedó atrás mantuvo la comprobación abierta hasta el límite de tiempo, así que ninguna columna se marca como más rápida. El renombrado de Varsto el mismo día fue 10 s y el lector no trajo datos de archivo.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>

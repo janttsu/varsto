@@ -27,7 +27,7 @@
 <link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/syncthing/">
 <link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/syncthing/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../../blog/feed.xml">
-<link rel="stylesheet" href="../../../assets/css/site.css?v=9fd5de25f8">
+<link rel="stylesheet" href="../../../assets/css/site.css?v=a790f8ed10">
 <script src="../../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -194,6 +194,14 @@
       <p class="pace-why">Syncthing a fini en 6 s et a envoyé 12 Mo. Le seul essai compté de Varsto a envoyé 26 Mo en 12 s. Les deux ne déplacent que ce qui a changé. L'émetteur de Varsto synchronise aussi chaque dossier qu'il tient, et le lecteur rehache les blocs qu'il a déjà.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="rename" hidden>
+    <figure class="pace" data-play="Lecture" data-pace data-scene="rename" data-nofinish="1" data-resilio="— · 0,2 Mo" data-varsto="10 s · 0 Mo de données">
+      <h3>Un répertoire renommé</h3>
+      <canvas width="720" height="376" aria-hidden="true"></canvas>
+      <div class="pace-readout" aria-hidden="true">
+        <p data-side="resilio"><span>Syncthing</span> <b>— · 0,2 Mo</b></p>
+        <p data-side="varsto"><span>Varsto</span> <b>0 s · 0 MB</b></p>
+      </div>
+    </figure>
       <p class="pace-why">Les deux essais Syncthing se sont terminés avec les mêmes fichiers et environ 0,2 Mo sur le réseau. L'horloge de fin n'a pas été notée : un répertoire vide resté en place a gardé la vérification ouverte jusqu'à la limite de temps, donc aucune colonne n'est marquée plus rapide. Le renommage de Varsto le même jour a pris 10 s et le lecteur n'a tiré aucune donnée de fichier.</p>
     </div>
     <div class="pace-panel" role="tabpanel" data-panel="slow" hidden>

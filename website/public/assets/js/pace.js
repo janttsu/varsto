@@ -14,7 +14,9 @@
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     var resilioRaw = fig.getAttribute("data-resilio") || "";
     var varstoRaw = fig.getAttribute("data-varsto") || "";
-    var rSec = seconds(resilioRaw);
+    // The other tool has no finish clock. Draw its end state and do not race it.
+    var noFinish = fig.getAttribute("data-nofinish") === "1";
+    var rSec = noFinish ? 0 : seconds(resilioRaw);
     var vSec = seconds(varstoRaw);
     var slow = Math.max(rSec, vSec, 0.001);
     var rAt = rSec / slow;
@@ -61,7 +63,9 @@
     function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
     function lerp(a, b, t) { return a + (b - a) * t; }
     function P(ox, x, y, z) {
-      return [ox + x * 26 - z * 12, 112 + z * 6 - y * 20];
+      // Narrower than 26px per step so each lane stays inside the frame,
+      // with the same gap on both sides of the centre line.
+      return [ox + x * 22 - z * 10, 112 + z * 6 - y * 20];
     }
     function shade(tone) {
       return {
@@ -124,6 +128,16 @@
     }
 
     function lane(name, p, ox) {
+      if (noFinish && name !== "varsto") {
+        var settled = rgb(css("--faint", "#687083"));
+        box(ox, 0, -0.2, 0, 1.85, 0.12, 1.25, [86, 92, 104]);
+        box(ox, 3.2, -0.2, 0, 1.85, 0.12, 1.25, [86, 92, 104]);
+        for (var n = 0; n < 4; n++) {
+          var sitting = slot(n, 3.6, 0.58);
+          box(ox, sitting[0], sitting[1], sitting[2], 0.58, 0.58, 0.58, settled);
+        }
+        return false;
+      }
       var accent = rgb(css("--accent", "#86a4ff"));
       var stone = [214, 176, 122];
       var grey = [128, 134, 146];
@@ -283,14 +297,19 @@
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = mix(rgb(css("--faint", "#687083")), [0, 0, 0], 0.25);
       ctx.fillRect((W / 2) | 0, 28, 1, H - 56);
-      var rDone = lane("resilio", p, 18);
-      var vDone = lane("varsto", p, 214);
+      var rDone = lane("resilio", p, 28);
+      var vDone = lane("varsto", p, 230);
       flush();
       var tickX = scene === "readers" ? 5.15 : 3.7;
       var tickY = (scene === "files" || scene === "text" || scene === "dup" || scene === "slow") ? 2.7 : 1.65;
-      if (rDone) { var rp = P(18, tickX, tickY, 0.2); tick(rp[0], rp[1]); }
-      if (vDone) { var vp = P(214, tickX, tickY, 0.2); tick(vp[0], vp[1]); }
-      show("resilio", resilioRaw, p, rAt);
+      if (rDone) { var rp = P(28, tickX, tickY, 0.2); tick(rp[0], rp[1]); }
+      if (vDone) { var vp = P(230, tickX, tickY, 0.2); tick(vp[0], vp[1]); }
+      if (noFinish) {
+        var held = fig.querySelector('[data-side="resilio"] b');
+        if (held) { held.textContent = resilioRaw; }
+      } else {
+        show("resilio", resilioRaw, p, rAt);
+      }
       show("varsto", varstoRaw, p, vAt);
     }
     function frame(now) {
