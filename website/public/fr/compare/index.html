@@ -27,7 +27,7 @@
 <link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/">
 <link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=a790f8ed10">
+<link rel="stylesheet" href="../../assets/css/site.css?v=4998b8d831">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -59,23 +59,34 @@
 <main id="main">
   <div class="wrap">
     <h1>Comment Varsto se compare</h1>
+    <figure class="qpace" data-qpace>
+      <h2>Le chiffrement résistant au quantique est-il lent ?</h2>
+      <p class="qpace-scene">Dix mille petits fichiers, environ 330 Mo, sur une liaison à 100 Mbit/s avec 40 ms de délai, 1 % de perte de paquets et une coupure de 0,3 s toutes les 4 s. Chaque barre avance selon le rapport du temps d’arrivée mesuré.</p>
+      <canvas width="720" height="150" role="img" aria-label="Varsto finit en 432 secondes, Syncthing en 489 secondes et Resilio Sync en 934 secondes."></canvas>
+      <ol class="qpace-lanes">
+        <li data-lane="varsto" data-sec="432"><i class="qpace-swatch" aria-hidden="true"></i><span>Varsto</span><b>432 s</b><small>336 Mo</small></li>
+        <li data-lane="syncthing" data-sec="489"><i class="qpace-swatch" aria-hidden="true"></i><span>Syncthing</span><b>489 s</b><small>299 Mo</small></li>
+        <li data-lane="resilio" data-sec="934"><i class="qpace-swatch" aria-hidden="true"></i><span>Resilio Sync</span><b>934 s</b><small>328 Mo</small></li>
+      </ol>
+      <p class="qpace-answer">Varsto est arrivé le premier, en 432 s. Syncthing a pris 489 s et Resilio Sync 934 s. Sur cette mesure, l’outil résistant au quantique a été le plus rapide.</p>
+      <button type="button" class="qpace-play" hidden>Lecture</button>
+    </figure>
     <p class="lead">Les outils qui gardent des fichiers synchronisés se répartissent en trois groupes. Les outils pair à pair comme Syncthing et Resilio Sync copient des dossiers entre vos propres appareils. Les clouds chiffrés comme MEGA, Filen et Tresorit gardent vos fichiers chez un seul fournisseur. git-annex suit de gros fichiers sur tous les disques et destinations que vous possédez. Varsto combine des éléments des trois : des fichiers chiffrés de bout en bout sur les stockages que vous choisissez, un transfert pair à pair entre vos appareils, et un registre de l’emplacement de chaque copie.</p>
 
     <table class="compare-table compare-overview">
       <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="syncthing/">Syncthing</a></th><th scope="col"><a href="resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="mega/">MEGA</a></th><th scope="col"><a href="filen/">Filen</a></th><th scope="col"><a href="tresorit/">Tresorit</a></th><th scope="col"><a href="git-annex/">git-annex</a></th></tr></thead>
       <tbody>
-      <tr><th scope="row">Où vivent vos fichiers</th><td><strong>Vos appareils et vos stockages</strong></td><td>Vos appareils</td><td>Vos appareils</td><td class="cloud">Le cloud de MEGA</td><td class="cloud">Le cloud de Filen</td><td class="cloud">Le cloud de Tresorit</td><td>Où vous voulez</td></tr>
-      <tr><th scope="row">Compte ou serveur central</th><td><strong>Aucun</strong></td><td>Aucun</td><td>Pas de compte</td><td class="cloud">Compte</td><td class="cloud">Compte</td><td class="cloud">Compte</td><td>Aucun</td></tr>
-      <tr><th scope="row">Les appareils doivent être en ligne en même temps</th><td><strong>Non</strong></td><td class="closed">Oui</td><td class="closed">Oui</td><td>Non</td><td>Non</td><td>Non</td><td>Non</td></tr>
-      <tr><th scope="row">Sait où se trouve chaque copie (le registre complet est disponible, réuni en un seul endroit)</th><td><strong>Oui</strong></td><td class="cloud">Non</td><td class="cloud">Non</td><td>Une copie chez le fournisseur</td><td>Une copie chez le fournisseur</td><td>Une copie chez le fournisseur</td><td>Oui</td></tr>
-      <tr><th scope="row">Disques amovibles et hors ligne</th><td><strong>Oui</strong></td><td>Non</td><td>Non</td><td>Non</td><td>Non</td><td>Non</td><td class="win">Oui</td></tr>
+      <tr><th scope="row">Où vivent vos fichiers</th><td class="win"><strong>Vos appareils et vos stockages</strong></td><td class="win">Vos appareils</td><td class="win">Vos appareils</td><td class="cloud">Le cloud de MEGA</td><td class="cloud">Le cloud de Filen</td><td class="cloud">Le cloud de Tresorit</td><td class="win">Où vous voulez</td></tr>
+      <tr><th scope="row">Compte ou serveur central</th><td class="win"><strong>Aucun</strong></td><td class="win">Aucun</td><td class="win">Pas de compte</td><td class="cloud">Compte</td><td class="cloud">Compte</td><td class="cloud">Compte</td><td class="win">Aucun</td></tr>
+      <tr><th scope="row">Les appareils doivent être en ligne en même temps</th><td class="win"><strong>Non</strong></td><td class="closed">Oui</td><td class="closed">Oui</td><td class="win">Non</td><td class="win">Non</td><td class="win">Non</td><td class="win">Non</td></tr>
+      <tr><th scope="row">Sait où se trouve chaque copie (le registre complet est disponible, réuni en un seul endroit)</th><td class="win"><strong>Oui</strong></td><td class="cloud">Non</td><td class="cloud">Non</td><td class="win">Une copie chez le fournisseur</td><td class="win">Une copie chez le fournisseur</td><td class="win">Une copie chez le fournisseur</td><td class="win">Oui</td></tr>
+      <tr><th scope="row">Disques amovibles et hors ligne</th><td class="win"><strong>Oui</strong></td><td>Non</td><td>Non</td><td>Non</td><td>Non</td><td>Non</td><td class="win">Oui</td></tr>
       <tr><th scope="row">Sauvegardes</th><td class="win"><strong>Instantanés en lecture seule sur vos stockages, conservés N jours</strong></td><td>Gestion des versions sur les appareils récepteurs uniquement</td><td>Dossier d’archive, 30 jours par défaut</td><td>Sauvegardes en lecture seule dans le cloud de MEGA</td><td>Mode de sauvegarde à sens unique vers le cloud de Filen</td><td class="closed">Historique des versions, pas de sauvegardes séparées</td><td>Copies comptées, ni instantanés ni durée de conservation</td></tr>
       <tr><th scope="row">Chiffrement résistant au quantique</th><td class="win"><strong>Oui, hybride (pas audité)</strong></td><td>Non</td><td>Non</td><td>Non</td><td>Non</td><td>Non</td><td>Non</td></tr>
-      <tr><th scope="row">Licence</th><td class="closed"><strong>Code source disponible</strong></td><td class="win">Open source</td><td class="cloud">Propriétaire</td><td class="closed">Code des clients publié</td><td class="closed">Clients open source</td><td class="closed">Propriétaire</td><td class="cloud">Logiciel libre</td></tr>
-      <tr><th scope="row">Prix</th><td><strong>Gratuit</strong></td><td>Gratuit</td><td>Offre gratuite</td><td>Abonnements</td><td>Abonnements</td><td>Abonnements</td><td>Gratuit</td></tr>
+      <tr><th scope="row">Licence</th><td class="win"><strong>Code source disponible</strong></td><td class="win">Open source</td><td class="cloud">Propriétaire</td><td class="closed">Code des clients publié</td><td class="closed">Clients open source</td><td class="closed">Propriétaire</td><td class="cloud">Logiciel libre</td></tr>
+      <tr><th scope="row">Prix</th><td class="win"><strong>Gratuit</strong></td><td class="win">Gratuit</td><td class="plain">Offre gratuite</td><td class="plain">20 Go gratuits ; à partir de 4,99 € par mois, avec des quotas de transfert</td><td class="plain">10 Go gratuits ; à partir de 1,99 € par mois</td><td class="plain">3 Go gratuits ; à partir de 5,99 € par mois</td><td class="win">Gratuit</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque une ligne où Varsto devance chacun des autres outils du tableau. <span class="noqc-swatch" aria-hidden="true"></span> Une colonne rougeâtre marque un outil sans chiffrement résistant au quantique. <span class="closed-swatch" aria-hidden="true"></span> Sur la ligne de la licence, le vert marque Syncthing, le jaune marque Resilio Sync et git-annex, et le rouge marque MEGA, Filen et Tresorit. Sur la ligne des disques amovibles, le vert marque git-annex. Sur la ligne des sauvegardes, le rouge marque Tresorit. Sur la ligne où les appareils doivent être en ligne en même temps, le même rouge marque Syncthing et Resilio Sync. <span class="cloud-swatch" aria-hidden="true"></span> Sur la ligne de l’emplacement des fichiers, le jaune marque MEGA, Filen et Tresorit. Sur la ligne du compte ou du serveur central, le même jaune marque MEGA, Filen et Tresorit. Sur la ligne qui indique où se trouve chaque copie, le même jaune marque Syncthing et Resilio Sync.</p>
     <p class="note">« Une copie chez le fournisseur » signifie que la copie hors site se trouve chez ce fournisseur ; vos appareils gardent aussi leurs propres copies. Chaque page de comparaison explique les détails et renvoie aux sources.</p>
 
     <h2>Comparaisons</h2>
@@ -90,7 +101,7 @@
       <a class="card" href="rclone/"><h3>Varsto et rclone</h3><p>rclone copie et synchronise des fichiers vers et depuis plus de soixante-dix systèmes de stockage, avec une destination crypt qui chiffre ce qui y transite.</p></a>
       <a class="card" href="restic/"><h3>Varsto, restic et BorgBackup</h3><p>restic et borg prennent des instantanés chiffrés et dédupliqués dans un dépôt : des sauvegardes, pas de la synchronisation.</p></a>
     </div>
-    <p class="note">Varsto est un logiciel alpha : ne lui confiez pas de données dont vous n’avez aucune autre copie, et sa cryptographie n’a pas été auditée de façon indépendante. Les autres produits présentés ici sont matures. Les faits les concernant ont été vérifiés dans leur propre documentation en octobre 2026 ; les prix et les offres changent souvent, consultez donc leurs pages pour les chiffres actuels. Les corrections sont les bienvenues sous forme de <a href="https://github.com/janttsu/varsto/issues" rel="noopener">tickets GitHub</a>.</p>
+    <p class="note">Varsto est un logiciel alpha : ne lui confiez pas de données dont vous n’avez aucune autre copie, et sa cryptographie n’a pas été auditée de façon indépendante. Les autres produits présentés ici sont matures. Les faits les concernant ont été vérifiés dans leur propre documentation en novembre 2026 ; les prix et les offres changent souvent, consultez donc leurs pages pour les chiffres actuels. Les corrections sont les bienvenues sous forme de <a href="https://github.com/janttsu/varsto/issues" rel="noopener">tickets GitHub</a>.</p>
 
   </div>
 </main>
@@ -109,5 +120,6 @@
 </footer>
 <script src="../../assets/js/field.js?v=c342154328" defer></script>
 <script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+<script src="../../assets/js/qpace.js?v=d0b3d75851" defer></script>
 </body>
 </html>

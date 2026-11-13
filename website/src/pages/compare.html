@@ -5,23 +5,34 @@ output: compare/index.html
 description: How Varsto compares with Syncthing, Resilio Sync, MEGA, Filen, Tresorit, git-annex, Cryptomator, rclone and restic/borg: what each is for and where they differ.
 ---
     <h1>How Varsto compares</h1>
+    <figure class="qpace" data-qpace>
+      <h2>Is quantum-resistant encryption slow?</h2>
+      <p class="qpace-scene">Ten thousand small files, about 330 MB, on a 100 Mbit/s link with 40 ms of delay, 1% packet loss, and a 0.3 s cut every 4 s. Each bar runs in the ratio of the measured finish.</p>
+      <canvas width="720" height="150" role="img" aria-label="Varsto finishes in 432 seconds, Syncthing in 489 seconds, and Resilio Sync in 934 seconds."></canvas>
+      <ol class="qpace-lanes">
+        <li data-lane="varsto" data-sec="432"><i class="qpace-swatch" aria-hidden="true"></i><span>Varsto</span><b>432 s</b><small>336 MB</small></li>
+        <li data-lane="syncthing" data-sec="489"><i class="qpace-swatch" aria-hidden="true"></i><span>Syncthing</span><b>489 s</b><small>299 MB</small></li>
+        <li data-lane="resilio" data-sec="934"><i class="qpace-swatch" aria-hidden="true"></i><span>Resilio Sync</span><b>934 s</b><small>328 MB</small></li>
+      </ol>
+      <p class="qpace-answer">Varsto finished first, in 432 s. Syncthing took 489 s and Resilio Sync 934 s. On this run the quantum-resistant tool was the fastest.</p>
+      <button type="button" class="qpace-play" hidden>Replay</button>
+    </figure>
     <p class="lead">Tools for keeping files in sync fall into three groups. Peer-to-peer tools such as Syncthing and Resilio Sync copy folders between your own devices. Encrypted clouds such as MEGA, Filen and Tresorit keep your files with one provider. git-annex tracks large files across any disks and remotes you own. Varsto combines parts of all three: end-to-end encrypted files on storages you choose, peer-to-peer transfer between your devices, and a record of where every copy is.</p>
 
     <table class="compare-table compare-overview">
       <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="syncthing/">Syncthing</a></th><th scope="col"><a href="resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="mega/">MEGA</a></th><th scope="col"><a href="filen/">Filen</a></th><th scope="col"><a href="tresorit/">Tresorit</a></th><th scope="col"><a href="git-annex/">git-annex</a></th></tr></thead>
       <tbody>
-      <tr><th scope="row">Where your files live</th><td><strong>Your devices and your storages</strong></td><td>Your devices</td><td>Your devices</td><td class="cloud">MEGA's cloud</td><td class="cloud">Filen's cloud</td><td class="cloud">Tresorit's cloud</td><td>Anywhere you choose</td></tr>
-      <tr><th scope="row">Account or central server</th><td><strong>None</strong></td><td>None</td><td>No account</td><td class="cloud">Account</td><td class="cloud">Account</td><td class="cloud">Account</td><td>None</td></tr>
-      <tr><th scope="row">Devices must be online together</th><td><strong>No</strong></td><td class="closed">Yes</td><td class="closed">Yes</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
-      <tr><th scope="row">Knows where every copy is (the full record is available, gathered in one place)</th><td><strong>Yes</strong></td><td class="cloud">No</td><td class="cloud">No</td><td>One provider copy</td><td>One provider copy</td><td>One provider copy</td><td>Yes</td></tr>
-      <tr><th scope="row">Removable and offline disks</th><td><strong>Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td class="win">Yes</td></tr>
+      <tr><th scope="row">Where your files live</th><td class="win"><strong>Your devices and your storages</strong></td><td class="win">Your devices</td><td class="win">Your devices</td><td class="cloud">MEGA's cloud</td><td class="cloud">Filen's cloud</td><td class="cloud">Tresorit's cloud</td><td class="win">Anywhere you choose</td></tr>
+      <tr><th scope="row">Account or central server</th><td class="win"><strong>None</strong></td><td class="win">None</td><td class="win">No account</td><td class="cloud">Account</td><td class="cloud">Account</td><td class="cloud">Account</td><td class="win">None</td></tr>
+      <tr><th scope="row">Devices must be online together</th><td class="win"><strong>No</strong></td><td class="closed">Yes</td><td class="closed">Yes</td><td class="win">No</td><td class="win">No</td><td class="win">No</td><td class="win">No</td></tr>
+      <tr><th scope="row">Knows where every copy is (the full record is available, gathered in one place)</th><td class="win"><strong>Yes</strong></td><td class="cloud">No</td><td class="cloud">No</td><td class="win">One provider copy</td><td class="win">One provider copy</td><td class="win">One provider copy</td><td class="win">Yes</td></tr>
+      <tr><th scope="row">Removable and offline disks</th><td class="win"><strong>Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td class="win">Yes</td></tr>
       <tr><th scope="row">Backups</th><td class="win"><strong>Read-only snapshots on your storages, kept N days</strong></td><td>Versioning on receiving devices only</td><td>Archive folder, 30 days by default</td><td>Read-only backups in MEGA's cloud</td><td>One-way backup mode to Filen's cloud</td><td class="closed">Version history, no separate backups</td><td>Copies counted, no snapshots or retention</td></tr>
       <tr><th scope="row">Quantum-resistant encryption</th><td class="win"><strong>Yes, hybrid (not audited)</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
-      <tr><th scope="row">Licence</th><td class="closed"><strong>Source-available</strong></td><td class="win">Open source</td><td class="cloud">Proprietary</td><td class="closed">Client source published</td><td class="closed">Open-source clients</td><td class="closed">Proprietary</td><td class="cloud">Free software</td></tr>
-      <tr><th scope="row">Price</th><td><strong>Free</strong></td><td>Free</td><td>Free tier</td><td>Plans</td><td>Plans</td><td>Plans</td><td>Free</td></tr>
+      <tr><th scope="row">Licence</th><td class="win"><strong>Source-available</strong></td><td class="win">Open source</td><td class="cloud">Proprietary</td><td class="closed">Client source published</td><td class="closed">Open-source clients</td><td class="closed">Proprietary</td><td class="cloud">Free software</td></tr>
+      <tr><th scope="row">Price</th><td class="win"><strong>Free</strong></td><td class="win">Free</td><td class="plain">Free tier</td><td class="plain">Free 20 GB; from €4.99 a month, with transfer quotas</td><td class="plain">Free 10 GB; from €1.99 a month</td><td class="plain">Free 3 GB; from €5.99 a month</td><td class="win">Free</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green marks a row where Varsto is ahead of every other tool in the table. <span class="noqc-swatch" aria-hidden="true"></span> A reddish column marks a tool without quantum-resistant encryption. <span class="closed-swatch" aria-hidden="true"></span> On the licence row, green marks Syncthing, yellow marks Resilio Sync and git-annex, and red marks MEGA, Filen and Tresorit. On the removable-disks row, green marks git-annex. On the backups row, red marks Tresorit. On the row about devices being online together, the same red marks Syncthing and Resilio Sync. <span class="cloud-swatch" aria-hidden="true"></span> On the row about where your files live, yellow marks MEGA, Filen and Tresorit. On the account row, the same yellow marks MEGA, Filen and Tresorit. On the row about knowing where every copy is, the same yellow marks Syncthing and Resilio Sync.</p>
     <p class="note">"One provider copy" means the off-site copy is with that provider; your devices keep their own copies too. Each comparison page explains the details and links to the sources.</p>
 
     <h2>Comparisons</h2>
@@ -36,4 +47,4 @@ description: How Varsto compares with Syncthing, Resilio Sync, MEGA, Filen, Tres
       <a class="card" href="rclone/"><h3>Varsto and rclone</h3><p>rclone copies and syncs files to and from more than seventy storage systems, with a crypt remote that encrypts what passes through it.</p></a>
       <a class="card" href="restic/"><h3>Varsto, restic and BorgBackup</h3><p>restic and borg take encrypted, deduplicated snapshots into a repository: backups, not sync.</p></a>
     </div>
-    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome as <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub issues</a>.</p>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in November 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome as <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub issues</a>.</p>

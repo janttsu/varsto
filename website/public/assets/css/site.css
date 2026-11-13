@@ -355,6 +355,7 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 .compare-overview td.win { background: var(--win-bg); color: var(--win-text); box-shadow: inset 3px 0 0 var(--win-border); }
 .compare-overview td.closed { background: var(--closed-bg); color: var(--closed-text); box-shadow: inset 3px 0 0 var(--closed-border); }
 .compare-overview td.cloud { background: var(--warn-bg); color: var(--warn-text); box-shadow: inset 3px 0 0 var(--warn-border); }
+.compare-overview td.plain { background: var(--bg); color: var(--text); box-shadow: none; }
 .compare-legend .win-swatch, .compare-legend .closed-swatch, .compare-legend .noqc-swatch, .compare-legend .cloud-swatch { display: inline-block; width: .9em; height: .9em; vertical-align: -.1em; border-radius: 3px; margin-right: .3em; }
 .compare-legend .win-swatch { background: var(--win-bg); box-shadow: inset 0 0 0 1px var(--win-border); }
 .compare-legend .noqc-swatch { background: var(--noqc-bg); box-shadow: inset 0 0 0 1px var(--closed-border); }
@@ -419,6 +420,22 @@ a.card:hover { border-color: var(--accent, currentColor); }
 .pace-readout span { color: var(--muted); font-family: var(--font); }
 .pace-why { color: var(--muted); font-size: .95rem; margin: .7rem 0 0; max-width: 48rem; }
 .pace-panel[hidden] { display: none; }
+.qpace { margin: 0 0 2.25rem; max-width: 52rem; }
+.qpace h2 { margin: 0 0 .45rem; font-size: 1.45rem; }
+.qpace-scene { color: var(--muted); margin: 0 0 .85rem; max-width: 46rem; }
+.qpace canvas { display: block; width: 100%; height: auto; background: var(--raise); border: 1px solid var(--border); border-radius: var(--radius); }
+.qpace-lanes { list-style: none; margin: .75rem 0 0; padding: 0; display: grid; gap: .35rem; }
+.qpace-lanes li { display: grid; grid-template-columns: .9rem minmax(7rem, 11rem) 5.2rem 1fr; gap: .65rem; align-items: baseline; }
+.qpace-swatch { display: inline-block; width: .85rem; height: .85rem; border-radius: 3px; font-style: normal; transform: translateY(.12rem); }
+.qpace-lanes [data-lane="varsto"] .qpace-swatch { background: var(--accent-2); }
+.qpace-lanes [data-lane="syncthing"] .qpace-swatch { background: var(--series-1); }
+.qpace-lanes [data-lane="resilio"] .qpace-swatch { background: var(--series-2); }
+.qpace-lanes b { font: 600 1.05rem var(--mono); }
+.qpace-lanes small { color: var(--muted); }
+.qpace-lanes li.is-done b { color: var(--win-text); }
+.qpace-answer { margin: .85rem 0 0; max-width: 46rem; }
+.qpace-play { margin-top: .85rem; font: 600 .85rem var(--font); color: var(--text); background: var(--raise); border: 1px solid var(--border-2); border-radius: 999px; padding: .35rem .85rem; cursor: pointer; }
+.qpace-play[hidden] { display: none; }
 
 /* Disclosure rows (the download list, the verification steps). */
 details.dl-all > summary, main details:not(.pop) > summary { cursor: pointer; color: var(--muted); font-weight: 550; padding: .5rem 0; }

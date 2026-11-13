@@ -350,6 +350,8 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
     scripts = ["field.js", "motion.js"]
     if rel.startswith("compare/resilio-sync") or rel.startswith("compare/syncthing"):
         scripts.append("pace.js")
+    if rel == "compare/index.html":
+        scripts.append("qpace.js")
     home_script = "".join(
         f'<script src="{p}assets/js/{js}?v={asset_version("assets/js/" + js)}" defer></script>\n'
         for js in scripts
