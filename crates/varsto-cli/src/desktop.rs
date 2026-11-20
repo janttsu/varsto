@@ -26,14 +26,18 @@ const FOLDERS_JS: &str = include_str!("../ui/folders.js");
 const I18N_JS: &str = include_str!("../ui/i18n.js");
 const I18N_FI: &str = include_str!("../ui/i18n/fi.json");
 const I18N_SV: &str = include_str!("../ui/i18n/sv.json");
+const I18N_DE: &str = include_str!("../ui/i18n/de.json");
+const I18N_ES: &str = include_str!("../ui/i18n/es.json");
+const I18N_RU: &str = include_str!("../ui/i18n/ru.json");
 
-/// The interface language chosen in the page ("en", "fi" or "sv"), for the
-/// tray and the menu bar: `home/ui-language`. English when unset.
+/// The interface language chosen in the page, for the tray and the menu bar:
+/// `home/ui-language`. English, Finnish, Swedish, German, Spanish or Russian.
+/// English when unset. French is a website language only.
 pub fn ui_language(home: &std::path::Path) -> String {
     std::fs::read_to_string(home.join("ui-language"))
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|l| matches!(l.as_str(), "en" | "fi" | "sv"))
+        .filter(|l| matches!(l.as_str(), "en" | "fi" | "sv" | "de" | "es" | "ru"))
         .unwrap_or_else(|| "en".to_string())
 }
 const APP_CSS: &str = include_str!("../ui/app.css");
@@ -465,7 +469,7 @@ pub fn bind(port: u16) -> Result<(Server, String)> {
 
 /// Threads that read bodies and write responses. The dispatch thread only
 /// queues: one stalled peer used to block it, and with it the liveness
-/// probe, the tray and MCP. A full pool waits out the socket timeout
+/// probe and the tray. A full pool waits out the socket timeout
 /// ([`tiny_http::SOCKET_IO_TIMEOUT`]) and then takes the next request.
 const IO_THREADS: usize = 8;
 
@@ -1029,6 +1033,9 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         "/i18n.js" => request.respond(text(I18N_JS, "text/javascript; charset=utf-8"))?,
         "/i18n/fi.json" => request.respond(text(I18N_FI, "application/json; charset=utf-8"))?,
         "/i18n/sv.json" => request.respond(text(I18N_SV, "application/json; charset=utf-8"))?,
+        "/i18n/de.json" => request.respond(text(I18N_DE, "application/json; charset=utf-8"))?,
+        "/i18n/es.json" => request.respond(text(I18N_ES, "application/json; charset=utf-8"))?,
+        "/i18n/ru.json" => request.respond(text(I18N_RU, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
         "/viz.js" => request.respond(text(VIZ_JS, "text/javascript; charset=utf-8"))?,
         "/viz.css" => request.respond(text(VIZ_CSS, "text/css; charset=utf-8"))?,
@@ -1057,8 +1064,8 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
             }
         }
         "/api/alive" => {
-            // The liveness probe of the command line, the tray and the MCP
-            // server (`service::status`): answered here, never behind the
+            // The liveness probe of the command line and the tray
+            // (`service::status`): answered here, never behind the
             // state, so "busy" is not mistaken for "not running".
             if !header_token_ok(&request, &fixed.token) {
                 request.respond(json_response(
@@ -1266,101 +1273,12 @@ fn handle(fixed: &Fixed, mut request: Request) -> Result<()> {
         in_header || in_ticket
     };
     if !token_ok {
-        // A scoped MCP key (`mcp_keys`): only the routes the MCP tools
-        // need, within the key's folders and levels.
-        let key = request
-            .headers()
-            .iter()
-            .find(|h| h.field.equiv(crate::mcp_keys::HEADER))
-            .map(|h| h.value.as_str().to_string());
-        let Some(key) = key else {
-            return Ok(request.respond(json_response(
-                401,
-                &json!({"error": "missing or wrong token; reopen the start URL"}),
-            ))?);
-        };
-        let key = match crate::mcp_keys::check(&fixed.home, &key) {
-            Ok(k) => k,
-            Err(r) => {
-                return Ok(request.respond(json_response(
-                    401,
-                    &json!({"error": match r {
-                        crate::mcp_keys::Refused::Expired => "the MCP key has expired: create a new one with varsto mcp key create",
-                        crate::mcp_keys::Refused::Unknown => "unknown or revoked MCP key",
-                    }}),
-                ))?);
-            }
-        };
-        let mut body = String::new();
-        if *request.method() == Method::Post {
-            request
-                .as_reader()
-                .take(4 << 20)
-                .read_to_string(&mut body)?;
-        }
-        let mut input: Value = serde_json::from_str(&body).unwrap_or(json!({}));
-        let method = request.method().clone();
-        if method == Method::Post && path == "/api/sync" && input.is_object() {
-            // An assistant's sync is queued for the service's own round:
-            // a sync on a slow link outlasts any tool call.
-            input["background"] = json!(true);
-        }
-        if method == Method::Get && path == "/api/mcp/scope" {
-            // The key's own scope (the MCP server asks it at start): no
-            // engine needed, so no wait behind a sync.
-            return Ok(request.respond(json_response(
-                200,
-                &json!({"id": key.id, "name": key.name, "scope": key.scope}),
-            ))?);
-        }
-        if method == Method::Get && crate::readcache::cacheable(&path) {
-            // A read of an assistant: like the page's, the last answer (for
-            // this key) while a job has the engine, "busy" after a while.
-            use crate::readcache::{self, Got};
-            let cache_key = format!("mcp/{}{}", key.id, loggable_url(&url));
-            let got = readcache::take_or_cached(
-                || try_checkout(state, "mcp"),
-                &fixed.reads,
-                &cache_key,
-                readcache::FRESH_WAIT,
-                MCP_WAIT,
-            );
-            return match got {
-                Got::Fresh(mut work) => {
-                    let generation = fixed
-                        .reads
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .generation();
-                    let (status, v) = mcp_api(&mut work, &key, method, &path, &query, &input);
-                    drop(work);
-                    let body = Arc::new(v.to_string());
-                    if status == 200 {
-                        fixed.reads.lock().unwrap_or_else(|e| e.into_inner()).store(
-                            &cache_key,
-                            generation,
-                            body.clone(),
-                            std::time::Instant::now(),
-                        );
-                    }
-                    Ok(request.respond(json_text(status, body.as_str()))?)
-                }
-                Got::Cached(age, body) => Ok(request.respond(
-                    json_text(200, &readcache::mark_stale(&body, age))
-                        .with_header(header("X-Varsto-Stale", "1")),
-                )?),
-                Got::Busy => {
-                    let why = busy_with(state).unwrap_or_else(|| "another task".into());
-                    Ok(request.respond(json_response(503, &busy_answer(&why)))?)
-                }
-            };
-        }
-        let (status, v) = match checkout_within(state, "mcp", MCP_WAIT) {
-            Ok(mut work) => mcp_api(&mut work, &key, method, &path, &query, &input),
-            Err(why) => (503, busy_answer(&why)),
-        };
-        return Ok(request.respond(json_response(status, &v))?);
+        return Ok(request.respond(json_response(
+            401,
+            &json!({"error": "missing or wrong token; reopen the start URL"}),
+        ))?);
     }
+
     if path == "/api/open" {
         // Download a file through the browser; a plain link, so it carries a
         // ticket instead of the token. Counts as an access. The engine is
@@ -1692,101 +1610,6 @@ fn run_api(
     let why = path.trim_start_matches("/api/");
     let mut work = checkout_within(state, why, ENGINE_WAIT)?;
     Ok(api(&mut work, method, path, query, input))
-}
-
-/// The longest an assistant's request waits for the engine: below the MCP
-/// server's 30 s read timeout, so that it hears "busy" instead.
-const MCP_WAIT: std::time::Duration = std::time::Duration::from_secs(25);
-
-/// A request made with an MCP key: checked against the key's scope, then
-/// answered like any other, with folder lists cut to the key's folders.
-/// `st` is a work state with the engine (taken out of the shared state).
-fn mcp_api(
-    st: &mut State,
-    key: &crate::mcp_keys::McpKey,
-    method: Method,
-    path: &str,
-    query: &str,
-    input: &Value,
-) -> (u16, Value) {
-    use crate::mcp_keys::{allows, route, Need};
-    let m = match method {
-        Method::Get => "GET",
-        Method::Post => "POST",
-        _ => "",
-    };
-    let body_folder = input
-        .get("folder")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    let Some((need, folder)) = route(m, path, query_param(query, "folder"), body_folder) else {
-        return (
-            403,
-            json!({"error": format!("an MCP key may not use {m} {path}")}),
-        );
-    };
-    // Folder names and Strongroom flags, by name and by id.
-    let known: Vec<(String, String, bool)> = match st.engine.as_ref() {
-        Some(e) => e
-            .folders()
-            .into_iter()
-            .map(|(r, _)| (r.name.clone(), r.folder_id.to_string(), r.is_strongroom()))
-            .collect(),
-        None => return (503, json!({"error": "vault is locked"})),
-    };
-    if let Some(f) = &folder {
-        let Some((name, _, strong)) = known.iter().find(|(n, id, _)| n == f || id == f) else {
-            return (403, json!({"error": format!("no access to folder {f}")}));
-        };
-        if !allows(&key.scope, name, *strong, need) {
-            let what = match need {
-                Need::Read => "access to",
-                Need::Analyse => "recording analyses in",
-                Need::Write => "changes in",
-            };
-            return (
-                403,
-                json!({"error": format!("the MCP key {} does not allow {what} folder {name}", key.name)}),
-            );
-        }
-    }
-    if path == "/api/mcp/scope" {
-        return (
-            200,
-            json!({"id": key.id, "name": key.name, "scope": key.scope}),
-        );
-    }
-    let visible = |name: &str| {
-        known
-            .iter()
-            .find(|(n, _, _)| n == name)
-            .is_some_and(|(n, _, s)| allows(&key.scope, n, *s, Need::Read))
-    };
-    match api(st, method, path, query, input) {
-        Ok(v) if path == "/api/status" => {
-            // Only the folders the key may read: no devices, no storages, no
-            // paths, no vault identity.
-            let mut folders = v.get("folders").cloned().unwrap_or(json!([]));
-            if let Some(a) = folders.as_array_mut() {
-                a.retain(|f| f["name"].as_str().is_some_and(visible));
-            }
-            (200, json!({ "folders": folders }))
-        }
-        Ok(mut v) => {
-            let list = if path == "/api/folders" {
-                Some(&mut v)
-            } else if path == "/api/status" {
-                v.get_mut("folders")
-            } else {
-                None
-            };
-            if let Some(a) = list.and_then(|l| l.as_array_mut()) {
-                a.retain(|f| f["name"].as_str().is_some_and(visible));
-            }
-            (200, v)
-        }
-        Err(e) => (400, json!({"error": format!("{e:#}")})),
-    }
 }
 
 /// Reads at most `left` bytes, then fails: an upload larger than allowed is
@@ -2588,7 +2411,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         (Method::Get, "/api/providers") => Ok(providers_json(varsto_core::util::now_utc())),
         (Method::Post, "/api/ui-language") => {
             let l = s(input, "language")?;
-            if !matches!(l.as_str(), "en" | "fi" | "sv") {
+            if !matches!(l.as_str(), "en" | "fi" | "sv" | "de" | "es" | "ru") {
                 bail!("unknown language {l}");
             }
             std::fs::create_dir_all(&st.home)?;
@@ -4049,7 +3872,7 @@ fn api_unlocked(
             engine.mkdir(&s(input, "folder")?, &s(input, "path")?)?;
             Ok(json!({"ok": true}))
         }
-        // New files only (the assistant's channel): nothing is overwritten.
+        // New files only: nothing is overwritten.
         (Method::Post, "/api/write") => Ok(serde_json::to_value(engine.create_file(
             &s(input, "folder")?,
             &s(input, "path")?,
@@ -4060,8 +3883,7 @@ fn api_unlocked(
             &s(input, "from")?,
             &s(input, "to")?,
         )?)?),
-        // File analyses (`engine::notes`): what a file contains, recorded by
-        // an assistant through MCP or by the user.
+        // File analyses (`engine::notes`): what a file contains, recorded by the user.
         (Method::Get, "/api/analysis") => {
             let folder = query_param(query, "folder")
                 .ok_or_else(|| anyhow!("folder query parameter required"))?;
@@ -6178,7 +6000,13 @@ mod tests {
             }
         }
         assert!(found.len() > 150, "{}", found.len());
-        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV)] {
+        for (lang, dict) in [
+            ("fi", I18N_FI),
+            ("sv", I18N_SV),
+            ("de", I18N_DE),
+            ("es", I18N_ES),
+            ("ru", I18N_RU),
+        ] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let missing: Vec<&String> = found
                 .iter()
@@ -6296,7 +6124,7 @@ mod tests {
             "reset",
             "shelf",
             "varsto",
-            "varsto mcp grant",
+            "No analysis yet. Write one yourself.",
             "varsto org request",
             "work-laptop",
             "Archive is almost full",
@@ -6359,7 +6187,13 @@ mod tests {
             );
         }
         assert!(used.len() > 800, "{}", used.len());
-        for (lang, dict) in [("fi", I18N_FI), ("sv", I18N_SV)] {
+        for (lang, dict) in [
+            ("fi", I18N_FI),
+            ("sv", I18N_SV),
+            ("de", I18N_DE),
+            ("es", I18N_ES),
+            ("ru", I18N_RU),
+        ] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let top: Vec<&String> = d.as_object().unwrap().keys().collect();
             // i18n.js reads only these three; a string next to them is never shown.

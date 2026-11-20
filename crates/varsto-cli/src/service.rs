@@ -2459,7 +2459,7 @@ pub fn run(opts: Options) -> Result<()> {
     crate::import_jobs::spawn_driver(state.clone(), activity_stop.clone());
 
     // File watcher: sends a signal on any change under an attached folder.
-    let (tx, rx) = mpsc::channel::<()>();
+    let (tx, rx) = mpsc::channel::<PathBuf>();
     let mut watcher = make_watcher(tx)?;
     let mut watched: Vec<PathBuf> = Vec::new();
     let mut last_change: Option<Instant> = None;
@@ -2553,8 +2553,10 @@ pub fn run(opts: Options) -> Result<()> {
             }
         }
         // Drain change notifications.
-        while rx.try_recv().is_ok() {
+        let mut dirty_paths: Vec<PathBuf> = Vec::new();
+        while let Ok(p) = rx.try_recv() {
             last_change = Some(Instant::now());
+            dirty_paths.push(p);
         }
         // Re-evaluate watched folders when the engine or its folders changed.
         {
@@ -2790,8 +2792,8 @@ pub fn run(opts: Options) -> Result<()> {
             last_change = None;
             // The whole round (peer records, ledger, the sync itself, the
             // upkeep) runs with the engine and the service's state taken out
-            // of the shared state: the interface, the tray, the command line
-            // and MCP get the summary from before the round (marked busy) and
+            // of the shared state: the interface, the tray and the command line
+            // get the summary from before the round (marked busy) and
             // the cached reads, and pause, lock and quit answer at once.
             let mut st = desktop::checkout(&state, "sync");
             st.service.sync_requested = false;
@@ -2820,7 +2822,46 @@ pub fn run(opts: Options) -> Result<()> {
             };
             let started = Instant::now();
             varsto_core::events::publish("sync.started", json!({ "reason": why }));
-            let result = st.engine.as_mut().map(|e| e.sync(None));
+            let result = st.engine.as_mut().map(|e| {
+                // A file watcher names the folders that changed. An interval
+                // or an explicit request still syncs every folder.
+                let only_files = due_change && !requested && !due_timer;
+                if !only_files || dirty_paths.is_empty() {
+                    return e.sync(None);
+                }
+                let mounts: Vec<(String, PathBuf)> = e
+                    .folders()
+                    .into_iter()
+                    .filter_map(|(r, m)| m.map(|p| (r.name.clone(), p)))
+                    .collect();
+                let mut ids: Vec<String> = Vec::new();
+                for path in &dirty_paths {
+                    let mut best: Option<(usize, String)> = None;
+                    for (name, root) in &mounts {
+                        if path.starts_with(root) {
+                            let n = root.as_os_str().len();
+                            if best.as_ref().map(|(len, _)| n > *len).unwrap_or(true) {
+                                best = Some((n, name.clone()));
+                            }
+                        }
+                    }
+                    if let Some((_, name)) = best {
+                        if !ids.iter().any(|id| id == &name) {
+                            ids.push(name);
+                        }
+                    }
+                }
+                dirty_paths.clear();
+                if ids.is_empty() || ids.len() == mounts.len() {
+                    e.sync(None)
+                } else {
+                    let mut all = Vec::new();
+                    for name in &ids {
+                        all.extend(e.sync(Some(name))?);
+                    }
+                    Ok(all)
+                }
+            });
             if let Some(Ok(reports)) = &result {
                 {
                     let (pulled, pushed) = reports.iter().fold((0, 0), |(a, b), (pl, ps)| {
@@ -2932,12 +2973,14 @@ fn is_change(ev: &notify::Event) -> bool {
     })
 }
 
-fn make_watcher(tx: mpsc::Sender<()>) -> Result<notify::RecommendedWatcher> {
+fn make_watcher(tx: mpsc::Sender<PathBuf>) -> Result<notify::RecommendedWatcher> {
     let watcher = notify::RecommendedWatcher::new(
         move |res: notify::Result<notify::Event>| {
             if let Ok(ev) = res {
                 if is_change(&ev) {
-                    let _ = tx.send(());
+                    for p in ev.paths {
+                        let _ = tx.send(p);
+                    }
                 }
             }
         },
@@ -3213,7 +3256,7 @@ pub fn login_service_installed() -> bool {
     {
         return std::env::var_os("HOME").is_some_and(|h| {
             PathBuf::from(h)
-                .join("Library/LaunchAgents/in.soderlund.varsto.plist")
+                .join("Library/LaunchAgents/net.varsto.app.plist")
                 .exists()
         });
     }
@@ -3365,12 +3408,12 @@ pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
     {
         let dir = PathBuf::from(std::env::var("HOME")?).join("Library/LaunchAgents");
         fs::create_dir_all(&dir)?;
-        let plist = dir.join("in.soderlund.varsto.plist");
+        let plist = dir.join("net.varsto.app.plist");
         let content = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>in.soderlund.varsto</string>
+  <key>Label</key><string>net.varsto.app</string>
   <key>ProgramArguments</key><array><string>{}</string><string>--home</string><string>{}</string><string>service</string><string>run</string><string>--interval</string><string>{}</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
@@ -3437,8 +3480,8 @@ pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
 pub fn uninstall() -> Result<String> {
     #[cfg(target_os = "macos")]
     {
-        let plist = PathBuf::from(std::env::var("HOME")?)
-            .join("Library/LaunchAgents/in.soderlund.varsto.plist");
+        let plist =
+            PathBuf::from(std::env::var("HOME")?).join("Library/LaunchAgents/net.varsto.app.plist");
         let _ = std::process::Command::new("launchctl")
             .args(["unload", "-w", &plist.display().to_string()])
             .output();

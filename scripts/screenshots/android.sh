@@ -9,7 +9,7 @@
 # (screen size; finalize.py scales them for the website).
 set -euo pipefail
 apk="$1"; out="$(mkdir -p "$2" && realpath "$2")"
-pkg=in.soderlund.varsto
+pkg=net.varsto.app
 for i in $(seq 1 100); do [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break; sleep 3; done
 echo "== device: $(adb shell getprop ro.product.model | tr -d '\r'), Android $(adb shell getprop ro.build.version.release | tr -d '\r'), $(adb shell wm size | tr -d '\r')"
 shot() { adb exec-out screencap -p > "$out/$1.png"; echo "   $1.png"; }

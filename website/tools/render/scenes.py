@@ -127,6 +127,29 @@ def L(*pts, **kw):
     return K.link(list(pts), **kw)
 
 
+def usb_cable(src, src_at, dst, dst_at, sag=0.05, r=0.008):
+    """A lead between two points on placed objects. Screen-space links sit on one
+    height, so a short one between the laptop and the dock never touched either."""
+    import bpy
+    bpy.context.view_layer.update()
+    a = src.matrix_world @ Vector(src_at)
+    b = dst.matrix_world @ Vector(dst_at)
+    root = K.empty("usbcable")
+    m = K.mat("slate", rough=0.45)
+    pts = []
+    steps = 12
+    for i in range(steps + 1):
+        t = i / steps
+        p = a.lerp(b, t)
+        p.z -= math.sin(math.pi * t) * sag
+        pts.append(p)
+    for p, q in zip(pts, pts[1:]):
+        K.tube(p, q, r, m, root, segs=8, caps=False)
+    K.sphere(r, m, at=pts[0], parent=root)
+    K.sphere(r, m, at=pts[-1], parent=root)
+    return root
+
+
 # ============================================================ features
 @scene("features/ledger")
 def ledger():
@@ -279,9 +302,10 @@ def disks():
         x, y = K.project(sh.matrix_world @ Vector((0.0, -0.08, z + 0.012)))
         K.text(x, y + 4, letter, "letter", free=True)
     lock_at(sh, "tr", dx=0, dy=0, lift=1.2)
-    node(K.laptop("cipher"), 420, 130, 0.35, "PC with a USB dock", label_x=470, label_y=234)
-    node(K.dock(), 544, 170, 0.05, rot=-20)
-    L((488, 162), (507, 170), solid=True, arrows=(), tone="mid", h=0.03, r=0.008)
+    lp = node(K.laptop("cipher"), 400, 128, 0.35, "PC with a USB dock", label_x=455, label_y=250)
+    dk = node(K.dock(), 545, 188, 0.14, rot=-18)
+    # Right edge of the laptop base, into the back of the dock.
+    usb_cable(lp, (0.60, -0.06, 0.025), dk, (0.0, 0.16, 0.11))
     L((236, 128), (290, 110), (324, 110), (360, 118))
     K.caption("Old drives become counted, verified copies: attach, fill, eject.")
 

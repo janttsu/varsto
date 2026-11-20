@@ -23,8 +23,11 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/use-cases/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/use-cases/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/use-cases/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/use-cases/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/use-cases/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/use-cases/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../../assets/css/site.css?v=4998b8d831">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -45,7 +48,7 @@
     </nav>
     <div class="tools">
       <details class="pop langs-menu"><summary class="iconbtn" aria-label="Langue">FR</summary>
-        <nav class="pop-body langs" aria-label="Langue"><a href="../../use-cases/" hreflang="en" lang="en">English</a><a href="../../fi/use-cases/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/use-cases/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/use-cases/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav></details>
+        <nav class="pop-body langs" aria-label="Langue"><a href="../../use-cases/" hreflang="en" lang="en">English</a><a href="../../fi/use-cases/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/use-cases/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/use-cases/" hreflang="fr" lang="fr" aria-current="true">Français</a><a href="../../de/use-cases/" hreflang="de" lang="de">Deutsch</a><a href="../../es/use-cases/" hreflang="es" lang="es">Español</a><a href="../../ru/use-cases/" hreflang="ru" lang="ru">Русский</a></nav></details>
       <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
       <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
       <a class="button small" href="../../fr/downloads/">Télécharger</a>
@@ -115,13 +118,11 @@
     </section>
 
     <section class="feature" id="uc-7">
-      <h2>7. « Range ce dossier pour moi »</h2>
-      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/usecases/tidy.webp?v=f843b65187"><img src="../../assets/img/usecases/tidy.png?v=a03202d808" alt="Une conversation avec un assistant qui travaille dans un seul dossier autorisé et propose une structure plus ordonnée, avec un bouton Confirmer." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/usecases/tidy-dark.webp?v=1735fe9174"><img src="../../assets/img/usecases/tidy-dark.png?v=3e91d9c283" alt="Une conversation avec un assistant qui travaille dans un seul dossier autorisé et propose une structure plus ordonnée, avec un bouton Confirmer." width="640" height="320"></picture>
+      <h2>7. Des fichiers que vous n'avez pas ouverts depuis des mois</h2>
       <div>
-        <p>Dix ans de lettres numérisées, de reçus et de notes dans un seul dossier. Vous accordez à un modèle de langage l’accès à ce seul dossier par le serveur MCP de Varsto : un modèle local sur votre propre machine (Ollama, LM Studio ou tout ce qui parle le Model Context Protocol). Le contenu ne quitte jamais vos appareils : aucun assistant cloud n’intervient, rien n’est envoyé à un fournisseur de modèles, et le modèle ne voit que le seul dossier que vous avez autorisé. Il lit les fichiers, détermine ce qu’ils sont et ce qui va ensemble, et propose une structure dans vos mots : par année, par correspondant, par projet, « papiers d’impôts par année, tout le reste par expéditeur ». Une fois que vous avez confirmé, il crée les répertoires, y déplace et renomme les fichiers et écrit un index de ce qui est allé où. La nouvelle organisation se synchronise vers vos autres appareils comme n’importe quel changement que vous feriez vous-même.</p>
-        <p>Les règles sont fixées dans Varsto, pas laissées au modèle : il ne voit que les dossiers que vous avez autorisés, en lecture seule sauf si vous autorisez les changements, jamais vos Strongrooms, et il ne peut rien détruire. Il n’y a pas d’outil de suppression ; écrire ne fait que créer de nouveaux fichiers, et un déplacement ou un renommage ne va que vers un nom libre sur chaque appareil, si bien qu’aucun fichier n’est jamais remplacé par un autre. Si le modèle se trompe, tout est encore là, sous un autre chemin.</p>
-        <p>Où doivent vivre les données inactives, c’est la décision de Varsto, pas celle de l’assistant : l’application tient la date de dernière utilisation de chaque fichier et suggère, dans l’interface, ce qui n’a pas été touché depuis des mois et ce que cela coûterait dans une classe de stockage à froid, avec les sources et les dates.</p>
-        <p class="note">Aujourd’hui : <code>varsto mcp</code> avec des autorisations par dossier (<code>varsto mcp grant Letters --write</code>) : lire, lister, créer des répertoires, déplacer et renommer vers des noms libres, et créer de nouvelles notes, sans aucun moyen de supprimer ni d’écraser ; l’estimation de placement propre à Varsto dans l’interface et en ligne de commande, chiffrée avec vos propres prix de stockage, un clic (ou <code>varsto advice apply</code>) pour libérer les fichiers inactifs sur cet appareil une fois leurs copies vérifiées et la politique du dossier toujours respectée, et, lorsque vous avez un stockage à froid moins cher, un clic pour y déplacer les blocs des fichiers inactifs afin que la facture elle-même baisse, jamais en dessous de la politique du dossier (<code>varsto move Letters --from box --to glacier --idle-days 180</code> fait la même chose à la main, avec <code>--dry-run</code> pour voir d’abord les coûts).</p>
+        <p>Dix ans de lettres numérisées, de reçus et de notes sont dans un seul dossier. La plupart n'ont pas été ouverts depuis des mois et occupent encore de la place sur l'ordinateur portable.</p>
+        <p>Varsto garde pour chaque fichier la date de dernière utilisation, fusionnée entre vos appareils, de sorte qu'un fichier n'est inactif que si aucun appareil ne l'a utilisé. L'interface propose ce qui n'a pas été touché et ce que cela coûterait dans une classe de stockage plus froide, avec les sources et les dates. Un clic, ou <code>varsto advice apply</code>, libère les fichiers inactifs sur cet appareil une fois leurs copies vérifiées et si la politique du dossier tient encore. Si vous avez un stockage à froid moins cher, un clic y déplace ces blocs. La facture peut baisser. Elle ne passe jamais sous la politique du dossier.</p>
+        <p class="note"><code>varsto move Letters --from box --to glacier --idle-days 180</code> fait la même chose à la main. <code>--dry-run</code> montre d'abord le coût. Rien ici ne donne vos fichiers à un modèle de langage. Varsto n'a pas de serveur MCP.</p>
       </div>
     </section>
 
@@ -136,7 +137,7 @@
 
     <section class="feature" id="uc-9">
       <h2>9. Des dizaines de téraoctets sur de vieux disques</h2>
-      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/disks.webp?v=512fa8dfa3"><img src="../../assets/img/features/disks.png?v=0440552c84" alt="Des disques durs sur une étagère à côté d’un PC avec une station d’accueil USB." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/disks-dark.webp?v=e3049a36e5"><img src="../../assets/img/features/disks-dark.png?v=d310371b86" alt="Des disques durs sur une étagère à côté d’un PC avec une station d’accueil USB." width="640" height="320"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../../assets/img/features/disks.webp?v=c0209b5984"><img src="../../assets/img/features/disks.png?v=96f3587910" alt="Des disques durs sur une étagère à côté d’un PC avec une station d’accueil USB." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/features/disks-dark.webp?v=66444a5bc2"><img src="../../assets/img/features/disks-dark.png?v=aaa4d305bd" alt="Des disques durs sur une étagère à côté d’un PC avec une station d’accueil USB." width="640" height="320"></picture>
       <div>
         <p><strong>Situation.</strong> Vous gérez une énorme archive sur de vieux disques durs, via une station d’accueil USB. Les disques dorment dans un placard ; certains sont gardés ailleurs. Aujourd’hui, vous les suivez avec un tableur, ou avec git-annex.</p>
         <p><strong>Comment Varsto aide.</strong> Branchez le disque « data-01 » et dites à l’application de l’utiliser. Elle remplit le disque selon votre politique de conservation, vous dit quand il peut être éjecté, et enregistre dans le registre ce qu’il contient, où il est gardé et quand il a été vérifié pour la dernière fois. Quand vous avez besoin d’un gros fichier sur le portable et que le téléchargement depuis le cloud prendrait des heures, l’application propose : « Branchez le disque data-01 (étagère : maison) ; environ 12 minutes au lieu de 9 heures depuis le cloud ». Un dossier peut être conservé uniquement sur des disques, répliqué autant de fois que vous le choisissez, sans aucune copie dans le cloud.</p>
@@ -180,6 +181,14 @@
       </div>
     </section>
 
+    <section class="feature" id="uc-14">
+      <h2>14. Un Raspberry Pi qui reste allumé</h2>
+      <div>
+        <p><strong>Situation.</strong> Vous laissez un Raspberry Pi, ou un autre petit ordinateur, faire tourner Varsto à la maison. Sa carte SD ou un disque USB bon marché n'est pas un support auquel vous confieriez la seule copie d'un fichier.</p>
+        <p><strong>Comment Varsto aide.</strong> Le service en arrière-plan relit les copies stockées et compare chaque bloc au hachage dans son nom. Une copie qui ne correspond plus est endommagée, et Varsto la remplace par une copie intacte sur un autre appareil ou un autre stockage. Le Pi n'a pas besoin d'être un stockage fiable. Il doit continuer la vérification. Vous gardez quand même une seconde copie ailleurs : la vérification ne répare un bloc que lorsqu'une autre bonne copie existe.</p>
+      </div>
+    </section>
+
     <h2>Comment ces cas sont testés</h2>
     <p>La suite automatisée du dépôt joue plusieurs de ces scénarios avec deux ou trois appareils simulés qui ne sont jamais en ligne en même temps : convergence hors ligne, modifications concurrentes avec copies de conflit, appareil restauré à partir d’une ancienne sauvegarde, réplica, dossier partagé, disque transporteur, synchronisation sélective et vignettes. Un laboratoire de machines virtuelles avec des réseaux domestiques et de bureau derrière des NAT joue à chaque version les scénarios de pair à pair, de réseau local, de panne, de décalage d’horloge, de volume et de disques amovibles (branchement à chaud de disques, préparation d’un disque entier, plans de récupération) ; 59 scénarios au total. Voir <a href="../../docs/testing.html">Testing</a> (en) et le <a href="../../docs/failure-model.html">modèle de défaillances</a>.</p>
 
@@ -197,9 +206,8 @@
     <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
     <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
   </div>
-  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
-<script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
 <script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
 </body>
 </html>

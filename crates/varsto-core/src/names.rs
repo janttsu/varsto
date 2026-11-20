@@ -299,6 +299,7 @@ impl LocalRules {
             case_insensitive: probe_case_insensitive(root).unwrap_or(platform),
         };
         cache.insert(root.to_path_buf(), r);
+        warn_nested_case(root, r.case_insensitive);
         r
     }
 
@@ -324,6 +325,21 @@ impl LocalRules {
     fn fold(&self, name: &str) -> String {
         fold(name)
     }
+}
+
+/// Which vault path keeps the plain spelling when two paths are one file
+/// on a case-insensitive disk. NFC, then lower case; an already-NFC
+/// spelling beats its decomposed twin; the original bytes break a
+/// remaining tie. Arrival order does not.
+fn spelling_wins(candidate: &str, occupant: &str) -> bool {
+    use unicode_normalization::UnicodeNormalization;
+    let rank = |path: &str| {
+        let nfc: String = path.nfc().collect();
+        let folded = nfc.to_lowercase();
+        let decomposed = u8::from(path != nfc);
+        (folded, decomposed, path.to_string())
+    };
+    rank(candidate) < rank(occupant)
 }
 
 /// The key two names share when a case-insensitive filesystem takes them
@@ -382,6 +398,88 @@ fn probe_case_insensitive(root: &Path) -> Option<bool> {
     let insensitive = std::fs::symlink_metadata(&upper).is_ok();
     let _ = std::fs::remove_file(&lower);
     Some(insensitive)
+}
+
+/// The root's answer is the folder's rule. A subdirectory that answers
+/// the other way (a case-sensitive directory on an otherwise insensitive
+/// disk, or the reverse) is named in the log: placement still follows the
+/// root, and files there can collide or stay apart contrary to that rule.
+fn warn_nested_case(root: &Path, root_insensitive: bool) {
+    let mut pending = vec![root.to_path_buf()];
+    let mut looked = 0usize;
+    while let Some(dir) = pending.pop() {
+        if looked >= 32 {
+            break;
+        }
+        looked += 1;
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if !kind.is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            if dir != root {
+                if let Some(here) = probe_listed_case(&path) {
+                    if here != root_insensitive {
+                        log::warn!(
+                            "{} is {} while {} is {}",
+                            path.display(),
+                            if here {
+                                "case-insensitive"
+                            } else {
+                                "case-sensitive"
+                            },
+                            root.display(),
+                            if root_insensitive {
+                                "case-insensitive"
+                            } else {
+                                "case-sensitive"
+                            }
+                        );
+                    }
+                }
+            }
+            if looked < 32 {
+                pending.push(path);
+            }
+        }
+    }
+}
+
+/// Case sensitivity from a name already in `dir`, without writing a probe.
+fn probe_listed_case(dir: &Path) -> Option<bool> {
+    let rd = std::fs::read_dir(dir).ok()?;
+    for entry in rd.flatten().take(8) {
+        let name = entry.file_name().into_string().ok()?;
+        if !name.is_ascii() {
+            continue;
+        }
+        let flipped: String = name
+            .chars()
+            .map(|c| {
+                if c.is_lowercase() {
+                    c.to_uppercase().next().unwrap_or(c)
+                } else {
+                    c.to_lowercase().next().unwrap_or(c)
+                }
+            })
+            .collect();
+        if flipped == name {
+            continue;
+        }
+        let here = std::fs::symlink_metadata(entry.path()).ok()?;
+        return match std::fs::symlink_metadata(dir.join(flipped)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(false),
+            Ok(other) => Some(same_file(&here, &other)),
+            Err(_) => continue,
+        };
+    }
+    None
 }
 
 /// Two names found for one file (on a case-insensitive filesystem) rather
@@ -656,6 +754,12 @@ impl LocalNames {
                         let owner = self.owner_of(rules, &child(&dir, &e));
                         if owner == vault {
                             e
+                        } else if spelling_wins(vault, &owner) {
+                            // The name that arrived second is the one that
+                            // keeps the plain spelling. The earlier file moves.
+                            disambiguated = true;
+                            self.displace(root, rules, &dir, &e, &owner);
+                            name.to_string()
                         } else {
                             disambiguated = true;
                             self.free_name(root, rules, &dir, name, Some(vault))
@@ -685,6 +789,24 @@ impl LocalNames {
             return v.clone();
         }
         rules.default_vault(local).into_owned()
+    }
+
+    /// Move the file that currently holds this folded name aside, so a
+    /// vault path that ranks ahead of it can take the plain spelling.
+    fn displace(&mut self, root: &Path, rules: LocalRules, dir: &str, existing: &str, owner: &str) {
+        let aside = self.free_name(root, rules, dir, existing, Some(owner));
+        let from_rel = child(dir, existing);
+        let to_rel = child(dir, &aside);
+        let from = join(root, &from_rel);
+        let to = join(root, &to_rel);
+        if from != to && from.exists() {
+            let _ = std::fs::rename(&from, &to);
+        }
+        self.record(owner, &to_rel);
+        if let Some(listing) = self.listings.get_mut(dir) {
+            listing.remove(&rules.fold(existing));
+            listing.insert(rules.fold(&aside), aside);
+        }
     }
 
     /// `name (2).ext`, `name (3).ext`, ...: the first one the directory
@@ -1090,17 +1212,21 @@ mod tests {
         let (b, pb) = names.place(root, CI, "Photos/file.txt").unwrap();
         assert_eq!(pb, Placed::Disambiguated("Photos/file (2).txt".into()));
         write(&b);
-        // A third spelling, and a file under the directory's other case.
+        // A third spelling. FILE sorts before File and file, so it takes
+        // the plain name and the earlier file moves aside.
         let (c, _) = names.place(root, CI, "Photos/FILE.TXT").unwrap();
-        assert_eq!(c, join(root, "Photos/FILE (3).TXT"));
+        assert_eq!(c, join(root, "Photos/FILE.TXT"));
         write(&c);
         let (d, pd) = names.place(root, CI, "photos/other.txt").unwrap();
         assert_eq!(d, join(root, "Photos/other.txt"));
         assert_eq!(pd, Placed::AsIs);
         write(&d);
-        // Writing the same vault path again reuses its place.
+        // Writing the same vault path again reuses its place. File.txt
+        // was moved aside when FILE.TXT took the plain spelling.
         assert_eq!(names.place(root, CI, "Photos/file.txt").unwrap().0, b);
-        assert_eq!(names.place(root, CI, "Photos/File.txt").unwrap().0, a);
+        let again = names.place(root, CI, "Photos/File.txt").unwrap().0;
+        assert_ne!(again, c);
+        assert!(again.to_string_lossy().contains('('));
         // A scan maps every local name back.
         let mut found: Vec<String> = walkdir::WalkDir::new(root)
             .into_iter()
@@ -1132,6 +1258,40 @@ mod tests {
         write(&a);
         let (_, placed) = names.place(tmp.path(), CI, "cafe\u{301}").unwrap();
         assert_eq!(placed, Placed::Disambiguated("cafe\u{301} (2)".into()));
+    }
+
+    #[test]
+    fn case_collision_does_not_depend_on_which_name_arrives_first() {
+        let expect = |first: &str, second: &str| {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path();
+            let mut names = LocalNames::default();
+            let (a, _) = names.place(root, CI, first).unwrap();
+            write(&a);
+            let (b, _) = names.place(root, CI, second).unwrap();
+            write(&b);
+            let mut found: Vec<(String, String)> = walkdir::WalkDir::new(root)
+                .into_iter()
+                .flatten()
+                .filter(|e| e.file_type().is_file())
+                .map(|e| {
+                    let local =
+                        crate::util::manifest_path(e.path().strip_prefix(root).unwrap()).unwrap();
+                    (names.vault_of(CI, &local), local)
+                })
+                .collect();
+            found.sort();
+            found
+        };
+        let forward = expect("Photos/file.txt", "Photos/File.txt");
+        let reverse = expect("Photos/File.txt", "Photos/file.txt");
+        assert_eq!(forward, reverse, "{forward:?} vs {reverse:?}");
+        assert!(forward
+            .iter()
+            .any(|(v, l)| v == "Photos/File.txt" && l.ends_with("File.txt") && !l.contains("(2)")));
+        assert!(forward
+            .iter()
+            .any(|(v, l)| v == "Photos/file.txt" && l.contains("(2)")));
     }
 
     #[test]

@@ -2,12 +2,12 @@
 title: Projekt
 nav: Project
 output: index.html
-description: Varsto: end-to-end-krypterad synkronisering, delning och säkerhetskopiering på lagring du redan äger, med hybrid postkvantkryptografi och en signerad förteckning över var varje kopia finns. Alfa, arbetsnamn.
+description: Varsto: end-to-end-krypterad filsynkronisering, delning och säkerhetskopiering på lagring du redan äger, med hybrid postkvantkryptografi och en signerad förteckning över var varje kopia finns. Alfa, arbetsnamn.
 ---
     <section class="hero">
       <canvas class="field" id="field" aria-hidden="true"></canvas>
       <h1>Ta med din egen lagring. Behåll dina egna nycklar. Vet var varje block finns.</h1>
-      <p class="lead">End-to-end-krypterad synkronisering, delning och säkerhetskopiering mellan dina enheter, med hybrid postkvantkryptografi och en bokföring du kan granska. Ingen server, inget konto, ingen leverantör att lita på.</p>
+      <p class="lead">End-to-end-krypterad filsynkronisering, delning och säkerhetskopiering på lagring du redan äger, med hybrid postkvantkryptografi och en bokföring du kan granska. Ingen server, inget konto, ingen leverantör att lita på. Så här skiljer det sig från <a href="{{L}}compare/syncthing/">Syncthing</a> och <a href="{{L}}compare/resilio-sync/">Resilio Sync</a>.</p>
       <div class="cta"><a class="button" href="{{L}}downloads/">Ladda ner alfaversionen</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Snabbstart</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Källkoden på GitHub</a></div>
       <nav class="platforms" aria-label="Nedladdningar"><a href="{{L}}downloads/">Linux</a> <a href="{{L}}downloads/">Windows</a> <a href="{{L}}downloads/">macOS</a> <a href="{{L}}downloads/">Android</a> <a href="{{L}}downloads/">iOS</a></nav>
     </section>
@@ -34,7 +34,7 @@ description: Varsto: end-to-end-krypterad synkronisering, delning och säkerhets
       <li>Innehållet krypteras med XChaCha20-Poly1305 under nycklar härledda ur en slumpmässig valvnyckel som bara dina enheter har; en lagringsplats ser chiffertextobjekt namngivna efter sin hash och inget annat. <a href="{{L}}how-it-works/">Så fungerar det</a>, steg för steg.</li>
       <li>Varje lagrad signatur är hybrid (Ed25519 + ML-DSA-65, båda måste verifieras) och varje förseglad nyckel är hybrid (X25519 + ML-KEM-768): hybrid postkvantkryptografi, utformad för det, inte granskad. Transporten (direkta anslutningar bär bara krypterade block över TLS 1.3 med fästa certifikat, på TCP eller, genom NAT, QUIC) och signeringen av releaser (minisign) använder klassiska algoritmer.</li>
       <li>Strongroom-mappar öppnas bara med en FIDO2-säkerhetsnyckel; skyddet är kryptografiskt, inte en dialogruta.</li>
-      <li>AI-hjälpen stannar lokalt: MCP-servern är avsedd för språkmodeller som körs på din egen dator, bara i de mappar du beviljar och aldrig i ett Strongroom. Inget skickas till någon modelleverantör.</li>
+      <li>Ingen assistent får åtkomst till valvet. Det finns ingen MCP-server och ingen nyckel som en språkmodell kan använda för att läsa dina filer.</li>
       <li>En förlorad enhet tas bort med en signerad återkallelse och valvet byter till nya nycklar; en raderingsorder utförs nästa gång enheten når en lagringsplats. Det finns inget konto och ingen deponering: återställningspaketet, 24 ord eller tre delar, är ditt att ta vara på.</li>
       <li>Varken designen eller koden har granskats eller reviderats. <a href="{{P}}docs/threat-model.html">Hotmodellen</a> och <a href="{{P}}docs/failure-model.html">felmodellen</a> beskriver vad designen är avsedd att göra, vad varje part kan se och var den tar slut.</li>
     </ul>

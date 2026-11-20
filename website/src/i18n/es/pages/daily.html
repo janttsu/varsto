@@ -1,0 +1,31 @@
+---
+title: Compilaciones diarias
+nav: Downloads
+output: daily/index.html
+description: Compilaciones de desarrollo de Varsto a partir de la rama principal, con una lista de sumas de comprobación firmada con una clave diaria aparte. No son publicaciones ni sirven para datos de producción.
+---
+    <h1>Compilaciones diarias</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>Estas son compilaciones de desarrollo de la rama principal, no publicaciones.</strong></p>
+      <ul>
+        <li>No son publicaciones y no han pasado las pruebas de publicación. No llevan firma de publicación ni firma de código de Apple o de Microsoft. No las uses con datos de producción.</li>
+        <li>El formato de almacenamiento puede cambiar de una compilación a la siguiente sin ninguna migración. Estas compilaciones escriben el formato de almacenamiento 3: una bóveda hecha con 0.0.1-alpha.15 o anterior se rechaza y hay que crearla de nuevo (<code>varsto reset --yes</code>, <code>varsto init</code>, y luego volver a sincronizar los archivos), y 0.0.1-alpha.15 rechaza una bóveda de formato 3. Un dispositivo que se une pide cada carpeta y un propietario la aprueba; <code>varsto init</code> imprime un segundo conjunto de 24 palabras de recuperación que pide <code>varsto folder add</code>.</li>
+        <li><code>varsto update --daily</code> instala la última compilación diaria de tu plataforma (las compilaciones de línea de comandos de Linux y de Windows; la aplicación de macOS y el APK de Android se instalan a mano). <code>varsto update</code> a secas se queda en las publicaciones y nunca instala una compilación diaria.</li>
+        <li>La compilación diaria de Android es un APK de depuración (<code>varsto-daily-android-debug.apk</code>) y el APK de publicación está firmado con otra clave, así que ninguno se actualiza encima del otro: desinstala uno antes de instalar el otro, lo que borra la copia de la bóveda de ese dispositivo.</li>
+        <li>Conserva tus propias copias de seguridad.</li>
+      </ul>
+      <p>¿Buscas algo en lo que puedas confiar? Usa en su lugar las <a href="{{L}}downloads/">descargas estables</a>.</p>
+    </div>
+    {{DAILY_BUILD}}
+    {{DAILY_TABLE}}
+    <h2>Verifica</h2>
+    <p>Pon <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> junto a los archivos que descargaste (los nombres de archivo son los estables de la tabla) y ejecuta</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Omite <code>--ignore-missing</code> si descargaste todos los archivos. La lista está firmada con la clave diaria aparte (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, formato minisign; la clave es <a href="{{P}}daily-key.pub">daily-key.pub</a>), que es lo que comprueba <code>varsto update --daily</code>. Además de decirte que una descarga está completa e íntegra, la firma muestra que la lista salió de la compilación propia del proyecto.</p>
+    <h2>Qué incluye</h2>
+    {{DAILY_INCLUDED}}
+    <h2>Lagunas conocidas</h2>
+    {{DAILY_GAPS}}
+    <h2>Compilaciones anteriores</h2>
+    <p>Se conservan las siete compilaciones más recientes, con los mismos nombres de archivo; cada una tiene su propia lista firmada.</p>
+    {{DAILY_HISTORY}}

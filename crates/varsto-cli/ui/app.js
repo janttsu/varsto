@@ -516,11 +516,19 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     window.scrollTo(0, 0);
   }
   // A field that gets focus is scrolled into view once the on-screen keyboard has made room
-  // (the Android shell resizes the page for the keyboard).
+  // (the Android shell resizes the page for the keyboard). On a desktop the keyboard never
+  // covers the field, and pulling it back to the centre fights a scroll down the Peers page.
   document.addEventListener("focusin", function (ev) {
     var f = ev.target;
     if (!f || !/^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) || f.type === "checkbox" || f.type === "radio") { return; }
-    [250, 600].forEach(function (ms) { setTimeout(function () { if (document.activeElement === f && f.scrollIntoView) { f.scrollIntoView({ block: "center", behavior: "smooth" }); } }, ms); });
+    [250, 600].forEach(function (ms) {
+      setTimeout(function () {
+        if (document.activeElement !== f || !f.scrollIntoView) { return; }
+        var vv = window.visualViewport;
+        if (!vv || vv.height >= window.innerHeight - 80) { return; }
+        f.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, ms);
+    });
   });
   // The shell's Back button (Android) asks the page first: it closes what is open, steps back
   // to the previous page and only when nothing is left to go back to returns false, so the
@@ -1475,6 +1483,12 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // `background` (a poll or an event, not something you did): the same
   // summary as last time is not drawn again.
   var statusIn = null, statusAgain = null, statusAgainLoud = false, statusRaw = null;
+  // Set from sync.started until sync.finished. A folder that still lists no
+  // files is a first fetch in progress, not an empty folder that is done.
+  var syncLive = false;
+  function fetchingFolder(f) {
+    return !!(f && f.path && !f.files && (syncLive || connKind === "busy"));
+  }
   function refreshStatus(known, background) {
     if (known && known.folders) { return drawStatus(Promise.resolve(known), false); }
     if (statusIn) {
@@ -1527,7 +1541,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         nameCell.appendChild(miniMap(f));
         tr.appendChild(nameCell);
         totalBlocks = addBlocks(totalBlocks, folderBlocks(f));
-        td(f.files, "num", "Files"); td(fmtBytes(f.bytes), "num", "Size"); td(f.chunks, "num", "Chunks");
+        td(fetchingFolder(f) ? "Fetching\u2026" : f.files, "num", "Files"); td(fmtBytes(f.bytes), "num", "Size"); td(f.chunks, "num", "Chunks");
         td(f.chunks_without_storage_copy, "num" + (f.chunks_without_storage_copy > 0 ? " bad" : ""), "Without storage copy"); td(f.chunks_verified_elsewhere, "num", "Verified elsewhere");
         var pc = document.createElement("td"); pc.dataset.policyFor = f.name; pc.appendChild(pill("grey", f.policy ? "Unchecked" : "No policy")); if (f.policy) { var pt = el("span", "policy-text", f.policy); pt.title = f.policy; pc.appendChild(pt); } tr.appendChild(pc);
         var act = document.createElement("td");
@@ -1558,7 +1572,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         if (!f.path) {
           detached++;
           var ali = el("li"); var aic = el("span", "li-icon"); aic.appendChild(icon("folders")); ali.appendChild(aic);
-          var abody = el("div", "li-body"); var atitle = el("div", "li-title", f.name); if (nk) { atitle.appendChild(accessPill(f)); } abody.appendChild(atitle); abody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes))); ali.appendChild(abody);
+          var abody = el("div", "li-body"); var atitle = el("div", "li-title", f.name); if (nk) { atitle.appendChild(accessPill(f)); } abody.appendChild(atitle); abody.appendChild(el("div", "li-sub", fetchingFolder(f) ? "Fetching files\u2026" : f.files + " files · " + fmtBytes(f.bytes))); ali.appendChild(abody);
           var aa = el("div", "li-actions"); var ab; if (nk) { ab = accessButton(f); } else { ab = el("button", "", "Attach"); ab.type = "button"; ab.onclick = function () { attachFolder(f.name, ""); }; } aa.appendChild(ab); ali.appendChild(aa);
           al.appendChild(ali);
         }
@@ -1568,7 +1582,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           shared++;
           var sli = el("li"); var sic = el("span", "li-icon"); sic.appendChild(icon("sharing")); sli.appendChild(sic);
           var sbody = el("div", "li-body"); var stitle = el("div", "li-title", f.name); stitle.appendChild(pill("accent", "shared")); if (f.read_only) { stitle.appendChild(pill("grey", "read only")); } sbody.appendChild(stitle);
-          sbody.appendChild(el("div", "li-sub", f.files + " files · " + fmtBytes(f.bytes) + (f.path ? " · " + displayPath(f.path) : ""))); sli.appendChild(sbody);
+          sbody.appendChild(el("div", "li-sub", (fetchingFolder(f) ? "Fetching files\u2026" : f.files + " files · " + fmtBytes(f.bytes)) + (f.path ? " · " + displayPath(f.path) : ""))); sli.appendChild(sbody);
           var sa = el("div", "li-actions");
           var smw = el("li", "sub-row hidden"); var sm = el("ul", "list sub-list"); smw.appendChild(sm);
           var smb = el("button", "secondary", "Members"); smb.type = "button";
@@ -1697,7 +1711,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (!f.path) { title.appendChild(pill("grey", "not on this device")); }
       if (keyless(f)) { title.appendChild(accessPill(f)); }
       body.appendChild(title);
-      body.appendChild(el("span", "fc-sub", f.files + " file" + (f.files === 1 ? "" : "s") + " · " + fmtBytes(f.bytes)));
+      body.appendChild(el("span", "fc-sub", fetchingFolder(f) ? "Fetching files\u2026" : f.files + " file" + (f.files === 1 ? "" : "s") + " · " + fmtBytes(f.bytes)));
       body.appendChild(miniMap(f)); b.appendChild(body);
       b.appendChild(icon("chevron", "fc-chev"));
       b.onclick = function () { if (f.path) { openFolder(f.name); } else { offerAttach(f); } };
@@ -4214,7 +4228,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("p2ppaths").classList.toggle("hidden", !paths.length);
       paths.forEach(function (x) {
         var tr = document.createElement("tr");
-        [x.name || x.device.slice(0, 8), x.path + (x.ok || x.path === "untried" || x.path === "unreachable" ? "" : " (refused)"), x.addr || ""].forEach(function (c) { var td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
+        [x.name || x.device.slice(0, 8), x.path + (x.ok || x.path === "untried" || x.path === "unreachable" || x.path === "connecting" ? "" : " (refused)"), x.addr || ""].forEach(function (c) { var td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
         tb.appendChild(tr);
       });
     }).catch(function () {});
@@ -4575,8 +4589,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     on("activity.peers", function (d) { evsPeers = d.peers || []; tasksChanged(); });
     on("traffic", function (d) { if (trafficWanted()) { renderTraffic(d); } });
     on("transfers", function (d) { transferFollowers.forEach(function (f) { f(d); }); });
-    on("sync.finished", function () { serviceSoon(); });
-    on("sync.started", function () {});
+    on("sync.finished", function () { syncLive = false; serviceSoon(); statusSoon(); });
+    on("sync.started", function () { syncLive = true; statusSoon(); });
     ["move.waiting", "move.done", "policy.changed", "ledger.health", "backup", "trash", "files.new", "space.low", "space.ok", "storage.problem", "storage.ok", "folder.paused", "peer.connected", "peer.disconnected"].forEach(function (k) { on(k, function () { serviceSoon(); }); });
     on("config.changed", function () { serviceSoon(); statusSoon(); });
     // A device asked for a folder, or membership changed on another device: the access card follows.
@@ -5149,6 +5163,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (!p) { return ["not yet", "grey"]; }
     if (p === "direct-lan") { return ["LAN", "ok"]; }
     if (p === "direct") { return ["direct", "accent"]; }
+    if (p === "connecting") { return ["connecting", "run"]; }
     if (p.indexOf("relayed via ") === 0) { return ["via " + p.slice(12), "risk"]; }
     return [p, "grey"];
   }
@@ -5183,24 +5198,25 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     var meW = narrow ? 90 : 150, peerW = narrow ? Math.min(118, W * 0.36) : 200, nodeH = 44;
     var meX = 0, meY = H / 2 - nodeH / 2, peerX = W - peerW, gapL = meX + meW, gapR = peerX;
     var svg = svgEl("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Traffic between this device and its peers" });
-    var defs = svgEl("defs");
-    ["rx", "tx", "relay"].forEach(function (k) {
-      var m = svgEl("marker", { id: "tr-arrow-" + k, viewBox: "0 0 10 10", refX: 7, refY: 5, markerWidth: 8, markerHeight: 8, markerUnits: "userSpaceOnUse", orient: "auto" }, "tr-marker " + k);
-      m.appendChild(svgEl("path", { d: "M0,0 L10,5 L0,10 z" }));
-      defs.appendChild(m);
-    });
-    svg.appendChild(defs);
     var edges = svgEl("g"), labels = svgEl("g"), nodes = svgEl("g");
     svg.appendChild(edges); svg.appendChild(nodes); svg.appendChild(labels);
     var pos = {};
     shown.forEach(function (p, i) { pos[p.device] = { y: top + i * rowH + rowH / 2 }; });
     var meCy = H / 2;
     function curve(x1, y1, x2, y2) { var mx = (x1 + x2) / 2; return "M" + x1 + "," + y1 + " C" + mx + "," + y1 + " " + mx + "," + y2 + " " + x2 + "," + y2; }
-    function edge(d, cls, bps) {
+    // A filled tip, not an SVG marker. marker-end="url(#…)" is a document
+    // fragment, and the Mac web view scrolls that fragment into view each
+    // time the traffic picture is drawn, which pulls the Peers page upward.
+    function arrowHead(x, y, dx, dy, cls) {
+      var len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+      var bx = x - ux * 8, by = y - uy * 8, px = -uy * 3.2, py = ux * 3.2;
+      edges.appendChild(svgEl("path", { d: "M" + x + "," + y + " L" + (bx + px) + "," + (by + py) + " L" + (bx - px) + "," + (by - py) + " Z" }, "tr-marker " + cls.split(" ")[0]));
+    }
+    function edge(d, cls, bps, tip) {
       var w = bps > 0 ? Math.min(5, 1.5 + Math.log(1 + bps / 4096) / Math.LN10 * 1.2) : 1.25;
       var e = svgEl("path", { d: d, "stroke-width": w.toFixed(2) }, "tr-edge " + cls + (bps > 0 ? " flowing" : ""));
-      if (bps > 0) { e.setAttribute("marker-end", "url(#tr-arrow-" + cls.split(" ")[0] + ")"); }
       edges.appendChild(e);
+      if (bps > 0 && tip) { arrowHead(tip[0], tip[1], tip[2], tip[3], cls); }
     }
     function label(x, y, arrow, cls, text, anchor) {
       var t = svgEl("text", { x: x, y: y, "text-anchor": anchor || "middle" }, "tr-label");
@@ -5232,7 +5248,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var segs = via ? [[a, [hx - hopW / 2, y + off]], [[hx + hopW / 2, y + off], b]] : [[a, b]];
         // Downloads point at this device, uploads at the peer.
         if (l[2] > 0) { segs = segs.map(function (s) { return [s[1], s[0]]; }).reverse(); }
-        segs.forEach(function (s) { edge(curve(s[0][0], s[0][1], s[1][0], s[1][1]), cls, l[1]); });
+        segs.forEach(function (s, si) {
+          var tip = si === segs.length - 1 ? [s[1][0], s[1][1], s[1][0] - s[0][0], s[1][1] - s[0][1]] : null;
+          edge(curve(s[0][0], s[0][1], s[1][0], s[1][1]), cls, l[1], tip);
+        });
       });
       // Speeds sit next to the peer, above its edge (and below it for a second direction).
       var lx = x2 - 6, ly = y - 13;
@@ -5247,7 +5266,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       var a = pos[f.from], b = pos[f.to];
       if (!a || !b || !(f.bps > 0)) { return; }
       var px = gapL + 14, py = meCy + 18 + i * 4;
-      edge(curve(gapR - 2, a.y + 6, px, py) + " " + curve(px, py, gapR - 2, b.y + 6).replace(/^M[^ ]+ /, ""), "relay", f.bps);
+      edge(curve(gapR - 2, a.y + 6, px, py) + " " + curve(px, py, gapR - 2, b.y + 6).replace(/^M[^ ]+ /, ""), "relay", f.bps, [gapR - 2, b.y + 6, gapR - px, b.y + 6 - py]);
       label(gapR - 6, b.y + 23, "\u21c4", "relay", "from " + peerName(f.from_name, f.from) + " " + fmtRate(f.bps), "end");
     });
     function node(x, y, w, cls, t1, t2) {

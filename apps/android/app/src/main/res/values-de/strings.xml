@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_running">Varsto synchronisiert im Hintergrund</string>
+    <string name="choose_files">Dateien zu Varsto hinzufügen</string>
+    <string name="open_with">Öffnen mit</string>
+    <string name="share_with">Teilen</string>
+    <string name="file_missing">%1$s ist noch nicht auf diesem Telefon</string>
+    <string name="file_not_shareable">Diese Datei kann nicht an andere Apps übergeben werden: %1$s</string>
+    <string name="camera_uploading">%1$d von %2$d wird nach %3$s hochgeladen</string>
+    <string name="service_did_not_start">Der Varsto-Dienst ist nicht gestartet</string>
+</resources>

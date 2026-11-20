@@ -315,6 +315,24 @@ pub fn repair_pack(
         pack: *pack,
     }));
     if let Err(e) = sink.commit(events) {
+        // A push that failed after the seal still names these packs.
+        // A seal that never happened leaves them unclaimed.
+        if !sink.commit_sealed() {
+            for pack in &written {
+                let key = pack_key(&hex::encode(pack.id));
+                for name in &pack.storages {
+                    let Some(storage) = storages.open(name) else {
+                        continue;
+                    };
+                    if let Err(del) = storage.delete(&key) {
+                        log::warn!(
+                            "repair: unsealed pack {} not removed from {name}: {del:#}",
+                            &hex::encode(pack.id)[..12]
+                        );
+                    }
+                }
+            }
+        }
         *writer =
             MapWriter::from_view(writer.folder, writer.device, writer.epoch, view, p.body.seq);
         return Err(e);

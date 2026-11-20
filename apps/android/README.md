@@ -56,4 +56,4 @@ camera upload scans and uploads by file name, errors that used to be
 swallowed). Both rotate at 10 MiB, keeping four old files. The service's
 console output still goes to `files/vault/service.log`. The service URL, the
 session token, passphrases and file contents are never logged. On a debug
-build: `adb shell run-as in.soderlund.varsto cat files/vault/logs/varsto-app.log`.
+build: `adb shell run-as net.varsto.app cat files/vault/logs/varsto-app.log`.

@@ -138,6 +138,9 @@ CAPTION = {
     "fi": ("Kuvattu automaattisesti versiosta {v}{c} {d}{s}.", "GitHub Actions -ajo"),
     "sv": ("Tagna automatiskt från version {v}{c} den {d}{s}.", "GitHub Actions-körning"),
     "fr": ("Capturées automatiquement depuis la version {v}{c} le {d}{s}.", "exécution GitHub Actions"),
+    "de": ("Automatisch aufgenommen von Version {v}{c} am {d}{s}.", "GitHub-Actions-Lauf"),
+    "es": ("Capturadas automáticamente de la versión {v}{c} el {d}{s}.", "ejecución de GitHub Actions"),
+    "ru": ("Снято автоматически с версии {v}{c} {d}{s}.", "запуск GitHub Actions"),
 }
 
 
@@ -217,7 +220,10 @@ def main(argv):
     for lang, page in [("en", site / "screenshots/index.html"),
                        ("fi", site / "fi/screenshots/index.html"),
                        ("sv", site / "sv/screenshots/index.html"),
-                       ("fr", site / "fr/screenshots/index.html")]:
+                       ("fr", site / "fr/screenshots/index.html"),
+                       ("de", site / "de/screenshots/index.html"),
+                       ("es", site / "es/screenshots/index.html"),
+                       ("ru", site / "ru/screenshots/index.html")]:
         if not (known.get("version") and page.exists()):
             continue
         html = page.read_text()

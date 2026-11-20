@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Varsto-sovellus: salattu synkronointi ja varmuuskopio omaan tallennustilaan</title>
-<meta name="description" content="Varsto-sovellus: päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.">
+<meta name="description" content="Varsto-sovellus: päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://varsto.net/fi/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Varsto">
 <meta property="og:title" content="Varsto-sovellus: salattu synkronointi ja varmuuskopio omaan tallennustilaan">
-<meta property="og:description" content="Varsto-sovellus: päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.">
+<meta property="og:description" content="Varsto-sovellus: päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.">
 <meta property="og:url" content="https://varsto.net/fi/">
 <meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
 <meta property="og:image:width" content="1200">
@@ -23,9 +23,12 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv","fr"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/fi/","description":"Varsto-sovellus: päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android, iOS","softwareVersion":"0.0.1-alpha.16","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.16","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://varsto.net/#site","url":"https://varsto.net/","name":"Varsto","inLanguage":["en","fi","sv","fr","de","es","ru"]},{"@type":"SoftwareApplication","name":"Varsto","url":"https://varsto.net/fi/","description":"Varsto-sovellus: päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.","applicationCategory":"UtilitiesApplication","applicationSubCategory":"File synchronisation and backup","operatingSystem":"Linux, Windows, macOS, Android, iOS","softwareVersion":"0.0.1-alpha.16","downloadUrl":"https://varsto.net/downloads/","screenshot":"https://varsto.net/assets/img/screenshots/desktop-files-light.png","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"},"isAccessibleForFree":true},{"@type":"SoftwareSourceCode","name":"Varsto source code","codeRepository":"https://github.com/janttsu/varsto","programmingLanguage":["Rust","Swift","Kotlin","JavaScript"],"runtimePlatform":"Rust","license":"https://polyformproject.org/licenses/shield/1.0.0/","version":"0.0.1-alpha.16","targetProduct":{"@type":"SoftwareApplication","name":"Varsto"}}]}</script>
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../assets/css/site.css?v=4998b8d831">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -46,7 +49,7 @@
     </nav>
     <div class="tools">
       <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
-        <nav class="pop-body langs" aria-label="Kieli"><a href="../" hreflang="en" lang="en">English</a><a href="../fi/" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../sv/" hreflang="sv" lang="sv">Svenska</a><a href="../fr/" hreflang="fr" lang="fr">Français</a></nav></details>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../" hreflang="en" lang="en">English</a><a href="../fi/" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../sv/" hreflang="sv" lang="sv">Svenska</a><a href="../fr/" hreflang="fr" lang="fr">Français</a><a href="../de/" hreflang="de" lang="de">Deutsch</a><a href="../es/" hreflang="es" lang="es">Español</a><a href="../ru/" hreflang="ru" lang="ru">Русский</a></nav></details>
       <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
       <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
       <a class="button small" href="../fi/downloads/">Lataa</a>
@@ -59,7 +62,7 @@
     <section class="hero">
       <canvas class="field" id="field" aria-hidden="true"></canvas>
       <h1>Tuo oma tallennuspaikkasi. Pidä omat avaimesi. Tiedä, missä jokainen lohko on.</h1>
-      <p class="lead">Päästä päähän salattu synkronointi, jakaminen ja varmuuskopiointi laitteidesi välillä, jälkikvanttisella hybridikryptografialla ja kirjanpidolla, jonka voit itse tarkastaa. Ei palvelinta, ei tiliä, ei palveluntarjoajaa, johon pitäisi luottaa.</p>
+      <p class="lead">Päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla ja kirjanpidolla, jonka voit itse tarkastaa. Ei palvelinta, ei tiliä, ei palveluntarjoajaa, johon pitäisi luottaa. Miten tämä eroaa <a href="compare/syncthing/">Syncthingistä</a> ja <a href="compare/resilio-sync/">Resilio Syncistä</a>.</p>
       <div class="cta"><a class="button" href="downloads/">Lataa alfa</a> <a class="button secondary" href="../docs/quick-start.html">Pika-aloitus</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Lähdekoodi GitHubissa</a></div>
       <nav class="platforms" aria-label="Lataukset"><a href="downloads/">Linux</a> <a href="downloads/">Windows</a> <a href="downloads/">macOS</a> <a href="downloads/">Android</a> <a href="downloads/">iOS</a></nav>
     </section>
@@ -86,7 +89,7 @@
       <li>Sisältö salataan XChaCha20-Poly1305:llä avaimilla, jotka johdetaan satunnaisesta holviavaimesta, joka on vain omilla laitteillasi; tallennuspaikka näkee tiivisteellään nimettyjä salattuja objekteja eikä mitään muuta. <a href="how-it-works/">Miten se toimii</a>, vaihe vaiheelta.</li>
       <li>Jokainen tallennettu allekirjoitus on hybridi (Ed25519 + ML-DSA-65, molempien on täsmättävä) ja jokainen sinetöity avain on hybridi (X25519 + ML-KEM-768): jälkikvanttinen hybridikryptografia, jota varten on suunniteltu, mutta jota ei ole auditoitu. Siirtoyhteys (suorat yhteydet kuljettavat vain salattuja lohkoja TLS 1.3:lla ja kiinnitetyillä varmenteilla, TCP:llä tai NATin läpi QUIC:llä) ja julkaisujen allekirjoitus (minisign) käyttävät perinteisiä algoritmeja.</li>
       <li>Strongroom-kansiot avautuvat vain FIDO2-suojausavaimella; suojaus on kryptografinen, ei pelkkä valintaikkuna.</li>
-      <li>Tekoälyapu pysyy paikallisena: MCP-palvelin on tarkoitettu omalla koneellasi toimiville kielimalleille, vain myöntämiesi kansioiden sisällä eikä koskaan Strongroomissa. Mitään ei lähetetä mallin tarjoajalle.</li>
+      <li>Holviin ei anneta avustajalle pääsyä. MCP-palvelinta ei ole, eikä kielimallilla ole avainta, jolla se lukisi tiedostosi.</li>
       <li>Kadonnut laite poistetaan allekirjoitetulla oikeuksien perumisella, ja holvi siirtyy uusiin avaimiin; tyhjennysmääräys suoritetaan, kun laite seuraavan kerran tavoittaa tallennuspaikan. Tiliä tai avaimen talletusta ei ole: palautuspaketti, 24 sanaa tai kolme osaa, on sinun säilytettäväsi.</li>
       <li>Suunnittelua tai koodia ei ole katselmoitu eikä auditoitu. <a href="../docs/threat-model.html">Uhkamalli</a> ja <a href="../docs/failure-model.html">vikamalli</a> kertovat, mitä suunnittelulla tavoitellaan, mitä kukin osapuoli näkee ja mihin suojaus päättyy.</li>
     </ul>
@@ -113,7 +116,7 @@
 
     <h2 id="status">Rehellinen tilannekuva</h2>
     <ul>
-      <li>Julkaistu versio: 0.0.1-alpha.16. Alfa on pystysuora läpileikkaus: ydinkirjasto, komentorivi, taustapalvelu, ilmoitusalueen ja valikkorivin kuoret, Android-kuori, noin 242 000 riviä Rustia, 1293 automaattista testiä ja 59 skenaarion testilaboratorio koti- ja toimisto-NATin taakse sijoitetuilla virtuaalikoneilla: offline-yhtenäistyminen, ristiriidat, palautetun laitteen eristys, replikat, jakaminen, säilytyssäännöt, vertaiset, Strongroomit, levyvarastot, varmuuskopiot ja muuta. Käytä sitä vain testidatalla.</li>
+      <li>Julkaistu versio: 0.0.1-alpha.16. Alfa on pystysuora läpileikkaus: ydinkirjasto, komentorivi, taustapalvelu, ilmoitusalueen ja valikkorivin kuoret, Android-kuori, noin 239 000 riviä Rustia, 1287 automaattista testiä ja 59 skenaarion testilaboratorio koti- ja toimisto-NATin taakse sijoitetuilla virtuaalikoneilla: offline-yhtenäistyminen, ristiriidat, palautetun laitteen eristys, replikat, jakaminen, säilytyssäännöt, vertaiset, Strongroomit, levyvarastot, varmuuskopiot ja muuta. Käytä sitä vain testidatalla.</li>
       <li>Kryptografista suunnittelua ei ole katselmoitu eikä auditoitu. <a href="../docs/threat-model.html">Uhkamalli</a> ja <a href="../docs/failure-model.html">vikamalli</a> kertovat, mitä suunnittelulla tavoitellaan ja mihin se päättyy.</li>
       <li>Lähdekoodi on julkisesti osoitteessa <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a> -lisenssillä (lähdekoodi saatavilla, ei avointa lähdekoodia); virheet ja kysymykset kuuluvat siellä olevaan vikaseurantaan. Tallennusmuoto on <a href="../docs/alpha-0-format.html">dokumentoitu</a>, jotta datasi pysyy palautettavissa.</li>
       <li>Varsto on kirjoitettu Rustilla, ja siinä on Swift- ja Kotlin-kuoret sekä tavallinen web-käyttöliittymä. Apu on tervetullutta tietoturvakatselmoinnissa, alustatyössä, verkko- ja tallennustestauksessa, paketoinnissa ja käännöksissä: <a href="contribute/">näin osallistut</a>.</li>
@@ -157,9 +160,8 @@ sha256sum -c --ignore-missing SHA256SUMS</code></pre><p><code>varsto update</cod
     <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
     <span><a href="../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../docs/licence.html">Lisenssi</a> · <a href="../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
   </div>
-  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
-<script src="../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../assets/js/field.js?v=c342154328" defer></script>
 <script src="../assets/js/motion.js?v=a547492b3b" defer></script>
 </body>
 </html>

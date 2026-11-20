@@ -227,7 +227,7 @@ pub fn dir(home: &Path) -> PathBuf {
 #[derive(Clone, Debug)]
 pub struct Options {
     pub home: PathBuf,
-    /// `service`, `cli`, `tray`, `desktop-app`, `mcp`, `ffi-ios`, …
+    /// `service`, `cli`, `tray`, `desktop-app`, `ffi-ios`, …
     pub component: String,
     /// A level or filter given on the command line.
     pub level: Option<String>,

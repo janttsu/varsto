@@ -46,7 +46,7 @@
 //!   rewritten.
 //! - Orphans: storages keep no write times this code can read, so a pack
 //!   no claim and no map names is remembered when first seen
-//!   ([`OrphanState`], kept by the caller) and deleted 7 days later if
+//!   ([`OrphanState`], kept by the caller) and deleted 48 hours later if
 //!   still unnamed. A pack the view shows deliberately dropped from a
 //!   storage (a crash between the batch and the delete) is deleted at once.
 
@@ -84,8 +84,11 @@ pub use verify::{
     copy_missing_pack, other_places, repair_pack, verify_pack, PackCheck, RepairReport, Verified,
 };
 
-/// Seven days: an unclaimed pack no map lists goes after this long.
-pub const ORPHAN_SECS: i64 = 7 * 86_400;
+/// 48 hours: an unclaimed pack no map lists goes after this long.
+/// A nearly full storage uses 24 hours (`GcOptions::tight`).
+pub const ORPHAN_SECS: i64 = 48 * 3600;
+/// Used when a storage is nearly full.
+pub const ORPHAN_TIGHT_SECS: i64 = 24 * 3600;
 /// Hot packs smaller than this class are compacted once their live
 /// members fill it.
 pub const COMPACT_BYTES: u64 = crate::packs::HOT_TARGET as u64;
@@ -174,6 +177,13 @@ pub trait Commit {
     fn tick(&mut self) -> u64;
     /// Seal and push; `Ok` only once the batch is on the storages.
     fn commit(&mut self, events: Vec<Event>) -> Result<()>;
+    /// True when the last `commit` sealed a batch before returning an
+    /// error (the push failed after the seal). A repair then keeps the
+    /// packs that batch names. The default is false: a failure left them
+    /// unclaimed, and the caller deletes them.
+    fn commit_sealed(&self) -> bool {
+        false
+    }
 }
 
 /// Where map records go: the writer and the hot metadata storages.

@@ -23,8 +23,11 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/benchmarks/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/benchmarks/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/benchmarks/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/benchmarks/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/benchmarks/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/benchmarks/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../../assets/css/site.css?v=4998b8d831">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -45,7 +48,7 @@
     </nav>
     <div class="tools">
       <details class="pop langs-menu"><summary class="iconbtn" aria-label="Langue">FR</summary>
-        <nav class="pop-body langs" aria-label="Langue"><a href="../../benchmarks/" hreflang="en" lang="en">English</a><a href="../../fi/benchmarks/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/benchmarks/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/benchmarks/" hreflang="fr" lang="fr" aria-current="true">Français</a></nav></details>
+        <nav class="pop-body langs" aria-label="Langue"><a href="../../benchmarks/" hreflang="en" lang="en">English</a><a href="../../fi/benchmarks/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/benchmarks/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/benchmarks/" hreflang="fr" lang="fr" aria-current="true">Français</a><a href="../../de/benchmarks/" hreflang="de" lang="de">Deutsch</a><a href="../../es/benchmarks/" hreflang="es" lang="es">Español</a><a href="../../ru/benchmarks/" hreflang="ru" lang="ru">Русский</a></nav></details>
       <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
       <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
       <a class="button small" href="../../fr/downloads/">Télécharger</a>
@@ -77,6 +80,7 @@
         <li><a href="#bottlenecks">Toujours lent, et pourquoi</a></li>
         <li><a href="#when">Quand le pair à pair gagne, et quand c’est le bucket</a></li>
         <li><a href="#resilio">Mesuré face à Resilio Sync</a></li>
+        <li><a href="#syncthing">Mesuré face à Syncthing</a></li>
         <li><a href="#cost">Coût</a></li>
         <li><a href="#limits">Limites de ce benchmark</a></li>
       </ol>
@@ -370,20 +374,21 @@
     </ul>
 
     <h2 id="resilio">Mesuré face à Resilio Sync (novembre 2026)</h2>
-    <p>Le 8 novembre 2026, les deux outils ont déplacé les mêmes données entre les trois mêmes machines louées (un émetteur à Paris, des lecteurs à Amsterdam et à Varsovie, 2 vCPU chacune), un outil à la fois, relais et trackers désactivés, et chaque fichier a été vérifié ensuite par SHA-256. Varsto était la version quotidienne 20261108-c50f260 ; Resilio Sync était en 2.8.1, car la 3.1.2 ne synchronisait pas du tout depuis un fichier de configuration. Médianes de deux exécutions. « Octets » désigne ce que le lecteur a échangé avec les autres machines. La méthode, ses limites, les données brutes et les scripts pour la reproduire sont dans <a href="../../docs/resilio-vs-varsto.html">le rapport de mesure</a> (en anglais).</p>
+    <p>Le 10 novembre 2026, les deux outils ont déplacé les mêmes données entre les trois mêmes machines louées (un émetteur à Paris, des lecteurs à Amsterdam et à Varsovie, 2 vCPU chacune), un outil à la fois, relais et trackers désactivés, et chaque fichier a été vérifié ensuite par SHA-256. Varsto était la version quotidienne 20261109-c1cf5c2 ; Resilio Sync était en 2.8.1, car la 3.1.2 ne synchronisait pas du tout depuis un fichier de configuration. Médianes de deux exécutions. « Octets » désigne ce que le lecteur a échangé avec les autres machines. La méthode, ses limites, les données brutes et les scripts pour la reproduire sont dans <a href="../../docs/resilio-vs-varsto.html">le rapport de mesure</a> (en anglais).</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Scénario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td>44 s · 285 Mo</td><td>25 s · 310 Mo ; une exécution sur deux bloquée 5 min</td></tr>
-        <tr><th scope="row">Deux fichiers de 1 Gio</th><td>43 s · 2 166 Mo</td><td>109 s · 2 227 Mo</td></tr>
-        <tr><th scope="row">537 Mo de texte de type journal</th><td>17 s · 161 Mo</td><td>63 s · 558 Mo</td></tr>
-        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td>13 s · 410 Mo</td><td>78 s · 848 Mo</td></tr>
-        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>72 s et 98 s ; l’émetteur a envoyé 4 107 Mo</td><td>102 s et 99 s ; l’émetteur a envoyé 3 419 Mo</td></tr>
-        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>61 s · 22 Mo</td><td>15 s · 12 Mo</td></tr>
-        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td>38 s · 0,1 Mo</td><td>67 s · 1 269 Mo</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes (les petits fichiers)</th><td>335 s · 295 Mo</td><td>599 s · 314 Mo</td></tr>
+        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td class="win">25 s · 292 Mo</td><td class="win">25 s · 313 Mo</td></tr>
+        <tr><th scope="row">Deux fichiers de 1 Gio</th><td class="win">44 s · 2 178 Mo</td><td>90 s · 2 226 Mo</td></tr>
+        <tr><th scope="row">537 Mo de texte de type journal</th><td class="win">17 s · 169 Mo</td><td>47 s · 563 Mo</td></tr>
+        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td class="win">13 s · 419 Mo</td><td>62 s · 856 Mo</td></tr>
+        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td class="win">Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 76 s, Varsovie 118 s ; l’émetteur a envoyé 3 636 Mo</td></tr>
+        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td class="win">12 s · 26 Mo, un essai</td><td>15 s · 12 Mo</td></tr>
+        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td class="win">10 s · 0 Mo de données</td><td>67 s · 1 269 Mo</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td>934 s · 328 Mo</td></tr>
       </tbody>
     </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque le temps le plus court. Si le temps le plus long dépasse d'au plus 10 %, les deux colonnes sont vertes.</p>
     <ul>
       <li><strong>Varsto est plus rapide</strong> dans chaque synchronisation initiale de données volumineuses, compressibles ou dupliquées, et sur la liaison lente avec pertes. Le texte coûte un tiers des octets, car les blocs sont compressés avant d’être chiffrés ; un répertoire renommé et des fichiers en double ne déplacent presque aucune donnée, car les blocs déjà présents sur le disque du lecteur sont réutilisés.</li>
       <li><strong>Resilio Sync est plus rapide</strong> sur beaucoup de petits fichiers quand il ne se bloque pas (il l’a fait dans une exécution sur deux), et pour propager une petite modification : Varsto ne récupère plus que les blocs modifiés (22 Mo au lieu de tout le 1,1 Gio dans la version précédente), mais met encore trois à cinq fois plus de temps, car la synchronisation de tous les dossiers par l’émetteur et le re-hachage des blocs locaux par le lecteur coûtent plus que le transfert.</li>
@@ -392,7 +397,32 @@
     </ul>
     <p class="note">Un jour, un fournisseur, deux exécutions par cas et une alpha : ce sont des indications, pas un verdict. Le rapport énumère tout ce qui les limite.</p>
 
-    <h2 id="cost">Coût</h2>
+    <h2 id="syncthing">Mesuré face à Syncthing (novembre 2026)</h2>
+    <p>Les chiffres de Varsto datent du 10 novembre 2026. Syncthing a été mesuré de nouveau le 11 novembre 2026. Les deux outils ont déplacé les mêmes données entre les trois mêmes machines louées (un émetteur à Paris, des lecteurs à Amsterdam et à Varsovie, 2 vCPU chacun), un outil à la fois. Syncthing 2.1.7 avait la découverte globale, la découverte locale et les relais coupés, et les appareils s'adressaient directement. Varsto était la version daily 20261109-c1cf5c2 ; ce sont les mêmes essais Varsto déjà publiés face à Resilio Sync, pas une nouvelle mesure. Médianes de deux essais. Les « octets » sont ce que l'émetteur a envoyé sur son interface réseau. Chaque essai terminé a été vérifié par hachage. La méthode est la même que <a href="../../docs/resilio-vs-varsto.html">la mesure Resilio Sync</a>.</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Scénario</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 petits fichiers (313 Mo)</th><td class="win">25 s · 292 Mo</td><td>61 s · 282 Mo</td></tr>
+        <tr><th scope="row">Deux fichiers de 1 Gio</th><td class="win">44 s · 2 178 Mo</td><td class="win">40 s · 2 177 Mo</td></tr>
+        <tr><th scope="row">537 Mo de texte de type journal</th><td>17 s · 169 Mo</td><td class="win">7 s · 547 Mo</td></tr>
+        <tr><th scope="row">816 Mo, dont la moitié de copies</th><td>13 s · 419 Mo</td><td class="win">8 s · 615 Mo</td></tr>
+        <tr><th scope="row">Deux lecteurs en même temps (Amsterdam, Varsovie)</th><td>Amsterdam 70 s, Varsovie 118 s ; l’émetteur a envoyé 3 685 Mo</td><td class="win">Amsterdam 49 s, Varsovie 59 s ; l’émetteur a envoyé 2 839 Mo</td></tr>
+        <tr><th scope="row">11 Mio modifiés dans 1,13 Gio</th><td>12 s · 26 Mo, un essai</td><td class="win">7 s · 12 Mo</td></tr>
+        <tr><th scope="row">Un répertoire de 1,13 Gio renommé</th><td>10 s · 0 Mo de données</td><td>fichiers identiques, environ 0,1 Mo, pas d'horloge de fin</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % de pertes, coupure de 0,3 s toutes les 4 s (les petits fichiers)</th><td class="win">432 s · 336 Mo</td><td>489 s · 299 Mo</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Le vert marque le temps le plus court. Si le temps le plus long dépasse d'au plus 10 %, les deux colonnes sont vertes. Le renommage n'a pas d'horloge de fin, donc aucune colonne n'est verte.</p>
+    <ul>
+      <li><strong>Varsto a été plus rapide</strong> sur les 10 000 petits fichiers, 25 s contre 61 s, avec à peu près les mêmes octets, et sur le lien coupé, 432 s contre 489 s.</li>
+      <li><strong>Syncthing a été plus rapide</strong> sur le texte de journal (7 s contre 17 s), sur les copies (8 s contre 13 s), avec deux lecteurs (Varsovie 59 s contre 118 s) et sur le petit changement (7 s contre 12 s).</li>
+      <li><strong>Le texte de journal est l'exception pour les octets.</strong> Syncthing a envoyé 549 Mo et a fini en 7 s. Varsto a envoyé 169 Mo et a pris 17 s, parce qu'un bloc est compressé avant d'être chiffré. Syncthing envoie le texte tel qu'il est stocké.</li>
+      <li><strong>Copies :</strong> Syncthing a fini plus tôt et a envoyé 615 Mo. Varsto a envoyé 419 Mo, parce que les blocs déjà sur le disque du lecteur sont réutilisés.</li>
+      <li><strong>Deux lecteurs :</strong> les lecteurs de Syncthing peuvent s'envoyer des données, et l'émetteur a envoyé 2 839 Mo. L'émetteur de Varsto a envoyé 3 685 Mo, et Varsovie a pris 118 s.</li>
+      <li><strong>Le renommage</strong> s'est terminé avec les mêmes fichiers et environ 0,1 Mo sur le réseau dans les deux essais Syncthing. L'horloge de fin n'a pas été notée : un répertoire vide resté en place a gardé la vérification ouverte jusqu'à la limite de temps. Le renommage de Varsto le même jour a pris 10 s, et le lecteur n'a tiré aucune donnée de fichier.</li>
+    </ul>
+    <p class="note">Un jour, un fournisseur, deux essais et une alpha : ce sont des indications, pas un verdict.</p>
+        <h2 id="cost">Coût</h2>
     <p>Liste de prix publique de Scaleway (consultée le 9 octobre 2026, région de Paris, hors taxes) : Object Storage Standard Multi-AZ 0.000022 € par Go-heure (environ 0.016 € par Go-mois), requêtes comprises, entrée comprise, sortie les 75 premiers Go par mois gratuits puis 0.01 € par Go. Les transferts entre régions (Paris – Amsterdam, Paris – Varsovie) comptent comme sortie ; au sein d’une région, ils sont gratuits.</p>
     <p>Ainsi, un lecteur à Amsterdam qui télécharge le jeu de 4 Gio depuis le bucket de Paris coûte environ 0.04 € une fois les 75 Go gratuits utilisés, et un foyer qui synchronise 500 Go par mois vers des appareils hors de la région du bucket paie environ 4 € par mois de sortie. Le pair à pair déplace les mêmes octets sur les propres connexions des appareils et n’ajoute rien à la facture de stockage. D’autres fournisseurs facturent davantage la sortie ou chaque requête ; la méthode ci-dessus s’y applique sans changement. Les machines de ce benchmark (trois instances à 0.147 € l’heure, environ sept heures et demie sur les deux jours) ont coûté environ 3.50 €.</p>
 
@@ -422,9 +452,8 @@
     <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
     <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
   </div>
-  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
-<script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
 <script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
 </body>
 </html>

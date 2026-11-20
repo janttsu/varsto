@@ -3,11 +3,8 @@
 //! kept by Varsto and readable on every device of the folder
 //! (`docs/spec/alpha-0-format.md`, section "File analyses").
 //!
-//! An assistant (typically a local LLM reading synced plain files from their
-//! `local_path`) records what it saw through MCP (`varsto_set_analysis`);
-//! the user can write or clear one by hand. Later the assistant searches
-//! them (`varsto_search_analyses`) to reorganise files without reading
-//! everything again.
+//! The user writes or clears an analysis from the interface or with
+//! `varsto analysis`, and finds files later with `varsto search`.
 //!
 //! Storage: every device keeps the merged map of the folder in
 //! `state/notes/<folder>.json` and publishes it as one *notes record* per
@@ -106,7 +103,7 @@ struct NotesState {
     seen: BTreeMap<DeviceId, i64>,
 }
 
-/// A file's analysis as reported to the interface, the command line and MCP.
+/// A file's analysis as reported to the interface and the command line.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileAnalysis {
     pub path: String,

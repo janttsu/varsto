@@ -1,0 +1,1 @@
+Työpöydällä Varsto on sivu, jonka taustapalvelu tarjoaa selaimelle. Vasemmalla ovat yleisnäkymä, tiedostot, jaot, varastot ja asetukset. Kansion kohdalla näet, montako lohkoa on vielä ilman kopiota. Puhelimessa sama näkymä tiivistyy alareunan välilehtiin. Tumma ja vaalea tila seuraavat sivuston teemaa. Kun jaat kansion, vertaat kuutta sanaa ennen kuin hyväksyt toisen laitteen.

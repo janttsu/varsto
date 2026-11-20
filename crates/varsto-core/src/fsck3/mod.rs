@@ -87,8 +87,8 @@ use crate::storage::Storage;
 use anyhow::Result;
 
 /// An unclaimed pack older than this many days is due for garbage
-/// collection (section 3, "Garbage collection": orphans go after 7 days).
-pub const ORPHAN_DAYS: i64 = 7;
+/// collection (section 3, "Garbage collection": orphans go after 48 hours).
+pub const ORPHAN_DAYS: i64 = 2;
 
 /// One opened storage.
 pub struct StorageDesc<'a> {

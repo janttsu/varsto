@@ -13,84 +13,217 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Menu and status texts in the interface language the user picked in the
-/// web UI (`<home>/ui-language`): English, Finnish, Swedish. `{}` marks
-/// where [`fill`] puts a value.
-const TR: &[(&str, &str, &str)] = &[
+/// web UI (`<home>/ui-language`): English is the key; Finnish, Swedish,
+/// German, Spanish and Russian are the entries. `{}` marks where [`fill`]
+/// puts a value. French is not an interface language.
+const TR: &[(&str, &[(&str, &str)])] = &[
     (
         "Not set up yet: open Varsto",
-        "Ei vielä otettu käyttöön: avaa Varsto",
-        "Inte konfigurerat ännu: öppna Varsto",
+        &[
+            ("fi", "Ei vielä otettu käyttöön: avaa Varsto"),
+            ("sv", "Inte konfigurerat ännu: öppna Varsto"),
+            ("de", "Noch nicht eingerichtet: Varsto öffnen"),
+            ("es", "Aún no está configurado: abre Varsto"),
+            ("ru", "Ещё не настроено: открой Varsto"),
+        ],
     ),
     (
         "Locked: open Varsto to unlock",
-        "Lukittu: avaa Varsto ja avaa lukitus",
-        "Låst: öppna Varsto för att låsa upp",
+        &[
+            ("fi", "Lukittu: avaa Varsto ja avaa lukitus"),
+            ("sv", "Låst: öppna Varsto för att låsa upp"),
+            ("de", "Gesperrt: Varsto öffnen und entsperren"),
+            ("es", "Bloqueado: abre Varsto para desbloquear"),
+            ("ru", "Заблокировано: открой Varsto и сними блокировку"),
+        ],
     ),
-    ("{} s ago", "{} s sitten", "för {} s sedan"),
-    ("{} min ago", "{} min sitten", "för {} min sedan"),
-    ("{} h ago", "{} h sitten", "för {} h sedan"),
-    ("Paused", "Keskeytetty", "Pausad"),
-    ("Up to date", "Ajan tasalla", "Uppdaterad"),
-    ("Problem: {}", "Ongelma: {}", "Problem: {}"),
+    (
+        "{} s ago",
+        &[
+            ("fi", "{} s sitten"),
+            ("sv", "för {} s sedan"),
+            ("de", "vor {} s"),
+            ("es", "hace {} s"),
+            ("ru", "{} с назад"),
+        ],
+    ),
+    (
+        "{} min ago",
+        &[
+            ("fi", "{} min sitten"),
+            ("sv", "för {} min sedan"),
+            ("de", "vor {} min"),
+            ("es", "hace {} min"),
+            ("ru", "{} мин назад"),
+        ],
+    ),
+    (
+        "{} h ago",
+        &[
+            ("fi", "{} h sitten"),
+            ("sv", "för {} h sedan"),
+            ("de", "vor {} h"),
+            ("es", "hace {} h"),
+            ("ru", "{} ч назад"),
+        ],
+    ),
+    (
+        "Paused",
+        &[
+            ("fi", "Keskeytetty"),
+            ("sv", "Pausad"),
+            ("de", "Pausiert"),
+            ("es", "En pausa"),
+            ("ru", "На паузе"),
+        ],
+    ),
+    (
+        "Up to date",
+        &[
+            ("fi", "Ajan tasalla"),
+            ("sv", "Uppdaterad"),
+            ("de", "Auf dem neuesten Stand"),
+            ("es", "Al día"),
+            ("ru", "Актуально"),
+        ],
+    ),
+    (
+        "Problem: {}",
+        &[
+            ("fi", "Ongelma: {}"),
+            ("sv", "Problem: {}"),
+            ("de", "Problem: {}"),
+            ("es", "Problema: {}"),
+            ("ru", "Проблема: {}"),
+        ],
+    ),
     (
         "{} · last sync {}",
-        "{} · viimeisin synkronointi {}",
-        "{} · senaste synkronisering {}",
+        &[
+            ("fi", "{} · viimeisin synkronointi {}"),
+            ("sv", "{} · senaste synkronisering {}"),
+            ("de", "{} · letzte Synchronisierung {}"),
+            ("es", "{} · última sincronización {}"),
+            ("ru", "{} · последняя синхронизация {}"),
+        ],
     ),
     (
         "{} · no sync yet",
-        "{} · ei vielä synkronoitu",
-        "{} · ingen synkronisering ännu",
+        &[
+            ("fi", "{} · ei vielä synkronoitu"),
+            ("sv", "{} · ingen synkronisering ännu"),
+            ("de", "{} · noch nicht synchronisiert"),
+            ("es", "{} · aún sin sincronizar"),
+            ("ru", "{} · ещё не синхронизировано"),
+        ],
     ),
     (
         "Service starting…",
-        "Palvelu käynnistyy…",
-        "Tjänsten startar…",
+        &[
+            ("fi", "Palvelu käynnistyy…"),
+            ("sv", "Tjänsten startar…"),
+            ("de", "Dienst startet…"),
+            ("es", "El servicio se está iniciando…"),
+            ("ru", "Служба запускается…"),
+        ],
     ),
-    ("Starting…", "Käynnistyy…", "Startar…"),
+    (
+        "Starting…",
+        &[
+            ("fi", "Käynnistyy…"),
+            ("sv", "Startar…"),
+            ("de", "Startet…"),
+            ("es", "Iniciando…"),
+            ("ru", "Запуск…"),
+        ],
+    ),
     (
         "Updating to {}…",
-        "Päivitetään versioon {}…",
-        "Uppdaterar till {}…",
+        &[
+            ("fi", "Päivitetään versioon {}…"),
+            ("sv", "Uppdaterar till {}…"),
+            ("de", "Aktualisierung auf {}…"),
+            ("es", "Actualizando a {}…"),
+            ("ru", "Обновление до {}…"),
+        ],
     ),
     (
         "Update failed: {}",
-        "Päivitys epäonnistui: {}",
-        "Uppdateringen misslyckades: {}",
+        &[
+            ("fi", "Päivitys epäonnistui: {}"),
+            ("sv", "Uppdateringen misslyckades: {}"),
+            ("de", "Aktualisierung fehlgeschlagen: {}"),
+            ("es", "La actualización falló: {}"),
+            ("ru", "Обновление не удалось: {}"),
+        ],
     ),
     (
         "Download {} from {}",
-        "Lataa {} osoitteesta {}",
-        "Ladda ned {} från {}",
+        &[
+            ("fi", "Lataa {} osoitteesta {}"),
+            ("sv", "Ladda ned {} från {}"),
+            ("de", "{} von {} herunterladen"),
+            ("es", "Descarga {} desde {}"),
+            ("ru", "Скачай {} с {}"),
+        ],
     ),
-    ("Open Varsto", "Avaa Varsto", "Öppna Varsto"),
+    (
+        "Open Varsto",
+        &[
+            ("fi", "Avaa Varsto"),
+            ("sv", "Öppna Varsto"),
+            ("de", "Varsto öffnen"),
+            ("es", "Abrir Varsto"),
+            ("ru", "Открыть Varsto"),
+        ],
+    ),
     (
         "Pause syncing",
-        "Keskeytä synkronointi",
-        "Pausa synkroniseringen",
+        &[
+            ("fi", "Keskeytä synkronointi"),
+            ("sv", "Pausa synkroniseringen"),
+            ("de", "Synchronisierung pausieren"),
+            ("es", "Pausar la sincronización"),
+            ("ru", "Приостановить синхронизацию"),
+        ],
     ),
     (
         "Install update",
-        "Asenna päivitys",
-        "Installera uppdatering",
+        &[
+            ("fi", "Asenna päivitys"),
+            ("sv", "Installera uppdatering"),
+            ("de", "Aktualisierung installieren"),
+            ("es", "Instalar la actualización"),
+            ("ru", "Установить обновление"),
+        ],
     ),
     (
         "Install Varsto {}",
-        "Asenna Varsto {}",
-        "Installera Varsto {}",
+        &[
+            ("fi", "Asenna Varsto {}"),
+            ("sv", "Installera Varsto {}"),
+            ("de", "Varsto {} installieren"),
+            ("es", "Instalar Varsto {}"),
+            ("ru", "Установить Varsto {}"),
+        ],
     ),
-    ("Quit Varsto", "Lopeta Varsto", "Avsluta Varsto"),
+    (
+        "Quit Varsto",
+        &[
+            ("fi", "Lopeta Varsto"),
+            ("sv", "Avsluta Varsto"),
+            ("de", "Varsto beenden"),
+            ("es", "Salir de Varsto"),
+            ("ru", "Выйти из Varsto"),
+        ],
+    ),
 ];
 
-/// `en` in `lang` ("en", "fi" or "sv"); English when there is no entry.
+/// English when `lang` is "en" or has no entry.
 fn tr(lang: &str, en: &'static str) -> &'static str {
     TR.iter()
         .find(|t| t.0 == en)
-        .map(|t| match lang {
-            "fi" => t.1,
-            "sv" => t.2,
-            _ => t.0,
-        })
+        .and_then(|t| t.1.iter().find(|p| p.0 == lang).map(|p| p.1))
         .unwrap_or(en)
 }
 
@@ -681,10 +814,11 @@ mod tests {
 
     #[test]
     fn translations_keep_placeholders() {
-        for (en, fi, sv) in TR {
+        for (en, rows) in TR {
             let n = en.matches("{}").count();
-            assert_eq!(fi.matches("{}").count(), n, "{en}");
-            assert_eq!(sv.matches("{}").count(), n, "{en}");
+            for (lang, text) in *rows {
+                assert_eq!(text.matches("{}").count(), n, "{lang} {en}");
+            }
         }
         assert_eq!(tr("fi", "Quit Varsto"), "Lopeta Varsto");
         assert_eq!(tr("sv", "Open Varsto"), "Öppna Varsto");

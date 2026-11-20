@@ -371,6 +371,20 @@ impl Engine {
             current.insert(e.path.clone(), e);
         }
         let mut manifests = self.load_manifests(folder);
+        if state.deletions_deferred {
+            // This device has not read the folder yet. An empty list would
+            // go out as its view, and a shorter list would drop files it
+            // already published. Keep the published paths and send only
+            // what is here in addition.
+            if current.is_empty() && state.published_seq == 0 && state.last_seen.is_empty() {
+                return Ok(None);
+            }
+            if let Some(own) = manifests.views.get(&self.me3()) {
+                for (p, e) in &own.files {
+                    current.entry(p.clone()).or_insert_with(|| e.clone());
+                }
+            }
+        }
         let (vault, me, vault_keys) = self.record_writer_parts();
         let view = self.view3()?;
         let mut writer = ManifestWriter::new(*folder, me);

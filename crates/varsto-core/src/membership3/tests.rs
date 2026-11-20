@@ -439,25 +439,52 @@ fn two_folder_epochs_under_one_number_wait() {
 
     ma.refresh().unwrap();
     let ep = ma.folder_epochs(&f);
-    assert_eq!(ep.unresolved(), vec![1]);
-    assert_eq!(
-        ep.forks[&1],
-        [ma.me, ma2.me]
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>()
-    );
-    // Neither is applied, neither key is used, nothing new is signed.
-    assert_eq!(ep.current(), 0);
-    assert!(!ma.read_my_grants().holds(&f, 1));
-    assert!(ma.start_folder_epoch(&f, &[], None).is_err());
-    // Keeping one applies it.
-    let keep = ma2.me;
-    ma.resolve_folder_epoch(&f, 1, &keep).unwrap();
-    assert_eq!(ma.folder_epochs(&f).current(), 1);
+    // Both records are visible. The greater issuer id is applied; the
+    // other stays on the storages and resolve-epoch can still name it.
+    let winner = *[ma.me, ma2.me].iter().max().unwrap();
+    let winner_key = if winner == ma.me {
+        ka.keys.epochs[&1].0
+    } else {
+        kb.keys.epochs[&1].0
+    };
+    assert!(ep.unresolved().is_empty(), "{:?}", ep.unresolved());
+    assert_eq!(ep.current(), 1);
     assert_eq!(
         ma.read_my_grants().get(&f).unwrap().epochs[&1].0,
-        kb.keys.epochs[&1].0
+        winner_key
     );
+    // A later epoch takes the next number.
+    let next = ma.start_folder_epoch(&f, &[], None).unwrap();
+    assert_eq!(next.epoch, 2);
+}
+
+#[test]
+fn two_vault_revocations_at_once_keep_the_greater_issuer() {
+    let (s1, s2) = (Mem::default(), Mem::default());
+    let both: Vec<&dyn Storage> = vec![&s1, &s2];
+    let only1: Vec<&dyn Storage> = vec![&s1];
+    let only2: Vec<&dyn Storage> = vec![&s2];
+    let keys = VaultKeys::genesis(SecretKey::random());
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let mut ma = device(&both, &a, &keys, "laptop");
+    let mb = device(&both, &b, &keys, "desktop");
+    let mc = device(&both, &c, &keys, "phone");
+    let k1 = RecoveryKey::generate();
+    // Each remover sees only its own first storage, so both write epoch 1.
+    let mut ma1 = Membership::open(VAULT, &only1, &a.sign, &a.kem, ma.vault_keys.clone()).unwrap();
+    let mut mb2 = Membership::open(VAULT, &only2, &b.sign, &b.kem, mb.vault_keys.clone()).unwrap();
+    ma1.remove_device(&mc.me, 1, false, Some(&k1)).unwrap();
+    mb2.remove_device(&mc.me, 1, false, Some(&k1)).unwrap();
+    ma.refresh().unwrap();
+    assert!(
+        ma.unresolved_vault_forks().is_empty(),
+        "a reader that sees both records still waits: {:?}",
+        ma.vault_forks
+    );
+    let winner = *[ma.me, mb.me].iter().max().unwrap();
+    assert_eq!(ma.vault_kept.get(&1), Some(&winner));
+    assert_eq!(ma.vault_keys.newest_epoch(), 1);
+    assert!(ma.is_revoked(&mc.me));
 }
 
 #[test]

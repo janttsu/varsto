@@ -64,10 +64,10 @@ fun taskRequestsRelease(name: String): Boolean {
 }
 
 android {
-    namespace = "in.soderlund.varsto"
+    namespace = "net.varsto.app"
     compileSdk = 35
     defaultConfig {
-        applicationId = "in.soderlund.varsto"
+        applicationId = "net.varsto.app"
         minSdk = 26
         targetSdk = 35
         versionCode = varstoVersionCode

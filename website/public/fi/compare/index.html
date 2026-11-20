@@ -23,8 +23,11 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/compare/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../../assets/css/site.css?v=4998b8d831">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -45,7 +48,7 @@
     </nav>
     <div class="tools">
       <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
-        <nav class="pop-body langs" aria-label="Kieli"><a href="../../compare/" hreflang="en" lang="en">English</a><a href="../../fi/compare/" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../../sv/compare/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/compare/" hreflang="fr" lang="fr">Français</a></nav></details>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../../compare/" hreflang="en" lang="en">English</a><a href="../../fi/compare/" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../../sv/compare/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/compare/" hreflang="fr" lang="fr">Français</a><a href="../../de/compare/" hreflang="de" lang="de">Deutsch</a><a href="../../es/compare/" hreflang="es" lang="es">Español</a><a href="../../ru/compare/" hreflang="ru" lang="ru">Русский</a></nav></details>
       <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
       <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
       <a class="button small" href="../../fi/downloads/">Lataa</a>
@@ -56,21 +59,34 @@
 <main id="main">
   <div class="wrap">
     <h1>Varsto vertailussa</h1>
+    <figure class="qpace" data-qpace>
+      <h2>Onko kvantinkestävä salaus hidasta?</h2>
+      <p class="qpace-scene">Kymmenen tuhatta pientä tiedostoa, noin 330 MB, 100 Mbit/s yhteydellä, jossa on 40 ms viive, 1 % pakettihävikki ja 0,3 s katko 4 s välein. Kukin palkki etenee mitatun maalinajan suhteessa.</p>
+      <canvas width="720" height="150" role="img" aria-label="Varsto valmistuu 432 sekunnissa, Syncthing 489 sekunnissa ja Resilio Sync 934 sekunnissa."></canvas>
+      <ol class="qpace-lanes">
+        <li data-lane="varsto" data-sec="432"><i class="qpace-swatch" aria-hidden="true"></i><span>Varsto</span><b>432 s</b><small>336 MB</small></li>
+        <li data-lane="syncthing" data-sec="489"><i class="qpace-swatch" aria-hidden="true"></i><span>Syncthing</span><b>489 s</b><small>299 MB</small></li>
+        <li data-lane="resilio" data-sec="934"><i class="qpace-swatch" aria-hidden="true"></i><span>Resilio Sync</span><b>934 s</b><small>328 MB</small></li>
+      </ol>
+      <p class="qpace-answer">Varsto oli ensimmäisenä maalissa, 432 s. Syncthingillä kesti 489 s ja Resilio Syncillä 934 s. Tässä ajossa kvantinkestävä työkalu oli nopein.</p>
+      <button type="button" class="qpace-play" hidden>Toista</button>
+    </figure>
     <p class="lead">Tiedostojen synkronointityökalut jakautuvat kolmeen ryhmään. Vertaisyhteyttä (P2P) käyttävät työkalut, kuten Syncthing ja Resilio Sync, kopioivat kansioita omien laitteidesi välillä. Salatut pilvet, kuten MEGA, Filen ja Tresorit, säilyttävät tiedostosi yhden palveluntarjoajan luona. git-annex pitää kirjaa suurista tiedostoista kaikilla omistamillasi levyillä ja etäkohteissa. Varsto yhdistää osia kaikista kolmesta: päästä päähän salatut tiedostot valitsemissasi tallennuspaikoissa, siirrot vertaisyhteydellä laitteidesi välillä ja kirjanpidon siitä, missä jokainen kopio on.</p>
 
     <table class="compare-table compare-overview">
       <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="../compare/syncthing/">Syncthing</a></th><th scope="col"><a href="../compare/resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="../compare/mega/">MEGA</a></th><th scope="col"><a href="../compare/filen/">Filen</a></th><th scope="col"><a href="../compare/tresorit/">Tresorit</a></th><th scope="col"><a href="../compare/git-annex/">git-annex</a></th></tr></thead>
       <tbody>
-      <tr><th scope="row">Missä tiedostosi ovat</th><td class="win"><strong>Omilla laitteillasi ja omissa tallennuspaikoissasi</strong></td><td>Omilla laitteillasi</td><td>Omilla laitteillasi</td><td>MEGAn pilvessä</td><td>Filenin pilvessä</td><td>Tresoritin pilvessä</td><td>Missä itse haluat</td></tr>
-      <tr><th scope="row">Tili tai keskuspalvelin</th><td><strong>Ei kumpaakaan</strong></td><td>Ei kumpaakaan</td><td>Ei tiliä</td><td>Tili</td><td>Tili</td><td>Tili</td><td>Ei kumpaakaan</td></tr>
-      <tr><th scope="row">Laitteiden oltava verkossa yhtä aikaa</th><td><strong>Ei</strong></td><td>Kyllä</td><td>Kyllä</td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td></tr>
-      <tr><th scope="row">Tietää, missä jokainen kopio on</th><td class="win"><strong>Kyllä</strong></td><td>Ei</td><td>Ei</td><td>Yksi kopio palveluntarjoajalla</td><td>Yksi kopio palveluntarjoajalla</td><td>Yksi kopio palveluntarjoajalla</td><td>Kyllä</td></tr>
-      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td class="win"><strong>Kyllä</strong></td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td><td>Kyllä</td></tr>
-      <tr><th scope="row">Varmuuskopiot</th><td class="win"><strong>Vain luku -versiot omissa tallennuspaikoissa, säilytys N päivää</strong></td><td>Versiointi vain vastaanottavilla laitteilla</td><td>Arkistokansio, oletuksena 30 päivää</td><td>Vain luku -varmuuskopiot MEGAn pilvessä</td><td>Yksisuuntainen varmuuskopiotila Filenin pilveen</td><td>Versiohistoria, ei erillisiä varmuuskopioita</td><td>Kopiot lasketaan, ei versioita eikä säilytysaikaa</td></tr>
-      <tr><th scope="row">Lisenssi ja hinta</th><td><strong>Lähdekoodi saatavilla, ilmainen</strong></td><td>Avoin lähdekoodi, ilmainen</td><td>Suljettu, ilmaisversio</td><td>Maksulliset tilaukset, asiakasohjelmien lähdekoodi julkaistu</td><td>Maksulliset tilaukset, avoimen lähdekoodin asiakasohjelmat</td><td>Suljettu, maksulliset tilaukset</td><td>Vapaa ohjelmisto, ilmainen</td></tr>
+      <tr><th scope="row">Missä tiedostosi ovat</th><td class="win"><strong>Omilla laitteillasi ja omissa tallennuspaikoissasi</strong></td><td class="win">Omilla laitteillasi</td><td class="win">Omilla laitteillasi</td><td class="cloud">MEGAn pilvessä</td><td class="cloud">Filenin pilvessä</td><td class="cloud">Tresoritin pilvessä</td><td class="win">Missä itse haluat</td></tr>
+      <tr><th scope="row">Tili tai keskuspalvelin</th><td class="win"><strong>Ei kumpaakaan</strong></td><td class="win">Ei kumpaakaan</td><td class="win">Ei tiliä</td><td class="cloud">Tili</td><td class="cloud">Tili</td><td class="cloud">Tili</td><td class="win">Ei kumpaakaan</td></tr>
+      <tr><th scope="row">Laitteiden oltava verkossa yhtä aikaa</th><td class="win"><strong>Ei</strong></td><td class="closed">Kyllä</td><td class="closed">Kyllä</td><td class="win">Ei</td><td class="win">Ei</td><td class="win">Ei</td><td class="win">Ei</td></tr>
+      <tr><th scope="row">Tietää, missä jokainen kopio on (täysi kirjanpito on kootusti saatavilla yhdessä paikassa)</th><td class="win"><strong>Kyllä</strong></td><td class="cloud">Ei</td><td class="cloud">Ei</td><td class="win">Yksi kopio palveluntarjoajalla</td><td class="win">Yksi kopio palveluntarjoajalla</td><td class="win">Yksi kopio palveluntarjoajalla</td><td class="win">Kyllä</td></tr>
+      <tr><th scope="row">Irrotettavat ja verkosta irti olevat levyt</th><td class="win"><strong>Kyllä</strong></td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td><td class="win">Kyllä</td></tr>
+      <tr><th scope="row">Varmuuskopiot</th><td class="win"><strong>Vain luku -versiot omissa tallennuspaikoissa, säilytys N päivää</strong></td><td>Versiointi vain vastaanottavilla laitteilla</td><td>Arkistokansio, oletuksena 30 päivää</td><td>Vain luku -varmuuskopiot MEGAn pilvessä</td><td>Yksisuuntainen varmuuskopiotila Filenin pilveen</td><td class="closed">Versiohistoria, ei erillisiä varmuuskopioita</td><td>Kopiot lasketaan, ei versioita eikä säilytysaikaa</td></tr>
+      <tr><th scope="row">Kvantinkestävä salaus</th><td class="win"><strong>Kyllä, hybridi (ei auditoitu)</strong></td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td><td>Ei</td></tr>
+      <tr><th scope="row">Lisenssi</th><td class="win"><strong>Lähdekoodi saatavilla</strong></td><td class="win">Avoin lähdekoodi</td><td class="cloud">Suljettu</td><td class="closed">Asiakasohjelmien lähdekoodi julkaistu</td><td class="closed">Avoimen lähdekoodin asiakasohjelmat</td><td class="closed">Suljettu</td><td class="cloud">Vapaa ohjelmisto</td></tr>
+      <tr><th scope="row">Hinta</th><td class="win"><strong>Ilmainen</strong></td><td class="win">Ilmainen</td><td class="plain">Ilmaisversio</td><td class="plain">Ilmainen 20 GB; alkaen 4,99 € kuukaudessa, siirtokiintiöillä</td><td class="plain">Ilmainen 10 GB; alkaen 1,99 € kuukaudessa</td><td class="plain">Ilmainen 3 GB; alkaen 5,99 € kuukaudessa</td><td class="win">Ilmainen</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä: kohdat, joissa Varsto tekee enemmän kuin useimmat taulukon työkalut.</p>
     <p class="note">”Yksi kopio palveluntarjoajalla” tarkoittaa, että talon ulkopuolinen kopio on kyseisellä palveluntarjoajalla; myös laitteillasi on omat kopionsa. Kukin vertailusivu kertoo yksityiskohdat ja linkittää lähteisiin.</p>
 
     <h2>Vertailut</h2>
@@ -85,7 +101,7 @@
       <a class="card" href="../compare/rclone/"><h3>Varsto ja rclone</h3><p>rclone kopioi ja synkronoi tiedostoja yli seitsemänkymmenen tallennusjärjestelmän kanssa; sen crypt-etäkohde salaa läpi kulkevat tiedostot.</p></a>
       <a class="card" href="../compare/restic/"><h3>Varsto, restic ja BorgBackup</h3><p>restic ja borg ottavat salattuja, deduplikoituja versioita varastoon: varmuuskopiointia, ei synkronointia.</p></a>
     </div>
-    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta lokakuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-issueina</a>.</p>
+    <p class="note">Varsto on alfavaiheen ohjelmisto: älä luota sille tietoja, joista sinulla ei ole muuta kopiota. Sen kryptografiaa ei ole myöskään auditoitu riippumattomasti. Muut tässä esitellyt tuotteet ovat kypsiä. Niitä koskevat tiedot tarkistettiin niiden omasta dokumentaatiosta marraskuussa 2026; hinnat ja tilausvaihtoehdot muuttuvat usein, joten katso ajantasaiset tiedot niiden omilta sivuilta. Korjaukset ovat tervetulleita <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub-issueina</a>.</p>
 
   </div>
 </main>
@@ -101,9 +117,9 @@
     <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
     <span><a href="../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../docs/licence.html">Lisenssi</a> · <a href="../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
   </div>
-  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
-<script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
 <script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+<script src="../../assets/js/qpace.js?v=d0b3d75851" defer></script>
 </body>
 </html>

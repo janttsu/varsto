@@ -23,6 +23,10 @@ use super::*;
 
 const LOCK_FILE: &str = "home.lock";
 const GEN_FILE: &str = "home.gen";
+/// Serialises `clock.json` reservations. Separate from `home.lock`: a
+/// reservation must not bump `home.gen` or reload the whole device
+/// directory, and a sync that already holds `home.lock` may still reserve.
+const CLOCK_LOCK_FILE: &str = "clock.lock";
 
 /// The counter another writer bumps: how often the state was written.
 pub(super) fn read_generation(home: &Path) -> u64 {
@@ -64,6 +68,30 @@ impl HomeLock {
     fn take_if_free(home: &Path) -> Result<Option<HomeLock>> {
         let (file, _) = Self::open(home)?;
         Ok(try_lock(&file)?.then_some(HomeLock { _file: file }))
+    }
+}
+
+/// Exclusive lock on `state/clock.lock`, held only while `clock.json` is
+/// read, raised and replaced. Released when dropped.
+pub(super) struct ClockLock {
+    _file: std::fs::File,
+}
+
+impl ClockLock {
+    pub(super) fn take(home: &Path) -> Result<ClockLock> {
+        let dir = home.join("state");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(CLOCK_LOCK_FILE);
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("open {}", path.display()))?;
+        if !try_lock(&file)? {
+            lock(&file).with_context(|| format!("lock {}", path.display()))?;
+        }
+        Ok(ClockLock { _file: file })
     }
 }
 

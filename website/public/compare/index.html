@@ -23,8 +23,11 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/compare/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/compare/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/compare/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/compare/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/compare/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/compare/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../assets/css/site.css?v=4998b8d831">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -45,7 +48,7 @@
     </nav>
     <div class="tools">
       <details class="pop langs-menu"><summary class="iconbtn" aria-label="Language">EN</summary>
-        <nav class="pop-body langs" aria-label="Language"><a href="../compare/" hreflang="en" lang="en" aria-current="true">English</a><a href="../fi/compare/" hreflang="fi" lang="fi">Suomi</a><a href="../sv/compare/" hreflang="sv" lang="sv">Svenska</a><a href="../fr/compare/" hreflang="fr" lang="fr">Français</a></nav></details>
+        <nav class="pop-body langs" aria-label="Language"><a href="../compare/" hreflang="en" lang="en" aria-current="true">English</a><a href="../fi/compare/" hreflang="fi" lang="fi">Suomi</a><a href="../sv/compare/" hreflang="sv" lang="sv">Svenska</a><a href="../fr/compare/" hreflang="fr" lang="fr">Français</a><a href="../de/compare/" hreflang="de" lang="de">Deutsch</a><a href="../es/compare/" hreflang="es" lang="es">Español</a><a href="../ru/compare/" hreflang="ru" lang="ru">Русский</a></nav></details>
       <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
       <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
       <a class="button small" href="../downloads/">Download</a>
@@ -56,21 +59,34 @@
 <main id="main">
   <div class="wrap">
     <h1>How Varsto compares</h1>
+    <figure class="qpace" data-qpace>
+      <h2>Is quantum-resistant encryption slow?</h2>
+      <p class="qpace-scene">Ten thousand small files, about 330 MB, on a 100 Mbit/s link with 40 ms of delay, 1% packet loss, and a 0.3 s cut every 4 s. Each bar runs in the ratio of the measured finish.</p>
+      <canvas width="720" height="150" role="img" aria-label="Varsto finishes in 432 seconds, Syncthing in 489 seconds, and Resilio Sync in 934 seconds."></canvas>
+      <ol class="qpace-lanes">
+        <li data-lane="varsto" data-sec="432"><i class="qpace-swatch" aria-hidden="true"></i><span>Varsto</span><b>432 s</b><small>336 MB</small></li>
+        <li data-lane="syncthing" data-sec="489"><i class="qpace-swatch" aria-hidden="true"></i><span>Syncthing</span><b>489 s</b><small>299 MB</small></li>
+        <li data-lane="resilio" data-sec="934"><i class="qpace-swatch" aria-hidden="true"></i><span>Resilio Sync</span><b>934 s</b><small>328 MB</small></li>
+      </ol>
+      <p class="qpace-answer">Varsto finished first, in 432 s. Syncthing took 489 s and Resilio Sync 934 s. On this run the quantum-resistant tool was the fastest.</p>
+      <button type="button" class="qpace-play" hidden>Replay</button>
+    </figure>
     <p class="lead">Tools for keeping files in sync fall into three groups. Peer-to-peer tools such as Syncthing and Resilio Sync copy folders between your own devices. Encrypted clouds such as MEGA, Filen and Tresorit keep your files with one provider. git-annex tracks large files across any disks and remotes you own. Varsto combines parts of all three: end-to-end encrypted files on storages you choose, peer-to-peer transfer between your devices, and a record of where every copy is.</p>
 
     <table class="compare-table compare-overview">
       <thead><tr><th scope="col"></th><th scope="col">Varsto</th><th scope="col"><a href="syncthing/">Syncthing</a></th><th scope="col"><a href="resilio-sync/">Resilio Sync</a></th><th scope="col"><a href="mega/">MEGA</a></th><th scope="col"><a href="filen/">Filen</a></th><th scope="col"><a href="tresorit/">Tresorit</a></th><th scope="col"><a href="git-annex/">git-annex</a></th></tr></thead>
       <tbody>
-      <tr><th scope="row">Where your files live</th><td class="win"><strong>Your devices and your storages</strong></td><td>Your devices</td><td>Your devices</td><td>MEGA's cloud</td><td>Filen's cloud</td><td>Tresorit's cloud</td><td>Anywhere you choose</td></tr>
-      <tr><th scope="row">Account or central server</th><td><strong>None</strong></td><td>None</td><td>No account</td><td>Account</td><td>Account</td><td>Account</td><td>None</td></tr>
-      <tr><th scope="row">Devices must be online together</th><td><strong>No</strong></td><td>Yes</td><td>Yes</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
-      <tr><th scope="row">Knows where every copy is</th><td class="win"><strong>Yes</strong></td><td>No</td><td>No</td><td>One provider copy</td><td>One provider copy</td><td>One provider copy</td><td>Yes</td></tr>
-      <tr><th scope="row">Removable and offline disks</th><td class="win"><strong>Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>Yes</td></tr>
-      <tr><th scope="row">Backups</th><td class="win"><strong>Read-only snapshots on your storages, kept N days</strong></td><td>Versioning on receiving devices only</td><td>Archive folder, 30 days by default</td><td>Read-only backups in MEGA's cloud</td><td>One-way backup mode to Filen's cloud</td><td>Version history, no separate backups</td><td>Copies counted, no snapshots or retention</td></tr>
-      <tr><th scope="row">Licence and price</th><td><strong>Source-available, free</strong></td><td>Open source, free</td><td>Proprietary, free tier</td><td>Plans, client source published</td><td>Plans, open-source clients</td><td>Proprietary plans</td><td>Free software, free</td></tr>
+      <tr><th scope="row">Where your files live</th><td class="win"><strong>Your devices and your storages</strong></td><td class="win">Your devices</td><td class="win">Your devices</td><td class="cloud">MEGA's cloud</td><td class="cloud">Filen's cloud</td><td class="cloud">Tresorit's cloud</td><td class="win">Anywhere you choose</td></tr>
+      <tr><th scope="row">Account or central server</th><td class="win"><strong>None</strong></td><td class="win">None</td><td class="win">No account</td><td class="cloud">Account</td><td class="cloud">Account</td><td class="cloud">Account</td><td class="win">None</td></tr>
+      <tr><th scope="row">Devices must be online together</th><td class="win"><strong>No</strong></td><td class="closed">Yes</td><td class="closed">Yes</td><td class="win">No</td><td class="win">No</td><td class="win">No</td><td class="win">No</td></tr>
+      <tr><th scope="row">Knows where every copy is (the full record is available, gathered in one place)</th><td class="win"><strong>Yes</strong></td><td class="cloud">No</td><td class="cloud">No</td><td class="win">One provider copy</td><td class="win">One provider copy</td><td class="win">One provider copy</td><td class="win">Yes</td></tr>
+      <tr><th scope="row">Removable and offline disks</th><td class="win"><strong>Yes</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td class="win">Yes</td></tr>
+      <tr><th scope="row">Backups</th><td class="win"><strong>Read-only snapshots on your storages, kept N days</strong></td><td>Versioning on receiving devices only</td><td>Archive folder, 30 days by default</td><td>Read-only backups in MEGA's cloud</td><td>One-way backup mode to Filen's cloud</td><td class="closed">Version history, no separate backups</td><td>Copies counted, no snapshots or retention</td></tr>
+      <tr><th scope="row">Quantum-resistant encryption</th><td class="win"><strong>Yes, hybrid (not audited)</strong></td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+      <tr><th scope="row">Licence</th><td class="win"><strong>Source-available</strong></td><td class="win">Open source</td><td class="cloud">Proprietary</td><td class="closed">Client source published</td><td class="closed">Open-source clients</td><td class="closed">Proprietary</td><td class="cloud">Free software</td></tr>
+      <tr><th scope="row">Price</th><td class="win"><strong>Free</strong></td><td class="win">Free</td><td class="plain">Free tier</td><td class="plain">Free 20 GB; from €4.99 a month, with transfer quotas</td><td class="plain">Free 10 GB; from €1.99 a month</td><td class="plain">Free 3 GB; from €5.99 a month</td><td class="win">Free</td></tr>
       </tbody>
     </table>
-    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Green: where Varsto does more than most tools in the table.</p>
     <p class="note">"One provider copy" means the off-site copy is with that provider; your devices keep their own copies too. Each comparison page explains the details and links to the sources.</p>
 
     <h2>Comparisons</h2>
@@ -85,7 +101,7 @@
       <a class="card" href="rclone/"><h3>Varsto and rclone</h3><p>rclone copies and syncs files to and from more than seventy storage systems, with a crypt remote that encrypts what passes through it.</p></a>
       <a class="card" href="restic/"><h3>Varsto, restic and BorgBackup</h3><p>restic and borg take encrypted, deduplicated snapshots into a repository: backups, not sync.</p></a>
     </div>
-    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in October 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome as <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub issues</a>.</p>
+    <p class="note">Varsto is alpha software: do not trust it with data you have no other copy of, and its cryptography has not been independently audited. The other products here are mature. Facts about them were checked from their own documentation in November 2026; prices and plans change often, so see their own pages for current figures. Corrections are welcome as <a href="https://github.com/janttsu/varsto/issues" rel="noopener">GitHub issues</a>.</p>
 
   </div>
 </main>
@@ -101,9 +117,9 @@
     <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
     <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
   </div>
-  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
-<script src="../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../assets/js/field.js?v=c342154328" defer></script>
 <script src="../assets/js/motion.js?v=a547492b3b" defer></script>
+<script src="../assets/js/qpace.js?v=d0b3d75851" defer></script>
 </body>
 </html>

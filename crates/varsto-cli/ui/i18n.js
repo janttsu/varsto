@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-// Interface languages: English (the source), Finnish and Swedish. The page is
-// written in English; this script translates what it shows, the static page
-// and everything app.js adds later, from /i18n/<lang>.json: exact strings
+// Interface languages: English (the source), Finnish, Swedish, German, Spanish
+// and Russian. French is a website language only. The page is written in
+// English; this script translates what it shows, the static page and
+// everything app.js adds later, from /i18n/<lang>.json: exact strings
 // (`strings`) and patterns for messages built from parts (`patterns`, each
 // [regular expression, replacement]). Untranslated text stays English. The
 // choice is kept in this browser and sent to the service, so the tray and
 // menu-bar follow it.
 (function () {
   "use strict";
-  var LANGS = [["en", "English"], ["fi", "Suomi"], ["sv", "Svenska"]];
+  var LANGS = [["en", "English"], ["fi", "Suomi"], ["sv", "Svenska"], ["de", "Deutsch"], ["es", "Español"], ["ru", "Русский"]];
   var KEY = "varsto-lang";
   var lang = "en";
   try { lang = localStorage.getItem(KEY) || "en"; } catch (e) { /* storage blocked */ }

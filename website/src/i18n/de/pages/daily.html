@@ -1,0 +1,31 @@
+---
+title: Tägliche Builds
+nav: Downloads
+output: daily/index.html
+description: Entwicklungs-Builds von Varsto aus der Hauptlinie, mit einer Prüfsummenliste, die mit einem eigenen Daily-Schlüssel signiert ist. Keine Veröffentlichungen, nicht für Produktionsdaten.
+---
+    <h1>Tägliche Builds</h1>
+    <div class="daily-warn" role="note">
+      <p><strong>Das sind Entwicklungs-Builds aus der Hauptlinie, keine Veröffentlichungen.</strong></p>
+      <ul>
+        <li>Sie sind keine Veröffentlichungen und haben keine Veröffentlichungstests durchlaufen. Sie tragen keine Veröffentlichungssignatur und keine Code-Signatur von Apple oder Microsoft. Benutze sie nicht für Produktionsdaten.</li>
+        <li>Das Speicherformat kann von einem Build zum nächsten ohne Migration wechseln. Diese Builds schreiben Speicherformat 3: ein Tresor, den 0.0.1-alpha.15 oder früher angelegt hat, wird abgelehnt und muss neu angelegt werden (<code>varsto reset --yes</code>, <code>varsto init</code>, dann die Dateien erneut synchronisieren), und 0.0.1-alpha.15 lehnt einen Tresor im Format 3 ab. Ein Gerät, das beitritt, fordert jeden Ordner an, und eine Eigentümerin oder ein Eigentümer genehmigt ihn; <code>varsto init</code> gibt einen zweiten Satz von 24 Wiederherstellungswörtern aus, nach denen <code>varsto folder add</code> fragt.</li>
+        <li><code>varsto update --daily</code> installiert den neuesten täglichen Build deiner Plattform (die Kommandozeilen-Builds für Linux und Windows; die macOS-App und die Android-APK werden von Hand installiert). Reines <code>varsto update</code> bleibt bei den Veröffentlichungen und installiert nie einen täglichen Build.</li>
+        <li>Der tägliche Android-Build ist eine Debug-APK (<code>varsto-daily-android-debug.apk</code>), und die Release-APK ist mit einem anderen Schlüssel signiert, sodass keiner den anderen überschreibt: deinstalliere den einen, bevor du den anderen installierst. Das entfernt die Tresorkopie dieses Geräts.</li>
+        <li>Behalte deine eigenen Sicherungen.</li>
+      </ul>
+      <p>Suchst du etwas, worauf du dich verlassen kannst? Nimm stattdessen die <a href="{{L}}downloads/">stabilen Downloads</a>.</p>
+    </div>
+    {{DAILY_BUILD}}
+    {{DAILY_TABLE}}
+    <h2>Prüfen</h2>
+    <p>Leg <a href="{{P}}daily/latest/SHA256SUMS">SHA256SUMS</a> neben die Dateien, die du heruntergeladen hast (die Dateinamen sind die festen Namen in der Tabelle), und führe aus</p>
+    <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+    <p>Lass <code>--ignore-missing</code> weg, wenn du jede Datei heruntergeladen hast. Die Liste ist mit dem eigenen Daily-Schlüssel signiert (<a href="{{P}}daily/latest/SHA256SUMS.sig">SHA256SUMS.sig</a>, minisign-Format; der Schlüssel ist <a href="{{P}}daily-key.pub">daily-key.pub</a>), und genau das prüft <code>varsto update --daily</code>. Neben der Aussage, dass ein Download vollständig und unversehrt ist, zeigt die Signatur, dass die Liste aus dem eigenen Build des Projekts stammt.</p>
+    <h2>Was enthalten ist</h2>
+    {{DAILY_INCLUDED}}
+    <h2>Bekannte Lücken</h2>
+    {{DAILY_GAPS}}
+    <h2>Frühere Builds</h2>
+    <p>Die sieben neuesten Builds bleiben erhalten, mit denselben Dateinamen; jeder hat seine eigene signierte Liste.</p>
+    {{DAILY_HISTORY}}

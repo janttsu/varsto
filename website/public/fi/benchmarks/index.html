@@ -23,8 +23,11 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/benchmarks/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/benchmarks/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/benchmarks/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/benchmarks/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/benchmarks/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/benchmarks/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../../assets/css/site.css?v=4998b8d831">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -45,7 +48,7 @@
     </nav>
     <div class="tools">
       <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
-        <nav class="pop-body langs" aria-label="Kieli"><a href="../../benchmarks/" hreflang="en" lang="en">English</a><a href="../../fi/benchmarks/" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../../sv/benchmarks/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/benchmarks/" hreflang="fr" lang="fr">Français</a></nav></details>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../../benchmarks/" hreflang="en" lang="en">English</a><a href="../../fi/benchmarks/" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../../sv/benchmarks/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/benchmarks/" hreflang="fr" lang="fr">Français</a><a href="../../de/benchmarks/" hreflang="de" lang="de">Deutsch</a><a href="../../es/benchmarks/" hreflang="es" lang="es">Español</a><a href="../../ru/benchmarks/" hreflang="ru" lang="ru">Русский</a></nav></details>
       <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
       <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
       <a class="button small" href="../../fi/downloads/">Lataa</a>
@@ -77,6 +80,7 @@
         <li><a href="#bottlenecks">Yhä hidasta, ja miksi</a></li>
         <li><a href="#when">Milloin vertaisyhteys voittaa ja milloin bucket</a></li>
         <li><a href="#resilio">Mitattu Resilio Synciä vastaan</a></li>
+        <li><a href="#syncthing">Mitattu Syncthingiä vastaan</a></li>
         <li><a href="#cost">Kustannukset</a></li>
         <li><a href="#limits">Mittauksen rajoitukset</a></li>
       </ol>
@@ -370,20 +374,21 @@
     </ul>
 
     <h2 id="resilio">Mitattu Resilio Synciä vastaan (marraskuu 2026)</h2>
-    <p>8. marraskuuta 2026 molemmat ohjelmat siirsivät saman datan samojen kolmen vuokrakoneen välillä (kirjoittaja Pariisissa, lukijat Amsterdamissa ja Varsovassa, 2 vCPU kukin), yksi ohjelma kerrallaan, välittäjät ja seurantapalvelimet pois päältä, ja jokainen tiedosto tarkistettiin jälkikäteen SHA-256-tiivisteellä. Varsto oli daily-käännös 20261108-c50f260; Resilio Sync oli versio 2.8.1, koska 3.1.2 ei synkronoinut asetustiedostosta lainkaan. Kahden ajon mediaanit. "Tavut" on se, mitä lukija vaihtoi muiden koneiden kanssa. Menetelmä, sen rajoitukset, raakadata ja toistamiseen tarvittavat skriptit ovat <a href="../../docs/resilio-vs-varsto.html">mittausraportissa</a> (englanniksi).</p>
+    <p>10. marraskuuta 2026 molemmat ohjelmat siirsivät saman datan samojen kolmen vuokrakoneen välillä (kirjoittaja Pariisissa, lukijat Amsterdamissa ja Varsovassa, 2 vCPU kukin), yksi ohjelma kerrallaan, välittäjät ja seurantapalvelimet pois päältä, ja jokainen tiedosto tarkistettiin jälkikäteen SHA-256-tiivisteellä. Varsto oli daily-käännös 20261109-c1cf5c2; Resilio Sync oli versio 2.8.1, koska 3.1.2 ei synkronoinut asetustiedostosta lainkaan. Kahden ajon mediaanit. "Tavut" on se, mitä lukija vaihtoi muiden koneiden kanssa. Menetelmä, sen rajoitukset, raakadata ja toistamiseen tarvittavat skriptit ovat <a href="../../docs/resilio-vs-varsto.html">mittausraportissa</a> (englanniksi).</p>
     <table class="compare-table bench-vs">
       <thead><tr><th>Skenaario</th><th>Varsto</th><th>Resilio Sync 2.8.1</th></tr></thead>
       <tbody>
-        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td>44 s · 285 MB</td><td>25 s · 310 MB; yksi ajo kahdesta jumittui 5 min</td></tr>
-        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td>43 s · 2 166 MB</td><td>109 s · 2 227 MB</td></tr>
-        <tr><th scope="row">537 MB lokimaista tekstiä</th><td>17 s · 161 MB</td><td>63 s · 558 MB</td></tr>
-        <tr><th scope="row">816 MB, josta puolet kopioita</th><td>13 s · 410 MB</td><td>78 s · 848 MB</td></tr>
-        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>72 s ja 98 s; kirjoittaja lähetti 4 107 MB</td><td>102 s ja 99 s; kirjoittaja lähetti 3 419 MB</td></tr>
-        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>61 s · 22 MB</td><td>15 s · 12 MB</td></tr>
-        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td>38 s · 0,1 MB</td><td>67 s · 1 269 MB</td></tr>
-        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki (pienet tiedostot)</th><td>335 s · 295 MB</td><td>599 s · 314 MB</td></tr>
+        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td class="win">25 s · 292 MB</td><td class="win">25 s · 313 MB</td></tr>
+        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td class="win">44 s · 2 178 MB</td><td>90 s · 2 226 MB</td></tr>
+        <tr><th scope="row">537 MB lokimaista tekstiä</th><td class="win">17 s · 169 MB</td><td>47 s · 563 MB</td></tr>
+        <tr><th scope="row">816 MB, josta puolet kopioita</th><td class="win">13 s · 419 MB</td><td>62 s · 856 MB</td></tr>
+        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td class="win">Amsterdam 70 s, Varsova 118 s; kirjoittaja lähetti 3 685 MB</td><td class="win">Amsterdam 76 s, Varsova 118 s; kirjoittaja lähetti 3 636 MB</td></tr>
+        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td class="win">12 s · 26 MB, yksi ajo</td><td>15 s · 12 MB</td></tr>
+        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td class="win">10 s · 0 MB tiedostodataa</td><td>67 s · 1 269 MB</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">432 s · 336 MB</td><td>934 s · 328 MB</td></tr>
       </tbody>
     </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä on nopeampi valmistuminen. Jos hitaampi aika on enintään 10 % hitaampaa, molemmat sarakkeet ovat vihreät.</p>
     <ul>
       <li><strong>Varsto on nopeampi</strong> kaikissa isojen, pakkautuvien tai duplikaattia sisältävien aineistojen ensimmäisissä synkronoinneissa sekä hitaalla, hävikkisellä yhteydellä. Teksti vie kolmasosan tavuista, koska lohkot pakataan ennen salausta; uudelleennimetty hakemisto ja kopiotiedostot siirtävät lähes nolla dataa, koska lukijan levyllä jo olevat lohkot käytetään uudelleen.</li>
       <li><strong>Resilio Sync on nopeampi</strong> monien pienten tiedostojen kanssa silloin, kun se ei jumitu (se jumittui yhdessä ajossa kahdesta), ja pienen muutoksen välittämisessä: Varsto hakee nyt vain muuttuneet lohkot (22 MB, kun edellinen käännös haki koko 1,1 GiB), mutta kestää yhä kolmesta viiteen kertaa kauemmin, koska kirjoittajan oma kaikkien kansioiden synkka ja lukijan omien lohkojen uudelleentiivistys maksavat enemmän kuin siirto.</li>
@@ -392,7 +397,32 @@
     </ul>
     <p class="note">Yksi päivä, yksi palveluntarjoaja, kaksi ajoa tapausta kohden ja alfa: nämä ovat suuntaa antavia, eivät tuomio. Raportti luettelee kaiken, mikä niitä rajoittaa.</p>
 
-    <h2 id="cost">Kustannukset</h2>
+    <h2 id="syncthing">Mitattu Syncthingiä vastaan (marraskuu 2026)</h2>
+    <p>Varston luvut ovat 10. marraskuuta 2026. Syncthing mitattiin uudelleen 11. marraskuuta 2026. Molemmat työkalut siirsivät saman datan samojen kolmen vuokratun koneen välillä (kirjoittaja Pariisissa, lukijat Amsterdamissa ja Varsovassa, 2 vCPU kukin), yksi työkalu kerrallaan. Syncthing 2.1.7:ssä yleinen ja paikallinen etsintä sekä välittimet olivat pois, ja laitteet osoittivat toisensa suoraan. Varsto oli daily-kooste 20261109-c1cf5c2; nämä ovat samat Varsto-ajot, jotka on jo julkaistu Resilio Synciä vastaan, ei uusi mittaus. Kahden ajon mediaanit. "Tavut" ovat se, mitä kirjoittaja lähetti verkkorajapinnastaan. Jokainen valmis ajo tarkistettiin tiivisteellä. Menetelmä on sama kuin <a href="../../docs/resilio-vs-varsto.html">Resilio Sync -mittauksessa</a>.</p>
+    <table class="compare-table bench-vs">
+      <thead><tr><th>Tilanne</th><th>Varsto</th><th>Syncthing 2.1.7</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">10 000 pientä tiedostoa (313 MB)</th><td class="win">25 s · 292 MB</td><td>61 s · 282 MB</td></tr>
+        <tr><th scope="row">Kaksi 1 GiB:n tiedostoa</th><td class="win">44 s · 2 178 MB</td><td class="win">40 s · 2 177 MB</td></tr>
+        <tr><th scope="row">537 MB lokimaista tekstiä</th><td>17 s · 169 MB</td><td class="win">7 s · 547 MB</td></tr>
+        <tr><th scope="row">816 MB, josta puolet kopioita</th><td>13 s · 419 MB</td><td class="win">8 s · 615 MB</td></tr>
+        <tr><th scope="row">Kaksi lukijaa yhtä aikaa (Amsterdam, Varsova)</th><td>Amsterdam 70 s, Varsova 118 s; kirjoittaja lähetti 3 685 MB</td><td class="win">Amsterdam 49 s, Varsova 59 s; kirjoittaja lähetti 2 839 MB</td></tr>
+        <tr><th scope="row">11 MiB muuttui 1,13 GiB:n sisällä</th><td>12 s · 26 MB, yksi ajo</td><td class="win">7 s · 12 MB</td></tr>
+        <tr><th scope="row">1,13 GiB:n hakemisto nimettiin uudelleen</th><td>10 s · 0 MB tiedostodataa</td><td>tiedostot täsmäsivät, noin 0,1 MB, ei valmistumiskelloa</td></tr>
+        <tr><th scope="row">100 Mbit/s, 40 ms, 1 % hävikki, katko 0,3 s joka 4. sekunti (pienet tiedostot)</th><td class="win">432 s · 336 MB</td><td>489 s · 299 MB</td></tr>
+      </tbody>
+    </table>
+    <p class="note compare-legend"><span class="win-swatch" aria-hidden="true"></span> Vihreä on nopeampi valmistuminen. Jos hitaampi aika on enintään 10 % hitaampaa, molemmat sarakkeet ovat vihreät. Uudelleennimeämisellä ei ole valmistumiskelloa, joten kumpikaan sarake ei ole vihreä.</p>
+    <ul>
+      <li><strong>Varsto oli nopeampi</strong> 10 000 pienessä tiedostossa, 25 s vastaan 61 s, suunnilleen samoilla tavuilla, ja katkotulla yhteydellä, 432 s vastaan 489 s.</li>
+      <li><strong>Syncthing oli nopeampi</strong> lokitekstissä (7 s vastaan 17 s), kopioissa (8 s vastaan 13 s), kahdella lukijalla (Varsova 59 s vastaan 118 s) ja pienessä muutoksessa (7 s vastaan 12 s).</li>
+      <li><strong>Lokiteksti on tavuissa poikkeus.</strong> Syncthing lähetti 547 MB ja valmistui 7 sekunnissa. Varsto lähetti 169 MB ja vei 17 s, koska lohko pakataan ennen salausta. Syncthing lähettää tekstin sellaisena kuin se on tallennettu.</li>
+      <li><strong>Kopiot:</strong> Syncthing valmistui ensin ja lähetti 615 MB. Varsto lähetti 419 MB, koska lukijan levyllä jo olevat lohkot käytetään uudelleen.</li>
+      <li><strong>Kaksi lukijaa:</strong> Syncthingin lukijat voivat lähettää toisilleen, ja kirjoittaja lähetti 2 839 MB. Varston kirjoittaja lähetti 3 685 MB, ja Varsova vei 118 s.</li>
+      <li><strong>Uudelleennimeäminen</strong> päättyi samoihin tiedostoihin ja noin 0,1 MB:iin verkossa molemmissa Syncthing-ajoissa. Valmistumiskelloa ei kirjattu: jäljelle jäänyt tyhjä hakemisto piti tarkistuksen auki aikarajaan asti. Varston uudelleennimeäminen samana päivänä oli 10 s, eikä lukija hakenut tiedostodataa.</li>
+    </ul>
+    <p class="note">Yksi päivä, yksi palveluntarjoaja, kaksi ajoa ja alfa: nämä ovat viitteitä, eivät tuomio.</p>
+        <h2 id="cost">Kustannukset</h2>
     <p>Scalewayn julkinen hinnasto (luettu 9. lokakuuta 2026, Pariisin alue, verottomat hinnat): Object Storage Standard Multi-AZ €0.000022 gigatavutunnilta (noin €0.016 gigatavukuukaudelta), pyynnöt sisältyvät, sisääntuleva liikenne sisältyy, ulosmenevästä liikenteestä ensimmäiset 75 GB kuukaudessa ilmaisia ja sen jälkeen €0.01 gigatavulta. Alueiden väliset siirrot (Pariisi – Amsterdam, Pariisi – Varsova) lasketaan ulosmeneväksi liikenteeksi; alueen sisällä ne ovat ilmaisia.</p>
     <p>Yksi Amsterdamin lukija, joka lataa 4 GiB:n aineiston Pariisin bucketista, maksaa siis noin €0.04, kun ilmaiset 75 GB on käytetty, ja kotitalous, joka synkronoi 500 GB kuukaudessa bucketin alueen ulkopuolisille laitteille, maksaa ulosmenevästä liikenteestä noin €4 kuukaudessa. Vertaisyhteys siirtää samat tavut laitteiden omien yhteyksien kautta eikä lisää tallennuslaskuun mitään. Muut palveluntarjoajat veloittavat ulosmenevästä liikenteestä tai pyynnöistä enemmän; yllä kuvattu menetelmä soveltuu niihin sellaisenaan. Tämän mittauksen koneet (kolme instanssia hintaan €0.147 tunnilta, noin seitsemän ja puoli tuntia kahtena päivänä) maksoivat noin €3.50.</p>
 
@@ -422,9 +452,8 @@
     <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
     <span><a href="../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../docs/licence.html">Lisenssi</a> · <a href="../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
   </div>
-  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
-<script src="../../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
 <script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
 </body>
 </html>

@@ -2,12 +2,12 @@
 title: Project
 nav: Project
 output: index.html
-description: Varsto: end-to-end encrypted sync, sharing and backup on storage you already own, with post-quantum hybrid cryptography and a signed record of where every copy is. Alpha, working name.
+description: Varsto: end-to-end encrypted file sync, sharing and backup on storage you already own, with post-quantum hybrid cryptography and a signed record of where every copy is. Alpha, working name.
 ---
     <section class="hero">
       <canvas class="field" id="field" aria-hidden="true"></canvas>
       <h1>Bring your own storage. Keep your own keys. Know where every block is.</h1>
-      <p class="lead">End-to-end encrypted sync, sharing and backup across your devices, with post-quantum hybrid cryptography and bookkeeping you can audit. No server, no account, no provider to trust.</p>
+      <p class="lead">End-to-end encrypted file sync, sharing and backup on storage you already own, with post-quantum hybrid cryptography and bookkeeping you can audit. No server, no account, no provider to trust. How this differs from <a href="compare/syncthing/">Syncthing</a> and <a href="compare/resilio-sync/">Resilio Sync</a>.</p>
       <div class="cta"><a class="button" href="downloads/">Download the alpha</a> <a class="button secondary" href="docs/quick-start.html">Quick start</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Source on GitHub</a></div>
       <nav class="platforms" aria-label="Downloads"><a href="downloads/">Linux</a> <a href="downloads/">Windows</a> <a href="downloads/">macOS</a> <a href="downloads/">Android</a> <a href="downloads/">iOS</a></nav>
     </section>
@@ -34,7 +34,7 @@ description: Varsto: end-to-end encrypted sync, sharing and backup on storage yo
       <li>Content is encrypted with XChaCha20-Poly1305 under keys derived from a random vault key that only your devices hold; a storage sees ciphertext objects named by their hash and nothing else. <a href="how-it-works/">How it works</a>, step by step.</li>
       <li>Every stored signature is hybrid (Ed25519 + ML-DSA-65, both must verify) and every sealed key is hybrid (X25519 + ML-KEM-768): post-quantum hybrid cryptography, designed for, not audited. Transport (direct connections carry only encrypted blocks over TLS 1.3 with pinned certificates, on TCP or, through NAT, QUIC) and release signing (minisign) use classical algorithms.</li>
       <li>Strongroom folders open only with a FIDO2 security key; the enforcement is cryptographic, not a dialog.</li>
-      <li>AI assistance stays local: the MCP server is meant for language models that run on your own machine, inside the folders you grant and never a Strongroom. Nothing is sent to a model provider.</li>
+      <li>No assistant is given access to the vault. There is no MCP server and no key a language model can use to read your files.</li>
       <li>A lost device is removed with a signed revocation and the vault moves to new keys; a wipe order runs when the device next reaches a storage. There is no account and no escrow: the recovery kit, 24 words or three shares, is yours to keep.</li>
       <li>Neither the design nor the code has been reviewed or audited. The <a href="docs/threat-model.html">threat model</a> and the <a href="docs/failure-model.html">failure model</a> say what the design intends, what each party can see, and where it stops.</li>
     </ul>

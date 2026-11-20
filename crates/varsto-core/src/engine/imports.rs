@@ -1963,7 +1963,12 @@ impl Engine {
         let packs = crate::blockmap::written_packs(&written, &|o| info.get(o).copied())?;
         let view = self.view3()?;
         let epoch = self.folder_keys(rec)?.epoch;
-        self.publish_map3(&members3::bin(&rec.folder_id)?, epoch, &packs, &view)
+        if let Err(e) = self.publish_map3(&members3::bin(&rec.folder_id)?, epoch, &packs, &view) {
+            // The map record was not published, so no claim was queued.
+            self.delete_unsealed_packs(&packs);
+            return Err(e);
+        }
+        Ok(())
     }
     // ----- what an import left ------------------------------------------------------
 

@@ -1,0 +1,38 @@
+---
+title: Contribuir
+nav: Contribute
+output: contribute/index.html
+description: Ayuda a construir Varsto, una herramienta de sincronización y copia de seguridad con cifrado de extremo a extremo escrita en Rust: arquitectura, dónde hace falta ayuda, cómo compilarla y probarla, y las condiciones de la licencia.
+---
+    <h1>Construye Varsto con nosotros</h1>
+    <p class="lead">Varsto es una herramienta de sincronización y copia de seguridad de archivos con cifrado de extremo a extremo, para un almacenamiento que ya es tuyo: buckets de S3, recursos compartidos de NAS, remotos de rclone, discos viejos y tus propios dispositivos. El núcleo está escrito en Rust, el código fuente es público en <a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a> y el formato de almacenamiento está especificado por escrito. Es una alfa temprana, el mejor momento para darle forma.</p>
+    <p><a class="button" href="https://github.com/janttsu/varsto" rel="noopener">Código fuente en GitHub</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Incidencias</a> <a class="button secondary" href="{{P}}docs/contributing.html">Reglas de contribución (en)</a></p>
+    <p>El seguimiento de incidencias es donde se anota el trabajo. Las etiquetas <code>help wanted</code> y <code>good first issue</code> marcan lo que puede tomar quien empieza. Un informe de fallo o una corrección pequeña de la documentación son bienvenidos cuando esa lista está vacía.</p>
+
+    <h2>En qué trabajarías</h2>
+    <div class="grid">
+      <section class="card"><h3>Un núcleo en Rust con una especificación escrita</h3><p><code>varsto-core</code> contiene el motor: corte en bloques definido por el contenido, cifrado XChaCha20-Poly1305, un libro mayor firmado con firmas híbridas Ed25519 + ML-DSA-65, colocación y políticas de conservación, intercambio de bloques entre pares con cruce de NAT, y backends de almacenamiento para directorios, S3 y rclone. Cada objeto que se escribe en el almacenamiento se describe en la <a href="{{P}}docs/alpha-0-format.html">especificación del formato de almacenamiento</a> (en).</p></section>
+      <section class="card"><h3>Un binario, muchos envoltorios</h3><p><code>varsto-cli</code> es la línea de comandos, el servicio en segundo plano, la bandeja y una interfaz web local (HTML, CSS y JavaScript sin más). Unos envoltorios nativos finos lo envuelven: Swift para macOS e iOS, Kotlin para Android, a través de <code>varsto-ffi</code>.</p></section>
+      <section class="card"><h3>Pruebas que ejecutan redes enteras</h3><p>Además de las pruebas unitarias y de integración, un laboratorio de máquinas virtuales representa portátiles, ordenadores de sobremesa y servidores detrás de routers domésticos, NAT simétrico e internet público, con un servidor S3 y, cuando hace falta, cortes del almacenamiento, caídas y desfase de reloj. Consulta <a href="{{P}}docs/testing.html">Testing</a> (en).</p></section>
+    </div>
+
+    <h2>Dónde hace falta ayuda</h2>
+    <ul>
+      <li><strong>Revisión de seguridad</strong> de la <a href="{{P}}docs/key-hierarchy.html">jerarquía de claves</a>, el <a href="{{P}}docs/threat-model.html">modelo de amenazas</a> y la especificación del formato. Los hallazgos siguen la <a href="{{P}}docs/security-policy.html">política de seguridad</a>.</li>
+      <li><strong>Plataformas:</strong> la bandeja de Windows y la integración con el Explorador, la aplicación de iOS en dispositivos reales y el comportamiento en segundo plano de Android en teléfonos de distintos fabricantes.</li>
+      <li><strong>Redes:</strong> el intercambio entre pares y el cruce de NAT en redes distintas de las del mantenedor: NAT de operador, solo IPv6, cortafuegos de empresa.</li>
+      <li><strong>Almacenamiento:</strong> pruebas con más proveedores compatibles con S3 y backends de rclone, y sus peculiaridades (lecturas por rango, desfase de reloj, coherencia de los listados).</li>
+      <li><strong>Empaquetado:</strong> Flatpak, Homebrew, AUR, winget y otros gestores de paquetes.</li>
+      <li><strong>Traducciones:</strong> la interfaz está en inglés, finés, sueco, alemán, español y ruso, y este sitio web también en esos idiomas y en francés; más idiomas y la revisión por hablantes nativos son bienvenidos. Los diccionarios son archivos JSON en <code>crates/varsto-cli/ui/i18n/</code>.</li>
+      <li><strong>Documentación</strong> e informes de fallos de instalaciones reales: el <a href="https://github.com/janttsu/varsto/issues" rel="noopener">seguimiento de incidencias</a> (hay un forum previsto).</li>
+    </ul>
+
+    <h2>Cómo empezar</h2>
+    <pre><code>git clone https://github.com/janttsu/varsto
+cd varsto
+cargo build --release
+cargo test --workspace</code></pre>
+    <p>Basta una cadena de herramientas de Rust estable (1.85 o posterior) para el núcleo y la línea de comandos. El <a href="{{P}}docs/quick-start.html">inicio rápido</a> (en) crea una bóveda en un directorio local en un minuto, así que puedes probar cambios sin ninguna cuenta en la nube. Antes de una pull request tienen que pasar <code>cargo fmt --all --check</code>, <code>cargo clippy --workspace --all-targets</code> y las pruebas, y el comportamiento nuevo necesita pruebas. Abre una incidencia antes de cambios grandes.</p>
+
+    <h2>Licencia</h2>
+    <p>El código fuente de Varsto está disponible bajo la <a href="{{P}}docs/licence.html">PolyForm Shield License 1.0.0</a>: puedes leer, usar, modificar y compartir el código para cualquier fin, excepto ofrecer un producto que compita con Varsto. No es una licencia de código abierto de la OSI. Al contribuir aceptas que tu contribución se distribuya bajo esa licencia; los detalles están en las <a href="{{P}}docs/contributing.html">reglas de contribución</a> (en). Todo lo que hay en el repositorio se escribe en inglés.</p>

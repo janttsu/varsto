@@ -1038,11 +1038,21 @@ def camera_icon():
 
 
 def dock():
-    """Small USB dock with three ports."""
+    """USB-SATA dock for a bare 3.5-inch drive: a base, walls around an open slot,
+    a connector in the floor, and a power button and status LED on the front.
+    The same bay the app's pictures use, without a drive in the slot."""
     root = empty("dock")
-    box(0.56, 0.24, 0.1, mat("paper"), bevel=0.02, parent=root)
-    for x in (-0.16, 0.0, 0.16):
-        box(0.09, 0.02, 0.05, mat("slate"), bevel=0.004, at=(x, -0.125, 0.03), parent=root)
+    wall = mat("paper")
+    box(0.80, 0.46, 0.05, mat("slate"), bevel=0.02, parent=root, name="base")
+    box(0.76, 0.14, 0.14, wall, bevel=0.018, at=(0, -0.14, 0.05), parent=root, name="front")
+    box(0.76, 0.14, 0.22, wall, bevel=0.018, at=(0, 0.14, 0.05), parent=root, name="back")
+    for sx in (-0.34, 0.34):
+        box(0.08, 0.16, 0.14, wall, bevel=0.015, at=(sx, 0, 0.05), parent=root, name="cap")
+    box(0.60, 0.15, 0.012, mat("dark"), bevel=0.004, at=(0, 0, 0.05), parent=root, name="floor")
+    box(0.36, 0.045, 0.02, mat("slate"), bevel=0.004, at=(0, 0, 0.062), parent=root, name="connector")
+    cyl(0.04, 0.012, mat("mid", rough=0.4), parent=root, at=(-0.30, -0.222, 0.12), axis="Y", name="button")
+    cyl(0.018, 0.014, mat("glyph", rough=0.4), parent=root, at=(-0.30, -0.224, 0.12), axis="Y", name="buttonmark")
+    cyl(0.024, 0.012, mat("mid", rough=0.3), parent=root, at=(0.30, -0.222, 0.12), axis="Y", name="led")
     return root
 
 

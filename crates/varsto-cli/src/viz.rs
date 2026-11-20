@@ -350,9 +350,8 @@ mod tests {
         for needle in ["100dvh", "100dvw", "viz-fullscreen", "cursor: none"] {
             assert!(css.contains(needle), "viz.css lacks {needle}");
         }
-        let android = include_str!(
-            "../../../apps/android/app/src/main/java/in/soderlund/varsto/MainActivity.kt"
-        );
+        let android =
+            include_str!("../../../apps/android/app/src/main/java/net/varsto/app/MainActivity.kt");
         assert!(
             android.contains("fun setFullscreen(on: Boolean)")
                 && android.contains("BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE")
@@ -437,6 +436,9 @@ mod tests {
         for (lang, dict) in [
             ("fi", include_str!("../ui/i18n/fi.json")),
             ("sv", include_str!("../ui/i18n/sv.json")),
+            ("de", include_str!("../ui/i18n/de.json")),
+            ("es", include_str!("../ui/i18n/es.json")),
+            ("ru", include_str!("../ui/i18n/ru.json")),
         ] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let missing: Vec<&String> = found

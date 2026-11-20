@@ -23,8 +23,11 @@
 <link rel="alternate" hreflang="fi" href="https://varsto.net/fi/use-cases/">
 <link rel="alternate" hreflang="sv" href="https://varsto.net/sv/use-cases/">
 <link rel="alternate" hreflang="fr" href="https://varsto.net/fr/use-cases/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/use-cases/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/use-cases/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/use-cases/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=ab2697617b">
+<link rel="stylesheet" href="../assets/css/site.css?v=4998b8d831">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -45,7 +48,7 @@
     </nav>
     <div class="tools">
       <details class="pop langs-menu"><summary class="iconbtn" aria-label="Language">EN</summary>
-        <nav class="pop-body langs" aria-label="Language"><a href="../use-cases/" hreflang="en" lang="en" aria-current="true">English</a><a href="../fi/use-cases/" hreflang="fi" lang="fi">Suomi</a><a href="../sv/use-cases/" hreflang="sv" lang="sv">Svenska</a><a href="../fr/use-cases/" hreflang="fr" lang="fr">Français</a></nav></details>
+        <nav class="pop-body langs" aria-label="Language"><a href="../use-cases/" hreflang="en" lang="en" aria-current="true">English</a><a href="../fi/use-cases/" hreflang="fi" lang="fi">Suomi</a><a href="../sv/use-cases/" hreflang="sv" lang="sv">Svenska</a><a href="../fr/use-cases/" hreflang="fr" lang="fr">Français</a><a href="../de/use-cases/" hreflang="de" lang="de">Deutsch</a><a href="../es/use-cases/" hreflang="es" lang="es">Español</a><a href="../ru/use-cases/" hreflang="ru" lang="ru">Русский</a></nav></details>
       <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
       <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
       <a class="button small" href="../downloads/">Download</a>
@@ -115,13 +118,11 @@
     </section>
 
     <section class="feature" id="uc-7">
-      <h2>7. "Tidy this folder for me"</h2>
-      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/usecases/tidy.webp?v=f843b65187"><img src="../assets/img/usecases/tidy.png?v=a03202d808" alt="A chat with an assistant that works inside one granted folder and proposes a tidier structure, with a Confirm button." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/usecases/tidy-dark.webp?v=1735fe9174"><img src="../assets/img/usecases/tidy-dark.png?v=3e91d9c283" alt="A chat with an assistant that works inside one granted folder and proposes a tidier structure, with a Confirm button." width="640" height="320"></picture>
+      <h2>7. Files you have not opened in months</h2>
       <div>
-        <p>Ten years of scanned letters, receipts and notes in one folder. You grant a language model that one folder through Varsto's MCP server: a local model on your own machine (Ollama, LM Studio or anything that speaks the Model Context Protocol). The contents never leave your devices: no cloud assistant is involved, nothing is sent to a model provider, and the model sees only the one folder you granted. It reads the files, works out what they are and what belongs together, and proposes a structure in your words: by year, by counterparty, by project, "tax papers per year, everything else by sender". After you confirm, it creates the directories, moves and renames the files into them and writes an index of what went where. The new layout syncs to your other devices like any change you make yourself.</p>
-        <p>The rules are fixed in Varsto, not left to the model: it sees only the folders you granted, read-only unless you allow changes, never your Strongrooms, and it cannot destroy anything. There is no delete tool; writing only creates new files, and a move or rename only goes to a name that is free on every device, so no file is ever replaced by another. If the model gets it wrong, everything is still there, under another path.</p>
-        <p>Where idle data should live is Varsto's own call, not the assistant's: the app keeps a last-used record for every file and suggests, in the interface, what has not been touched in months and what it would cost in a cold storage class, with sources and dates.</p>
-        <p class="note">Today: <code>varsto mcp</code> with per-folder grants (<code>varsto mcp grant Letters --write</code>): read, list, create directories, move and rename to free names, and create new notes, with no way to delete or overwrite; Varsto's own placement estimate in the interface and on the command line, priced with your own storage prices, one click (or <code>varsto advice apply</code>) to free idle files on this device once their copies are verified and the folder's policy still holds, and, when you have a cheaper cold storage, one click to move the idle files' blocks there so the bill itself goes down, never below the folder's policy (<code>varsto move Letters --from box --to glacier --idle-days 180</code> does the same by hand, with <code>--dry-run</code> for the costs first).</p>
+        <p>Ten years of scanned letters, receipts and notes sit in one folder. Most of them have not been opened in months, and they still take space on the laptop.</p>
+        <p>Varsto keeps a last-used record for every file, merged across your devices, so a file counts as idle only if no device used it. The interface suggests what has not been touched and what it would cost in a colder storage class, with sources and dates. One click, or <code>varsto advice apply</code>, frees the idle files on this device once their copies are verified and the folder's policy still holds. If you have a cheaper cold storage, one click moves those blocks there. The bill can go down. It never goes below the folder's policy.</p>
+        <p class="note"><code>varsto move Letters --from box --to glacier --idle-days 180</code> does the same by hand. <code>--dry-run</code> shows the cost first. Nothing here hands a language model your files. Varsto has no MCP server.</p>
       </div>
     </section>
 
@@ -136,7 +137,7 @@
 
     <section class="feature" id="uc-9">
       <h2>9. Tens of terabytes on old disks</h2>
-      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/features/disks.webp?v=512fa8dfa3"><img src="../assets/img/features/disks.png?v=0440552c84" alt="Hard drives on a shelf next to a PC with a USB dock." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/features/disks-dark.webp?v=e3049a36e5"><img src="../assets/img/features/disks-dark.png?v=d310371b86" alt="Hard drives on a shelf next to a PC with a USB dock." width="640" height="320"></picture>
+      <picture class="theme-light"><source type="image/webp" srcset="../assets/img/features/disks.webp?v=c0209b5984"><img src="../assets/img/features/disks.png?v=96f3587910" alt="Hard drives on a shelf next to a PC with a USB dock." width="640" height="320" loading="lazy"></picture><picture class="theme-dark"><source type="image/webp" srcset="../assets/img/features/disks-dark.webp?v=66444a5bc2"><img src="../assets/img/features/disks-dark.png?v=aaa4d305bd" alt="Hard drives on a shelf next to a PC with a USB dock." width="640" height="320"></picture>
       <div>
         <p><strong>Situation.</strong> You manage a huge archive on old hard disks through a USB dock. The disks sit in a cupboard; some are kept elsewhere. Today you track them with a spreadsheet, or with git-annex.</p>
         <p><strong>How Varsto helps.</strong> Plug in disk "data-01" and tell the app to use it. It fills the disk according to your retention policy, tells you when it can be ejected, and records in the ledger what is on it, where it is kept and when it was last verified. When you need a large file on the laptop and the cloud download would take hours, the app proposes: "Attach disk data-01 (shelf: home); about 12 minutes instead of 9 hours from the cloud". A folder can be kept only on disks, replicated as many times as you choose, with no cloud copy.</p>
@@ -180,6 +181,14 @@
       </div>
     </section>
 
+    <section class="feature" id="uc-14">
+      <h2>14. A Raspberry Pi that stays on</h2>
+      <div>
+        <p><strong>Situation.</strong> You leave a Raspberry Pi, or another small computer, running Varsto at home. Its SD card or a cheap USB disk is not hardware you would trust with the only copy of a file.</p>
+        <p><strong>How Varsto helps.</strong> The background service keeps reading stored copies and comparing each block with the hash in its name. A copy that no longer matches is damaged, and Varsto replaces it from an intact copy on another device or storage. The Pi does not have to be reliable storage. It has to keep running the check. You still keep a second copy somewhere else: the check can repair a block only when another good copy exists.</p>
+      </div>
+    </section>
+
     <h2>How these are tested</h2>
     <p>The automated suite in the repository plays several of these scenarios with two or three simulated devices that are never online at the same time: offline convergence, concurrent edits with conflict copies, a device restored from an old backup, a replica, a shared folder, a transferrer disk, selective sync and thumbnails. A lab of virtual machines with NATed home and office networks plays the peer-to-peer, LAN, outage, clock-skew, scale and removable-disk scenarios (disk hot-plugging, preparing a whole drive, fetch plans) on every release; 59 scenarios in all. See <a href="../docs/testing.html">Testing</a> and the <a href="../docs/failure-model.html">failure model</a>.</p>
 
@@ -197,9 +206,8 @@
     <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
     <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
   </div>
-  <div class="foot-mark" aria-hidden="true" data-foot-mark>varsto</div>
 </footer>
-<script src="../assets/js/field.js?v=cd646cd0a5" defer></script>
+<script src="../assets/js/field.js?v=c342154328" defer></script>
 <script src="../assets/js/motion.js?v=a547492b3b" defer></script>
 </body>
 </html>
