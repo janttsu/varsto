@@ -65,8 +65,8 @@ pub(crate) struct VaultEpochs {
 }
 
 /// Two signed vault epoch records under one number, by different issuers
-/// or with different contents: both are recorded, and the device signs
-/// nothing until the user keeps one (`varsto device resolve-epoch <n>
+/// or with different contents: both are recorded. The greater issuer id
+/// counts until the user keeps one (`varsto device resolve-epoch <n>
 /// --keep <issuer>`).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EpochForks {
@@ -793,6 +793,9 @@ impl Engine {
         // learning its addresses at once.
         self.reset_view();
         self.republish_own_peer_record();
+        if let Err(e) = self.note_credential_rotation() {
+            log::warn!("the device was removed, but the credential reminder was not saved: {e:#}");
+        }
         let folder_name = |f: &crate::record::Id16| {
             self.f3
                 .members
@@ -834,9 +837,9 @@ impl Engine {
     }
 
     /// After every read of the membership: act on a revocation of this
-    /// device (with a wipe order, wipe it), record vault epochs two devices
-    /// wrote under one number, and refuse to go on while one waits for the
-    /// user's choice.
+    /// device (with a wipe order, wipe it) and record vault epochs two
+    /// devices wrote under one number. The greater issuer id counts until
+    /// the user keeps one.
     pub(super) fn after_members(
         &mut self,
         own: Option<crate::membership3::RevocationRecord>,
@@ -864,8 +867,22 @@ impl Engine {
             .into_iter()
             .map(|(e, s)| (e, s.iter().map(|d| DeviceId::from_bytes(d)).collect()))
             .collect();
-        if found != self.epochs.forks.found {
-            self.epochs.forks.found = found;
+        let mut changed = found != self.epochs.forks.found;
+        self.epochs.forks.found = found;
+        // The user has not chosen: the greater device id wins, the same way
+        // on every device. `resolve-epoch` still replaces that choice.
+        for (epoch, issuers) in &self.epochs.forks.found {
+            let std::collections::btree_map::Entry::Vacant(slot) =
+                self.epochs.forks.kept.entry(*epoch)
+            else {
+                continue;
+            };
+            if let Some(winner) = issuers.iter().max() {
+                slot.insert(winner.clone());
+                changed = true;
+            }
+        }
+        if changed {
             util::write_json(&self.home.join(EPOCH_FORK_FILE), &self.epochs.forks)?;
         }
         if let Some(e) = self.epochs.forks.unresolved().first() {

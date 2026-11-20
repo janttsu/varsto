@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-package `in`.soderlund.varsto
+package net.varsto.app
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -119,7 +119,7 @@ class VarstoService : Service() {
 
     companion object {
         /** Start (or poke) the service to look for new photos and videos now. */
-        const val ACTION_CAMERA_SCAN = "in.soderlund.varsto.CAMERA_SCAN"
+        const val ACTION_CAMERA_SCAN = "net.varsto.app.CAMERA_SCAN"
 
         /** Where plain-file folders go: Internal storage/Varsto. */
         @Suppress("DEPRECATION")

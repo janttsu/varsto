@@ -17,7 +17,7 @@
 //!   reads it too).
 //! - **Two epochs under one number** (section 58): signed records of two
 //!   issuers (or two different records) under one number are both
-//!   recorded and neither is applied until the user keeps one.
+//!   recorded. The greater issuer id is applied until the user keeps one.
 
 use super::folders::Participant;
 use super::keys::VaultKeys;
@@ -320,11 +320,13 @@ fn open_vault_epoch(
     vault: Id16,
     epoch: u32,
     k3: &SecretKey,
+    prefer: Option<Id16>,
 ) -> Option<OpenedEpoch> {
     let keys = VaultKeys {
         keys: BTreeMap::from([(epoch, k3.clone())]),
     };
     let ring = super::keys::KeyRing::vault_only([0u8; 16], &keys);
+    let mut found: BTreeMap<Id16, OpenedEpoch> = BTreeMap::new();
     for s in storages {
         let stream = StreamRef::new(Kind::Epoch, VAULT_SCOPE, [0u8; 16]);
         let prefix = stream.prefix()?;
@@ -376,12 +378,16 @@ fn open_vault_epoch(
         if record.epoch != epoch || record.issuer != e0.device || record.previous_epoch >= epoch {
             continue;
         }
-        return Some(OpenedEpoch {
-            record,
-            envelope: envs,
-        });
+        found.insert(
+            e0.device,
+            OpenedEpoch {
+                record,
+                envelope: envs,
+            },
+        );
     }
-    None
+    let want = prefer.or_else(|| preferred_issuer(found.keys().copied()));
+    want.and_then(|d| found.remove(&d))
 }
 
 /// From the key of vault epoch `top`, follow the epoch records down to
@@ -393,15 +399,17 @@ pub(crate) fn walk_vault_chain(
     vault: Id16,
     top: u32,
     k3_top: SecretKey,
+    prefer: &BTreeMap<u32, Id16>,
 ) -> Result<(VaultKeys, Vec<OpenedEpoch>)> {
     let mut keys = BTreeMap::new();
     let mut opened = Vec::new();
     let mut e = top;
     let mut k = k3_top;
     while e > 0 {
-        let o = open_vault_epoch(storages, vault, e, &k).ok_or_else(|| {
-            anyhow!("the record of vault epoch {e} is missing or does not open with its key")
-        })?;
+        let o =
+            open_vault_epoch(storages, vault, e, &k, prefer.get(&e).copied()).ok_or_else(|| {
+                anyhow!("the record of vault epoch {e} is missing or does not open with its key")
+            })?;
         keys.insert(e, k);
         k = SecretKey(o.record.previous_k3);
         e = o.record.previous_epoch;
@@ -409,6 +417,14 @@ pub(crate) fn walk_vault_chain(
     }
     keys.insert(0, k);
     Ok((VaultKeys { keys }, opened))
+}
+
+/// Which issuer counts when several signed records share one epoch number
+/// and the user has not chosen. An epoch record carries no Lamport time
+/// (the body stays as it is), so the greater issuer id wins. Every device
+/// that sees the same records picks the same one, whatever the order.
+pub(crate) fn preferred_issuer(issuers: impl IntoIterator<Item = Id16>) -> Option<Id16> {
+    issuers.into_iter().max()
 }
 
 /// The highest epoch number any object under `prefix` is named with (0:
@@ -455,7 +471,7 @@ pub(crate) fn epoch_of_key(storages: &[&dyn Storage], vault: Id16, k3: &SecretKe
         }
     }
     for e in numbers.into_iter().rev() {
-        if open_vault_epoch(storages, vault, e, k3).is_some() {
+        if open_vault_epoch(storages, vault, e, k3, None).is_some() {
             return Ok(e);
         }
     }

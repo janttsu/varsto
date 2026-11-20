@@ -1148,7 +1148,7 @@ fn a_failed_batch_deletes_nothing() {
 }
 
 #[test]
-fn an_orphan_pack_goes_after_seven_days_and_a_dropped_leftover_at_once() {
+fn an_orphan_pack_goes_after_48_hours_or_sooner_when_storage_is_tight() {
     let a = 0;
     let mut w = World::new(&[Class::Owner]);
     let blocks = photo(&mut w);
@@ -1191,9 +1191,10 @@ fn an_orphan_pack_goes_after_seven_days_and_a_dropped_leftover_at_once() {
     let standing = w.devs[a].standing();
     let mut state = OrphanState::default();
     let names = w.set.names();
-    let run = |w: &World, state: &mut OrphanState| {
+    let run_at = |w: &World, state: &mut OrphanState, tight: bool| {
         let opts = GcOptions {
             now_utc: w.now,
+            tight,
             ..GcOptions::default()
         };
         collect_orphans(
@@ -1207,6 +1208,7 @@ fn an_orphan_pack_goes_after_seven_days_and_a_dropped_leftover_at_once() {
         )
         .unwrap()
     };
+    let run = |w: &World, state: &mut OrphanState| run_at(w, state, false);
     let r = run(&w, &mut state);
     assert_eq!(
         (r.orphans_deleted, r.leftovers_deleted, r.orphans_waiting),
@@ -1214,11 +1216,10 @@ fn an_orphan_pack_goes_after_seven_days_and_a_dropped_leftover_at_once() {
         "{r:?}"
     );
     assert!(!w.has_pack(H2, &kept) && w.has_pack(H1, &kept));
-    w.now += 6 * DAY;
-    assert_eq!(run(&w, &mut state).orphans_deleted, 0);
-    assert!(w.has_pack(H1, &orphan));
-    w.now += DAY;
-    assert_eq!(run(&w, &mut state).orphans_deleted, 1);
+    w.now += 23 * 3600;
+    assert_eq!(run_at(&w, &mut state, true).orphans_deleted, 0);
+    w.now += 3600;
+    assert_eq!(run_at(&w, &mut state, true).orphans_deleted, 1);
     assert!(!w.has_pack(H1, &orphan));
     assert!(w.has_pack(H1, &kept), "a claimed pack stays");
 }
@@ -1307,6 +1308,69 @@ fn verification_finds_a_flipped_byte_and_repair_takes_the_member_from_another_st
             .check,
         PackCheck::Good
     );
+}
+
+#[test]
+fn a_repair_whose_batch_is_refused_removes_the_pack_it_just_wrote() {
+    let a = 0;
+    let mut w = World::new(&[Class::Owner]);
+    let blocks = photo(&mut w);
+    let packs = w.push(a, &[("photo.jpg", &blocks)], &[hot()]);
+    let id = packs[0].id;
+    w.flip(H1, &id, packs[0].members[1].offset as usize + 7);
+    let before = w.storage(H1).list("packs/").unwrap();
+    let class = w.view.pack(&id).unwrap().class;
+    let damaged = verify_pack(&*w.storage(H1), &id, class)
+        .unwrap()
+        .damaged
+        .unwrap();
+
+    let mut sink = w.sink();
+    sink.fail = true;
+    let err = {
+        let World {
+            devs,
+            keys,
+            meta,
+            view,
+            set,
+            ..
+        } = &mut w;
+        let dev = &mut devs[a];
+        let signer = DeviceSigner {
+            device: dev.id,
+            key: &dev.sk,
+        };
+        let rw = RecordWriter {
+            vault: VAULT,
+            signer: &signer,
+            keys: &*keys,
+        };
+        let metas = [&**meta as &dyn Storage];
+        let out = MapOut {
+            writer: &rw,
+            meta: &metas,
+        };
+        let standing = dev.standing();
+        let snapshot = MapTable::open(dev.table.path(), FOLDER).unwrap();
+        let fetch = other_places(&snapshot, view, &*set, id);
+        repair_pack(
+            &standing,
+            &mut dev.map,
+            &mut dev.table,
+            view,
+            &out,
+            &*set,
+            H1,
+            &id,
+            &damaged,
+            &fetch,
+            &mut sink,
+        )
+    };
+    assert!(err.is_err(), "{err:?}");
+    assert_eq!(w.storage(H1).list("packs/").unwrap(), before);
+    assert!(w.has_pack(H1, &id), "the damaged pack stays");
 }
 
 fn repair_on(

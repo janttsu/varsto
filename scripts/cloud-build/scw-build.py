@@ -78,9 +78,9 @@ def scp(src, dst, extra=()):
 def rsa_key_id():
     """Scaleway encrypts the Windows administrator password with an RSA key from IAM."""
     for k in scw("iam", "ssh-key", "list"):
-        if k.get("name") == os.environ.get("SCW_RSA_KEY_NAME", "orca-rsa"):
+        if k.get("name") == os.environ.get("SCW_RSA_KEY_NAME", "varsto-rsa"):
             return k["id"]
-    raise SystemExit("register an RSA public key in IAM named orca-rsa (scw iam ssh-key create name=orca-rsa public-key=\"$(cat ~/.ssh/id_rsa.pub)\")")
+    raise SystemExit("register an RSA public key in IAM named varsto-rsa (scw iam ssh-key create name=varsto-rsa public-key=\"$(cat ~/.ssh/id_rsa.pub)\")")
 
 
 def create_instance(name, itype, image, user_data=None, disk_gb=None):

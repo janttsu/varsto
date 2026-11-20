@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-package `in`.soderlund.varsto
+package net.varsto.app
 
 import android.content.Context
 import android.graphics.Bitmap

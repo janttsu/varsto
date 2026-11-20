@@ -748,7 +748,11 @@ impl Engine {
     ) -> Result<()> {
         let written = self.upload_missing(rec, root, state, push)?;
         let view = self.view3()?;
-        self.publish_map3(folder, epoch, &written, &view)?;
+        if let Err(e) = self.publish_map3(folder, epoch, &written, &view) {
+            self.delete_unsealed_packs(&written);
+            return Err(e);
+        }
+        // A failed seal keeps the packs: the claim events stay pending.
         self.commit_batch()?;
         Ok(())
     }

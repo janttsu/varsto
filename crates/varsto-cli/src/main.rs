@@ -69,6 +69,12 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum GcCmd {
+    /// Delete unclaimed packs now, without the 48 hour wait.
+    Orphans,
+}
+
+#[derive(Subcommand)]
 enum LedgerCmd {
     /// List the ledger batches held on this device.
     List,
@@ -329,6 +335,11 @@ enum Cmd {
     Ledger {
         #[command(subcommand)]
         cmd: Option<LedgerCmd>,
+    },
+    /// Garbage collection.
+    Gc {
+        #[command(subcommand)]
+        cmd: GcCmd,
     },
     /// The local debug log: where it is, follow it, pack it for a bug report.
     Log {
@@ -1208,6 +1219,8 @@ enum StorageCmd {
         #[arg(long, default_value = "")]
         place: String,
     },
+    /// The credentials of this storage were replaced at the provider after a device was removed.
+    MarkRotated { name: String },
     /// Add a pool of removable disks; then `varsto disk add <mount> --pool <name> --label <label>`.
     AddPool {
         name: String,
@@ -3501,6 +3514,10 @@ fn run(cli: &Cli) -> Result<()> {
                     *measure,
                 )?,
                 StorageCmd::Set { .. } => unreachable!("handled above"),
+                StorageCmd::MarkRotated { name } => {
+                    engine.mark_credentials_rotated(name)?;
+                    println!("{name}: credentials marked as replaced");
+                }
                 StorageCmd::List => {
                     let estimates = engine.storage_estimates()?;
                     let quotas = engine.quota_statuses()?;
@@ -4992,6 +5009,13 @@ fn run(cli: &Cli) -> Result<()> {
                             }
                         );
                     }
+                    let pending = engine.credentials_to_rotate();
+                    if !pending.is_empty() {
+                        out += &format!(
+                            "\nreplace the credentials of {} at the provider, then `varsto storage mark-rotated <name>`: a removed device may still delete ciphertext there",
+                            pending.join(", ")
+                        );
+                    }
                     out.trim_end().to_string()
                 })?;
             }
@@ -5898,6 +5922,16 @@ fn run(cli: &Cli) -> Result<()> {
                 }
             }
         }
+        Cmd::Gc {
+            cmd: GcCmd::Orphans,
+        } => {
+            let mut engine = open_engine(&home)?;
+            let n = engine.gc_orphans_now()?;
+            println!(
+                "removed {n} unclaimed pack{}",
+                if n == 1 { "" } else { "s" }
+            );
+        }
         Cmd::Ledger {
             cmd: Some(LedgerCmd::Status),
         } => {
@@ -6519,6 +6553,21 @@ fn status_from_value(v: &serde_json::Value) -> String {
         })
         .unwrap_or_default();
     out += &format!("storages: {}\n", storages.join(", "));
+    let rotate: Vec<String> = v
+        .get("credentials_to_rotate")
+        .and_then(|d| d.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !rotate.is_empty() {
+        out += &format!(
+            "replace storage credentials after a device was removed: {} (`varsto storage mark-rotated <name>`)\n",
+            rotate.join(", ")
+        );
+    }
     for f in v
         .get("folders")
         .and_then(|d| d.as_array())

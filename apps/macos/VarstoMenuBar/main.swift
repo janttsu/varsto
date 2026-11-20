@@ -241,7 +241,7 @@ final class AppLog {
     static let shared = AppLog()
     /// Lines above this level are dropped (trace: routine status polling).
     var maxLevel: LogLevel = .debug
-    private let queue = DispatchQueue(label: "in.soderlund.varsto.applog")
+    private let queue = DispatchQueue(label: "net.varsto.app.applog")
     private var dir: URL?
     private var handle: FileHandle?
     private var size: UInt64 = 0

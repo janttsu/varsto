@@ -40,7 +40,7 @@
         <service android:name=".VarstoService" android:exported="false" android:foregroundServiceType="dataSync" />
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="in.soderlund.varsto.files"
+            android:authorities="net.varsto.app.files"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />

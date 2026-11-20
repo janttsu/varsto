@@ -54,3 +54,33 @@ fn two_engines_on_one_home_never_hand_out_the_same_value() {
     let v = c.tick_clock().unwrap();
     assert!(seen.iter().all(|s| *s < v), "{v} not after every value");
 }
+
+/// Two processes reserving at the same time. Each crosses several
+/// reservation ends, so both rewrite `clock.json` while the other ticks.
+#[test]
+fn parallel_reservations_never_hand_out_the_same_value() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let (engine, _) = Engine::init(&home, "laptop", PASS).unwrap();
+    drop(engine);
+    let spawn = |home: std::path::PathBuf| {
+        std::thread::spawn(move || {
+            let mut engine = Engine::open(&home, PASS).unwrap();
+            let mut out = Vec::with_capacity(2_500);
+            for _ in 0..2_500 {
+                out.push(engine.tick_clock().unwrap());
+            }
+            out
+        })
+    };
+    let left = spawn(home.clone());
+    let right = spawn(home);
+    let mut all = left.join().expect("left engine");
+    all.extend(right.join().expect("right engine"));
+    let distinct: HashSet<u64> = all.iter().copied().collect();
+    assert_eq!(
+        distinct.len(),
+        all.len(),
+        "a Lamport value was handed out twice"
+    );
+}

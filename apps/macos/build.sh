@@ -43,7 +43,7 @@ cat > "$app/Info.plist" <<PLIST
 <dict>
   <key>CFBundleName</key><string>Varsto</string>
   <key>CFBundleDisplayName</key><string>Varsto</string>
-  <key>CFBundleIdentifier</key><string>in.soderlund.varsto</string>
+  <key>CFBundleIdentifier</key><string>net.varsto.app</string>
   <key>CFBundleVersion</key><string>$version</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleExecutable</key><string>Varsto</string>
@@ -59,7 +59,7 @@ cat > "$app/Info.plist" <<PLIST
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
-      <key>CFBundleURLName</key><string>in.soderlund.varsto.link</string>
+      <key>CFBundleURLName</key><string>net.varsto.app.link</string>
       <key>CFBundleURLSchemes</key><array><string>varsto</string></array>
     </dict>
   </array>
@@ -85,7 +85,7 @@ cat > "$app/Info.plist" <<PLIST
   <key>UTExportedTypeDeclarations</key>
   <array>
     <dict>
-      <key>UTTypeIdentifier</key><string>in.soderlund.varsto.placeholder</string>
+      <key>UTTypeIdentifier</key><string>net.varsto.app.placeholder</string>
       <key>UTTypeDescription</key><string>Varsto placeholder</string>
       <key>UTTypeConformsTo</key><array><string>public.data</string></array>
       <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>varsto-placeholder</string></array></dict>
@@ -97,7 +97,7 @@ cat > "$app/Info.plist" <<PLIST
       <key>CFBundleTypeName</key><string>Varsto placeholder</string>
       <key>CFBundleTypeRole</key><string>Viewer</string>
       <key>LSHandlerRank</key><string>Owner</string>
-      <key>LSItemContentTypes</key><array><string>in.soderlund.varsto.placeholder</string></array>
+      <key>LSItemContentTypes</key><array><string>net.varsto.app.placeholder</string></array>
     </dict>
   </array>
 </dict>

@@ -118,7 +118,7 @@ for bin in "${mac_bins[@]}"; do
 <dict>
   <key>CFBundleName</key><string>Varsto</string>
   <key>CFBundleDisplayName</key><string>Varsto</string>
-  <key>CFBundleIdentifier</key><string>in.soderlund.varsto.alpha</string>
+  <key>CFBundleIdentifier</key><string>net.varsto.app.alpha</string>
   <key>CFBundleVersion</key><string>$version</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleExecutable</key><string>varsto</string>

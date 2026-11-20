@@ -493,3 +493,91 @@ fn a_conflict_whose_winner_is_unavailable_keeps_the_local_file() {
         contents(&lab.a_dir)
     );
 }
+
+/// Remove everything in `dir` except the folder marker.
+fn empty_keep_marker(dir: &Path) {
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.file_name().and_then(|n| n.to_str()) == Some(".varsto-folder") {
+            continue;
+        }
+        if path.is_dir() {
+            fs::remove_dir_all(&path).unwrap();
+        } else {
+            fs::remove_file(&path).unwrap();
+        }
+    }
+}
+
+/// A new device whose first pull fails, with one file of its own in the
+/// otherwise empty folder. That file is pushed. The other device's files
+/// are not published as deleted, and the next pull fetches them.
+#[test]
+fn a_failed_first_pull_does_not_publish_the_unread_folder_as_empty() {
+    let lab = lab();
+    fs::write(lab.a_dir.join("a.txt"), b"from-a").unwrap();
+    fs::write(lab.a_dir.join("b.txt"), b"also-a").unwrap();
+    let (mut a, mut b) = pair(&lab);
+    a.push("docs").unwrap();
+    fs::write(lab.b_dir.join("from-b.txt"), b"local").unwrap();
+    b.fail_next_pull_for_tests("peer not reached");
+    let synced = b.sync(Some("docs")).unwrap();
+    assert!(
+        synced.iter().any(|(pull, _)| pull.error.is_some()),
+        "the pull was supposed to fail: {synced:?}"
+    );
+
+    let got = a.pull("docs").unwrap();
+    assert_eq!(got.files_deleted, 0, "{got:?}");
+    assert_eq!(fs::read(lab.a_dir.join("a.txt")).unwrap(), b"from-a");
+    assert_eq!(fs::read(lab.a_dir.join("b.txt")).unwrap(), b"also-a");
+    assert_eq!(fs::read(lab.a_dir.join("from-b.txt")).unwrap(), b"local");
+
+    b.pull("docs").unwrap();
+    assert_eq!(fs::read(lab.b_dir.join("a.txt")).unwrap(), b"from-a");
+    assert_eq!(fs::read(lab.b_dir.join("b.txt")).unwrap(), b"also-a");
+    assert_eq!(fs::read(lab.b_dir.join("from-b.txt")).unwrap(), b"local");
+}
+
+/// The folder was synced, then the files disappeared from this device and
+/// the next pull failed. Publishing that scan would delete the files on
+/// the other device. They stay, and the next pull brings them back.
+#[test]
+fn a_failed_pull_of_an_emptied_folder_does_not_delete_the_other_device() {
+    let lab = lab();
+    fs::write(lab.a_dir.join("a.txt"), b"from-a").unwrap();
+    fs::write(lab.a_dir.join("b.txt"), b"also-a").unwrap();
+    fs::write(lab.a_dir.join("c.txt"), b"third").unwrap();
+    let (mut a, mut b) = pair(&lab);
+    a.push("docs").unwrap();
+    b.pull("docs").unwrap();
+    assert_eq!(fs::read(lab.b_dir.join("a.txt")).unwrap(), b"from-a");
+
+    empty_keep_marker(&lab.b_dir);
+    b.fail_next_pull_for_tests("peer not reached");
+    b.sync(Some("docs")).unwrap();
+
+    let got = a.pull("docs").unwrap();
+    assert_eq!(got.files_deleted, 0, "{got:?}");
+    assert_eq!(
+        contents(&lab.a_dir),
+        vec![
+            ("a.txt".into(), b"from-a".to_vec()),
+            ("b.txt".into(), b"also-a".to_vec()),
+            ("c.txt".into(), b"third".to_vec()),
+        ]
+    );
+    let still: Vec<String> = b
+        .list_files("docs")
+        .unwrap()
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    assert!(still.iter().any(|p| p == "a.txt"), "{still:?}");
+
+    b.pull("docs").unwrap();
+    assert_eq!(fs::read(lab.b_dir.join("a.txt")).unwrap(), b"from-a");
+    assert_eq!(fs::read(lab.b_dir.join("b.txt")).unwrap(), b"also-a");
+    assert_eq!(fs::read(lab.b_dir.join("c.txt")).unwrap(), b"third");
+    assert_eq!(contents(&lab.a_dir).len(), 3);
+}

@@ -31,8 +31,10 @@ pub struct GcOptions {
     /// Hot packs of a smaller class are compacted once their live members
     /// fill this many bytes (64 MiB).
     pub compact_bytes: u64,
-    /// An unclaimed pack no map lists goes after this long (7 days).
+    /// An unclaimed pack no map lists goes after this long (48 hours).
     pub orphan_secs: i64,
+    /// A storage that is nearly full: orphans older than 24 hours go too.
+    pub tight: bool,
 }
 
 impl Default for GcOptions {
@@ -41,6 +43,7 @@ impl Default for GcOptions {
             now_utc: crate::util::now_utc(),
             compact_bytes: super::COMPACT_BYTES,
             orphan_secs: super::ORPHAN_SECS,
+            tight: false,
         }
     }
 }
@@ -659,7 +662,12 @@ pub fn collect_orphans(
             }
             present.insert(hex_id.to_string());
             let first = *seen.entry(hex_id.to_string()).or_insert(opts.now_utc);
-            if opts.now_utc - first >= opts.orphan_secs {
+            let wait = if opts.tight {
+                opts.orphan_secs.min(super::ORPHAN_TIGHT_SECS)
+            } else {
+                opts.orphan_secs
+            };
+            if opts.now_utc - first >= wait {
                 if s.delete(&key).is_ok() {
                     report.orphans_deleted += 1;
                     present.remove(hex_id);

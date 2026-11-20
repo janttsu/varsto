@@ -21,7 +21,7 @@ fn init_works_again_after_reset() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
 
-    let first = varsto(&home, &["init", "--name", "orca"]);
+    let first = varsto(&home, &["init", "--name", "laptop"]);
     assert!(
         first.status.success(),
         "init failed: {}",
@@ -37,7 +37,7 @@ fn init_works_again_after_reset() {
     );
     assert!(!home.join("vault.json").exists(), "reset left vault.json");
 
-    let again = varsto(&home, &["init", "--name", "orca"]);
+    let again = varsto(&home, &["init", "--name", "laptop"]);
     assert!(
         again.status.success(),
         "init after reset failed: {}",

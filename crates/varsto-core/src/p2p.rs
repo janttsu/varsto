@@ -1353,10 +1353,18 @@ impl Health {
 
     /// No route reached it: rest by how it has been doing (see
     /// `BLIP_REST`, `DEAD_REST_MAX`); `refused` (it refused our
-    /// certificate, so it reads our record soon) rests `REFUSED_REST`.
+    /// certificate, so it reads our record soon) rests `REFUSED_REST`,
+    /// except the first refusal of a peer that has never answered, which
+    /// does not rest: the record is usually read within the same second
+    /// and the next try then goes through.
     fn failed(&mut self, refused: bool) {
         let now = Instant::now();
+        let first_refusal = refused && self.last_ok.is_none() && self.failures == 0;
         self.failures = self.failures.saturating_add(1);
+        if first_refusal {
+            self.rest_until = None;
+            return;
+        }
         let doubling = 1u32 << (self.failures.min(11) - 1);
         let rest = if refused {
             REFUSED_REST
@@ -1379,6 +1387,8 @@ struct AddrState {
     ok: bool,
     at: Instant,
     last_ok: Option<Instant>,
+    /// Certificate refusals noted for this address. The first does not rest.
+    refusals: u8,
 }
 
 impl AddrState {
@@ -1474,6 +1484,26 @@ fn refused_us(e: &str) -> bool {
     .iter()
     .any(|m| e.contains(m))
 }
+
+/// A route we did not dial. It is written next to a real attempt, and it
+/// must not hide a certificate refusal on a route that was dialled: a
+/// never-answered peer would otherwise rest a minute, then up to 15 minutes.
+fn attempt_not_made(e: &str) -> bool {
+    e.contains("resting after a failure")
+        || e.contains("not asked again yet")
+        || e.contains("that address is this device itself")
+}
+
+/// True when every route that was actually dialled refused our certificate.
+fn certificate_refusal(tried: &[String]) -> bool {
+    let made: Vec<&String> = tried.iter().filter(|t| !attempt_not_made(t)).collect();
+    !made.is_empty() && made.iter().all(|t| refused_us(t))
+}
+
+/// Route-entry status when the peer refused our certificate and has never
+/// answered. `status_of` reports the path `connecting` instead of
+/// `unreachable`. Not an HTTP status the peer returned.
+const STATUS_CONNECTING: u16 = 1;
 
 /// When to note a failure so that it rests `rest` instead of `ROUTE_TTL`.
 fn failed_at(rest: Duration) -> Instant {
@@ -1712,15 +1742,23 @@ impl Peers {
     /// certificate). An answer ends any rest; a failure starts one.
     fn remember(&self, device: &DeviceId, route: Option<Route>, status: u16, refused: bool) {
         let ok = route.is_some();
-        let at = if refused {
-            failed_at(REFUSED_REST)
+        let never_answered = self
+            .health
+            .lock()
+            .unwrap()
+            .get(device)
+            .is_none_or(|h| h.last_ok.is_none());
+        // The first refusal is still "connecting": the peer has our record
+        // to read, it has not failed to exist.
+        let status = if !ok && refused && never_answered {
+            STATUS_CONNECTING
         } else {
-            Instant::now()
+            status
         };
         self.routes
             .lock()
             .unwrap()
-            .insert(device.clone(), (route, status, at));
+            .insert(device.clone(), (route, status, Instant::now()));
         let mut health = self.health.lock().unwrap();
         let h = health.entry(device.clone()).or_default();
         if ok {
@@ -1743,18 +1781,33 @@ impl Peers {
     /// Note how a request to the TCP address `addr` went.
     fn note_addr(&self, addr: SocketAddr, ok: bool, refused: bool) {
         let mut state = self.state.lock().unwrap();
-        let last_ok = state.get(&addr).and_then(|s| s.last_ok);
+        let prev = state.get(&addr).copied();
+        let last_ok = prev.and_then(|s| s.last_ok);
         let now = Instant::now();
+        let refusals = if refused {
+            prev.map(|s| s.refusals.saturating_add(1)).unwrap_or(1)
+        } else if ok {
+            0
+        } else {
+            prev.map(|s| s.refusals).unwrap_or(0)
+        };
         state.insert(
             addr,
             AddrState {
                 ok,
                 at: if refused {
-                    failed_at(REFUSED_REST)
+                    // The first refusal is dialled again at once. A later
+                    // one rests `REFUSED_REST`, not a minute.
+                    failed_at(if refusals <= 1 {
+                        Duration::ZERO
+                    } else {
+                        REFUSED_REST
+                    })
                 } else {
                     now
                 },
                 last_ok: if ok { Some(now) } else { last_ok },
+                refusals,
             },
         );
     }
@@ -2179,8 +2232,22 @@ impl Peers {
                 }
             }
         }
+        // A refusal still counts when another route was only resting or
+        // had not been asked yet. Those notes are not a failed dial.
+        let refused = certificate_refusal(&tried);
+        let never_answered = self
+            .health
+            .lock()
+            .unwrap()
+            .get(&p.device)
+            .is_none_or(|h| h.last_ok.is_none());
         log(&format!(
-            "{who}: unreachable ({})",
+            "{who}: {} ({})",
+            if refused && never_answered {
+                "connecting"
+            } else {
+                "unreachable"
+            },
             if tried.is_empty() {
                 "no route to try".to_string()
             } else {
@@ -2198,7 +2265,6 @@ impl Peers {
             .is_some_and(|(r, _, at)| r.is_some() && *at > began);
         if !reached {
             // It answered and refused us: it reads our record soon.
-            let refused = !tried.is_empty() && tried.iter().all(|t| refused_us(t));
             self.remember(&p.device, None, 0, refused);
         }
         None
@@ -2415,7 +2481,17 @@ impl Peers {
             Some((Some(r), status, when)) => {
                 (r.label(), r.addr(), matches!(status, 200 | 404), Some(when))
             }
-            Some((None, _, when)) => ("unreachable".to_string(), None, false, Some(when)),
+            Some((None, status, when)) => (
+                if *status == STATUS_CONNECTING {
+                    "connecting"
+                } else {
+                    "unreachable"
+                }
+                .to_string(),
+                None,
+                false,
+                Some(when),
+            ),
             None => ("untried".to_string(), None, false, None),
         };
         PeerStatus {
@@ -2564,8 +2640,14 @@ mod tests {
             dead.failed(false);
         }
         assert!(dead.rest_until.unwrap() - now <= DEAD_REST_MAX + Duration::from_secs(1));
-        // A refusal of our certificate rests only a few seconds.
+        // The first refusal of a peer that has never answered does not rest.
+        // The next one rests only a few seconds, not a minute.
         let mut refused = Health::default();
+        refused.failed(true);
+        assert!(
+            refused.rest_until.is_none(),
+            "the first certificate refusal is tried again at once"
+        );
         refused.failed(true);
         assert!(refused.rest_until.unwrap() - now <= REFUSED_REST + Duration::from_millis(50));
         // An address that answered a moment ago rests a second, not a minute.
@@ -2574,11 +2656,13 @@ mod tests {
             ok: false,
             at: t,
             last_ok: Some(t),
+            refusals: 0,
         };
         let gone = AddrState {
             ok: false,
             at: t,
             last_ok: None,
+            refusals: 0,
         };
         assert!(blip.resting() && gone.resting());
         let later = AddrState {
@@ -2592,6 +2676,46 @@ mod tests {
             ..gone
         }
         .resting());
+        // The first certificate refusal of an address does not rest. The
+        // next one rests a few seconds, not a minute.
+        let first_refusal = AddrState {
+            ok: false,
+            at: failed_at(Duration::ZERO),
+            last_ok: None,
+            refusals: 1,
+        };
+        assert!(!first_refusal.resting());
+        let refused_again = AddrState {
+            ok: false,
+            at: failed_at(REFUSED_REST),
+            last_ok: None,
+            refusals: 2,
+        };
+        assert!(refused_again.resting());
+        assert!(refused_again.at.elapsed() + REFUSED_REST + Duration::from_millis(50) >= ROUTE_TTL);
+    }
+
+    #[test]
+    fn a_certificate_refusal_counts_even_beside_a_route_that_was_not_asked() {
+        let mixed = vec![
+            "tcp 192.0.2.1:9: resting after a failure".to_string(),
+            "quic 192.0.2.2:9: no answer 1 s ago; not asked again yet".to_string(),
+            "quic 192.0.2.3:9: ApplicationVerificationFailure".to_string(),
+        ];
+        assert!(certificate_refusal(&mixed));
+        assert!(certificate_refusal(&[
+            "tcp 192.0.2.1:9: AccessDenied".into()
+        ]));
+        // A dial that failed for another reason is not a refusal.
+        assert!(!certificate_refusal(&[
+            "quic 192.0.2.3:9: ApplicationVerificationFailure".into(),
+            "tcp 192.0.2.1:9: connection timed out".into(),
+        ]));
+        // Nothing was dialled.
+        assert!(!certificate_refusal(&[
+            "tcp 192.0.2.1:9: resting after a failure".into()
+        ]));
+        assert!(!certificate_refusal(&[]));
     }
 
     fn snap(me: &DeviceId) -> Snapshot {

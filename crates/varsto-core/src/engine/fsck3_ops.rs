@@ -34,6 +34,8 @@ pub(super) struct Sink3<'a> {
     /// Lamport times reserved for this step.
     pub lamports: std::collections::VecDeque<u64>,
     pub last: u64,
+    /// The last `commit` sealed a batch before a later push failed.
+    pub(super) sealed: bool,
 }
 
 impl Commit for Sink3<'_> {
@@ -43,6 +45,7 @@ impl Commit for Sink3<'_> {
         t
     }
     fn commit(&mut self, events: Vec<Event3>) -> Result<()> {
+        self.sealed = false;
         let lamport = self.tick();
         let seen = self.ledger.vault_seen(&self.me);
         let raw = events.iter().map(Event3::to_raw).collect();
@@ -56,6 +59,7 @@ impl Commit for Sink3<'_> {
             ledger3::NO_FOLDER,
             self.signer,
         )?;
+        self.sealed = true;
         let pubkey = self.signer.public();
         for (spec, backend) in self.storages {
             if spec.is_carrier() || spec.is_data_only() {
@@ -66,6 +70,10 @@ impl Commit for Sink3<'_> {
             super::ledger3_ops::push_contiguous(self.ledger, &self.me, backend.as_ref(), &pubkey)?;
         }
         Ok(())
+    }
+
+    fn commit_sealed(&self) -> bool {
+        self.sealed
     }
 }
 

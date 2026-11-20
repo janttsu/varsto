@@ -350,9 +350,8 @@ mod tests {
         for needle in ["100dvh", "100dvw", "viz-fullscreen", "cursor: none"] {
             assert!(css.contains(needle), "viz.css lacks {needle}");
         }
-        let android = include_str!(
-            "../../../apps/android/app/src/main/java/in/soderlund/varsto/MainActivity.kt"
-        );
+        let android =
+            include_str!("../../../apps/android/app/src/main/java/net/varsto/app/MainActivity.kt");
         assert!(
             android.contains("fun setFullscreen(on: Boolean)")
                 && android.contains("BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE")

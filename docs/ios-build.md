@@ -79,12 +79,12 @@ Get the `.ipa` onto the iPad (AirDrop, Files, or the tool's file picker).
 Update cycle: build a newer `.ipa`, install it over the old app (same bundle
 identifier). The vault lives in the app container and is kept. If the tool
 rewrites the bundle identifier (a free Apple ID cannot reuse
-`in.soderlund.varsto.ios` if somebody else holds it), keep using the same
+`net.varsto.app.ios` if somebody else holds it), keep using the same
 rewritten one every time.
 
 ## What is in the bundle
 
-- Bundle identifier `in.soderlund.varsto.ios`, minimum iOS 16.0, iPhone and
+- Bundle identifier `net.varsto.app.ios`, minimum iOS 16.0, iPhone and
   iPad (`TARGETED_DEVICE_FAMILY 1,2`), arm64 only.
 - App icon: `apps/ios/Varsto/Assets.xcassets` (1024 px, from `brand/appicon.svg`
   without the rounded corners; iOS rounds it).

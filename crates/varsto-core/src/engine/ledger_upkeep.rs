@@ -1133,6 +1133,7 @@ pub(super) mod tests {
                 storages: &storages,
                 lamports: std::collections::VecDeque::new(),
                 last,
+                sealed: false,
             };
             sink.commit(vec![Event3::FolderAdded(
                 crate::ledger3::events::FolderAdded { folder: [9; 16] },

@@ -18,7 +18,7 @@
 //!    more than half collectable and compacts small hot packs
 //!    (`gc3::collect`): new packs, one map record, one batch, and only then
 //!    the deletes;
-//! 4. packs no claim and no map names are deleted 7 days after they were
+//! 4. packs no claim and no map names are deleted 48 hours after they were
 //!    first seen (`gc3::collect_orphans`, the state in `state/gc3.json`).
 //!
 //! A mark made by one device settles when every current writer of the
@@ -43,6 +43,45 @@ use crate::record::{Acceptor, DeviceSigner, Id16, Kind, RecordStore, RecordWrite
 use std::sync::Arc;
 
 const GC_STATE_FILE: &str = "state/gc3.json";
+
+/// A local directory storage with less than 10 % free is nearly full:
+/// orphan packs there are deleted after 24 hours instead of 48.
+fn storage_nearly_full(storages: &[crate::storage::StorageSpec], names: &[String]) -> bool {
+    for spec in storages {
+        if !names.iter().any(|n| n == spec.name()) {
+            continue;
+        }
+        let crate::storage::StorageSpec::LocalDir { path, .. } = spec else {
+            continue;
+        };
+        if let Some((free, total)) = volume_free(path) {
+            if total > 0 && free.saturating_mul(100) / total < 10 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn volume_free(path: &std::path::Path) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+            return None;
+        }
+        let free = st.f_bavail as u64 * st.f_frsize as u64;
+        let total = st.f_blocks as u64 * st.f_frsize as u64;
+        Some((free, total))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
 
 /// What garbage collection keeps between runs.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -83,7 +122,7 @@ pub struct PackUpkeepReport {
     /// Pack copies on cold storage that go once the storage's minimum
     /// duration has passed.
     pub drops_waiting: u64,
-    /// Unclaimed packs no map lists, deleted after 7 days.
+    /// Unclaimed packs no map lists, deleted after 48 hours.
     pub orphans_deleted: u64,
     /// Devices collection waits for (they have not acknowledged a mark).
     pub waiting_for: Vec<String>,
@@ -354,6 +393,7 @@ impl Engine {
             storages: &storages,
             last: lamports.back().copied().unwrap_or(0),
             lamports,
+            sealed: false,
         };
         let mut t = table.write().unwrap_or_else(|e| e.into_inner());
         f(&mut writer, &mut t, &out, &mut sink)
@@ -530,6 +570,7 @@ impl Engine {
                 .collect();
             let opts = GcOptions {
                 now_utc: now,
+                tight: storage_nearly_full(&self.config.storages, &names),
                 ..Default::default()
             };
             let o = crate::gc3::collect_orphans(
@@ -549,6 +590,62 @@ impl Engine {
         report.waiting_for.sort();
         report.waiting_for.dedup();
         Ok(report)
+    }
+
+    /// Delete unclaimed packs now, without the 48 hour wait.
+    pub fn gc_orphans_now(&mut self) -> Result<u64> {
+        let now = util::now_utc();
+        let mut st = self.load_gc_state();
+        let storages = self.gc_storages(&mut Vec::new());
+        let view = self.view3()?;
+        self.ensure_tables();
+        let tables: Vec<_> = self
+            .f3
+            .tables
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        let guards: Vec<_> = tables
+            .iter()
+            .map(|t| t.read().unwrap_or_else(|e| e.into_inner()))
+            .collect();
+        let refs: Vec<&crate::blockmap::MapTable> = guards.iter().map(|g| &**g).collect();
+        let names: Vec<String> = self
+            .config
+            .storages
+            .iter()
+            .filter(|s| !s.is_carrier() && !s.is_data_only())
+            .map(|s| s.name().to_string())
+            .collect();
+        let standing = self
+            .config
+            .folders
+            .iter()
+            .filter_map(|m| members3::bin(&m.folder_id).ok())
+            .map(|f| self.standing3(&f))
+            .find(|s| s.may_collect());
+        let Some(standing) = standing else {
+            return Ok(0);
+        };
+        let opts = GcOptions {
+            now_utc: now,
+            orphan_secs: 0,
+            ..Default::default()
+        };
+        let o = crate::gc3::collect_orphans(
+            &standing,
+            &storages,
+            &names,
+            &view,
+            &refs,
+            &mut st.orphans,
+            &opts,
+        )?;
+        let n = o.orphans_deleted + o.leftovers_deleted;
+        self.save_gc_state(&st)?;
+        Ok(n)
     }
 
     /// Pack copies on cold storage the last run left for later (the

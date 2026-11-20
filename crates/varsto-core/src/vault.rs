@@ -1280,6 +1280,11 @@ pub struct Config {
     /// receive it. Absent: any device that lacks a block.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub carrier_for: std::collections::BTreeMap<String, Vec<DeviceId>>,
+    /// Storages whose credentials a removed device may still hold. Cleared
+    /// one storage at a time after the user has replaced them at the provider
+    /// (`varsto storage mark-rotated`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub credential_rotation: std::collections::BTreeSet<String>,
     /// Backups this device is the source of: what it backs up and when.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backups: Vec<BackupSource>,

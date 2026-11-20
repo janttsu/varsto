@@ -66,7 +66,7 @@ want() { # key expected
   got="$(plutil -extract "$1" raw -o - "$plist")"
   [ "$got" = "$2" ] || { echo "Info.plist $1 is '$got', expected '$2'" >&2; exit 1; }
 }
-want CFBundleIdentifier in.soderlund.varsto.ios
+want CFBundleIdentifier net.varsto.app.ios
 want MinimumOSVersion 16.0
 want CFBundleShortVersionString "$version"
 plutil -extract NSLocalNetworkUsageDescription raw -o - "$plist" >/dev/null

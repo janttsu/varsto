@@ -272,6 +272,11 @@ struct FolderState {
     /// once each, and applied once the rule or setting no longer stops them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     ignored_remote: BTreeMap<String, FileState>,
+    /// A pull failed before this device had read the other devices' file
+    /// lists. Files missing on disk are not published as deletions until a
+    /// later pull has merged those lists (`finish_deferred_deletions`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    deletions_deferred: bool,
 }
 
 fn now_secs() -> i64 {
@@ -591,6 +596,9 @@ pub struct StatusReport {
     pub org: Option<OrgBrief>,
     /// Whether this device's ledger needs a rebuild (`ledger_recovery`).
     pub ledger_health: LedgerHealth,
+    /// Storages whose credentials should be replaced after a device was removed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credentials_to_rotate: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -861,6 +869,10 @@ pub struct Engine {
     /// Tests: the next pull fails with this message after the scan
     /// (`fail_next_pull_for_tests`).
     pull_fault: Option<String>,
+    /// The pull of this sync failed. The push still sends local additions
+    /// and edits, and does not publish deletions of files this device has
+    /// not read from the other devices (`deletions_deferred`).
+    defer_deletions: bool,
     /// Which file metadata this system can represent (`fsmeta::Caps`).
     meta_caps: crate::fsmeta::Caps,
     /// Of the last scan: entries ignored, files whose metadata alone changed.
@@ -2126,6 +2138,7 @@ impl Engine {
             replace_hook: None,
             scan_read_hook: None,
             pull_fault: None,
+            defer_deletions: false,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
             last_scan: None,
@@ -2240,6 +2253,7 @@ impl Engine {
             replace_hook: None,
             scan_read_hook: None,
             pull_fault: None,
+            defer_deletions: false,
             meta_caps: crate::fsmeta::Caps::here(),
             scan_extra: (0, 0),
             last_scan: None,
@@ -2327,10 +2341,12 @@ impl Engine {
 
     /// Reserve the next `CLOCK_RESERVE` values in `clock.json`. Another
     /// process on this device (the command line beside the background
-    /// service) may have reserved values meanwhile: the new reservation
-    /// starts after the higher of its end and our own value, so the two
-    /// processes never hand out the same value.
+    /// service) may be reserving at the same moment: the read, the raise
+    /// and the replace run under `state/clock.lock`, so both cannot keep
+    /// the same end. The new reservation starts after the higher of the
+    /// file's end and our own value. `write_json` fsyncs and renames.
     fn reserve_clock(&mut self) -> Result<()> {
+        let _lock = home_lock::ClockLock::take(&self.home)?;
         let path = self.home.join("clock.json");
         if let Ok(disk) = util::read_json::<Clock>(&path) {
             self.clock.lamport = self.clock.lamport.max(disk.lamport);
@@ -4136,6 +4152,29 @@ impl Engine {
             .filter(|p| !unreadable_covers(&state.unreadable, p))
             .collect();
         self.scan_extra = (ignored, meta_changed);
+        // A pull that did not read the other devices' lists must not turn
+        // an empty directory into deletions. The files stay as they are
+        // until `finish_deferred_deletions` has had a chance to fetch them.
+        if state.deletions_deferred {
+            for path in &gone {
+                if let Some(e) = state.local_index.get(path) {
+                    new_index.insert(path.clone(), e.clone());
+                }
+            }
+            for p in &kept {
+                if let Some(e) = state.local_index.get(p) {
+                    new_index.insert(p.clone(), e.clone());
+                }
+            }
+            for (p, e) in &state.local_index {
+                if unreadable_covers(&state.unreadable, p) {
+                    new_index.entry(p.clone()).or_insert_with(|| e.clone());
+                }
+            }
+            state.local_index = new_index;
+            self.history_record_replacements(rec, replaced)?;
+            return Ok((scanned, changed));
+        }
         if !state.unreadable.is_empty() {
             log::warn!(
                 folder = rec.name.as_str();
@@ -4278,6 +4317,7 @@ impl Engine {
         let out = crate::logged_op!("push", folder, {
             self.exclusive(|e| e.push_inner(folder, scan))
         });
+        self.defer_deletions = false;
         self.finish_storages();
         out
     }
@@ -4290,6 +4330,11 @@ impl Engine {
         }
         let (rec, root) = self.resolve_for_write(folder)?;
         let mut state = self.load_state(&rec.folder_id)?;
+        if self.defer_deletions {
+            // Remember it on the folder: the next pull fetches missing files
+            // before anything is published as deleted.
+            state.deletions_deferred = true;
+        }
         self.check_held(&rec, &root, &mut state)?;
         let mut report = PushReport {
             folder: rec.name.clone(),
@@ -4366,7 +4411,10 @@ impl Engine {
         // (`EarlyPublish`); `written` is what is left.
         let written = self.upload_missing(&rec, &root, &state, &mut report)?;
         let view3 = self.view3()?;
-        self.publish_map3(&folder, epoch, &written, &view3)?;
+        if let Err(e) = self.publish_map3(&folder, epoch, &written, &view3) {
+            self.delete_unsealed_packs(&written);
+            return Err(e);
+        }
         report.thumbnails += self
             .make_thumbnails(&rec, &root, &mut state, THUMBS_PER_PASS, THUMBS_PASS_TIME)
             .unwrap_or_else(|e| {
@@ -4383,9 +4431,40 @@ impl Engine {
         // Deletions found by this scan, restores and purges reach the
         // other devices' trash.
         self.trash_publish(&rec, util::now_utc())?;
-        report.batch_seq = self.commit_batch()?;
+        match self.commit_batch() {
+            Ok(seq) => report.batch_seq = seq,
+            Err(e) => {
+                // The events that claim these packs stay pending, and the
+                // next seal names them. Deleting the packs here would make
+                // that seal claim ciphertext that is gone.
+                return Err(e);
+            }
+        }
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
+    }
+
+    /// Best-effort delete of packs written in a push whose batch did not
+    /// seal. A pack another device already fetched is ciphertext without a
+    /// claim; deleting it here is the same end the orphan sweep reaches.
+    fn delete_unsealed_packs(&self, written: &[crate::blockmap::WrittenPack]) {
+        let Ok(storages) = self.open_storages(true) else {
+            return;
+        };
+        for pack in written {
+            let key = crate::packs::pack_key(&hex::encode(pack.id));
+            for (spec, backend) in &storages {
+                if pack.storages.iter().any(|n| n == spec.name()) {
+                    if let Err(e) = backend.delete(&key) {
+                        log::warn!(
+                            "unsealed pack {} not removed from {}: {e:#}",
+                            &hex::encode(pack.id)[..12],
+                            spec.name()
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// Upload every chunk of every current file that the ledger does not
@@ -4792,7 +4871,7 @@ impl Engine {
         if let Some(e) = first_error {
             // Packs written before the failure are claimed by nobody: the
             // next push writes their blocks again and garbage collection
-            // takes the orphans after 7 days (design section 3).
+            // takes the orphans after 48 hours (design section 3).
             return Err(e);
         }
         crate::blockmap::written_packs(&per_storage, &|o| info.get(o).copied())
@@ -5130,11 +5209,135 @@ impl Engine {
         if encrypted_here {
             self.cache_wanted(&rec, &fk, &mut state, &storages, &mut report)?;
         }
+        if state.deletions_deferred {
+            if let Err(e) = self.finish_deferred_deletions(
+                &rec,
+                &fk,
+                &root,
+                &mut state,
+                &manifests,
+                &storages,
+                &mut report,
+            ) {
+                if folder_safety::paused_error(&e).is_some() {
+                    self.commit_batch()?;
+                    self.save_state(&rec.folder_id, &state)?;
+                }
+                return Err(e);
+            }
+        }
         // Transferrers let go of what every device they carry to holds.
         self.prune_carriers(&rec)?;
         self.commit_batch()?;
         self.save_state(&rec.folder_id, &state)?;
         Ok(report)
+    }
+
+    /// Files missing on disk after a pull that failed earlier. Another
+    /// device's live copy is fetched. A path nobody else still has is
+    /// recorded as deleted. Downloads that fail leave the folder deferred.
+    #[allow(clippy::too_many_arguments)]
+    fn finish_deferred_deletions(
+        &mut self,
+        rec: &FolderRecord,
+        fk: &FolderKeys,
+        root: &Path,
+        state: &mut FolderState,
+        manifests: &crate::manifest3::FolderManifests,
+        storages: &[(StorageSpec, Box<dyn Storage>)],
+        report: &mut PullReport,
+    ) -> Result<()> {
+        if self.mount_is_encrypted(&rec.folder_id) {
+            state.deletions_deferred = false;
+            return Ok(());
+        }
+        let me = self.me3();
+        let rules = self.local_rules(root);
+        let missing: Vec<String> = state
+            .files
+            .iter()
+            .filter(|(path, f)| {
+                if f.deleted || unreadable_covers(&state.unreadable, path) {
+                    return false;
+                }
+                let disk = self.disk_of(root, state, path);
+                !present(&disk) && !present(&placeholder_path(&disk))
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+        let mut restore: Vec<(String, FileState)> = Vec::new();
+        let mut drop_paths: Vec<String> = Vec::new();
+        for path in missing {
+            let mut best: Option<FileState> = None;
+            for (dev, view) in &manifests.views {
+                if *dev == me {
+                    continue;
+                }
+                let Some(entry) = view.files.get(&path) else {
+                    continue;
+                };
+                if entry.deleted {
+                    continue;
+                }
+                let remote = entry.to_state();
+                best = Some(match best {
+                    None => remote,
+                    Some(cur) => match manifest::merge(Some(&cur), &remote) {
+                        Merge::TakeRemote => remote,
+                        Merge::KeepLocal => cur,
+                        Merge::Conflict { winner, .. } => winner,
+                    },
+                });
+            }
+            if let Some(remote) = best {
+                restore.push((path, remote));
+            } else {
+                drop_paths.push(path);
+            }
+        }
+        if let Some(pause) = self.hold_local_deletions(rec, root, state, &drop_paths) {
+            return Err(pause.into());
+        }
+        let me_dev = self.vault.device_id.clone();
+        let mut trashed: Vec<(FileState, u64)> = Vec::new();
+        for path in drop_paths {
+            state.local_names.forget(rules, &path);
+            let clock = self.tick()?;
+            let prev = state.files.get(&path).cloned().unwrap();
+            let mut version = prev.version.clone();
+            version.insert(me_dev.clone(), clock);
+            state.files.insert(
+                path.clone(),
+                FileState {
+                    path: path.clone(),
+                    version,
+                    deleted: true,
+                    size: 0,
+                    mtime: 0,
+                    content_hash: String::new(),
+                    chunks: vec![],
+                    modified_by: me_dev.clone(),
+                    modified_clock: clock,
+                    meta: None,
+                    chunking: 0,
+                },
+            );
+            trashed.push((prev, clock));
+        }
+        self.trash_record_deletions(rec, state, trashed)?;
+        let mut still = false;
+        for (path, remote) in restore {
+            if let Err(e) =
+                self.apply_remote(rec, fk, root, state, remote.clone(), storages, report)
+            {
+                log::warn!("{path} was not fetched after the failed pull: {e}");
+                report.files_unavailable.push(format!("{path}: {e}"));
+                state.pending_remote.entry(path).or_insert(remote);
+                still = true;
+            }
+        }
+        state.deletions_deferred = still;
+        Ok(())
     }
 
     /// `merge_one`, but a failure of this one file is recorded and the pull
@@ -6939,7 +7142,7 @@ impl Engine {
     /// map record at the end lists the rest. Nothing stored yet: nothing
     /// is published and the cadence keeps counting. A failure is logged:
     /// the packs it took are claimed by nobody, and the next push writes
-    /// their blocks again (orphans go after 7 days).
+    /// their blocks again (orphans go after 48 hours).
     fn publish_stored_so_far(
         &mut self,
         name: &str,
@@ -7626,11 +7829,15 @@ impl Engine {
                 Err(e) => {
                     // The pull stopped, but this device's own changes still
                     // go out: one broken entry must not freeze the folder.
+                    // Deletions do not: an empty directory, or a folder this
+                    // device has not read yet, must not be published as the
+                    // file list. The next pull fetches what is missing first.
                     log::warn!(
                         folder = name.as_str();
                         "pull failed, local changes are still pushed: {e:#}"
                     );
                     self.last_scan = None;
+                    self.defer_deletions = true;
                     PullReport {
                         folder: name.clone(),
                         error: Some(format!("{e:#}")),
@@ -7641,6 +7848,7 @@ impl Engine {
             // The pull scanned the folder; the push need not walk it again.
             let scan = self.last_scan.take();
             if self.keyring.find(&name).is_none() {
+                self.defer_deletions = false;
                 synced += 1;
                 continue; // converted while pulling
             }
@@ -7648,6 +7856,7 @@ impl Engine {
             match self.fill_placeholders(&name, &mut pull.files_unavailable) {
                 Ok(n) => pull.files_updated += n,
                 Err(e) => {
+                    self.defer_deletions = false;
                     out.push(failed(e, pull, &mut first_failure));
                     continue;
                 }
@@ -7907,7 +8116,42 @@ impl Engine {
                 })
                 .collect(),
             ledger_health: self.ledger_health(),
+            credentials_to_rotate: self.credentials_to_rotate(),
         })
+    }
+
+    /// Storage names whose credentials a removed device may still hold.
+    pub fn credentials_to_rotate(&self) -> Vec<String> {
+        self.config.credential_rotation.iter().cloned().collect()
+    }
+
+    /// Every storage of this device is marked: a removed device could have
+    /// copied its credentials and can still delete ciphertext until they
+    /// are replaced at the provider.
+    pub(super) fn note_credential_rotation(&mut self) -> Result<()> {
+        let mut changed = false;
+        for spec in &self.config.storages {
+            changed |= self
+                .config
+                .credential_rotation
+                .insert(spec.name().to_string());
+        }
+        if changed {
+            self.config.save(&self.home)?;
+        }
+        Ok(())
+    }
+
+    /// The user has replaced the credentials of `name` at the provider.
+    pub fn mark_credentials_rotated(&mut self, name: &str) -> Result<()> {
+        if !self.config.storages.iter().any(|s| s.name() == name) {
+            bail!("unknown storage {name}");
+        }
+        if !self.config.credential_rotation.remove(name) {
+            bail!("{name} is not waiting for its credentials to be replaced");
+        }
+        self.config.save(&self.home)?;
+        Ok(())
     }
 
     /// Compare the ledger with what the storages actually hold. With

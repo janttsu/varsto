@@ -267,7 +267,8 @@ impl<'a> Membership<'a> {
         k3: SecretKey,
     ) -> Result<Membership<'a>> {
         let top = epochs::epoch_of_key(storages, vault, &k3)?;
-        let (keys, _) = epochs::walk_vault_chain(storages, vault, top, k3.clone())?;
+        let (keys, _) =
+            epochs::walk_vault_chain(storages, vault, top, k3.clone(), &BTreeMap::new())?;
         let admins = crate::org::admins_for_join(storages, vault_id, &keys.keys)?;
         Self::join_with(vault, storages, sign, kem, k3, admins)
     }
@@ -281,7 +282,7 @@ impl<'a> Membership<'a> {
         admins: Option<BTreeSet<Id16>>,
     ) -> Result<Membership<'a>> {
         let top = epochs::epoch_of_key(storages, vault, &k3)?;
-        let (keys, _) = epochs::walk_vault_chain(storages, vault, top, k3)?;
+        let (keys, _) = epochs::walk_vault_chain(storages, vault, top, k3, &BTreeMap::new())?;
         let m = Membership::open_with_admins(
             vault,
             storages,
@@ -532,6 +533,7 @@ impl<'a> Membership<'a> {
                 self.vault,
                 g.body.epoch,
                 SecretKey(g.body.k3),
+                &self.vault_kept,
             ) else {
                 continue;
             };
@@ -579,7 +581,8 @@ impl<'a> Membership<'a> {
             Some((e, k)) => (e, k.clone()),
             None => bail!("no vault key"),
         };
-        let (_, opened) = epochs::walk_vault_chain(self.storages, self.vault, top, k3)?;
+        let (_, opened) =
+            epochs::walk_vault_chain(self.storages, self.vault, top, k3, &self.vault_kept)?;
         let mut backing: BTreeMap<u32, (Id16, Vec<Id16>)> = BTreeMap::new();
         for o in &opened {
             let pk = self.devices.signing_key(&o.record.issuer).ok_or_else(|| {
@@ -699,8 +702,14 @@ impl<'a> Membership<'a> {
             };
             self.vault_signed.insert(e);
             if list.len() > 1 {
-                self.vault_forks
-                    .insert(e, list.iter().map(|n| n.device).collect());
+                let issuers: BTreeSet<Id16> = list.iter().map(|n| n.device).collect();
+                self.vault_forks.insert(e, issuers.clone());
+                // No choice yet: the greater issuer id counts, on every device.
+                if let std::collections::btree_map::Entry::Vacant(slot) = self.vault_kept.entry(e) {
+                    if let Some(winner) = epochs::preferred_issuer(issuers) {
+                        slot.insert(winner);
+                    }
+                }
             }
         }
         Ok(())
@@ -728,6 +737,16 @@ impl<'a> Membership<'a> {
             && !envs
                 .keys()
                 .any(|s| u32::try_from(*s).is_ok_and(|n| n > current && n < e))
+    }
+
+    /// The one record that counts under an epoch number: the issuer the
+    /// user kept, or, with no choice, the greater issuer id.
+    fn one_epoch_record<'b>(
+        owners: &[&'b store::Numbered],
+        kept: Option<Id16>,
+    ) -> Option<&'b store::Numbered> {
+        let want = kept.or_else(|| epochs::preferred_issuer(owners.iter().map(|n| n.device)))?;
+        owners.iter().copied().find(|n| n.device == want)
     }
 
     /// Whether `d` may grant (and start epochs) in `folder` at `epoch`.
@@ -840,21 +859,18 @@ impl<'a> Membership<'a> {
                 if stopped {
                     continue;
                 }
-                let chosen: Vec<&&store::Numbered> = match kept.get(&e) {
-                    Some(k) => owners.iter().filter(|n| n.device == *k).collect(),
-                    None => owners.iter().collect(),
-                };
-                if chosen.len() != 1 {
+                // The user kept one issuer, or the greater issuer id wins.
+                let Some(picked) = Self::one_epoch_record(&owners, kept.get(&e).copied()) else {
                     ep.forks
                         .insert(e, owners.iter().map(|n| n.device).collect());
                     stopped = true;
                     continue;
-                }
+                };
                 let Some(k9) = keys.as_ref().and_then(|k| k.epochs.get(&e)) else {
                     stopped = true;
                     continue;
                 };
-                match self.open_epoch_record(folder, e, k9, chosen[0], &mut counter) {
+                match self.open_epoch_record(folder, e, k9, picked, &mut counter) {
                     Some(rec) => {
                         ep.applied.insert(e, rec);
                     }
@@ -891,9 +907,8 @@ impl<'a> Membership<'a> {
                         let owners: Vec<&store::Numbered> = c
                             .iter()
                             .filter(|n| Self::owner_at(&st, &ep, &n.device, e - 1))
-                            .filter(|n| kept.get(&e).is_none_or(|k| *k == n.device))
                             .collect();
-                        (owners.len() == 1).then(|| owners[0])
+                        Self::one_epoch_record(&owners, kept.get(&e).copied())
                     });
                     issuer_ok
                         && one.is_some_and(|n| {
@@ -1662,6 +1677,16 @@ impl<'a> Membership<'a> {
         remove: &[Removed],
         k1: Option<&RecoveryKey>,
     ) -> Result<EpochStart> {
+        self.start_folder_epoch_at(folder, remove, k1, 0)
+    }
+
+    fn start_folder_epoch_at(
+        &mut self,
+        folder: &Id16,
+        remove: &[Removed],
+        k1: Option<&RecoveryKey>,
+        attempt: u8,
+    ) -> Result<EpochStart> {
         let ep = self.folder_epochs(folder);
         if let Some(e) = ep.unresolved().first() {
             bail!("two owners started folder epoch {e} at once; keep one first");
@@ -1768,6 +1793,11 @@ impl<'a> Membership<'a> {
             // other failure leaves it kept (the record may have landed).
             if err.downcast_ref::<Taken>().is_some() {
                 let _ = self.keep(&pending_key, false);
+                self.refresh()?;
+                let now = self.folder_epochs(folder).current();
+                if attempt < 3 && now > current {
+                    return self.start_folder_epoch_at(folder, &remove, k1, attempt + 1);
+                }
             }
             return Err(err);
         }
@@ -1858,6 +1888,17 @@ impl<'a> Membership<'a> {
         wipe: bool,
         k1: Option<&RecoveryKey>,
         unchecked: bool,
+    ) -> Result<RemovalReport> {
+        self.remove_devices_at(targets, wipe, k1, unchecked, 0)
+    }
+
+    fn remove_devices_at(
+        &mut self,
+        targets: &[(Id16, u64)],
+        wipe: bool,
+        k1: Option<&RecoveryKey>,
+        unchecked: bool,
+        attempt: u8,
     ) -> Result<RemovalReport> {
         if targets.is_empty() {
             bail!("no device to remove");
@@ -1953,6 +1994,12 @@ impl<'a> Membership<'a> {
             // other failure leaves it kept (the record may have landed).
             if err.downcast_ref::<Taken>().is_some() {
                 let _ = self.keep(&pending_key, false);
+                self.refresh()?;
+                // The other epoch was adopted: write the next number on
+                // top of it instead of stopping for a manual choice.
+                if attempt < 3 && self.vault_keys.newest_epoch() > old {
+                    return self.remove_devices_at(targets, wipe, k1, unchecked, attempt + 1);
+                }
             }
             return Err(err);
         }
@@ -2268,9 +2315,13 @@ impl<'a> Membership<'a> {
             if !list.iter().any(|n| n.device == self.me) {
                 return Ok(true);
             }
-            let Ok((keys, opened)) =
-                epochs::walk_vault_chain(self.storages, self.vault, epoch, k3.clone())
-            else {
+            let Ok((keys, opened)) = epochs::walk_vault_chain(
+                self.storages,
+                self.vault,
+                epoch,
+                k3.clone(),
+                &self.vault_kept,
+            ) else {
                 // This device's record under the number does not open with
                 // the key: a newer try took it.
                 return Ok(true);
@@ -2423,7 +2474,8 @@ impl<'a> Membership<'a> {
         if top == 0 {
             return Ok(Vec::new());
         }
-        let (_, opened) = epochs::walk_vault_chain(self.storages, self.vault, top, k3.clone())?;
+        let (_, opened) =
+            epochs::walk_vault_chain(self.storages, self.vault, top, k3.clone(), &self.vault_kept)?;
         let Some(newest) = opened.first() else {
             return Ok(Vec::new());
         };

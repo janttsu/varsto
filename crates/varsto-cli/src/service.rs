@@ -3256,7 +3256,7 @@ pub fn login_service_installed() -> bool {
     {
         return std::env::var_os("HOME").is_some_and(|h| {
             PathBuf::from(h)
-                .join("Library/LaunchAgents/in.soderlund.varsto.plist")
+                .join("Library/LaunchAgents/net.varsto.app.plist")
                 .exists()
         });
     }
@@ -3408,12 +3408,12 @@ pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
     {
         let dir = PathBuf::from(std::env::var("HOME")?).join("Library/LaunchAgents");
         fs::create_dir_all(&dir)?;
-        let plist = dir.join("in.soderlund.varsto.plist");
+        let plist = dir.join("net.varsto.app.plist");
         let content = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>in.soderlund.varsto</string>
+  <key>Label</key><string>net.varsto.app</string>
   <key>ProgramArguments</key><array><string>{}</string><string>--home</string><string>{}</string><string>service</string><string>run</string><string>--interval</string><string>{}</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
@@ -3480,8 +3480,8 @@ pub fn install(home: &Path, interval_secs: u64) -> Result<String> {
 pub fn uninstall() -> Result<String> {
     #[cfg(target_os = "macos")]
     {
-        let plist = PathBuf::from(std::env::var("HOME")?)
-            .join("Library/LaunchAgents/in.soderlund.varsto.plist");
+        let plist =
+            PathBuf::from(std::env::var("HOME")?).join("Library/LaunchAgents/net.varsto.app.plist");
         let _ = std::process::Command::new("launchctl")
             .args(["unload", "-w", &plist.display().to_string()])
             .output();

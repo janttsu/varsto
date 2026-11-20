@@ -202,6 +202,16 @@ fn revoked_device_is_cut_off_and_new_data_needs_new_keys() {
     assert!(a.revoke_device("c", false).is_err(), "already removed");
     let listed = a.devices_list();
     assert!(listed.iter().any(|d| d.name == "c" && d.revoked));
+    // Every storage is named: Varsto does not know which credentials C copied.
+    assert_eq!(a.credentials_to_rotate(), vec!["box".to_string()]);
+    assert_eq!(
+        a.status().unwrap().credentials_to_rotate,
+        vec!["box".to_string()]
+    );
+    assert!(a.mark_credentials_rotated("no-such").is_err());
+    a.mark_credentials_rotated("box").unwrap();
+    assert!(a.credentials_to_rotate().is_empty());
+    assert!(a.mark_credentials_rotated("box").is_err());
 
     // C has not heard of it yet and keeps writing: its new batch and
     // manifest must not count anywhere.
@@ -519,11 +529,11 @@ fn a_backdated_revocation_does_not_win() {
 }
 
 /// Two devices that each remove the other at the same moment, through
-/// different first storages, write two vault epochs under one number. Every
-/// device that sees both records it, signs nothing until the user keeps
-/// one, and then follows the kept one only.
+/// different first storages, write two vault epochs under one number. A
+/// device that sees both keeps the greater issuer id, adopts that record
+/// and keeps signing. `resolve-epoch` still replaces the choice.
 #[test]
-fn two_epochs_under_one_number_wait_for_a_choice() {
+fn two_epochs_under_one_number_keep_the_greater_issuer() {
     let lab = Lab::new();
     let (mut a, mut b, c0, _) = three_devices(&lab);
     drop(c0);
@@ -560,24 +570,34 @@ fn two_epochs_under_one_number_wait_for_a_choice() {
     fs::remove_file(second_dir.join("vault/epochs/0000000000000001-0000.rec")).unwrap();
     assert_eq!(c.revoke_unchecked("a", 946_684_800).unwrap().key_epoch, 1);
 
+    let a_wins = a.device_id() > c.device_id();
     fs::write(lab.dir("b").join("b-file.txt"), b"wants to be signed").unwrap();
-    let err = b.sync(None).unwrap_err();
-    assert!(format!("{err:#}").contains("resolve-epoch"), "{err:#}");
-    let h = b.ledger_health();
-    assert_eq!(h.state, "epoch_fork", "{h:?}");
-    assert_eq!(b.epoch_forks().unresolved(), vec![1]);
-    assert!(b.resolve_epoch_fork(1, "nobody").is_err());
-    b.resolve_epoch_fork(1, "a").unwrap();
+    // B sees both records and does not stop to wait for a manual choice.
     b.sync(None).unwrap();
+    assert!(b.epoch_forks().unresolved().is_empty());
     assert_eq!(b.ledger_health().state, "ok");
     let list = b.devices_list();
-    assert!(!list.iter().find(|d| d.name == "a").unwrap().revoked);
-    assert!(list.iter().find(|d| d.name == "c2").unwrap().revoked);
+    assert_eq!(
+        list.iter().find(|d| d.name == "a").unwrap().revoked,
+        !a_wins
+    );
+    assert_eq!(
+        list.iter().find(|d| d.name == "c2").unwrap().revoked,
+        a_wins
+    );
     assert_eq!(b.key_epoch(), 1);
-    // A saw both as well, and was not removed by C2's record.
+    assert!(b.resolve_epoch_fork(1, "nobody").is_err());
+    let winner = if a_wins { "a" } else { "c2" };
+    b.resolve_epoch_fork(1, winner).unwrap();
+    b.sync(None).unwrap();
+    assert_eq!(b.ledger_health().state, "ok");
+    // A already holds the key it wrote. It is not removed by a record it
+    // does not adopt, including when C2's id is the greater one.
     let _ = a.sync(None);
     assert!(a.removal().is_none());
-    a.resolve_epoch_fork(1, "a").unwrap();
-    a.sync(None).unwrap();
-    assert!(lab.dir("a").join("b-file.txt").exists());
+    if a_wins {
+        a.resolve_epoch_fork(1, "a").unwrap();
+        a.sync(None).unwrap();
+        assert!(lab.dir("a").join("b-file.txt").exists());
+    }
 }
