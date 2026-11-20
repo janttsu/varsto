@@ -266,7 +266,8 @@ fn a_block_comes_through_the_rendezvous_relay_when_no_address_works() {
         .into_iter()
         .find(|s| &s.device == a.device_id())
         .unwrap();
-    assert_eq!(st.path, "unreachable", "{st:?}");
+    // One certificate refusal, and the laptop has never answered: connecting.
+    assert_eq!(st.path, "connecting", "{st:?}");
     for rv in [rv_a, rv_b, rv_c] {
         rv.stop();
     }
