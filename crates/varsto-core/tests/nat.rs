@@ -134,7 +134,8 @@ fn quic_direct_transfer_with_pinned_certificates() {
         .into_iter()
         .find(|s| &s.device == a.device_id())
         .unwrap();
-    assert_eq!(st.path, "unreachable", "{st:?}");
+    // The first refusal is still connecting. The device has not answered yet.
+    assert_eq!(st.path, "connecting", "{st:?}");
 
     // The token is checked behind the certificate: one made for another
     // responder is refused on the desk's open connection.

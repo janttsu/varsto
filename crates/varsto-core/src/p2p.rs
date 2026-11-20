@@ -1500,9 +1500,9 @@ fn certificate_refusal(tried: &[String]) -> bool {
     !made.is_empty() && made.iter().all(|t| refused_us(t))
 }
 
-/// Route-entry status when the peer refused our certificate and has never
-/// answered. `status_of` reports the path `connecting` instead of
-/// `unreachable`. Not an HTTP status the peer returned.
+/// Route-entry status for the first certificate refusal of a peer that
+/// has never answered. A later refusal keeps a normal failure status, so
+/// `status_of` reports `unreachable`. Not an HTTP status the peer returned.
 const STATUS_CONNECTING: u16 = 1;
 
 /// When to note a failure so that it rests `rest` instead of `ROUTE_TTL`.
@@ -1742,15 +1742,15 @@ impl Peers {
     /// certificate). An answer ends any rest; a failure starts one.
     fn remember(&self, device: &DeviceId, route: Option<Route>, status: u16, refused: bool) {
         let ok = route.is_some();
-        let never_answered = self
-            .health
-            .lock()
-            .unwrap()
-            .get(device)
-            .is_none_or(|h| h.last_ok.is_none());
-        // The first refusal is still "connecting": the peer has our record
-        // to read, it has not failed to exist.
-        let status = if !ok && refused && never_answered {
+        // Only the first refusal, while the peer has never answered, is
+        // still "connecting". A later one is a real miss.
+        let first_refusal = !ok && refused && {
+            let health = self.health.lock().unwrap();
+            health
+                .get(device)
+                .is_none_or(|h| h.last_ok.is_none() && h.failures == 0)
+        };
+        let status = if first_refusal {
             STATUS_CONNECTING
         } else {
             status
@@ -2235,15 +2235,15 @@ impl Peers {
         // A refusal still counts when another route was only resting or
         // had not been asked yet. Those notes are not a failed dial.
         let refused = certificate_refusal(&tried);
-        let never_answered = self
-            .health
-            .lock()
-            .unwrap()
-            .get(&p.device)
-            .is_none_or(|h| h.last_ok.is_none());
+        let first_refusal = refused && {
+            let health = self.health.lock().unwrap();
+            health
+                .get(&p.device)
+                .is_none_or(|h| h.last_ok.is_none() && h.failures == 0)
+        };
         log(&format!(
             "{who}: {} ({})",
-            if refused && never_answered {
+            if first_refusal {
                 "connecting"
             } else {
                 "unreachable"
