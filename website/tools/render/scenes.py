@@ -127,6 +127,41 @@ def L(*pts, **kw):
     return K.link(list(pts), **kw)
 
 
+# ============================================================ blog / alpha.17
+@scene("blog/notify")
+def blog_notify():
+    node(K.laptop("lines"), 118, 128, 0.35, "Your computer", label_y=214)
+    ph = node(K.phone("rows"), 508, 136, 0.42, "Your phone", label_y=214)
+    c = card_at(236, 46, 188, 78, r=12)
+    K.text(258, 70, "Low space", "title", "s")
+    K.text(258, 92, "Documents, 9% free", "sub", "s")
+    L((186, 118), (214, 108))
+    L((436, 108), (468, 122))
+    K.caption("The alert reaches your phone. The vault stays where it is.")
+
+
+@scene("blog/reuse")
+def blog_reuse():
+    node(K.laptop("cipher"), 128, 132, 0.35, "This device", "keeps what it has", label_y=220)
+    cl = node(K.cloud(), 500, 118, 0.3, "The other copy", lift=0.22, label_y=220)
+    lock_at(cl, "tr", dx=-4, dy=6, lift=0.75)
+    floating_blocks(300, 78, 3, 1, lift=0.55)
+    L((196, 118), (250, 96), (360, 96), (430, 112))
+    K.caption("A pull moves only the blocks that are actually missing.")
+
+
+@scene("blog/pause")
+def blog_pause():
+    home = node(K.laptop("cipher"), 112, 124, 0.32, "Home", label_y=216)
+    node(K.phone("rows"), 320, 138, 0.42, "Paused", label_y=216)
+    office = node(K.nas(), 524, 128, 0.26, "Office", label_y=216)
+    badge_at(home, "x", "tr", dx=6, dy=-8)
+    badge_at(office, "x", "tl", dx=-10, dy=-10)
+    L((178, 116), (250, 128))
+    L((390, 128), (468, 118))
+    K.caption("Pause stops the listeners, the beacon and the relay.")
+
+
 def usb_cable(src, src_at, dst, dst_at, sag=0.05, r=0.008):
     """A lead between two points on placed objects. Screen-space links sit on one
     height, so a short one between the laptop and the dock never touched either."""
