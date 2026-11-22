@@ -798,8 +798,9 @@ fn durability_policy_is_shared_and_evaluated_from_the_ledger() {
 }
 
 /// A device that synced before it attached the folder (it read the
-/// folder's records then) downloads every file at the sync after the
-/// attach, and its report counts the blocks and bytes it fetched.
+/// folder's records then) writes every file at the sync after the
+/// attach. Blocks that sync already stored are copied; the rest are
+/// fetched. The report accounts for both, and none of it comes from a peer.
 #[test]
 fn a_folder_attached_after_a_sync_is_downloaded_and_counted() {
     let lab = lab();
@@ -819,8 +820,15 @@ fn a_folder_attached_after_a_sync_is_downloaded_and_counted() {
     let pull = &reports[0].0;
     assert_eq!(fs::read(lab.b_dir.join("big.bin")).unwrap(), big);
     assert_eq!(pull.files_updated, 2, "{pull:?}");
-    assert!(pull.chunks_downloaded >= 3, "{pull:?}");
-    assert_eq!(pull.bytes_downloaded, big.len() as u64 + 7, "{pull:?}");
+    assert!(
+        pull.chunks_downloaded + pull.chunks_reused_local >= 3,
+        "{pull:?}"
+    );
+    assert_eq!(
+        pull.bytes_downloaded + pull.bytes_reused_local,
+        big.len() as u64 + 7,
+        "{pull:?}"
+    );
     assert_eq!(pull.bytes_from_peers, 0, "no peers: all from the storage");
 }
 
