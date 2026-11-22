@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.16: formato de almacenamiento 3, acceso a las carpetas por aprobación y un servicio de rendezvous: Varsto</title>
+<meta name="description" content="Un formato de almacenamiento nuevo, con un libro mayor a nivel de paquete, registros firmados y palabras de recuperación, así que las bóvedas que ya existen hay que crearlas de nuevo. Una carpeta se abre a un dispositivo con la aprobación de un propietario. Los dispositivos se encuentran a través de un servicio de rendezvous opcional. Unirse y los cambios de miembros funcionan sin conexión, y hay importaciones desde torrents y YouTube.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.16: formato de almacenamiento 3, acceso a las carpetas por aprobación y un servicio de rendezvous: Varsto">
+<meta property="og:description" content="Un formato de almacenamiento nuevo, con un libro mayor a nivel de paquete, registros firmados y palabras de recuperación, así que las bóvedas que ya existen hay que crearlas de nuevo. Una carpeta se abre a un dispositivo con la aprobación de un propietario. Los dispositivos se encuentran a través de un servicio de rendezvous opcional. Unirse y los cambios de miembros funcionan sin conexión, y hay importaciones desde torrents y YouTube.">
+<meta property="og:url" content="https://varsto.net/es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="es_ES">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.16: formato de almacenamiento 3, acceso a las carpetas por aprobación y un servicio de rendezvous","description":"Un formato de almacenamiento nuevo, con un libro mayor a nivel de paquete, registros firmados y palabras de recuperación, así que las bóvedas que ya existen hay que crearlas de nuevo. Una carpeta se abre a un dispositivo con la aprobación de un propietario. Los dispositivos se encuentran a través de un servicio de rendezvous opcional. Unirse y los cambios de miembros funcionan sin conexión, y hay importaciones desde torrents y YouTube.","datePublished":"2026-11-04","url":"https://varsto.net/es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html","inLanguage":"es","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../es/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Software alfa, no para datos de producción.</strong> Los errores pueden destruir datos, el formato de almacenamiento puede cambiar sin una herramienta de migración y el cifrado aún no se ha auditado. Conserva tus propias copias de seguridad y comprueba que puedes restaurar desde ellas.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../es/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menú principal">
+      <a href="../../es/features/">Funciones</a>
+      <a href="../../es/how-it-works/">Cómo funciona</a>
+      <a href="../../es/compare/">Comparación</a>
+      <a href="../../docs/">Documentación (en)</a>
+      <a href="../../es/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Idioma">ES</summary>
+        <nav class="pop-body langs" aria-label="Idioma"><a href="../../blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="es" lang="es" aria-current="true">Español</a><a href="../../ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../es/downloads/">Descargar</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menú"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menú"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/compare/">Comparación</a><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/screenshots/">Capturas</a><a href="../../docs/">Documentación (en)</a><a href="../../es/downloads/">Descargas</a><a href="../../es/blog/" aria-current="page">Blog</a><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.16: formato de almacenamiento 3, acceso a las carpetas por aprobación y un servicio de rendezvous</h1><p class="note"><time datetime="2026-11-04">2026-11-04</time></p>
+<p>La versión actual es <a href="https://varsto.net/es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. Esta nota describe una versión anterior. Las <a href="https://varsto.net/es/downloads/">descargas</a> sirven alpha.17, y el código fuente está en <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
+<p>Alpha.16 vuelve a cambiar el formato de almacenamiento. Eso es lo principal que hay que saber antes de actualizar: las bóvedas hechas con alpha.15 o anterior no se pueden abrir con esta versión y hay que crearlas de nuevo. El resto de la publicación es una lista larga de cambios en cómo se unen los dispositivos, cómo se encuentran y cómo aguantan una red mala, una página Importar nueva, y un conjunto grande de correcciones y de refuerzo a partir de una revisión del formato nuevo.</p>
+<h2 id="crear-de-nuevo-una-bóveda">Crear de nuevo una bóveda</h2>
+<p>No hay migración. Alpha.16 rechaza una bóveda anterior cuando la abre o cuando un dispositivo se une a través de su almacenamiento, y el mensaje dice qué hacer. Alpha.15 rechaza una bóveda de formato 3 del mismo modo, así que las dos versiones no pueden compartir una bóveda en ninguno de los dos sentidos. Todos los dispositivos de una bóveda tienen que ejecutar alpha.16. Deja tus archivos donde están, y luego:</p>
+<ol type="1">
+<li>Conserva el binario de alpha.15 por si necesitas leer la bóveda antigua.</li>
+<li><code>varsto reset --yes</code> en el dispositivo, y luego <code>varsto init</code>. Imprime un kit con dos conjuntos de palabras: las palabras de la bóveda y, nuevas en el formato 3, las palabras de recuperación. Guarda las dos.</li>
+<li>Vuelve a añadir los almacenamientos, añade las carpetas (aquí se piden las palabras de recuperación) y sincroniza.</li>
+</ol>
+<h2 id="android-desinstala-primero-el-apk-antiguo">Android: desinstala primero el APK antiguo</h2>
+<p>El paquete de Android es ahora un APK firmado para la publicación (<code>varsto-&lt;version&gt;-android.apk</code>), no una compilación de depuración, así que una publicación posterior se instala encima como actualización. Está firmado con una clave nueva. Una instalación de un APK de depuración anterior (alpha.15, o una compilación diaria más antigua) no se puede actualizar a este: Android rechaza la actualización. Desinstala primero la aplicación antigua y luego instala la nueva. Desinstalar quita la copia de la bóveda de ese dispositivo, así que asegúrate de que la bóveda tenga otro dispositivo o un almacenamiento antes de hacerlo. La descarga diaria de Android sigue siendo una compilación de depuración, con el nombre <code>varsto-daily-android-debug.apk</code>.</p>
+<h2 id="formato-de-almacenamiento-3">Formato de almacenamiento 3</h2>
+<p>El formato 3 se describe en la sección 77 de la especificación y en el documento de diseño del formato 3. Lo que cambia para quien lo usa:</p>
+<ul>
+<li>El libro mayor ya no lista cada bloque. Declara paquetes de unos pocos tamaños fijos (de 256 KiB a 64 MiB, con relleno), así que un almacenamiento ve clases de tamaño y no cuántos bloques o archivos hay.</li>
+<li>Cada objeto publicado que no sea un paquete es un registro firmado que nombra la clave con la que está sellado. Los manifiestos, las listas de la papelera y las instantáneas son una base más deltas pequeños, y cada carpeta guarda un mapa de bloques firmado por cada dispositivo que escribe.</li>
+<li>La clave de una carpeta llega a un dispositivo solo como una concesión que aprobó un propietario. Un dispositivo que se une con las palabras de la bóveda ve los nombres de las carpetas y no tiene el contenido; lo pide con <code>varsto folder request</code>, un propietario compara seis palabras que se muestran en los dos dispositivos y aprueba con <code>varsto folder approve</code> (también <code>requests</code>, <code>deny</code>, <code>members</code>, <code>role</code>). El servicio en segundo plano no aprueba nunca. La interfaz tiene una tarjeta Acceso a la carpeta en la página Archivos.</li>
+<li>Cada época de la clave de carpeta tiene una copia de recuperación bajo las palabras de recuperación. <code>varsto folder add</code> la crea, <code>varsto recovery escrow</code> escribe más tarde una que falte, y <code>varsto status</code> avisa hasta entonces. <code>varsto join --recovery-words</code> abre cada carpeta que tiene una copia de recuperación.</li>
+<li>Los pares hablan solo por TLS, con tokens atados a la conexión, y comparan hasta dónde llega el libro mayor de cada uno, así que se nota un almacenamiento que oculta lotes o los revierte, y lo dicen la página Ayuda y una notificación.</li>
+<li>Quitar un dispositivo ahora se mantiene: a un dispositivo revocado no se le concede la siguiente clave de carpeta, y sus registros dejan de contar en el momento de quitarlo.</li>
+</ul>
+<h2 id="encontrarse-el-servicio-de-rendezvous">Encontrarse: el servicio de rendezvous</h2>
+<p>Los dispositivos pueden encontrarse entre redes a través de un servicio de rendezvous opcional, por defecto <code>https://varsto.net/rv</code>. Un dispositivo deja allí su registro de par sellado, lee los registros de la bóveda, aprende su propia dirección pública y, cuando ninguna dirección responde, alcanza a un par mediante una perforación coordinada o, como último camino, un relé cifrado de extremo a extremo (se muestra como <code>relayed via rendezvous</code>). Un dispositivo que se une y no encuentra nada en su red puede buscar una oferta por código o por enlace y emparejarse a través del relé. El servicio ve etiquetas, direcciones IP y cuentas de bytes, nunca la identidad de la bóveda ni el contenido. Lo cambian <code>varsto p2p rendezvous set &lt;url&gt; | on | --off | status</code> o la página Pares, y el servidor se puede alojar uno mismo (<code>varsto-rendezvous</code>, un binario estático de Linux en la compilación diaria; el puerto UDP por defecto es 3334). Todo funciona también sin él.</p>
+<h2 id="una-red-mala-y-trabajar-sin-conexión">Una red mala y trabajar sin conexión</h2>
+<ul>
+<li>Un almacenamiento al que no se llega ya no hace fallar toda una sincronización. Se marca como caído durante esa pasada y descansa entre pasadas, y los otros almacenamientos siguen; lo que se perdió se copia allí más tarde.</li>
+<li>Las llamadas a S3 y a rclone tienen límites de tiempo que se ajustan al tamaño de la transferencia, reintentos y subidas multiparte que se pueden reanudar, así que un enlace lento cuesta segundos, no minutos.</li>
+<li>La transferencia de par a par funciona sin ningún almacenamiento, a partir de un directorio de pares guardado, así que la sincronización en la LAN funciona sin internet.</li>
+<li>Unirse por emparejamiento ya no necesita que responda un almacenamiento, y los cambios de miembros (añadir una carpeta, aprobar, cambiar un papel, compartir) se guardan primero en el dispositivo y se envían cuando un almacenamiento responde. <code>varsto status</code> dice «N changes waiting to upload» (N cambios esperando a subirse).</li>
+<li>Las acciones locales (importaciones, la página Papelera, las miniaturas, las escrituras de archivos) terminan mientras un almacenamiento está caído e informan de «upload pending» (subida pendiente).</li>
+<li>La interfaz, la bandeja, la línea de comandos y MCP ya no se quedan congelados mientras una sincronización espera un enlace muerto.</li>
+</ul>
+<h2 id="importaciones">Importaciones</h2>
+<ul>
+<li>Una sola página Importar para cada origen (una carpeta o un disco, un repositorio git-annex, una unidad en la nube a través de rclone, un torrent, YouTube), con una lista de las importaciones en curso.</li>
+<li><code>varsto import torrent</code> importa torrents más grandes que el disco, en tandas que conservan una reserva de espacio libre; un archivo sale del disco de descarga solo cuando sus bloques están en un almacenamiento y se cumple la política de conservación de la carpeta.</li>
+<li><code>varsto import youtube</code> archiva canales, listas de reproducción y vídeos en carpetas con yt-dlp, con valores por defecto corteses y una reserva de espacio libre.</li>
+</ul>
+<h2 id="discos-y-servidores">Discos y servidores</h2>
+<ul>
+<li><code>varsto mailbox</code> deja preparados los bloques de un disco acoplado para un disco del grupo o un almacenamiento que está fuera, en una bandeja de salida duradera y comprobada por hash, así que un bloque que solo está en el disco A llega al disco B cuando se acopla B.</li>
+<li><code>varsto service remember</code> funciona sin una sesión de escritorio (por SSH, en servidores) a través de <code>systemd-creds</code> o del llavero del núcleo; <code>varsto service forget</code> lo quita.</li>
+<li><code>varsto service stop</code> ahora se queda parado, y una actualización del propio programa sigue reiniciando el servicio.</li>
+</ul>
+<h2 id="correcciones-y-refuerzo">Correcciones y refuerzo</h2>
+<ul>
+<li>Una descarga ya no sobrescribe un archivo editado después del examen, y un archivo malo ya no detiene la descarga o la subida de una carpeta. Un archivo o un directorio que no se puede leer se cuenta, en lugar de hacer que los archivos que hay debajo parezcan borrados.</li>
+<li>Miembros: quitar un dispositivo vale para quien se une después y para las carpetas a las que no se les cambió la clave, y solo se adopta una época, una revocación o una orden de borrado de un administrador.</li>
+<li>El vaciado, quitar un almacenamiento y la limpieza después de insertar un disco conservan cualquier paquete que pueda ser la única copia. Están corregidas la reparación, la subida después de un lote que falta y acoplar después de desacoplar.</li>
+<li>Las lecturas por rango de S3 ya no hacen que <code>fsck</code> dé todos los paquetes por cortos.</li>
+<li>La visualización muestra una nota de carga o una nota de bóveda vacía en lugar de la escena de ejemplo, y las miniaturas se ven en la página.</li>
+<li>Las negociaciones TLS tienen un plazo que se cumple, y una dirección puede tener como mucho 64 sin terminar. Un cliente local atascado ya no puede congelar la API local. El servidor de rendezvous tiene un límite de ritmo por clase de petición y una memoria acotada para las búsquedas. Los avisos de dependencias que informa <code>cargo audit</code> están parcheados.</li>
+<li>Los flujos de trabajo de GitHub se ejecutan con permisos de solo lectura, salvo donde publican.</li>
+</ul>
+<h2 id="compatibilidad">Compatibilidad</h2>
+<p>Todos los dispositivos de una bóveda tienen que ejecutar alpha.16. Alpha.15 no puede leer una bóveda de alpha.16 y alpha.16 no puede leer una bóveda de alpha.15. Actualiza todos los dispositivos a la vez y crea de nuevo la bóveda como se describe arriba. Esto sigue siendo una alfa: no es para datos de producción. La lista completa está en el registro de cambios.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Sincronización y copia de seguridad de archivos cifradas en tu propio almacenamiento.</p></div>
+    <div><h2>Producto</h2><nav aria-label="Producto"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/screenshots/">Capturas</a><a href="../../es/downloads/">Descargas</a></nav></div>
+    <div><h2>Aprender</h2><nav aria-label="Aprender"><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/compare/">Comparación</a><a href="../../docs/">Documentación (en)</a><a href="../../es/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Comunidad</h2><nav aria-label="Comunidad"><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto es un nombre provisional. Código fuente: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, bajo la PolyForm Shield License 1.0.0 (código fuente disponible).</span>
+    <span>Sin cookies, sin seguimiento. El servidor web conserva un registro de acceso ordinario como máximo siete días.</span>
+    <span><a href="../../docs/security-policy.html">Política de seguridad</a> · <a href="../../docs/licence.html">Licencia</a> · <a href="../../docs/trademark.html">Marca</a> (en inglés)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

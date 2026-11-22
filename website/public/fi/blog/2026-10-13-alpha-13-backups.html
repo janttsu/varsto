@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.13: varmuuskopiot, joita mikään ei voi muuttaa: Varsto</title>
+<meta name="description" content="Valitse kansio millä tahansa laitteella, niin Varsto säilyttää siitä salattuja, vain luku -muotoisia tilannevedoksia ulkoisissa tallennuspaikoissasi, ei koskaan laitteillasi, niin monen päivän ajan kuin valitset (oletuksena 90). Palautukset menevät nimeämääsi hakemistoon, sovelluksesta tai komentoriviltä.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fi/blog/2026-10-13-alpha-13-backups.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.13: varmuuskopiot, joita mikään ei voi muuttaa: Varsto">
+<meta property="og:description" content="Valitse kansio millä tahansa laitteella, niin Varsto säilyttää siitä salattuja, vain luku -muotoisia tilannevedoksia ulkoisissa tallennuspaikoissasi, ei koskaan laitteillasi, niin monen päivän ajan kuin valitset (oletuksena 90). Palautukset menevät nimeämääsi hakemistoon, sovelluksesta tai komentoriviltä.">
+<meta property="og:url" content="https://varsto.net/fi/blog/2026-10-13-alpha-13-backups.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fi_FI">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-13-alpha-13-backups.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-13-alpha-13-backups.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-13-alpha-13-backups.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-13-alpha-13-backups.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-13-alpha-13-backups.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-13-alpha-13-backups.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-13-alpha-13-backups.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-13-alpha-13-backups.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.13: varmuuskopiot, joita mikään ei voi muuttaa","description":"Valitse kansio millä tahansa laitteella, niin Varsto säilyttää siitä salattuja, vain luku -muotoisia tilannevedoksia ulkoisissa tallennuspaikoissasi, ei koskaan laitteillasi, niin monen päivän ajan kuin valitset (oletuksena 90). Palautukset menevät nimeämääsi hakemistoon, sovelluksesta tai komentoriviltä.","datePublished":"2026-10-13","url":"https://varsto.net/fi/blog/2026-10-13-alpha-13-backups.html","inLanguage":"fi","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fi/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fi/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Päävalikko">
+      <a href="../../fi/features/">Ominaisuudet</a>
+      <a href="../../fi/how-it-works/">Miten se toimii</a>
+      <a href="../../fi/compare/">Vertailu</a>
+      <a href="../../docs/">Dokumentaatio (en)</a>
+      <a href="../../fi/blog/" aria-current="page">Blogi</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../../blog/2026-10-13-alpha-13-backups.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-13-alpha-13-backups.html" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../../sv/blog/2026-10-13-alpha-13-backups.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-13-alpha-13-backups.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-13-alpha-13-backups.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-13-alpha-13-backups.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-13-alpha-13-backups.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fi/downloads/">Lataa</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Valikko"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Valikko"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/compare/">Vertailu</a><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/downloads/">Lataukset</a><a href="../../fi/blog/" aria-current="page">Blogi</a><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.13: varmuuskopiot, joita mikään ei voi muuttaa</h1><p class="note"><time datetime="2026-10-13">2026-10-13</time></p>
+<p>Synkronointi pitää jokaisen kopion samana, mikä on juuri sitä, mitä et halua, kun tiedosto poistetaan vahingossa tai kiristyshaittaohjelma salaa sen: vahinko yltää jokaiseen laitteeseen. Alpha.13 lisää varmuuskopiot, jotka toimivat toisin päin.</p>
+<h2 id="miten-se-toimii">Miten se toimii</h2>
+<p>Valitset kansion yhdellä laitteella ja annat varmuuskopiolle nimen. Varsto ottaa siitä tilannevedoksen: tiedostoluettelon ja jokaisen lohkon, salattuina kuten kaikki muukin, mitä se tallentaa. Tilannevedokset menevät vain ulkoisiin tallennuspaikkoihin (S3-ämpärit, rclone-etäkohteet, NAS-jaot, hakemistot ja kylmätallennus), ei koskaan siirtolevyille eikä muille laitteillesi. Muut laitteesi näkevät, että varmuuskopio on olemassa ja mitkä tilannevedokset sillä on, mutta ne eivät lataa sen sisältöä.</p>
+<pre><code>varsto backup add accounting ~/Accounting --retention-days 90
+varsto backup list
+varsto backup snapshots accounting
+varsto backup restore accounting 2026-10-01 --to ~/restored</code></pre>
+<p>Tilannevedokset otetaan oletuksena päivittäin, viikoittain tai vain kun pyydät (<code>varsto backup take</code>). Lohkot, jotka eivät muuttuneet, tallennetaan kerran, käyttivät niitä miten monta tilannevedosta tahansa.</p>
+<h2 id="vain-luku-ja-säilytys-määräajan">Vain luku, ja säilytys määräajan</h2>
+<p>Tilannevedosta ei koskaan muokata sen ottamisen jälkeen. Sen vanhenemispäivä sinetöidään sen sisään, kun se kirjoitetaan, joten säilytysajan muuttaminen myöhemmin vaikuttaa vain uusiin tilannevedoksiin. Kun tilannevedos on vanhentunut, varmuuskopion tehnyt laite poistaa sen tallennuspaikoista. Vain ne lohkot poistetaan, joita mikään jäljellä oleva tilannevedos ei tarvitse, ja yhden päivän armonaika antaa tilaa kelloille, jotka ovat hieman väärässä. Jos se laite on poissa, holvin mikä tahansa muu laite tekee sen vähän myöhemmin. Varmuuskopion pysäyttäminen ei ota uusia tilannevedoksia, mutta ei poista mitään etuajassa.</p>
+<h2 id="palauttaminen">Palauttaminen</h2>
+<p>Palautus menee aina hakemistoon, jonka nimeät, ja sen hakemiston on oltava tyhjä, ellet salli päällekirjoitusta. Voit valita uusimman tilannevedoksen, numeroidun tai uusimman, joka on tiettynä päivänä tai sitä ennen, ja palauttaa kaiken tai vain joitakin polkuja. Sovelluksessa on Varmuuskopiot-sivu, joka tekee saman.</p>
+<h2 id="yksityiskohdat-ja-rajat">Yksityiskohdat ja rajat</h2>
+<p>Muoto on <a href="../docs/alpha-0-format.html">määrittelyn</a> kohdassa 31. Tässä ensimmäisessä versiossa vanheneminen seuraa kunkin laitteen omaa kelloa, säilytyssäännöt eivät vielä kata varmuuskopioita, eikä näkymä siitä missä data on näytä niitä.</p>
+<p>Vanhemmat versiot eivät ymmärrä varmuuskopioita: päivitä holvin jokainen laite versioon alpha.13 ennen kuin lisäät sellaisen.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan.</p></div>
+    <div><h2>Tuote</h2><nav aria-label="Tuote"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../fi/downloads/">Lataukset</a></nav></div>
+    <div><h2>Opi</h2><nav aria-label="Opi"><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/compare/">Vertailu</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/blog/" aria-current="page">Blogi</a></nav></div>
+    <div><h2>Yhteisö</h2><nav aria-label="Yhteisö"><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../docs/licence.html">Lisenssi</a> · <a href="../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

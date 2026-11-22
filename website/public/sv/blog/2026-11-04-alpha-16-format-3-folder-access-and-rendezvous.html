@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.16: lagringsformat 3, mappåtkomst genom godkännande och en mötestjänst: Varsto</title>
+<meta name="description" content="Ett nytt lagringsformat med en liggare på paketnivå, signerade poster och återställningsord, så befintliga valv måste skapas på nytt; mappar öppnas för en enhet genom en ägares godkännande; enheter hittar varandra via en valfri mötestjänst; anslutning och medlemsändringar fungerar offline; och import från torrents och YouTube.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.16: lagringsformat 3, mappåtkomst genom godkännande och en mötestjänst: Varsto">
+<meta property="og:description" content="Ett nytt lagringsformat med en liggare på paketnivå, signerade poster och återställningsord, så befintliga valv måste skapas på nytt; mappar öppnas för en enhet genom en ägares godkännande; enheter hittar varandra via en valfri mötestjänst; anslutning och medlemsändringar fungerar offline; och import från torrents och YouTube.">
+<meta property="og:url" content="https://varsto.net/sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.16: lagringsformat 3, mappåtkomst genom godkännande och en mötestjänst","description":"Ett nytt lagringsformat med en liggare på paketnivå, signerade poster och återställningsord, så befintliga valv måste skapas på nytt; mappar öppnas för en enhet genom en ägares godkännande; enheter hittar varandra via en valfri mötestjänst; anslutning och medlemsändringar fungerar offline; och import från torrents och YouTube.","datePublished":"2026-11-04","url":"https://varsto.net/sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html","inLanguage":"sv","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../sv/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../sv/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Huvudmeny">
+      <a href="../../sv/features/">Funktioner</a>
+      <a href="../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../sv/compare/">Jämförelse</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../sv/blog/" aria-current="page">Blogg</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Språk">SV</summary>
+        <nav class="pop-body langs" aria-label="Språk"><a href="../../blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="sv" lang="sv" aria-current="true">Svenska</a><a href="../../fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../sv/downloads/">Ladda ner</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Meny"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Meny"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/compare/">Jämförelse</a><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/downloads/">Nedladdningar</a><a href="../../sv/blog/" aria-current="page">Blogg</a><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.16: lagringsformat 3, mappåtkomst genom godkännande och en mötestjänst</h1><p class="note"><time datetime="2026-11-04">2026-11-04</time></p>
+<p>Den aktuella versionen är <a href="https://varsto.net/sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. Den här texten beskriver en äldre version. <a href="https://varsto.net/sv/downloads/">Nedladdningarna</a> ger alpha.17, och källkoden finns på <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
+<p>Alpha.16 ändrar lagringsformatet igen. Det är det viktigaste att veta innan du uppdaterar: valv som gjorts av alpha.15 eller tidigare kan inte öppnas av den här versionen och måste skapas på nytt. Resten av versionen är en lång lista med ändringar i hur enheter ansluter, hittar varandra och klarar ett dåligt nätverk, en ny sida Import, och en stor mängd fixar och härdning från en granskning av det nya formatet.</p>
+<h2 id="skapa-valvet-på-nytt">Skapa valvet på nytt</h2>
+<p>Det finns ingen migrering. Alpha.16 vägrar ett äldre valv när det öppnar det eller när en enhet ansluter via dess lagringsplats, och meddelandet säger vad du ska göra. Alpha.15 vägrar ett valv i format 3 på samma sätt, så de två versionerna kan inte dela ett valv åt något håll. Varje enhet i ett valv måste köra alpha.16. Låt filerna ligga kvar där de är, och gör sedan så här:</p>
+<ol type="1">
+<li>Behåll alpha.15-binären om du kan behöva läsa det gamla valvet.</li>
+<li><code>varsto reset --yes</code> på enheten, sedan <code>varsto init</code>. Den skriver ut ett återställningspaket med två uppsättningar ord: valvorden och, nytt i format 3, återställningsorden. Spara båda.</li>
+<li>Lägg till lagringsplatserna igen, lägg till mapparna (återställningsorden efterfrågas här) och synka.</li>
+</ol>
+<h2 id="android-avinstallera-den-gamla-apkn-först">Android: avinstallera den gamla APK:n först</h2>
+<p>Android-paketet är nu en releasesignerad APK (<code>varsto-&lt;version&gt;-android.apk</code>), inte ett debug-bygge, så en senare release installeras över den som en uppdatering. Den är signerad med en ny nyckel. En installation av en tidigare debug-APK (alpha.15, eller ett äldre dagligt bygge) kan inte uppdateras till den: Android vägrar uppdateringen. Avinstallera den gamla appen först och installera sedan den nya. Avinstallation tar bort den enhetens kopia av valvet, så se till att valvet har en annan enhet eller en lagringsplats innan du gör det. Den dagliga Android-nedladdningen förblir ett debug-bygge under namnet <code>varsto-daily-android-debug.apk</code>.</p>
+<h2 id="lagringsformat-3">Lagringsformat 3</h2>
+<p>Format 3 beskrivs i avsnitt 77 i specifikationen och i designdokumentet för format 3. Det som ändras för dig:</p>
+<ul>
+<li>Liggaren listar inte längre varje block. Den gör anspråk på paket av några fasta storlekar (256 KiB till 64 MiB, utfyllda), så en lagringsplats ser storleksklasser och inte hur många block eller filer det finns.</li>
+<li>Varje publicerat objekt utom ett paket är en signerad post som namnger nyckeln den är förseglad med. Fillistor, papperskorgslistor och versioner är en bas plus små deltan, och varje mapp har en signerad blockkarta per skrivande enhet.</li>
+<li>En mappnyckel når en enhet bara som ett beviljande som en ägare har godkänt. En enhet som ansluter med valvorden ser mappnamn och har inget innehåll; den ber med <code>varsto folder request</code>, en ägare jämför sex ord som visas på båda enheterna och godkänner med <code>varsto folder approve</code> (också <code>requests</code>, <code>deny</code>, <code>members</code>, <code>role</code>). Bakgrundstjänsten godkänner aldrig. Gränssnittet har kortet Åtkomst till mappar på sidan Filer.</li>
+<li>Varje epok av mappnyckeln har en återställningskopia under återställningsorden. <code>varsto folder add</code> gör den, <code>varsto recovery escrow</code> skriver en som saknas senare, och <code>varsto status</code> varnar tills dess. <code>varsto join --recovery-words</code> öppnar varje mapp som har en återställningskopia.</li>
+<li>Peers talar bara TLS, med token bundna till anslutningen, och jämför liggarens huvuden, så en lagringsplats som undanhåller eller rullar tillbaka batcher märks, och sidan Hjälp och en avisering säger det.</li>
+<li>Att ta bort en enhet håller i sig nu: en återkallad enhet får inte nästa mappnyckel, och dess poster slutar räknas vid borttagningen.</li>
+</ul>
+<h2 id="hitta-varandra-mötestjänsten">Hitta varandra: mötestjänsten</h2>
+<p>Enheter kan hitta varandra över nätverk via en valfri mötestjänst, som standard <code>https://varsto.net/rv</code>. En enhet lämnar sin förseglade peer-post där, läser valvets poster, får reda på sin egen publika adress och, när ingen adress svarar, når en peer genom ett samordnat hole punching eller, som sista väg, ett totalsträckskrypterat relä (visas som <code>relayed via rendezvous</code>). En enhet som ansluter och inte hittar något i sitt nätverk kan slå upp ett erbjudande med kod eller länk och paras ihop via reläet. Tjänsten ser taggar, IP-adresser och antal byte, aldrig valvets identitet eller innehåll. <code>varsto p2p rendezvous set &lt;url&gt; | on | --off | status</code> eller sidan Peers ändrar den, och du kan driva servern själv (<code>varsto-rendezvous</code>, en statisk Linux-binär i det dagliga bygget; standardporten för UDP är 3334). Allt fungerar också utan den.</p>
+<h2 id="ett-dåligt-nätverk-och-att-arbeta-offline">Ett dåligt nätverk och att arbeta offline</h2>
+<ul>
+<li>En lagringsplats som inte kan nås får inte längre en hel synk att misslyckas. Den markeras som nere för körningen och vilar mellan körningar, och de andra lagringsplatserna fortsätter; det den missade kopieras dit senare.</li>
+<li>Anrop till S3 och rclone har tidsgränser som följer överföringens storlek, nya försök och multipart-uppladdningar som kan återupptas, så en långsam länk kostar sekunder, inte minuter.</li>
+<li>Peer-to-peer fungerar utan någon lagringsplats, från en sparad peer-katalog, så synk i det lokala nätverket fungerar utan internet.</li>
+<li>Att ansluta genom ihopparning behöver inte längre att en lagringsplats svarar, och medlemsändringar (lägga till en mapp, godkänna, byta roll, dela) sparas först på enheten och skickas när en lagringsplats svarar. <code>varsto status</code> säger ”N ändringar väntar på uppladdning”.</li>
+<li>Lokala åtgärder (importer, sidan Papperskorg, miniatyrer, filskrivningar) blir klara medan en lagringsplats är nere och rapporterar ”uppladdning väntar”.</li>
+<li>Gränssnittet, aktivitetsfältet, kommandoraden och MCP fryser inte längre medan en synk väntar på en död länk.</li>
+</ul>
+<h2 id="importer">Importer</h2>
+<ul>
+<li>En sida Import för varje källa (en mapp eller disk, ett git-annex-arkiv, en molnlagring via rclone, en torrent, YouTube), med en lista över importer som pågår.</li>
+<li><code>varsto import torrent</code> importerar torrentfiler som är större än disken i omgångar som håller en reserv för ledigt utrymme; en fil lämnar nedladdningsdisken först när dess block finns på en lagringsplats och mappens regel håller.</li>
+<li><code>varsto import youtube</code> arkiverar kanaler, spellistor och videor till mappar med yt-dlp, med varsamma standardvärden och en reserv för ledigt utrymme.</li>
+</ul>
+<h2 id="diskar-och-servrar">Diskar och servrar</h2>
+<ul>
+<li><code>varsto mailbox</code> mellanlagrar block från en dockad disk åt en pooldisk eller lagringsplats som är borta, i en beständig utkorg som kontrolleras med hash, så ett block som bara finns på disk A når disk B när B dockas.</li>
+<li><code>varsto service remember</code> fungerar utan en skrivbordssession (över SSH, på servrar) via <code>systemd-creds</code> eller kärnans nyckelring; <code>varsto service forget</code> tar bort det.</li>
+<li><code>varsto service stop</code> förblir nu stoppad, och en självuppdatering startar ändå om tjänsten.</li>
+</ul>
+<h2 id="fixar-och-härdning">Fixar och härdning</h2>
+<ul>
+<li>En hämtning skriver inte längre över en fil som redigerats efter avläsningen, och en trasig fil stoppar inte längre en mapps hämtning eller sändning. En oläsbar fil eller katalog räknas i stället för att få filerna under den att se raderade ut.</li>
+<li>Medlemskap: borttagning av en enhet gäller för den som ansluter senare och för mappar som inte nycklades om, och bara en administratörs epok, återkallelse eller raderingsorder antas.</li>
+<li>Tömning, borttagning av en lagringsplats och uppstädningen efter att en disk satts i behåller varje paket som kan vara den enda kopian. Reparation, sändning efter en saknad batch och anslutning efter frånkoppling är rättade.</li>
+<li>Intervalläsningar mot S3 får inte längre <code>fsck</code> att kalla varje paket för kort.</li>
+<li>Visualiseringen visar en notis om laddning eller en notis om tomt valv i stället för exempelscenen, och miniatyrer syns på sidan.</li>
+<li>TLS-handskakningar har en tidsgräns som håller, och en adress kan ha högst 64 ofärdiga. En lokal klient som har fastnat kan inte längre frysa det lokala API:t. Mötestjänstens server har en gräns per förfrågningsklass och begränsat minne för uppslag. Sårbarhetsråd som <code>cargo audit</code> rapporterar är åtgärdade.</li>
+<li>GitHub-arbetsflödena körs med enbart läsrättigheter utom där de publicerar.</li>
+</ul>
+<h2 id="kompatibilitet">Kompatibilitet</h2>
+<p>Varje enhet i ett valv måste köra alpha.16. Alpha.15 kan inte läsa ett valv från alpha.16 och alpha.16 kan inte läsa ett valv från alpha.15. Uppdatera alla enheter tillsammans och skapa valvet på nytt som beskrivs ovan. Det här är fortfarande en alfa: inte för produktionsdata. Hela listan finns i ändringsloggen.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Krypterad filsynkronisering och säkerhetskopiering till din egen lagring.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../sv/downloads/">Nedladdningar</a></nav></div>
+    <div><h2>Lär dig</h2><nav aria-label="Lär dig"><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/compare/">Jämförelse</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/blog/" aria-current="page">Blogg</a></nav></div>
+    <div><h2>Gemenskap</h2><nav aria-label="Gemenskap"><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../docs/licence.html">Licens</a> · <a href="../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

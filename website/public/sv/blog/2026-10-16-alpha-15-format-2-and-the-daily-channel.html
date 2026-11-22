@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.15: lagringsformat 2, ett Windows-installationsprogram och en daglig kanal: Varsto</title>
+<meta name="description" content="Ett nytt lagringsformat som åtgärdar två fynd från säkerhetsgranskningen, så befintliga valv måste skapas på nytt; Windows får ett installationsprogram, ett eget fönster och automatiska uppdateringar; och en signerad kanal för dagliga byggen.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.15: lagringsformat 2, ett Windows-installationsprogram och en daglig kanal: Varsto">
+<meta property="og:description" content="Ett nytt lagringsformat som åtgärdar två fynd från säkerhetsgranskningen, så befintliga valv måste skapas på nytt; Windows får ett installationsprogram, ett eget fönster och automatiska uppdateringar; och en signerad kanal för dagliga byggen.">
+<meta property="og:url" content="https://varsto.net/sv/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.15: lagringsformat 2, ett Windows-installationsprogram och en daglig kanal","description":"Ett nytt lagringsformat som åtgärdar två fynd från säkerhetsgranskningen, så befintliga valv måste skapas på nytt; Windows får ett installationsprogram, ett eget fönster och automatiska uppdateringar; och en signerad kanal för dagliga byggen.","datePublished":"2026-10-16","url":"https://varsto.net/sv/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html","inLanguage":"sv","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../sv/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../sv/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Huvudmeny">
+      <a href="../../sv/features/">Funktioner</a>
+      <a href="../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../sv/compare/">Jämförelse</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../sv/blog/" aria-current="page">Blogg</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Språk">SV</summary>
+        <nav class="pop-body langs" aria-label="Språk"><a href="../../blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="sv" lang="sv" aria-current="true">Svenska</a><a href="../../fr/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../sv/downloads/">Ladda ner</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Meny"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Meny"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/compare/">Jämförelse</a><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/downloads/">Nedladdningar</a><a href="../../sv/blog/" aria-current="page">Blogg</a><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.15: lagringsformat 2, ett Windows-installationsprogram och en daglig kanal</h1><p class="note"><time datetime="2026-10-16">2026-10-16</time></p>
+<p>Den aktuella versionen är <a href="https://varsto.net/sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. Den här texten beskriver en äldre version. <a href="https://varsto.net/sv/downloads/">Nedladdningarna</a> ger alpha.17, och källkoden finns på <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
+<p>Alpha.15 ändrar lagringsformatet. Det är det viktigaste att veta innan du uppdaterar: valv som gjorts av alpha.14 eller tidigare kan inte öppnas av den här versionen och måste skapas på nytt. Resten av versionen är en lång lista med fixar och arbete i gränssnittet, en riktig Windows-installation och en kanal för dagliga byggen för den som vill testa den nyaste koden.</p>
+<h2 id="format-2-och-vad-det-betyder">Format 2 och vad det betyder</h2>
+<p>Säkerhetsgranskningen bakom alpha.14 hittade två problem i hur block lagrades som inte kunde åtgärdas utan att ändra formatet. Format 2 åtgärdar dem:</p>
+<ul>
+<li>Nonce för ett krypterat block härleds nu från de exakta bytes som krypteras (efter komprimering), inte från klartexten. Förut berodde nonce på ett komprimeringsresultat som inte var garanterat att bli detsamma mellan olika versioner av zstd.</li>
+<li>Bitindelaren är nycklad per mapp. Skärpunkterna var förr en publik funktion av filinnehållet, så en lagringsplats som kände en fil kunde känna igen den på storlekarna hos dess block. Nu skärs samma fil i två mappar på olika ställen.</li>
+<li>Varje block lagras i ett paket (64 MiB, 256 MiB på kalla lagringsplatser) och inget block är ett eget objekt, så en lagringsplats ser paketstorlekar och inte storlekarna eller antalet block inuti dem. Paketen har krypterade index, och raderade block hålls reda på per mapp och skrivs bort.</li>
+<li>Komprimeringen är zstd nivå 3 efter en snabb sondering: text komprimeras nästan lika bra som förut och är flera gånger snabbare att skriva.</li>
+</ul>
+<p>Vad format 2 inte åtgärdar: fillistor och delningsepoker godtas fortfarande enbart på mappnyckeln, eftersom det kräver signerade manifest och delningsepoker, som hör till postlagret i nästa format. Tills det finns kan den som har en mapps nyckel fortfarande ändra vad den mappen visar, och opålitliga repliker och delade mappar ska behandlas så. Båda de kritiska fynden är fortfarande öppna i alpha.15.</p>
+<p><strong>Skapa valvet på nytt.</strong> Det finns ingen migrering. Alpha.15 vägrar ett äldre valv när det öppnar det eller när en enhet ansluter via dess lagringsplats, och meddelandet säger vad du ska göra. Låt filerna ligga kvar där de är, och gör sedan så här:</p>
+<ol type="1">
+<li>Behåll alpha.14-binären om du kan behöva läsa det gamla valvet.</li>
+<li><code>varsto reset --yes</code> på enheten, sedan <code>varsto init</code>.</li>
+<li>Lägg till lagringsplatserna igen och synka mapparna.</li>
+</ol>
+<p>Alpha.14 vägrar ett valv i format 2 på samma sätt, så de två versionerna kan inte dela ett valv åt något håll.</p>
+<h2 id="windows-installationsprogrammet-ett-eget-fönster-och-automatiska-uppdateringar">Windows: installationsprogrammet, ett eget fönster och automatiska uppdateringar</h2>
+<p>Den portabla zipen är borta. Windows har nu en nedladdning, <code>Varsto-&lt;version&gt;-setup.exe</code>: den uppgraderar på plats, kan reparera en installation, och dess avinstallerare behåller din datamapp. Gränssnittet öppnas i ett eget fönster (WebView2) med storlek och position ihågkomna, ett fönster per användare, och aktivitetsfältet startar det. Kopior som installationsprogrammet har installerat söker uppdateringar en gång om dagen, verifierar det signerade installationsprogrammet och installerar det tyst. Om du fortfarande kör en uppackad portabel kopia säger <code>varsto update</code> att du ska köra installationsprogrammet en gång; sedan fortsätter uppdateringarna av sig själva.</p>
+<h2 id="allt-annat-sedan-alpha14">Allt annat sedan alpha.14</h2>
+<ul>
+<li>En mappöversikt med en säkerhetsindikator per mapp: 100 % i extern lagring, 100 % endast på dina egna diskar, delvis skyddad eller endast på enheter.</li>
+<li>En levande visualisering av enheter, lagringsplatser, diskar och molnet med animerade flöden, och riktig helskärm i webbläsaren och i skalen för Android, macOS och Windows (Esc lämnar den).</li>
+<li>Vidarebefordran: en enhet som är ansluten till en mapp, även med selektiv synkronisering, kan bära andra enheters block till de lagringsplatser den kan skriva till, så att en telefons foton når en bucket som bara den bärbara datorn har inloggningsuppgifter till. Dialogen Anslut frågar nu om full eller selektiv synkronisering och om riktningen.</li>
+<li>Ihopparning erbjuder varje användbar lokal adress, den bästa först, och anslutning faller tillbaka över dem och en sökning i det lokala nätverket, med synligt förlopp och ett fel som namnger vad som prövades.</li>
+<li>Ny data får en frist innan verifieringen rapporterar ett brott: block som lagrats inom det större av verifieringsfönstret och 24 timmar visas som ”verifiering väntar”.</li>
+<li>Gränssnittet förblir användbart under långa synkar: läsningar besvaras från det senaste sparade svaret när tjänsten är upptagen, listor ritas stegvis, och sidan laddas aldrig om.</li>
+<li>Fixar: tömning och placering vägrar nu motsägelsefulla val, miniatyrer för lagringsplatser som lagts till senare, telefoner godtar bara S3- och rclone-lagringsplatser, foton och videor som redan finns på en telefon säkerhetskopieras nyast först, utskrift av återställningspaketet, Dock-ikonen på macOS, Tillbaka och tangentbordet på Android, <code>reset</code> och omstarter av tjänsten, och initiering av diskar med en modern GPT-layout.</li>
+<li>En osignerad iOS-<code>.ipa</code> för AltStore, SideStore och Sideloadly.</li>
+<li>Webbplatsen har en fransk översättning, och de finska och svenska sidorna visar skärmbilder av gränssnittet på sitt eget språk.</li>
+</ul>
+<h2 id="den-dagliga-kanalen">Den dagliga kanalen</h2>
+<p><code>varsto update --daily</code> installerar det nyaste dagliga bygget av huvudlinjen. Dagliga byggen görs för alla plattformar när huvudgrenen rör sig och publiceras på varsto.net/daily/. Kontrollsummelistan signeras med en daglig nyckel som är skild från releasenyckeln: uppdateraren litar på varje nyckel bara för dess egen kanal, så en daglig signatur validerar aldrig en release, och tvärtom. Den vägrar också listor som är föråldrade, från framtiden eller äldre än bygget du kör. Bakgrundsuppdateraren och gränssnittet stannar på releaser; den dagliga kanalen startas bara för hand.</p>
+<p>Dagliga byggen är utvecklingsbyggen. De är inte för produktionsdata, och ett dagligt bygge kan bära en ändring av lagringsformatet innan någon release gör det.</p>
+<h2 id="kompatibilitet">Kompatibilitet</h2>
+<p>Varje enhet i ett valv måste köra alpha.15. Alpha.14 kan inte läsa ett valv från alpha.15 och alpha.15 kan inte läsa ett valv från alpha.14, och ingendera läser den andras paket eller tombstone-listor. Uppdatera alla enheter tillsammans och skapa valvet på nytt som beskrivs ovan.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Krypterad filsynkronisering och säkerhetskopiering till din egen lagring.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../sv/downloads/">Nedladdningar</a></nav></div>
+    <div><h2>Lär dig</h2><nav aria-label="Lär dig"><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/compare/">Jämförelse</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/blog/" aria-current="page">Blogg</a></nav></div>
+    <div><h2>Gemenskap</h2><nav aria-label="Gemenskap"><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../docs/licence.html">Licens</a> · <a href="../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

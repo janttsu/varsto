@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.16: формат хранения 3, доступ к папке по подтверждению и служба rendezvous: Varsto</title>
+<meta name="description" content="Новый формат хранения с журналом учёта на уровне пакетов, подписанными записями и словами восстановления, поэтому существующие хранилища надо создать заново. Папка открывается устройству подтверждением владельца, устройства находят друг друга через необязательную службу rendezvous, присоединение и изменения состава работают без сети, и есть импорт из торрентов и YouTube.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.16: формат хранения 3, доступ к папке по подтверждению и служба rendezvous: Varsto">
+<meta property="og:description" content="Новый формат хранения с журналом учёта на уровне пакетов, подписанными записями и словами восстановления, поэтому существующие хранилища надо создать заново. Папка открывается устройству подтверждением владельца, устройства находят друг друга через необязательную службу rendezvous, присоединение и изменения состава работают без сети, и есть импорт из торрентов и YouTube.">
+<meta property="og:url" content="https://varsto.net/ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.16: формат хранения 3, доступ к папке по подтверждению и служба rendezvous","description":"Новый формат хранения с журналом учёта на уровне пакетов, подписанными записями и словами восстановления, поэтому существующие хранилища надо создать заново. Папка открывается устройству подтверждением владельца, устройства находят друг друга через необязательную службу rendezvous, присоединение и изменения состава работают без сети, и есть импорт из торрентов и YouTube.","datePublished":"2026-11-04","url":"https://varsto.net/ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html","inLanguage":"ru","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../ru/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">К содержанию</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Альфа-версия, не для рабочих данных.</strong> Ошибки могут уничтожить данные, формат хранения может измениться без средства переноса, а шифрование ещё не проверяли. Храни собственные резервные копии и убедись, что из них можно восстановиться.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../ru/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Главное меню">
+      <a href="../../ru/features/">Возможности</a>
+      <a href="../../ru/how-it-works/">Как это устроено</a>
+      <a href="../../ru/compare/">Сравнение</a>
+      <a href="../../docs/">Документация (en)</a>
+      <a href="../../ru/blog/" aria-current="page">Блог</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Язык">RU</summary>
+        <nav class="pop-body langs" aria-label="Язык"><a href="../../blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="ru" lang="ru" aria-current="true">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../ru/downloads/">Скачать</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Меню"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Меню"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/compare/">Сравнение</a><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../docs/">Документация (en)</a><a href="../../ru/downloads/">Загрузки</a><a href="../../ru/blog/" aria-current="page">Блог</a><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.16: формат хранения 3, доступ к папке по подтверждению и служба rendezvous</h1><p class="note"><time datetime="2026-11-04">2026-11-04</time></p>
+<p>Текущий выпуск — <a href="https://varsto.net/ru/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. Эта заметка описывает более старый выпуск. <a href="https://varsto.net/ru/downloads/">Загрузки</a> отдают alpha.17, исходный код на <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
+<p>Alpha.16 снова меняет формат хранения. Это главное, что надо знать перед обновлением: хранилища, созданные alpha.15 или раньше, эта версия открыть не может, и их надо создать заново. Остальное — длинный список того, как устройства присоединяются, находят друг друга и живут с плохой сетью, новая страница «Импорт» и большой набор починок и укрепления по разбору нового формата.</p>
+<h2 id="создание-хранилища-заново">Создание хранилища заново</h2>
+<p>Миграции нет. Alpha.16 отказывается от более старого хранилища, когда открывает его или когда устройство присоединяется через его хранилище данных, и сообщение говорит, что делать. Alpha.15 точно так же отказывается от хранилища формата 3, поэтому две версии не могут пользоваться одним хранилищем ни в какую сторону. Каждое устройство хранилища должно быть на alpha.16. Файлы оставь где они есть, затем:</p>
+<ol type="1">
+<li>Оставь двоичный файл alpha.15 под рукой, если старое хранилище ещё может понадобиться прочитать.</li>
+<li><code>varsto reset --yes</code> на устройстве, затем <code>varsto init</code>. <code>varsto init</code> печатает набор из двух комплектов слов: слова хранилища и, это новое в формате 3, слова восстановления. Храни оба.</li>
+<li>Снова добавь хранилища данных, добавь папки (здесь спросят слова восстановления) и синхронизируй.</li>
+</ol>
+<h2 id="android-сначала-удали-старый-apk">Android: сначала удали старый APK</h2>
+<p>Пакет Android теперь — APK с подписью выпуска (<code>varsto-&lt;version&gt;-android.apk</code>), а не отладочная сборка, поэтому следующий выпуск ставится поверх как обновление. Подпись новым ключом. Поставленное раньше отладочное APK (alpha.15 или более старая ежедневная сборка) обновить до него нельзя: Android обновление отвергает. Сначала удали старое приложение и потом поставь новое. Удаление стирает копию хранилища на этом устройстве, поэтому сначала убедись, что у хранилища есть другое устройство или хранилище данных. Ежедневная загрузка Android остаётся отладочной сборкой под именем <code>varsto-daily-android-debug.apk</code>.</p>
+<h2 id="формат-хранения-3">Формат хранения 3</h2>
+<p>Формат 3 описан в разделе 77 спецификации и в проектном документе формата 3. Что меняется для тебя:</p>
+<ul>
+<li>Журнал учёта больше не перечисляет каждый блок. Он заявляет пакеты нескольких фиксированных размеров (от 256 KiB до 64 MiB, с дополнением), и хранилище данных видит классы размера, а не сколько внутри блоков или файлов.</li>
+<li>Каждый опубликованный объект, кроме пакета, — подписанная запись, и в ней назван ключ, которым она запечатана. Списки файлов, списки корзины и снимки — это база плюс небольшие дельты, а у каждой папки своя подписанная карта блоков на каждое пишущее устройство.</li>
+<li>Ключ папки доходит до устройства только грантом, который подтвердил владелец. Устройство, вошедшее словами хранилища, видит имена папок и содержимого не держит. Оно просит через <code>varsto folder request</code>, владелец сверяет шесть слов на обоих устройствах и подтверждает через <code>varsto folder approve</code> (ещё <code>requests</code>, <code>deny</code>, <code>members</code>, <code>role</code>). Фоновая служба сама не подтверждает никогда. На странице «Файлы» есть карточка «Доступ к папке».</li>
+<li>У каждой эпохи ключа папки есть резерв под словами восстановления. Его делает <code>varsto folder add</code>, недостающий позже дописывает <code>varsto recovery escrow</code>, а <code>varsto status</code> предупреждает, пока резерва нет. <code>varsto join --recovery-words</code> открывает каждую папку, у которой резерв есть.</li>
+<li>Узлы говорят только по TLS, токены привязаны к соединению, и они сверяют, какая партия журнала учёта последняя. Хранилище данных, которое утаивает партии или откатывает их, замечают, и об этом говорят страница «Справка» и уведомление.</li>
+<li>Удаление устройства теперь остаётся: отозванное устройство не получает следующий ключ папки, и его записи перестают считаться с момента удаления.</li>
+</ul>
+<h2 id="как-найти-друг-друга-служба-rendezvous">Как найти друг друга: служба rendezvous</h2>
+<p>Устройства могут находить друг друга между сетями через необязательную службу rendezvous, по умолчанию <code>https://varsto.net/rv</code>. Устройство оставляет там запечатанную запись узла, читает записи хранилища, узнаёт свой публичный адрес и, если ни один адрес не отвечает, достаёт узел согласованным пробиванием дыр или, последним путём, сквозным зашифрованным ретранслятором (так и показано: <code>relayed via rendezvous</code>). Устройство, которое присоединяется и в своей сети ничего не находит, может найти предложение по коду или ссылке и сопрячься через ретранслятор. Служба видит метки, IP-адреса и счёт байтов, но не идентификатор хранилища и не содержимое. Меняется это командой <code>varsto p2p rendezvous set &lt;url&gt; | on | --off | status</code> или на странице «Узлы», а сервер можно поднять у себя (<code>varsto-rendezvous</code>, статический двоичный файл Linux в ежедневной сборке; UDP-порт по умолчанию 3334). Без неё тоже всё работает.</p>
+<h2 id="плохая-сеть-и-работа-без-сети">Плохая сеть и работа без сети</h2>
+<ul>
+<li>Одно недоступное хранилище данных больше не роняет всю синхронизацию. На этот прогон оно помечено недоступным и отдыхает между прогонами, остальные продолжают, а пропущенное копируется туда позже.</li>
+<li>У вызовов S3 и rclone сроки по размеру передачи, есть повторы и возобновляемые составные отправки, поэтому медленная связь стоит секунды, не минуты.</li>
+<li>Обмен между узлами работает совсем без хранилища данных, из сохранённого каталога узлов, так что синхронизация в локальной сети идёт без интернета.</li>
+<li>Присоединение сопряжением больше не ждёт ответа хранилища данных, а изменения состава (новая папка, подтверждение, смена роли, общий доступ) сначала лежат на устройстве и уходят, когда хранилище данных ответит. <code>varsto status</code> говорит: «N изменений ждут отправки».</li>
+<li>Локальные действия (импорт, страница «Корзина», миниатюры, запись файлов) заканчиваются, даже когда хранилище данных недоступно, и сообщают «отправка ждёт».</li>
+<li>Интерфейс, трей, командная строка и MCP больше не замирают, пока синхронизация ждёт мёртвой связи.</li>
+</ul>
+<h2 id="импорт">Импорт</h2>
+<ul>
+<li>Одна страница «Импорт» на все источники (папка или диск, репозиторий git-annex, облачный диск через rclone, торрент, YouTube) и список того, что импортируется сейчас.</li>
+<li><code>varsto import torrent</code> берёт торренты больше диска партиями и держит резерв свободного места. Файл уходит с диска загрузки, только когда его блоки лежат в хранилище данных и правило папки выполняется.</li>
+<li><code>varsto import youtube</code> складывает каналы, списки воспроизведения и видео в папки через yt-dlp, с вежливыми настройками по умолчанию и резервом свободного места.</li>
+</ul>
+<h2 id="диски-и-серверы">Диски и серверы</h2>
+<ul>
+<li><code>varsto mailbox</code> откладывает блоки с диска в доке для диска пула или хранилища данных, которого сейчас нет, в устойчивый исходящий ящик с проверкой хеша: блок, который есть только на диске A, доходит до диска B, когда B ставят в док.</li>
+<li><code>varsto service remember</code> работает без сеанса на компьютере (по SSH, на серверах) через <code>systemd-creds</code> или связку ключей ядра. <code>varsto service forget</code> это убирает.</li>
+<li><code>varsto service stop</code> теперь так и остаётся остановленной, а самообновление службу всё же перезапускает.</li>
+</ul>
+<h2 id="починки-и-укрепление">Починки и укрепление</h2>
+<ul>
+<li>Получение больше не затирает файл, изменённый после обхода, и один плохой файл больше не останавливает получение или отправку папки. Нечитаемый файл или каталог считается, а не делает файлы внутри похожими на удалённые.</li>
+<li>Состав: удаление устройства держится и для тех, кто присоединится позже, и для папок, которым ключ не сменяли, а принимаются только эпоха, отзыв или стирание администратора.</li>
+<li>Опорожнение, удаление хранилища данных и уборка после того, как диск вставили, берегут любой пакет, который может быть единственной копией. Починены починка, отправка после пропавшей партии и прикрепление после открепления.</li>
+<li>Чтение диапазонов S3 больше не заставляет <code>fsck</code> считать каждый пакет обрезанным.</li>
+<li>Визуализация показывает пометку о загрузке или пометку о пустом хранилище вместо примерной сцены, и миниатюры видны на странице.</li>
+<li>У рукопожатия TLS есть срок, и он соблюдается. На одном адресе не больше 64 незавершённых. Застрявший локальный клиент больше не может заморозить локальный API. У сервера rendezvous ограничение частоты на каждый класс запросов и память на поиски не безгранична. Замечания по зависимостям, о которых сообщает <code>cargo audit</code>, закрыты.</li>
+<li>Рабочие процессы GitHub идут с правом только читать, кроме тех, что публикуют.</li>
+</ul>
+<h2 id="совместимость">Совместимость</h2>
+<p>Каждое устройство хранилища должно быть на alpha.16. Alpha.15 не читает хранилище alpha.16, alpha.16 не читает хранилище alpha.15. Обнови все устройства вместе и создай хранилище заново, как сказано выше. Это всё ещё альфа: не для рабочих данных. Полный список в списке изменений.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Шифрованная синхронизация и резервное копирование файлов на твоём хранилище.</p></div>
+    <div><h2>Продукт</h2><nav aria-label="Продукт"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../ru/downloads/">Загрузки</a></nav></div>
+    <div><h2>Изучить</h2><nav aria-label="Изучить"><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/compare/">Сравнение</a><a href="../../docs/">Документация (en)</a><a href="../../ru/blog/" aria-current="page">Блог</a></nav></div>
+    <div><h2>Сообщество</h2><nav aria-label="Сообщество"><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto — рабочее название. Исходный код: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, по лицензии PolyForm Shield License 1.0.0 (исходный код доступен).</span>
+    <span>Без cookie и без слежения. Веб-сервер хранит обычный журнал доступа не дольше семи дней.</span>
+    <span><a href="../../docs/security-policy.html">Политика безопасности</a> · <a href="../../docs/licence.html">Лицензия</a> · <a href="../../docs/trademark.html">Товарный знак</a> (на английском)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.8 : un registre qui reste petit, le retrait des appareils, et des téléphones qui ne gardent rien en clair: Varsto</title>
+<meta name="description" content="Le registre ne liste plus que ce qui est nouveau, garde une vue en cache et s’élague derrière des points de contrôle signés ; les appareils peuvent être retirés, avec de nouvelles clés pour tout ce qui est écrit ensuite ; les téléphones gardent les dossiers chiffrés sous forme de blocs chiffrés ; et l’interface montre où sont vos données et comment circule le trafic pair à pair.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.8 : un registre qui reste petit, le retrait des appareils, et des téléphones qui ne gardent rien en clair: Varsto">
+<meta property="og:description" content="Le registre ne liste plus que ce qui est nouveau, garde une vue en cache et s’élague derrière des points de contrôle signés ; les appareils peuvent être retirés, avec de nouvelles clés pour tout ce qui est écrit ensuite ; les téléphones gardent les dossiers chiffrés sous forme de blocs chiffrés ; et l’interface montre où sont vos données et comment circule le trafic pair à pair.">
+<meta property="og:url" content="https://varsto.net/fr/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.8 : un registre qui reste petit, le retrait des appareils, et des téléphones qui ne gardent rien en clair","description":"Le registre ne liste plus que ce qui est nouveau, garde une vue en cache et s’élague derrière des points de contrôle signés ; les appareils peuvent être retirés, avec de nouvelles clés pour tout ce qui est écrit ensuite ; les téléphones gardent les dossiers chiffrés sous forme de blocs chiffrés ; et l’interface montre où sont vos données et comment circule le trafic pair à pair.","datePublished":"2026-10-09","url":"https://varsto.net/fr/blog/2026-10-09-alpha-8-ledger-and-devices.html","inLanguage":"fr","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fr/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fr/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menu principal">
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Langue">FR</summary>
+        <nav class="pop-body langs" aria-label="Langue"><a href="../../blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="fr" lang="fr" aria-current="true">Français</a><a href="../../de/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fr/downloads/">Télécharger</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menu"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/compare/">Comparaison</a><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/downloads/">Téléchargements</a><a href="../../fr/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.8 : un registre qui reste petit, le retrait des appareils, et des téléphones qui ne gardent rien en clair</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Alpha.8 est sorti d’une longue journée à utiliser alpha.7 sur un Mac, un bureau Linux et un téléphone Samsung, et à demander ce que devient la conception après quelques années d’usage.</p>
+<h2 id="un-registre-qui-reste-petit">Un registre qui reste petit</h2>
+<p>Chaque appareil tient un journal signé et chiffré de faits : quel bloc il a stocké où, quelle copie il a vérifiée, quelle liste de fichiers il a publiée. Jusqu’ici chaque entrée restait pour toujours, comme son propre objet sur chaque stockage, et chaque synchronisation les listait toutes. Maintenant une synchronisation ne liste que ce qui est nouveau, l’appareil garde une vue chiffrée en cache au lieu de tout rejouer, une synchronisation écrit un seul lot, et chaque appareil écrit de temps en temps un point de contrôle signé. Une fois que tous vos appareils ont accusé réception d’un point de contrôle, les lots derrière lui sont supprimés, en gardant les derniers pour qu’un appareil restauré depuis une ancienne sauvegarde soit encore pris. Dans un coffre de test avec 20 000 lots, une synchronisation sans rien de nouveau est passée de 668 ms à 28 ms (à l’époque) et le registre sur le stockage de 171 Mo à 5 Mo. La page <a href="../../docs/./">Comment ça marche</a> explique le registre.</p>
+<h2 id="retirer-un-appareil">Retirer un appareil</h2>
+<p>Un téléphone perdu ou un portable que vous n’utilisez plus peut être retiré depuis n’importe quel autre appareil (Réglages ou Pairs, « Retirer… », ou <code>varsto device revoke</code>). Ses entrées ultérieures sont ignorées, vos appareils refusent ses connexions, et le coffre passe à de nouvelles clés que seuls vos appareils restants reçoivent, de sorte que rien de ce qui est écrit ensuite ne s’ouvre avec ce que détient l’appareil retiré. Vous pouvez aussi lui ordonner de s’effacer la prochaine fois qu’il atteint un stockage. La liste des appareils montre le système, le modèle, la version de Varsto et la dernière synchronisation de chacun.</p>
+<h2 id="les-téléphones-gardent-les-dossiers-chiffrés-chiffrés">Les téléphones gardent les dossiers chiffrés chiffrés</h2>
+<p>Un dossier gardé « chiffré sur ce téléphone » ne contient plus que des blocs chiffrés, les mêmes octets que ceux de vos stockages. La synchronisation sélective marche comme partout ailleurs ; les fichiers s’affichent dans la propre visionneuse de l’application, déchiffrés en mémoire, et ne sont remis à une autre application que lorsque vous le demandez, comme une copie temporaire qui est retirée quand le coffre se verrouille. Android peut envoyer les nouvelles photos et vidéos vers un dossier de votre choix.</p>
+<h2 id="voir-ce-qui-se-passe">Voir ce qui se passe</h2>
+<ul>
+<li><strong>Où sont vos données</strong> : un schéma des dossiers vers les stockages et les appareils, avec le nombre de copies de chaque chose.</li>
+<li><strong>Trafic pair à pair</strong> : quel appareil envoie quoi à quel autre, par quel chemin, à quelle vitesse.</li>
+<li><strong>Vérification automatique</strong> : un autre appareil relit vos blocs selon un calendrier, de sorte qu’une politique comme « vérifié dans les 30 jours » reste vraie d’elle-même.</li>
+<li>Les boutons montrent tout de suite que quelque chose a commencé, et les téléchargements montrent leur progression.</li>
+</ul>
+<h2 id="et-encore">Et encore</h2>
+<p>Les dossiers Strongroom peuvent être convertis depuis des dossiers existants et reçoivent une clé de sécurité de secours ; les stockages peuvent être retirés une fois leurs blocs copiés là où il le faut ; les dossiers peuvent être détachés ou retirés du coffre, et les noms de premier niveau sont uniques ; les disques transporteurs peuvent recevoir un appareil de destination ; les prix des stockages alimentent les estimations de coût et la libération en un clic des fichiers inactifs ; l’assistant (MCP) ne peut jamais supprimer ni écraser des fichiers ; et sous Linux le premier démarrage installe Varsto pour votre utilisateur, avec un service en arrière-plan qui continue de synchroniser aussi pour ceux qui n’utilisent que la ligne de commande.</p>
+<h2 id="encore-une-alpha">Encore une alpha</h2>
+<p>La cryptographie n’a pas été auditée, le format peut encore changer, et un bogue peut détruire des données. Utilisez des données de test et conservez vos propres sauvegardes.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage.</p></div>
+    <div><h2>Produit</h2><nav aria-label="Produit"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../fr/downloads/">Téléchargements</a></nav></div>
+    <div><h2>Découvrir</h2><nav aria-label="Découvrir"><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/compare/">Comparaison</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Communauté</h2><nav aria-label="Communauté"><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

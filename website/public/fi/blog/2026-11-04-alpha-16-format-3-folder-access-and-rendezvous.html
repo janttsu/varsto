@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.16: tallennusmuoto 3, kansion käyttöoikeus hyväksynnällä ja kohtaamispalvelu: Varsto</title>
+<meta name="description" content="Uusi tallennusmuoto, jossa on pakettitason kirjanpito, allekirjoitetut tietueet ja palautussanat, joten olemassa olevat holvit on luotava uudelleen; kansio avataan laitteelle omistajan hyväksynnällä; laitteet löytävät toisensa valinnaisen kohtaamispalvelun kautta; liittyminen ja jäsenyyden muutokset toimivat ilman yhteyttä; sekä tuonnit torrenteista ja YouTubesta.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.16: tallennusmuoto 3, kansion käyttöoikeus hyväksynnällä ja kohtaamispalvelu: Varsto">
+<meta property="og:description" content="Uusi tallennusmuoto, jossa on pakettitason kirjanpito, allekirjoitetut tietueet ja palautussanat, joten olemassa olevat holvit on luotava uudelleen; kansio avataan laitteelle omistajan hyväksynnällä; laitteet löytävät toisensa valinnaisen kohtaamispalvelun kautta; liittyminen ja jäsenyyden muutokset toimivat ilman yhteyttä; sekä tuonnit torrenteista ja YouTubesta.">
+<meta property="og:url" content="https://varsto.net/fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fi_FI">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.16: tallennusmuoto 3, kansion käyttöoikeus hyväksynnällä ja kohtaamispalvelu","description":"Uusi tallennusmuoto, jossa on pakettitason kirjanpito, allekirjoitetut tietueet ja palautussanat, joten olemassa olevat holvit on luotava uudelleen; kansio avataan laitteelle omistajan hyväksynnällä; laitteet löytävät toisensa valinnaisen kohtaamispalvelun kautta; liittyminen ja jäsenyyden muutokset toimivat ilman yhteyttä; sekä tuonnit torrenteista ja YouTubesta.","datePublished":"2026-11-04","url":"https://varsto.net/fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html","inLanguage":"fi","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fi/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fi/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Päävalikko">
+      <a href="../../fi/features/">Ominaisuudet</a>
+      <a href="../../fi/how-it-works/">Miten se toimii</a>
+      <a href="../../fi/compare/">Vertailu</a>
+      <a href="../../docs/">Dokumentaatio (en)</a>
+      <a href="../../fi/blog/" aria-current="page">Blogi</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../../blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../../sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fi/downloads/">Lataa</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Valikko"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Valikko"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/compare/">Vertailu</a><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/downloads/">Lataukset</a><a href="../../fi/blog/" aria-current="page">Blogi</a><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.16: tallennusmuoto 3, kansion käyttöoikeus hyväksynnällä ja kohtaamispalvelu</h1><p class="note"><time datetime="2026-11-04">2026-11-04</time></p>
+<p>Nykyinen julkaisu on <a href="https://varsto.net/fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. Tämä teksti kuvaa vanhempaa julkaisua. <a href="https://varsto.net/fi/downloads/">Lataukset</a> antavat version alpha.17, ja lähdekoodi on <a href="https://github.com/janttsu/varsto">GitHubissa</a>.</p>
+<p>Alpha.16 muuttaa tallennusmuodon jälleen. Tämä pitää tietää ennen päivitystä: alpha.15:n tai sitä vanhemman tekemää holvia tämä versio ei avaa, vaan holvi on luotava uudelleen. Julkaisun loppu on pitkä lista muutoksista siinä, miten laitteet liittyvät, löytävät toisensa ja selviävät huonosta verkosta, uusi Tuonti-sivu sekä suuri joukko korjauksia ja kovennusta uuden muodon katselmoinnista.</p>
+<h2 id="holvin-luominen-uudelleen">Holvin luominen uudelleen</h2>
+<p>Siirtoa ei ole. Alpha.16 hylkää vanhemman holvin avatessaan sen tai kun laite liittyy sen tallennuspaikan kautta, ja viesti sanoo, mitä tehdä. Alpha.15 hylkää muodon 3 holvin samalla tavalla, joten nämä kaksi versiota eivät voi jakaa holvia kumpaankaan suuntaan. Holvin jokaisen laitteen on oltava versiossa alpha.16. Pidä tiedostosi siellä missä ne ovat, ja sitten:</p>
+<ol type="1">
+<li>Pidä alpha.15:n binääri tallessa siltä varalta, että joudut lukemaan vanhan holvin.</li>
+<li><code>varsto reset --yes</code> laitteella, sitten <code>varsto init</code>. Se tulostaa paketin, jossa on kaksi sanajoukkoa: holvisanat ja, uutena muodossa 3, palautussanat. Säilytä molemmat.</li>
+<li>Lisää tallennuspaikat uudelleen, lisää kansiot (palautussanoja kysytään tässä) ja synkronoi.</li>
+</ol>
+<h2 id="android-poista-vanha-apk-ensin">Android: poista vanha APK ensin</h2>
+<p>Android-paketti on nyt julkaisuallekirjoitettu APK (<code>varsto-&lt;version&gt;-android.apk</code>), ei debug-käännös, joten myöhempi julkaisu asentuu sen päälle päivityksenä. Se on allekirjoitettu uudella avaimella. Aiempaa debug-APK:ta (alpha.15 tai vanhempi päivittäinen versio) ei voi päivittää siihen: Android kieltäytyy päivityksestä. Poista vanha sovellus ensin ja asenna sitten uusi. Asennuksen poisto poistaa sen laitteen holvikopion, joten varmista ennen sitä, että holvilla on toinen laite tai tallennuspaikka. Päivittäinen Android-lataus pysyy debug-käännöksenä nimellä <code>varsto-daily-android-debug.apk</code>.</p>
+<h2 id="tallennusmuoto-3">Tallennusmuoto 3</h2>
+<p>Muoto 3 on kuvattu määrittelyn kohdassa 77 ja muodon 3 suunnitteludokumentissa. Mitä se muuttaa sinulle:</p>
+<ul>
+<li>Kirjanpito ei enää luettele jokaista lohkoa. Se väittää paketteja, joilla on yksi muutamasta kiinteästä koosta (256 KiB–64 MiB, täytettynä), joten tallennuspaikka näkee kokoluokat, ei sitä montako lohkoa tai tiedostoa on.</li>
+<li>Jokainen julkaistu objekti pakettia lukuun ottamatta on allekirjoitettu tietue, joka nimeää avaimen, jolla se on sinetöity. Tiedostoluettelot, roskakorin luettelot ja tilannevedokset ovat pohja ja pieniä deltoja, ja jokainen kansio pitää allekirjoitetun lohkokartan kutakin kirjoittavaa laitetta kohden.</li>
+<li>Kansioavain päätyy laitteelle vain myöntönä, jonka omistaja on hyväksynyt. Holvisanoilla liittyvä laite näkee kansioiden nimet eikä saa sisältöä; se pyytää komennolla <code>varsto folder request</code>, omistaja vertaa kuutta sanaa, jotka näkyvät molemmilla laitteilla, ja hyväksyy komennolla <code>varsto folder approve</code> (myös <code>requests</code>, <code>deny</code>, <code>members</code>, <code>role</code>). Taustapalvelu ei koskaan hyväksy. Käyttöliittymässä on Kansioiden käyttöoikeudet -kortti Tiedostot-sivulla.</li>
+<li>Jokaisella kansioavaimen kaudella on palautuskopio palautussanojen alla. <code>varsto folder add</code> tekee sen, <code>varsto recovery escrow</code> kirjoittaa puuttuvan myöhemmin, ja <code>varsto status</code> varoittaa siihen asti. <code>varsto join --recovery-words</code> avaa jokaisen kansion, jolla on palautuskopio.</li>
+<li>Vertaiset puhuvat vain TLS:ää, tunnisteilla jotka on sidottu yhteyteen, ja vertaavat kirjanpidon päitä, joten tallennuspaikka, joka pidättää eriä tai kelaa niitä taaksepäin, huomataan, ja Ohje-sivu sekä ilmoitus kertovat siitä.</li>
+<li>Laitteen poistaminen pysyy nyt: kumottu laite ei saa seuraavaa kansioavainta, ja sen tietueet lakkaavat laskemasta poistosta.</li>
+</ul>
+<h2 id="toistensa-löytäminen-kohtaamispalvelu">Toistensa löytäminen: kohtaamispalvelu</h2>
+<p>Laitteet voivat löytää toisensa verkkojen yli valinnaisen kohtaamispalvelun kautta, oletuksena <code>https://varsto.net/rv</code>. Laite jättää sinne sinetöidyn vertaistietueensa, lukee holvin tietueet, saa tietää oman julkisen osoitteensa ja, kun mikään osoite ei vastaa, tavoittaa vertaisen koordinoidulla reiänlyönnillä tai viimeisenä reittinä päästä päähän salatulla välityksellä (näkyy muodossa <code>relayed via rendezvous</code>). Liittyvä laite, joka ei löydä verkostaan mitään, voi hakea tarjouksen koodilla tai linkillä ja pariutua välityksen kautta. Palvelu näkee tunnisteita, IP-osoitteita ja tavumääriä, ei koskaan holvin identiteettiä eikä sisältöä. <code>varsto p2p rendezvous set &lt;url&gt; | on | --off | status</code> tai Vertaiset-sivu muuttaa sitä, ja palvelimen voi pitää itse (<code>varsto-rendezvous</code>, staattinen Linux-binääri päivittäisessä versiossa; oletus-UDP-portti on 3334). Kaikki toimii myös ilman sitä.</p>
+<h2 id="huono-verkko-ja-työ-ilman-yhteyttä">Huono verkko ja työ ilman yhteyttä</h2>
+<ul>
+<li>Yksi tallennuspaikka, johon ei saada yhteyttä, ei enää kaada koko synkronointia. Se merkitään alhaalla olevaksi ajon ajaksi ja lepää ajojen välillä, ja muut tallennuspaikat jatkavat; se minkä se missasi kopioidaan sinne myöhemmin.</li>
+<li>S3- ja rclone-kutsuilla on aikarajat, jotka sopivat siirron kokoon, uudelleenyritykset ja jatkettavat moniosaiset lähetykset, joten hidas yhteys maksaa sekunteja, ei minuutteja.</li>
+<li>Vertaisyhteys toimii ilman yhtään tallennuspaikkaa, tallennetusta vertaishakemistosta, joten lähiverkon synkronointi toimii ilman internetiä.</li>
+<li>Liittyminen pariutumalla ei enää tarvitse tallennuspaikan vastausta, ja jäsenyyden muutokset (kansion lisääminen, hyväksyminen, roolin muuttaminen, jakaminen) pidetään ensin laitteella ja lähetetään, kun tallennuspaikka vastaa. <code>varsto status</code> kertoo, montako muutosta odottaa lähetystä: ”N changes waiting to upload”.</li>
+<li>Paikalliset toimet (tuonnit, Roskakori-sivu, esikatselukuvat, tiedostojen kirjoitukset) valmistuvat, kun tallennuspaikka on alhaalla, ja ilmoittavat, että lähetys odottaa: ”upload pending”.</li>
+<li>Käyttöliittymä, ilmoitusalue, komentorivi ja MCP eivät enää jumitu, kun synkronointi odottaa kuollutta yhteyttä.</li>
+</ul>
+<h2 id="tuonnit">Tuonnit</h2>
+<ul>
+<li>Yksi Tuonti-sivu jokaiselle lähteelle (kansio tai levy, git-annex-tietovarasto, pilviasema rclonen kautta, torrent, YouTube), ja luettelo käynnissä olevista tuonneista.</li>
+<li><code>varsto import torrent</code> tuo levyä suurempia torrentteja erissä, jotka pitävät vapaan tilan varauksen; tiedosto lähtee latauslevyltä vasta, kun sen lohkot ovat tallennuspaikassa ja kansion sääntö pätee.</li>
+<li><code>varsto import youtube</code> arkistoi kanavat, soittolistat ja videot kansioihin yt-dlp:llä, kohteliain oletuksin ja vapaan tilan varauksella.</li>
+</ul>
+<h2 id="levyt-ja-palvelimet">Levyt ja palvelimet</h2>
+<ul>
+<li><code>varsto mailbox</code> puskuroi lohkot telakoidulta levyltä levyvaraston levylle tai tallennuspaikalle, joka on poissa, kestävään, tiivisteellä tarkistettuun lähtölaatikkoon, joten lohko joka on vain levyllä A päätyy levylle B, kun B telakoidaan.</li>
+<li><code>varsto service remember</code> toimii ilman työpöytäistuntoa (SSH:n yli, palvelimilla) <code>systemd-creds</code>-palvelun tai ytimen avainnipun kautta; <code>varsto service forget</code> poistaa sen.</li>
+<li><code>varsto service stop</code> pysyy nyt pysäytettynä, ja itsepäivitys käynnistää palvelun yhä uudelleen.</li>
+</ul>
+<h2 id="korjaukset-ja-kovennus">Korjaukset ja kovennus</h2>
+<ul>
+<li>Haku ei enää korvaa tiedostoa, jota on muokattu skannauksen jälkeen, eikä yksi huono tiedosto enää pysäytä kansion hakua tai työntöä. Lukukelvoton tiedosto tai hakemisto lasketaan, sen sijaan että sen alla olevat tiedostot näyttäisivät poistetuilta.</li>
+<li>Jäsenyys: laitteen poisto pätee myöhempiin liittyjiin ja kansioihin, joita ei avainnettu uudelleen, ja vain ylläpitäjän kausi, kumous tai tyhjennys otetaan käyttöön.</li>
+<li>Tyhjennys, tallennuspaikan poistaminen ja siivous levyn liittämisen jälkeen säilyttävät jokaisen paketin, joka saattaa olla ainoa kopio. Korjaus, työntö puuttuvan erän jälkeen ja liittäminen irrottamisen jälkeen on korjattu.</li>
+<li>S3:n aluehaut eivät enää saa <code>fsck</code>:tä pitämään jokaista pakettia lyhyenä.</li>
+<li>Visualisointi näyttää lataushuomautuksen tai tyhjän holvin huomautuksen esimerkkikuvan sijaan, ja esikatselukuvat näkyvät sivulla.</li>
+<li>TLS-kättelyillä on aikaraja, joka pitää, ja osoitteella voi olla enintään 64 keskeneräistä. Jumittunut paikallinen asiakas ei voi enää jäädyttää paikallista rajapintaa. Kohtaamispalvelimella on nopeusraja pyyntöluokkaa kohden ja rajattu muisti hauille. <code>cargo audit</code> -ohjelman raportoimat riippuvuusvaroitukset on paikattu.</li>
+<li>GitHub-työnkulut ajetaan vain luku -oikeuksin, paitsi siellä missä ne julkaisevat.</li>
+</ul>
+<h2 id="yhteensopivuus">Yhteensopivuus</h2>
+<p>Holvin jokaisen laitteen on oltava versiossa alpha.16. Alpha.15 ei voi lukea alpha.16:n holvia eikä alpha.16 alpha.15:n holvia. Päivitä kaikki laitteet yhdessä ja luo holvi uudelleen yllä kuvatulla tavalla. Tämä on yhä alfa: ei tuotantodatalle. Koko lista on muutoslokissa.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan.</p></div>
+    <div><h2>Tuote</h2><nav aria-label="Tuote"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../fi/downloads/">Lataukset</a></nav></div>
+    <div><h2>Opi</h2><nav aria-label="Opi"><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/compare/">Vertailu</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/blog/" aria-current="page">Blogi</a></nav></div>
+    <div><h2>Yhteisö</h2><nav aria-label="Yhteisö"><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../docs/licence.html">Lisenssi</a> · <a href="../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

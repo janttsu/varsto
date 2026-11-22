@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.12: los archivos pequeños en paquetes, y Varsto en finés y en sueco</title>
+<meta name="description" content="Los bloques cifrados pequeños se escriben ahora en paquetes, así que una carpeta de 20 000 archivos pequeños se convierte en 79 objetos en un bucket en lugar de 20 000. La interfaz, la bandeja, la barra de menús, las envolturas móviles y este sitio web están en finés y en sueco, además de en inglés.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/es/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.12: los archivos pequeños en paquetes, y Varsto en finés y en sueco">
+<meta property="og:description" content="Los bloques cifrados pequeños se escriben ahora en paquetes, así que una carpeta de 20 000 archivos pequeños se convierte en 79 objetos en un bucket en lugar de 20 000. La interfaz, la bandeja, la barra de menús, las envolturas móviles y este sitio web están en finés y en sueco, además de en inglés.">
+<meta property="og:url" content="https://varsto.net/es/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="es_ES">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-12-alpha-12-packs-and-languages.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.12: los archivos pequeños en paquetes, y Varsto en finés y en sueco","description":"Los bloques cifrados pequeños se escriben ahora en paquetes, así que una carpeta de 20 000 archivos pequeños se convierte en 79 objetos en un bucket en lugar de 20 000. La interfaz, la bandeja, la barra de menús, las envolturas móviles y este sitio web están en finés y en sueco, además de en inglés.","datePublished":"2026-10-12","url":"https://varsto.net/es/blog/2026-10-12-alpha-12-packs-and-languages.html","inLanguage":"es","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../es/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Software alfa, no para datos de producción.</strong> Los errores pueden destruir datos, el formato de almacenamiento puede cambiar sin una herramienta de migración y el cifrado aún no se ha auditado. Conserva tus propias copias de seguridad y comprueba que puedes restaurar desde ellas.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../es/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menú principal">
+      <a href="../../es/features/">Funciones</a>
+      <a href="../../es/how-it-works/">Cómo funciona</a>
+      <a href="../../es/compare/">Comparación</a>
+      <a href="../../docs/">Documentación (en)</a>
+      <a href="../../es/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Idioma">ES</summary>
+        <nav class="pop-body langs" aria-label="Idioma"><a href="../../blog/2026-10-12-alpha-12-packs-and-languages.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-12-alpha-12-packs-and-languages.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-12-alpha-12-packs-and-languages.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-12-alpha-12-packs-and-languages.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-12-alpha-12-packs-and-languages.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-12-alpha-12-packs-and-languages.html" hreflang="es" lang="es" aria-current="true">Español</a><a href="../../ru/blog/2026-10-12-alpha-12-packs-and-languages.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../es/downloads/">Descargar</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menú"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menú"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/compare/">Comparación</a><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/screenshots/">Capturas</a><a href="../../docs/">Documentación (en)</a><a href="../../es/downloads/">Descargas</a><a href="../../es/blog/" aria-current="page">Blog</a><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.12: los archivos pequeños en paquetes, y Varsto en finés y en sueco</h1><p class="note"><time datetime="2026-10-12">2026-10-12</time></p>
+<p>Alpha.12 tiene dos temas: menos objetos en tu almacenamiento, y la interfaz en más idiomas.</p>
+<h2 id="bloques-pequeños-en-paquetes">Bloques pequeños en paquetes</h2>
+<p>Hasta ahora cada bloque cifrado era un objeto propio en el almacenamiento. Es simple y robusto, pero una carpeta con muchos archivos pequeños, como notas, código fuente o los archivos que acompañan a una fototeca, se convierte en decenas de miles de objetos diminutos. Muchos proveedores cobran por petición, algunos por objeto, y listarlos y comprobarlos todos es lento.</p>
+<p>Desde esta versión, los bloques de hasta 128 KiB se reúnen en paquetes de unos 4 MiB o 256 miembros. Un paquete se escribe con un índice que nombra a sus miembros y dónde empieza cada uno, y un miembro se lee con una petición por rango, así que leer un archivo pequeño sigue descargando solo sus propios bytes. Los bloques grandes se siguen escribiendo de uno en uno. Los paquetes se usan en buckets S3, remotos de rclone y directorios; el almacenamiento en frío, los grupos de discos y los discos transportadores siguen con objetos sueltos.</p>
+<p>En el laboratorio, una carpeta de 20 000 archivos pequeños llegó al bucket como 79 paquetes en lugar de 20 000 objetos. Después de la pasada se comprobó cada miembro contra su nombre.</p>
+<p>Borrar un bloque que vive en un paquete escribe una marca de borrado pequeña, y el propio paquete desaparece cuando ya no queda ningún miembro. La reparación, la verificación, las réplicas, los movimientos de datos y quitar un almacenamiento entienden los paquetes. El formato de almacenamiento se describe en la sección 30 de la <a href="../docs/alpha-0-format.html">especificación del formato</a>.</p>
+<p>No hay compatibilidad con las versiones anteriores: un dispositivo con alpha.11 o anterior no ve los bloques que están en paquetes. Actualiza todos los dispositivos.</p>
+<h2 id="fallos-encontrados-por-el-camino">Fallos encontrados por el camino</h2>
+<p>Las pasadas del laboratorio encontraron problemas que las pruebas unitarias no habían visto:</p>
+<ul>
+<li><code>rclone serve s3</code> responde a una lectura por rango con el estado 200 y solo los bytes pedidos. Varsto ahora acepta eso además del 206 habitual, así que los paquetes se leen bien desde esos servidores.</li>
+<li>Un dispositivo que acababa de leer los índices de paquetes no volvía a buscar paquetes que otro dispositivo había escrito momentos después. Una lectura que no encuentra ahora recarga los índices al momento.</li>
+<li>Un dispositivo podía fiarse de un índice de paquetes después de que otro dispositivo hubiera borrado miembros de él. Antes de decidir que un bloque ya existe y no hace falta escribirlo, Varsto comprueba ahora que sigue en su paquete.</li>
+<li>Los grupos de discos y los demás almacenamientos sin paquetes vuelven a escribir sus bloques de uno en uno, así que un disco lleno o ausente se informa como tal, en lugar de hacer fallar toda la subida.</li>
+<li>Un servidor S3 cuyo reloj se desvía más de unos minutos se corrige ahora en los dos sentidos, también cuando responde con el estado 400 en lugar de 403.</li>
+</ul>
+<h2 id="finés-y-sueco">Finés y sueco</h2>
+<p>La interfaz de escritorio, la bandeja y la barra de menús de macOS, las envolturas de Android y de iOS, y este sitio web están ahora en finés y en sueco. El inglés sigue siendo el idioma por defecto. El idioma se elige en los ajustes de la interfaz o al pie de la barra lateral, y la bandeja y las aplicaciones siguen la misma elección. La línea de comandos, la documentación y todo lo del repositorio siguen en inglés.</p>
+<p>Las traducciones de los textos críticos para la seguridad, como los de borrar, revocar dispositivos y las palabras de recuperación, están marcadas para que las revisen hablantes nativos. Las correcciones son bienvenidas.</p>
+<h2 id="construye-varsto-con-nosotros">Construye Varsto con nosotros</h2>
+<p>La nueva página <a href="../../docs/./">Contribuir</a> describe cómo se construye Varsto y dónde hace falta ayuda: una revisión de la criptografía y del formato de almacenamiento, Windows, iOS y Android, el cruce de NAT en redes distintas de las del mantenedor, más proveedores de S3, el empaquetado y las traducciones.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Sincronización y copia de seguridad de archivos cifradas en tu propio almacenamiento.</p></div>
+    <div><h2>Producto</h2><nav aria-label="Producto"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/screenshots/">Capturas</a><a href="../../es/downloads/">Descargas</a></nav></div>
+    <div><h2>Aprender</h2><nav aria-label="Aprender"><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/compare/">Comparación</a><a href="../../docs/">Documentación (en)</a><a href="../../es/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Comunidad</h2><nav aria-label="Comunidad"><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto es un nombre provisional. Código fuente: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, bajo la PolyForm Shield License 1.0.0 (código fuente disponible).</span>
+    <span>Sin cookies, sin seguimiento. El servidor web conserva un registro de acceso ordinario como máximo siete días.</span>
+    <span><a href="../../docs/security-policy.html">Política de seguridad</a> · <a href="../../docs/licence.html">Licencia</a> · <a href="../../docs/trademark.html">Marca</a> (en inglés)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

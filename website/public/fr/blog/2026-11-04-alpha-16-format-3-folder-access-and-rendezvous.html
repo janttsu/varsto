@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.16 : format de stockage 3, accès aux dossiers sur approbation, et un service de rendez-vous: Varsto</title>
+<meta name="description" content="Un nouveau format de stockage avec un registre au niveau des paquets, des enregistrements signés et des mots de récupération, de sorte que les coffres existants doivent être recréés ; les dossiers s’ouvrent à un appareil sur l’approbation d’un propriétaire ; les appareils se trouvent par un service de rendez-vous facultatif ; rejoindre et changer les membres fonctionne hors ligne ; et des imports depuis des torrents et YouTube.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.16 : format de stockage 3, accès aux dossiers sur approbation, et un service de rendez-vous: Varsto">
+<meta property="og:description" content="Un nouveau format de stockage avec un registre au niveau des paquets, des enregistrements signés et des mots de récupération, de sorte que les coffres existants doivent être recréés ; les dossiers s’ouvrent à un appareil sur l’approbation d’un propriétaire ; les appareils se trouvent par un service de rendez-vous facultatif ; rejoindre et changer les membres fonctionne hors ligne ; et des imports depuis des torrents et YouTube.">
+<meta property="og:url" content="https://varsto.net/fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.16 : format de stockage 3, accès aux dossiers sur approbation, et un service de rendez-vous","description":"Un nouveau format de stockage avec un registre au niveau des paquets, des enregistrements signés et des mots de récupération, de sorte que les coffres existants doivent être recréés ; les dossiers s’ouvrent à un appareil sur l’approbation d’un propriétaire ; les appareils se trouvent par un service de rendez-vous facultatif ; rejoindre et changer les membres fonctionne hors ligne ; et des imports depuis des torrents et YouTube.","datePublished":"2026-11-04","url":"https://varsto.net/fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html","inLanguage":"fr","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fr/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fr/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menu principal">
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Langue">FR</summary>
+        <nav class="pop-body langs" aria-label="Langue"><a href="../../blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fr" lang="fr" aria-current="true">Français</a><a href="../../de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fr/downloads/">Télécharger</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menu"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/compare/">Comparaison</a><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/downloads/">Téléchargements</a><a href="../../fr/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.16 : format de stockage 3, accès aux dossiers sur approbation, et un service de rendez-vous</h1><p class="note"><time datetime="2026-11-04">2026-11-04</time></p>
+<p>La version actuelle est <a href="https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. Cette note décrit une version plus ancienne. Les <a href="https://varsto.net/fr/downloads/">téléchargements</a> servent alpha.17, et le code source est sur <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
+<p>Alpha.16 change de nouveau le format de stockage. C’est la chose principale à savoir avant de mettre à jour : les coffres faits par alpha.15 ou plus ancien ne peuvent pas être ouverts par cette version et doivent être recréés. Le reste de la version est une longue liste de changements dans la façon dont les appareils rejoignent, se trouvent et supportent un mauvais réseau, une nouvelle page Import, et un grand ensemble de corrections et de durcissement issus d’une relecture du nouveau format.</p>
+<h2 id="recréer-un-coffre">Recréer un coffre</h2>
+<p>Il n’y a pas de migration. Alpha.16 refuse un coffre plus ancien quand il l’ouvre ou quand un appareil rejoint par son stockage, et le message dit quoi faire. Alpha.15 refuse un coffre au format 3 de la même façon, donc les deux versions ne peuvent pas partager un coffre dans un sens ni dans l’autre. Chaque appareil d’un coffre doit exécuter alpha.16. Gardez vos fichiers où ils sont, puis :</p>
+<ol type="1">
+<li>Gardez le binaire alpha.15 à portée de main si vous pouvez avoir besoin de lire l’ancien coffre.</li>
+<li><code>varsto reset --yes</code> sur l’appareil, puis <code>varsto init</code>. Il imprime un kit avec deux jeux de mots : les mots du coffre et, nouveaux dans le format 3, les mots de récupération. Conservez les deux.</li>
+<li>Ajoutez de nouveau les stockages, ajoutez les dossiers (les mots de récupération sont demandés ici) et synchronisez.</li>
+</ol>
+<h2 id="android--désinstallez-dabord-lancien-apk">Android : désinstallez d’abord l’ancien APK</h2>
+<p>Le paquetage Android est maintenant un APK signé pour la publication (<code>varsto-&lt;version&gt;-android.apk</code>), et non un build de débogage, de sorte qu’une version ultérieure s’installe par-dessus comme une mise à jour. Il est signé avec une nouvelle clé. Une installation d’un APK de débogage plus ancien (alpha.15, ou une version quotidienne plus ancienne) ne peut pas être mise à jour vers celui-ci : Android refuse la mise à jour. Désinstallez d’abord l’ancienne application, puis installez la nouvelle. Désinstaller retire la copie du coffre de cet appareil, donc assurez-vous que le coffre a un autre appareil ou un stockage avant de le faire. Le téléchargement Android quotidien reste un build de débogage sous le nom <code>varsto-daily-android-debug.apk</code>.</p>
+<h2 id="format-de-stockage-3">Format de stockage 3</h2>
+<p>Le format 3 est décrit dans la section 77 de la spécification et dans le document de conception du format 3. Ce qu’il change pour un utilisateur :</p>
+<ul>
+<li>Le registre ne liste plus chaque bloc. Il déclare des paquets de quelques tailles fixes (256 Kio à 64 Mio, complétés), de sorte qu’un stockage voit des classes de taille et non combien il y a de blocs ou de fichiers.</li>
+<li>Chaque objet publié autre qu’un paquet est un enregistrement signé qui nomme la clé sous laquelle il est scellé. Les manifestes, les listes de la corbeille et les instantanés sont une base plus de petits deltas, et chaque dossier garde une carte de blocs signée par appareil écrivant.</li>
+<li>Une clé de dossier n’atteint un appareil que sous forme de concession qu’un propriétaire a approuvée. Un appareil qui rejoint avec les mots du coffre voit les noms des dossiers et ne détient aucun contenu ; il demande avec <code>varsto folder request</code>, un propriétaire compare six mots affichés sur les deux appareils et approuve avec <code>varsto folder approve</code> (aussi <code>requests</code>, <code>deny</code>, <code>members</code>, <code>role</code>). Le service en arrière-plan n’approuve jamais. L’interface a une carte Accès au dossier sur la page Fichiers.</li>
+<li>Chaque époque de clé de dossier a une copie de séquestre sous les mots de récupération. <code>varsto folder add</code> la crée, <code>varsto recovery escrow</code> en écrit une manquante plus tard, et <code>varsto status</code> avertit jusque-là. <code>varsto join --recovery-words</code> ouvre chaque dossier qui a une copie de séquestre.</li>
+<li>Les pairs ne parlent qu’en TLS, avec des jetons liés à la connexion, et comparent les têtes de registre, de sorte qu’un stockage qui retient des lots ou les ramène en arrière est remarqué, et la page Aide et une notification le disent.</li>
+<li>Retirer un appareil tient maintenant : un appareil révoqué ne reçoit pas la clé de dossier suivante, et ses enregistrements cessent de compter au retrait.</li>
+</ul>
+<h2 id="se-trouver--le-service-de-rendez-vous">Se trouver : le service de rendez-vous</h2>
+<p>Les appareils peuvent se trouver à travers les réseaux par un service de rendez-vous facultatif, par défaut <code>https://varsto.net/rv</code>. Un appareil y laisse son enregistrement de pair scellé, lit les enregistrements du coffre, apprend sa propre adresse publique et, quand aucune adresse ne répond, atteint un pair par un perçage coordonné ou, en dernier recours, un relais chiffré de bout en bout (affiché comme <code>relayed via rendezvous</code>). Un appareil qui rejoint et ne trouve rien sur son réseau peut retrouver une offre par code ou par lien et s’appairer à travers le relais. Le service voit des étiquettes, des adresses IP et des nombres d’octets, jamais l’identité du coffre ni le contenu. <code>varsto p2p rendezvous set &lt;url&gt; | on | --off | status</code> ou la page Pairs le change, et le serveur peut être auto-hébergé (<code>varsto-rendezvous</code>, un binaire Linux statique dans le build quotidien ; le port UDP par défaut est 3334). Tout fonctionne aussi sans lui.</p>
+<h2 id="un-mauvais-réseau-et-travailler-hors-ligne">Un mauvais réseau, et travailler hors ligne</h2>
+<ul>
+<li>Un stockage qui ne peut pas être atteint ne fait plus échouer toute une synchronisation. Il est marqué hors service pour cette exécution et se repose entre les exécutions, et les autres stockages continuent ; ce qu’il a manqué y est copié plus tard.</li>
+<li>Les appels S3 et rclone ont des délais adaptés à la taille du transfert, des nouvelles tentatives, et des envois en plusieurs parties qui peuvent reprendre, de sorte qu’une liaison lente coûte des secondes, pas des minutes.</li>
+<li>Le pair à pair fonctionne sans aucun stockage, depuis un répertoire de pairs enregistré, de sorte que la synchronisation sur le réseau local fonctionne sans internet.</li>
+<li>Rejoindre par appairage n’a plus besoin qu’un stockage réponde, et les changements d’appartenance (ajouter un dossier, approuver, changer un rôle, partager) sont gardés d’abord sur l’appareil et envoyés quand un stockage répond. <code>varsto status</code> dit « N changements en attente d’envoi ».</li>
+<li>Les actions locales (imports, la page Corbeille, les vignettes, les écritures de fichiers) finissent pendant qu’un stockage est hors service et signalent « envoi en attente ».</li>
+<li>L’interface, la zone de notification, la ligne de commande et MCP ne se figent plus pendant qu’une synchronisation attend sur une liaison morte.</li>
+</ul>
+<h2 id="imports">Imports</h2>
+<ul>
+<li>Une seule page Import pour chaque source (un dossier ou un disque, un dépôt git-annex, un lecteur cloud via rclone, un torrent, YouTube), avec une liste des imports en cours.</li>
+<li><code>varsto import torrent</code> importe les torrents plus gros que le disque par lots qui gardent une réserve d’espace libre ; un fichier ne quitte le disque de téléchargement qu’une fois ses blocs sur un stockage et la politique du dossier respectée.</li>
+<li><code>varsto import youtube</code> archive des chaînes, des listes de lecture et des vidéos dans des dossiers avec yt-dlp, avec des réglages courtois par défaut et une réserve d’espace libre.</li>
+</ul>
+<h2 id="disques-et-serveurs">Disques et serveurs</h2>
+<ul>
+<li><code>varsto mailbox</code> met en attente des blocs depuis un disque branché pour un disque de pool ou un stockage qui est absent, dans une boîte d’envoi durable et contrôlée par empreinte, de sorte qu’un bloc qui n’est que sur le disque A atteint le disque B quand B est branché.</li>
+<li><code>varsto service remember</code> fonctionne sans session de bureau (en SSH, sur des serveurs) par <code>systemd-creds</code> ou le trousseau du noyau ; <code>varsto service forget</code> le retire.</li>
+<li><code>varsto service stop</code> reste maintenant arrêté, et une mise à jour de soi-même redémarre encore le service.</li>
+</ul>
+<h2 id="corrections-et-durcissement">Corrections et durcissement</h2>
+<ul>
+<li>Une récupération n’écrase plus un fichier modifié après le parcours, et un fichier mauvais n’arrête plus la récupération ni l’envoi d’un dossier. Un fichier ou un répertoire illisible est compté au lieu de faire paraître supprimés les fichiers en dessous.</li>
+<li>Appartenance : le retrait d’un appareil vaut pour ceux qui rejoignent ensuite et pour les dossiers qui n’ont pas reçu de nouvelle clé, et seules l’époque, la révocation ou l’effacement d’un administrateur sont adoptés.</li>
+<li>Le vidage, le retrait d’un stockage et le rangement après l’insertion d’un disque conservent tout paquet qui pourrait être la seule copie. La réparation, l’envoi après un lot manquant et l’attachement après un détachement sont corrigés.</li>
+<li>Les lectures par plage S3 ne font plus dire à <code>fsck</code> que chaque paquet est trop court.</li>
+<li>La visualisation montre une note de chargement ou une note de coffre vide au lieu de la scène d’exemple, et les vignettes s’affichent dans la page.</li>
+<li>Les poignées de main TLS ont un délai qui est respecté, et une adresse peut en tenir au plus 64 inachevées. Un client local bloqué ne peut plus geler l’API locale. Le serveur de rendez-vous a une limite de débit par classe de requête et une mémoire bornée pour les recherches. Les avis de dépendances signalés par <code>cargo audit</code> sont corrigés.</li>
+<li>Les workflows GitHub s’exécutent avec des droits en lecture seule, sauf là où ils publient.</li>
+</ul>
+<h2 id="compatibilité">Compatibilité</h2>
+<p>Chaque appareil d’un coffre doit exécuter alpha.16. Alpha.15 ne peut pas lire un coffre alpha.16 et alpha.16 ne peut pas lire un coffre alpha.15. Mettez à jour tous les appareils ensemble et recréez le coffre comme décrit plus haut. C’est encore une alpha : pas pour des données de production. La liste complète est dans le journal des changements.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage.</p></div>
+    <div><h2>Produit</h2><nav aria-label="Produit"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../fr/downloads/">Téléchargements</a></nav></div>
+    <div><h2>Découvrir</h2><nav aria-label="Découvrir"><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/compare/">Comparaison</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Communauté</h2><nav aria-label="Communauté"><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

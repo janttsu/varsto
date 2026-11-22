@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.6 : le code source est public, et chaque plateforme est construite dans le cloud: Varsto</title>
+<meta name="description" content="Le dépôt est maintenant public sur GitHub sous la licence PolyForm Shield, les applications natives macOS et iOS se construisent sur GitHub Actions, Linux, Windows et Android se construisent sur des machines cloud de courte durée, et l’interface a été refaite autour d’une vue des fichiers.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/blog/2026-10-09-alpha-6-source-on-github.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.6 : le code source est public, et chaque plateforme est construite dans le cloud: Varsto">
+<meta property="og:description" content="Le dépôt est maintenant public sur GitHub sous la licence PolyForm Shield, les applications natives macOS et iOS se construisent sur GitHub Actions, Linux, Windows et Android se construisent sur des machines cloud de courte durée, et l’interface a été refaite autour d’une vue des fichiers.">
+<meta property="og:url" content="https://varsto.net/fr/blog/2026-10-09-alpha-6-source-on-github.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-09-alpha-6-source-on-github.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-09-alpha-6-source-on-github.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-09-alpha-6-source-on-github.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-09-alpha-6-source-on-github.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-09-alpha-6-source-on-github.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-09-alpha-6-source-on-github.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-09-alpha-6-source-on-github.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-09-alpha-6-source-on-github.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.6 : le code source est public, et chaque plateforme est construite dans le cloud","description":"Le dépôt est maintenant public sur GitHub sous la licence PolyForm Shield, les applications natives macOS et iOS se construisent sur GitHub Actions, Linux, Windows et Android se construisent sur des machines cloud de courte durée, et l’interface a été refaite autour d’une vue des fichiers.","datePublished":"2026-10-09","url":"https://varsto.net/fr/blog/2026-10-09-alpha-6-source-on-github.html","inLanguage":"fr","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fr/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fr/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menu principal">
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Langue">FR</summary>
+        <nav class="pop-body langs" aria-label="Langue"><a href="../../blog/2026-10-09-alpha-6-source-on-github.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-09-alpha-6-source-on-github.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-09-alpha-6-source-on-github.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-09-alpha-6-source-on-github.html" hreflang="fr" lang="fr" aria-current="true">Français</a><a href="../../de/blog/2026-10-09-alpha-6-source-on-github.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-09-alpha-6-source-on-github.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-09-alpha-6-source-on-github.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fr/downloads/">Télécharger</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menu"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/compare/">Comparaison</a><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/downloads/">Téléchargements</a><a href="../../fr/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.6 : le code source est public, et chaque plateforme est construite dans le cloud</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Depuis alpha-0, les alphas ont ajouté l’essentiel de ce que le plan appelle le cœur : des stockages S3 et rclone, le partage avec un autre utilisateur par une clé scellée, des signatures et un échange de clés hybrides post-quantiques, des politiques de durabilité qui avertissent à temps, le transfert pair à pair entre vos propres appareils, la compression avant le chiffrement, des dossiers Strongroom derrière une clé de sécurité FIDO2, un kit de récupération imprimable, et un serveur MCP pour qu’un assistant puisse lire et réorganiser exactement les dossiers que vous lui accordez. Alpha.6 porte sur le projet autour de ce code.</p>
+<h2 id="le-code-source-est-public">Le code source est public</h2>
+<p>Le dépôt est sur <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous la <a href="../docs/licence.html">PolyForm Shield License 1.0.0</a> : à code source disponible, pas open source. Lisez-le, compilez-le, signalez ce qui casse dans le suivi des tickets. L’historique a été réécrit avant la publication pour qu’il ne porte ni chemins ni adresses personnels ; si vous avez cloné une copie privée plus ancienne, clonez de nouveau.</p>
+<h2 id="chaque-plateforme-est-construite-par-une-machine-qui-nexistait-pas-une-heure-plus-tôt">Chaque plateforme est construite par une machine qui n’existait pas une heure plus tôt</h2>
+<ul>
+<li><strong>macOS et iOS</strong> se construisent sur GitHub Actions, sur des runners Apple Silicon : la suite de tests, le Varsto.app natif avec sa propre fenêtre, son élément dans la barre de menus et sa ligne de commande incluse, et l’enveloppe iOS pour le simulateur, qui y est lancée et photographiée. Une version étiquetée reçoit le zip macOS joint automatiquement.</li>
+<li><strong>Linux, Windows et Android</strong> se construisent et se testent sur des machines cloud de courte durée, créées par un script, utilisées une fois et supprimées : la suite de tests complète sur un vrai Ubuntu, le zip Windows installé et mis à l’épreuve sur un vrai Windows Server, l’APK Android construit avec le SDK et le NDK puis lancé dans un émulateur.</li>
+</ul>
+<p>Aucun build ne dépend plus de l’ordinateur d’un développeur, ce qui veut aussi dire que chaque paquet de la page de téléchargement vient d’un chemin documenté et reproductible.</p>
+<h2 id="une-vue-des-fichiers-dabord">Une vue des fichiers d’abord</h2>
+<p>L’interface a été refaite : une barre latérale avec une arborescence de dossiers, une vue Fichiers avec un fil d’Ariane, des carrés d’état et un volet de détails, et un mode téléphone dans lequel les tableaux deviennent des cartes et la navigation passe en bas. Sur un téléphone, un dossier s’ajoute par son seul nom ; l’appareil choisit où il vit, donc vous ne tapez jamais un répertoire. Il y a aussi, dans les Réglages, un « recommencer sur cet appareil » protégé pour l’alpha, et la vue d’ensemble suggère où les fichiers inactifs coûteraient moins cher à conserver, d’après le propre relevé de dernière utilisation de Varsto et des données de prix ouvertes.</p>
+<h2 id="encore-une-alpha">Encore une alpha</h2>
+<p>Rien ici ne change l’avertissement de chaque page : la cryptographie n’a pas été auditée, le format peut encore changer, et un bogue peut détruire des données. Utilisez des données de test, conservez vos propres sauvegardes, et lisez le <a href="../docs/failure-model.html">modèle de défaillances</a> avant de lui confier autre chose.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage.</p></div>
+    <div><h2>Produit</h2><nav aria-label="Produit"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../fr/downloads/">Téléchargements</a></nav></div>
+    <div><h2>Découvrir</h2><nav aria-label="Découvrir"><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/compare/">Comparaison</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Communauté</h2><nav aria-label="Communauté"><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

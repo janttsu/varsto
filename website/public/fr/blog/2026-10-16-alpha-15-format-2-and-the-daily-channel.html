@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.15 : format de stockage 2, un programme d’installation Windows et un canal quotidien: Varsto</title>
+<meta name="description" content="Un nouveau format de stockage qui corrige deux constats de la relecture de sécurité, de sorte que les coffres existants doivent être recréés ; Windows reçoit un programme d’installation, une fenêtre native et des mises à jour automatiques ; et un canal de versions quotidiennes signé.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.15 : format de stockage 2, un programme d’installation Windows et un canal quotidien: Varsto">
+<meta property="og:description" content="Un nouveau format de stockage qui corrige deux constats de la relecture de sécurité, de sorte que les coffres existants doivent être recréés ; Windows reçoit un programme d’installation, une fenêtre native et des mises à jour automatiques ; et un canal de versions quotidiennes signé.">
+<meta property="og:url" content="https://varsto.net/fr/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.15 : format de stockage 2, un programme d’installation Windows et un canal quotidien","description":"Un nouveau format de stockage qui corrige deux constats de la relecture de sécurité, de sorte que les coffres existants doivent être recréés ; Windows reçoit un programme d’installation, une fenêtre native et des mises à jour automatiques ; et un canal de versions quotidiennes signé.","datePublished":"2026-10-16","url":"https://varsto.net/fr/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html","inLanguage":"fr","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fr/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fr/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menu principal">
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Langue">FR</summary>
+        <nav class="pop-body langs" aria-label="Langue"><a href="../../blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="fr" lang="fr" aria-current="true">Français</a><a href="../../de/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fr/downloads/">Télécharger</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menu"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/compare/">Comparaison</a><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/downloads/">Téléchargements</a><a href="../../fr/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.15 : format de stockage 2, un programme d’installation Windows et un canal quotidien</h1><p class="note"><time datetime="2026-10-16">2026-10-16</time></p>
+<p>La version actuelle est <a href="https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. Cette note décrit une version plus ancienne. Les <a href="https://varsto.net/fr/downloads/">téléchargements</a> servent alpha.17, et le code source est sur <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
+<p>Alpha.15 change le format de stockage. C’est la chose principale à savoir avant de mettre à jour : les coffres faits par alpha.14 ou plus ancien ne peuvent pas être ouverts par cette version et doivent être recréés. Le reste de la version est une longue liste de corrections et de travail sur l’interface, une vraie installation Windows, et un canal de versions quotidiennes pour ceux qui veulent tester le code le plus récent.</p>
+<h2 id="le-format-2-et-ce-quil-veut-dire">Le format 2 et ce qu’il veut dire</h2>
+<p>La relecture de sécurité derrière alpha.14 a trouvé deux problèmes dans la façon dont les blocs étaient stockés, qui ne pouvaient pas être corrigés sans changer le format. Le format 2 les corrige :</p>
+<ul>
+<li>Le nonce d’un bloc chiffré est maintenant dérivé des octets exacts qui sont chiffrés (après compression), et non du texte en clair. Avant, le nonce dépendait d’un résultat de compression qui n’était pas garanti identique d’une version de zstd à l’autre.</li>
+<li>Le découpeur est à clé par dossier. Les points de coupe étaient une fonction publique du contenu du fichier, de sorte qu’un stockage qui connaissait un fichier pouvait le reconnaître aux tailles de ses blocs. Maintenant, le même fichier dans deux dossiers est coupé à des endroits différents.</li>
+<li>Chaque bloc est stocké dans un paquet (64 Mio, 256 Mio sur les stockages à froid) et aucun bloc n’est un objet à lui seul, de sorte qu’un stockage voit les tailles des paquets et non les tailles ni le nombre de blocs dedans. Les paquets ont des index chiffrés, et les blocs supprimés sont suivis par dossier, puis retirés quand le paquet est réécrit.</li>
+<li>La compression est zstd au niveau 3 après une sonde rapide : le texte se compresse presque aussi bien qu’avant et s’écrit plusieurs fois plus vite.</li>
+</ul>
+<p>Ce que le format 2 ne corrige pas : les listes de fichiers et les époques de partage sont encore acceptées sur la seule clé du dossier, parce que fermer cela demande des manifestes signés et des époques de partage, qui appartiennent à la couche des enregistrements du format suivant. Tant que cela n’existe pas, un détenteur de la clé d’un dossier peut encore changer ce que ce dossier montre, et les répliques non fiables et les dossiers partagés doivent être traités ainsi. Les deux constats critiques restent ouverts dans alpha.15.</p>
+<p><strong>Recréer un coffre.</strong> Il n’y a pas de migration. Alpha.15 refuse un coffre plus ancien quand il l’ouvre ou quand un appareil rejoint par son stockage, et le message dit quoi faire. Gardez vos fichiers où ils sont, puis :</p>
+<ol type="1">
+<li>Gardez le binaire alpha.14 à portée de main si vous pouvez avoir besoin de lire l’ancien coffre.</li>
+<li><code>varsto reset --yes</code> sur l’appareil, puis <code>varsto init</code>.</li>
+<li>Ajoutez de nouveau les stockages et synchronisez les dossiers.</li>
+</ol>
+<p>Alpha.14 refuse un coffre au format 2 de la même façon, donc les deux versions ne peuvent pas partager un coffre dans un sens ni dans l’autre.</p>
+<h2 id="windows--le-programme-dinstallation-une-fenêtre-native-et-les-mises-à-jour-automatiques">Windows : le programme d’installation, une fenêtre native et les mises à jour automatiques</h2>
+<p>Le zip portable n’existe plus. Windows n’a plus qu’un téléchargement, <code>Varsto-&lt;version&gt;-setup.exe</code> : il met à niveau sur place, peut réparer une installation, et son programme de désinstallation conserve votre dossier de données. L’interface s’ouvre dans une fenêtre native (WebView2) dont la taille et la position sont mémorisées, une fenêtre par utilisateur, et la zone de notification la lance. Les copies installées par le programme d’installation cherchent des mises à jour une fois par jour, vérifient le programme d’installation signé et l’installent en silence. Si vous exécutez encore une copie portable décompressée, <code>varsto update</code> vous dit de lancer le programme d’installation une fois ; les mises à jour continuent seules ensuite.</p>
+<h2 id="tout-le-reste-depuis-alpha14">Tout le reste depuis alpha.14</h2>
+<ul>
+<li>Une vue d’ensemble des dossiers avec un indicateur de sécurité par dossier : 100 % dans un stockage externe, 100 % sur vos propres disques seulement, partiellement protégé, ou seulement sur les appareils.</li>
+<li>Une visualisation en direct des appareils, des stockages, des disques et du cloud, avec des flux animés, et un vrai plein écran dans le navigateur et dans les enveloppes Android, macOS et Windows (Échap en sort).</li>
+<li>Acheminement : un appareil attaché à un dossier, même en synchronisation sélective, peut porter les blocs d’autres appareils vers les stockages où il peut écrire, de sorte que les photos d’un téléphone atteignent un bucket pour lequel seul le portable a les identifiants. Le dialogue d’attachement demande maintenant la synchronisation complète ou sélective, et le sens.</li>
+<li>L’appairage propose chaque adresse locale utilisable, la meilleure d’abord, et rejoindre se rabat de l’une à l’autre et sur une recherche du réseau local, avec une progression visible et une erreur qui nomme ce qui a été essayé.</li>
+<li>Les données nouvelles ont un délai de grâce avant que la vérification signale une infraction : les blocs stockés dans le plus grand de la fenêtre de vérification et de 24 heures s’affichent comme « vérification en attente ».</li>
+<li>L’interface reste utilisable pendant les longues synchronisations : les lectures sont répondues depuis la dernière réponse conservée quand le service est occupé, les listes se dessinent au fur et à mesure, et la page n’est jamais rechargée.</li>
+<li>Corrections : le vidage et l’emplacement refusent maintenant les choix contradictoires, les vignettes pour les stockages ajoutés plus tard, les téléphones n’acceptent que les stockages S3 et rclone, les photos et vidéos déjà sur un téléphone sont sauvegardées de la plus récente à la plus ancienne, l’impression du kit de récupération, l’icône du Dock macOS, le bouton Retour et le clavier d’Android, <code>reset</code> et les redémarrages du service, et l’initialisation d’un disque avec une disposition GPT moderne.</li>
+<li>Un <code>.ipa</code> iOS non signé pour AltStore, SideStore et Sideloadly.</li>
+<li>Le site a une traduction française, et les pages finnoises et suédoises montrent des captures d’écran de l’interface dans leur propre langue.</li>
+</ul>
+<h2 id="le-canal-quotidien">Le canal quotidien</h2>
+<p><code>varsto update --daily</code> installe la dernière version quotidienne de la ligne principale. Les versions quotidiennes sont faites pour toutes les plateformes chaque fois que la branche principale bouge, et elles sont publiées sur varsto.net/daily/. La liste des sommes de contrôle est signée avec une clé quotidienne distincte de la clé de version : le programme de mise à jour ne fait confiance à chaque clé que pour son propre canal, de sorte qu’une signature quotidienne ne valide jamais une version officielle, et inversement. Il refuse aussi les listes périmées, datées dans le futur, ou plus anciennes que le build que vous exécutez. La mise à jour en arrière-plan et l’interface restent sur les versions officielles ; le canal quotidien n’est jamais lancé qu’à la main.</p>
+<p>Les versions quotidiennes sont des versions de développement. Elles ne sont pas pour des données de production, et une version quotidienne peut porter un changement de format de stockage avant toute version officielle.</p>
+<h2 id="compatibilité">Compatibilité</h2>
+<p>Chaque appareil d’un coffre doit exécuter alpha.15. Alpha.14 ne peut pas lire un coffre alpha.15 et alpha.15 ne peut pas lire un coffre alpha.14, et aucune des deux ne lit les paquets ni les listes de marques de suppression de l’autre. Mettez à jour tous les appareils ensemble et recréez le coffre comme décrit plus haut.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage.</p></div>
+    <div><h2>Produit</h2><nav aria-label="Produit"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../fr/downloads/">Téléchargements</a></nav></div>
+    <div><h2>Découvrir</h2><nav aria-label="Découvrir"><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/compare/">Comparaison</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Communauté</h2><nav aria-label="Communauté"><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

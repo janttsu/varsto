@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.9: данные там, где ты хочешь, починка сама, подписанные обновления и каждая платформа собирается у всех на виду: Varsto</title>
+<meta name="description" content="Папки можно размещать в выбранных хранилищах данных и переносить между ними, пропавшие копии чинятся сами, обновления подписаны ключом, который не выходит в сеть, скачивания между узлами берут много блоков сразу, и каждый пакет теперь собирается, проверяется и фотографируется на машинах GitHub.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/ru/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.9: данные там, где ты хочешь, починка сама, подписанные обновления и каждая платформа собирается у всех на виду: Varsto">
+<meta property="og:description" content="Папки можно размещать в выбранных хранилищах данных и переносить между ними, пропавшие копии чинятся сами, обновления подписаны ключом, который не выходит в сеть, скачивания между узлами берут много блоков сразу, и каждый пакет теперь собирается, проверяется и фотографируется на машинах GitHub.">
+<meta property="og:url" content="https://varsto.net/ru/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.9: данные там, где ты хочешь, починка сама, подписанные обновления и каждая платформа собирается у всех на виду","description":"Папки можно размещать в выбранных хранилищах данных и переносить между ними, пропавшие копии чинятся сами, обновления подписаны ключом, который не выходит в сеть, скачивания между узлами берут много блоков сразу, и каждый пакет теперь собирается, проверяется и фотографируется на машинах GitHub.","datePublished":"2026-10-10","url":"https://varsto.net/ru/blog/2026-10-10-alpha-9-placement-repair-signed.html","inLanguage":"ru","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../ru/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">К содержанию</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Альфа-версия, не для рабочих данных.</strong> Ошибки могут уничтожить данные, формат хранения может измениться без средства переноса, а шифрование ещё не проверяли. Храни собственные резервные копии и убедись, что из них можно восстановиться.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../ru/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Главное меню">
+      <a href="../../ru/features/">Возможности</a>
+      <a href="../../ru/how-it-works/">Как это устроено</a>
+      <a href="../../ru/compare/">Сравнение</a>
+      <a href="../../docs/">Документация (en)</a>
+      <a href="../../ru/blog/" aria-current="page">Блог</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Язык">RU</summary>
+        <nav class="pop-body langs" aria-label="Язык"><a href="../../blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="ru" lang="ru" aria-current="true">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../ru/downloads/">Скачать</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Меню"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Меню"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/compare/">Сравнение</a><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../docs/">Документация (en)</a><a href="../../ru/downloads/">Загрузки</a><a href="../../ru/blog/" aria-current="page">Блог</a><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.9: данные там, где ты хочешь, починка сама, подписанные обновления и каждая платформа собирается у всех на виду</h1><p class="note"><time datetime="2026-10-10">2026-10-10</time></p>
+<p>Alpha.9 (сборка, которую саму так и не пометили; её изменения вышли в alpha.10) про долгий путь: решать, где лежат данные, возвращать их к тем копиям, которых просит правило, без твоей команды, и доверять обновлению, которое приносит следующую версию.</p>
+<h2 id="данные-там-где-ты-хочешь">Данные там, где ты хочешь</h2>
+<p>У каждой папки теперь может быть размещение: хранилища данных, куда идут её блоки. Данные можно переносить из одного хранилища данных в другое, целую папку или только файлы, которые простаивали сколько-то дней, блок за блоком. Каждый блок записывается на новое хранилище данных и читается оттуда обратно, прежде чем удаляется старая копия, а прерванный перенос просто продолжается, когда его запускают снова. Пул съёмных дисков может просить копии на дисках, которые лежат в разных местах, например один дома и один на работе, и Varsto заполняет каждый диск тем, чего его месту ещё не хватает.</p>
+<h2 id="починка-сама">Починка сама</h2>
+<p>Когда копия пропадает, хранилище данных удаляют или проверка не сходится, устройство, на котором есть данные, кладёт блок обратно туда, куда его хотят правило и размещение папки: из своих файлов, из кэша зашифрованных блоков, из другого хранилища данных или с узла. Очередь починки видна в интерфейсе и через <code>varsto repair</code>.</p>
+<h2 id="подписанные-обновления">Подписанные обновления</h2>
+<p>Список контрольных сумм каждого выпуска теперь подписан ключом выпусков проекта, и этот ключ никогда не покидает машину сопровождающего. Программа обновления отказывается от выпуска, подписанного не им. Она также сверяет контрольную сумму с той, что приложена к выпуску на GitHub: это второй канал. <code>varsto verify-release</code> проверяет загрузку вручную, и <code>minisign</code> тоже. <a href="https://github.com/janttsu/varsto/blob/main/RELEASING.md">RELEASING.md</a> объясняет схему.</p>
+<h2 id="быстрее-от-узла-к-узлу">Быстрее от узла к узлу</h2>
+<p>Скачивания держат одновременно в пути до восьми блоков (на тот момент), заранее забирают маленькие файлы по всей папке и делят одно соединение на узел. Устройство, которое отдаёт блоки, больше не начинает свою полную синхронизацию каждые несколько секунд. <a href="../../docs/./">Замеры</a> сравнивают Париж, Амстердам и Варшаву, от узла к узлу против бакета S3.</p>
+<h2 id="у-всех-на-виду">У всех на виду</h2>
+<p>Каждая платформа теперь собирается и проверяется на машинах GitHub при каждом изменении: пакеты Linux и Windows (пакет Windows проверен на Windows Server 2025, включая пункты меню Explorer), приложение Android в эмуляторе, образ диска macOS и приложение iOS на Apple Silicon. Те же прогоны делают <a href="../../docs/./">снимки экрана</a>, поэтому картинки на этом сайте идут за новейшей сборкой.</p>
+<h2 id="и-ещё">И ещё</h2>
+<p>Общий доступ записывает, кто просил доступ, по отпечатку, удаление участника переводит общий доступ на новые ключи, и у Strongroom можно сменить ключ. Файлы можно скачать или освободить из файлового менеджера в Linux (Nautilus, Dolphin, Nemo) и в Windows (Explorer). В строке папки остаются две главные кнопки, остальное уходит в меню. Приложение macOS и приложения телефона говорят, когда на странице загрузок ждёт более новая версия, а не называют себя актуальными. Большие партии журнала учёта на S3 больше не отказывают.</p>
+<h2 id="обнови-каждое-устройство-прежде-чем-переносить-данные">Обнови каждое устройство, прежде чем переносить данные</h2>
+<p>Перенос данных пишет новый вид записи журнала учёта, которую alpha.8 и более ранние прочитать не могут: их синхронизация отказала бы с первого переноса. Сначала обнови все свои устройства. С этой версии неизвестные записи пропускаются, поэтому поздние добавления её не сломают. Клиенты до alpha.8 включительно при обновлении проверяют только контрольную сумму. Этот выпуск первый, чья программа обновления требует подпись.</p>
+<h2 id="всё-ещё-альфа">Всё ещё альфа</h2>
+<p>Криптографию не аудировали, формат ещё может измениться, и ошибка может уничтожить данные. Используй тестовые данные и храни свои резервные копии.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Шифрованная синхронизация и резервное копирование файлов на твоём хранилище.</p></div>
+    <div><h2>Продукт</h2><nav aria-label="Продукт"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../ru/downloads/">Загрузки</a></nav></div>
+    <div><h2>Изучить</h2><nav aria-label="Изучить"><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/compare/">Сравнение</a><a href="../../docs/">Документация (en)</a><a href="../../ru/blog/" aria-current="page">Блог</a></nav></div>
+    <div><h2>Сообщество</h2><nav aria-label="Сообщество"><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto — рабочее название. Исходный код: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, по лицензии PolyForm Shield License 1.0.0 (исходный код доступен).</span>
+    <span>Без cookie и без слежения. Веб-сервер хранит обычный журнал доступа не дольше семи дней.</span>
+    <span><a href="../../docs/security-policy.html">Политика безопасности</a> · <a href="../../docs/licence.html">Лицензия</a> · <a href="../../docs/trademark.html">Товарный знак</a> (на английском)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.14 : une relecture de sécurité, ses corrections, et tout ce qui a été fusionné depuis alpha.13: Varsto</title>
+<meta name="description" content="Une relecture de sécurité au niveau du code de tout le programme, les corrections qu’elle a demandées, une synchronisation bien plus rapide, des déplacements reprenables vers une pile de disques amovibles, et la vingtaine de fonctionnalités qui attendaient sur la branche principale depuis alpha.13.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.14 : une relecture de sécurité, ses corrections, et tout ce qui a été fusionné depuis alpha.13: Varsto">
+<meta property="og:description" content="Une relecture de sécurité au niveau du code de tout le programme, les corrections qu’elle a demandées, une synchronisation bien plus rapide, des déplacements reprenables vers une pile de disques amovibles, et la vingtaine de fonctionnalités qui attendaient sur la branche principale depuis alpha.13.">
+<meta property="og:url" content="https://varsto.net/fr/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.14 : une relecture de sécurité, ses corrections, et tout ce qui a été fusionné depuis alpha.13","description":"Une relecture de sécurité au niveau du code de tout le programme, les corrections qu’elle a demandées, une synchronisation bien plus rapide, des déplacements reprenables vers une pile de disques amovibles, et la vingtaine de fonctionnalités qui attendaient sur la branche principale depuis alpha.13.","datePublished":"2026-10-14","url":"https://varsto.net/fr/blog/2026-10-14-alpha-14-hardening-and-everything-since.html","inLanguage":"fr","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fr/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fr/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menu principal">
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Langue">FR</summary>
+        <nav class="pop-body langs" aria-label="Langue"><a href="../../blog/2026-10-14-alpha-14-hardening-and-everything-since.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-14-alpha-14-hardening-and-everything-since.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-14-alpha-14-hardening-and-everything-since.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-14-alpha-14-hardening-and-everything-since.html" hreflang="fr" lang="fr" aria-current="true">Français</a><a href="../../de/blog/2026-10-14-alpha-14-hardening-and-everything-since.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-14-alpha-14-hardening-and-everything-since.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-14-alpha-14-hardening-and-everything-since.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fr/downloads/">Télécharger</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menu"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/compare/">Comparaison</a><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/downloads/">Téléchargements</a><a href="../../fr/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.14 : une relecture de sécurité, ses corrections, et tout ce qui a été fusionné depuis alpha.13</h1><p class="note"><time datetime="2026-10-14">2026-10-14</time></p>
+<p>La version actuelle est <a href="https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. Cette note décrit une version plus ancienne. Les <a href="https://varsto.net/fr/downloads/">téléchargements</a> servent alpha.17, et le code source est sur <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
+<p>Alpha.14 est la plus grande version jusqu’ici. Elle porte deux choses : l’arriéré de fonctionnalités arrivées sur la branche principale après alpha.13, et la première série de corrections d’une relecture de sécurité qui a lu chaque ligne du programme avec en tête un stockage hostile, un réseau hostile et un appareil compagnon hostile.</p>
+<h2 id="la-relecture-de-sécurité">La relecture de sécurité</h2>
+<p>La relecture a trouvé les primitives cryptographiques solides, et l’autorisation autour d’elles insuffisante. Alpha.14 ferme les parties qui pouvaient l’être sans changer le format de stockage :</p>
+<ul>
+<li>Les événements du registre sont acceptés selon le rôle : une réplique ne peut déclarer que des copies, un membre d’un dossier partagé ne peut parler que de ce dossier, et les points de contrôle ne sont pris que des appareils complets. Un stockage qui retient un lot est remarqué, un objet de rebut sous le propre nom d’un appareil ne met plus l’appareil sous clôture, et une révocation ne compte qu’avec son époque de clé signée.</li>
+<li>Le service et le transport entre pairs : le canal latéral STUN est borné, le navigateur reçoit un code de démarrage à usage unique à la place du jeton de session, une requête forgée ne peut plus faire planter l’API, les clés Strongroom doivent correspondre à un engagement et la clé de sécurité demande son code PIN, les secrets ont disparu de la ligne de commande, le programme de mise à jour refuse les listes signées périmées, et les lectures sur les stockages sont bornées.</li>
+<li>Hygiène : les fichiers de clés sont créés privés dès le premier octet, les jetons sont comparés en temps constant, le matériel de clé est effacé de la mémoire, les parts de récupération portent un contrôle, et la bibliothèque Shamir a été remplacée par une branche corrigée.</li>
+</ul>
+<p>Deux constats demandent un nouveau format de stockage et ne sont pas dans cette version : les listes de fichiers et les époques de partage sont encore acceptées sur la seule clé du dossier, et le nonce du morceau vient encore du texte en clair. Les deux sont construits sur les branches du format 2, qui est la version suivante. D’ici là, traitez les dossiers partagés et les répliques non fiables comme la relecture le décrit : un détenteur de la clé d’un dossier peut encore changer ce que ce dossier montre.</p>
+<h2 id="plus-rapide">Plus rapide</h2>
+<p>Synchroniser 50 000 petits fichiers vers un stockage local est passé de 167 secondes à 21 ; 10 000 fichiers, de 77 à 8,5. L’horloge n’est plus écrite sur le disque pour chaque fichier, les stockages sont ouverts une fois par synchronisation, les envois se répartissent par stockage, le client S3 sonde une seule fois si les écritures conditionnelles sont honorées, et les binaires sont construits avec l’optimisation à l’édition de liens et un allocateur plus rapide.</p>
+<h2 id="tout-depuis-alpha13">Tout depuis alpha.13</h2>
+<p>L’activité en direct entre appareils, le contrôle de pourriture binaire, les disques entiers pour les pools de disques, les sauvegardes avec restic, les analyses de fichiers et <code>varsto search</code>, les clés MCP à portée limitée, la reconstruction du registre, la vérification selon le support, la comptabilité des disques et « le prochain disque à brancher », le guide du kit de récupération, les imports depuis git-annex, les lecteurs cloud et les dossiers locaux, la corbeille du coffre, les quotas de stockage et le vidage, les journaux de débogage locaux, les noms d’origine, la sécurité des dossiers (marqueur, garde contre les suppressions en masse, envoi seul et réception seule), les règles d’ignorance, les métadonnées de fichiers, l’historique des versions, les invitations par code QR, la redirection de ports du routeur, l’espace disque libre minimum, le flux d’événements, les membres en lecture seule, les règles par plateforme, l’historique des changements, et les déplacements reprenables d’un dossier vers une pile de disques amovibles, un disque à la fois.</p>
+<h2 id="compatibilité">Compatibilité</h2>
+<p>Le format de stockage n’a pas changé, mais chaque appareil d’un coffre doit exécuter alpha.14 : le cache de la vue du registre et les contrôles des enregistrements ont changé, et les appareils plus anciens ne liront pas ce qu’alpha.14 écrit. La fonction de téléchargement de torrents sur la branche principale ne fait pas partie de cette version.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage.</p></div>
+    <div><h2>Produit</h2><nav aria-label="Produit"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../fr/downloads/">Téléchargements</a></nav></div>
+    <div><h2>Découvrir</h2><nav aria-label="Découvrir"><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/compare/">Comparaison</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Communauté</h2><nav aria-label="Communauté"><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

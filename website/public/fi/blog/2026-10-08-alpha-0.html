@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha-0: ensimmäinen pystysuora siivu: Varsto</title>
+<meta name="description" content="Komentorivityökalu, joka salaa, tallentaa ja synkronoi kansion kahden laitteen välillä sinun omistamasi tallennuspaikan kautta, ja allekirjoitettu kirjanpito, jonka voit tarkistaa.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fi/blog/2026-10-08-alpha-0.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha-0: ensimmäinen pystysuora siivu: Varsto">
+<meta property="og:description" content="Komentorivityökalu, joka salaa, tallentaa ja synkronoi kansion kahden laitteen välillä sinun omistamasi tallennuspaikan kautta, ja allekirjoitettu kirjanpito, jonka voit tarkistaa.">
+<meta property="og:url" content="https://varsto.net/fi/blog/2026-10-08-alpha-0.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fi_FI">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-08-alpha-0.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-08-alpha-0.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-08-alpha-0.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-08-alpha-0.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-08-alpha-0.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-08-alpha-0.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-08-alpha-0.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-08-alpha-0.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha-0: ensimmäinen pystysuora siivu","description":"Komentorivityökalu, joka salaa, tallentaa ja synkronoi kansion kahden laitteen välillä sinun omistamasi tallennuspaikan kautta, ja allekirjoitettu kirjanpito, jonka voit tarkistaa.","datePublished":"2026-10-08","url":"https://varsto.net/fi/blog/2026-10-08-alpha-0.html","inLanguage":"fi","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fi/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fi/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Päävalikko">
+      <a href="../../fi/features/">Ominaisuudet</a>
+      <a href="../../fi/how-it-works/">Miten se toimii</a>
+      <a href="../../fi/compare/">Vertailu</a>
+      <a href="../../docs/">Dokumentaatio (en)</a>
+      <a href="../../fi/blog/" aria-current="page">Blogi</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../../blog/2026-10-08-alpha-0.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-08-alpha-0.html" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../../sv/blog/2026-10-08-alpha-0.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-08-alpha-0.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-08-alpha-0.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-08-alpha-0.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-08-alpha-0.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fi/downloads/">Lataa</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Valikko"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Valikko"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/compare/">Vertailu</a><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/downloads/">Lataukset</a><a href="../../fi/blog/" aria-current="page">Blogi</a><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha-0: ensimmäinen pystysuora siivu</h1><p class="note"><time datetime="2026-10-08">2026-10-08</time></p>
+<p>Alpha-0 on ensimmäinen, jonka voit ajaa. Se on tarkoituksella kapea: yksi tallennustausta (hakemisto), komentorivityökalu pienellä paikallisella työpöytäkäyttöliittymällä ja pienin joukko mekanismeja, jotka tekevät ydinajatuksesta totta.</p>
+<h2 id="mikä-ydinajatus-on">Mikä ydinajatus on</h2>
+<p>Useimmissa salatuissa synkronointituotteissa on palvelin, joka näkee vähintään sen, kuka yhdistää ja milloin, ja joka yleensä myy myös tallennustilan. Varstolla ei ole palvelinta. Laitteesi kirjoittavat salattuja objekteja tallennuspaikkaan, jonka omistat, ja niiden viereen allekirjoitetun, salatun merkinnän siitä, mitä ne tekivät. Toinen laite, joka pääsee samaan tallennuspaikkaan, lukee merkinnän, tarkistaa allekirjoitukset ja tietää, mitä on olemassa, missä se on ja mitkä kopiot on tarkistettu. Kaksi laitetta, jotka eivät ole koskaan yhtä aikaa verkossa, päätyvät silti samoihin tiedostoihin.</p>
+<h2 id="mitä-alpha-0-tekee">Mitä alpha-0 tekee</h2>
+<ul>
+<li>pilkkoo tiedostot sisällön mukaan määräytyviin paloihin ja salaa jokaisen avaimella, joka johdetaan palan omasta avainnetusta tiivisteestä, joten sama sisältö on sama objekti jokaisella laitteella ja deduplikoituu ilman että laitteiden tarvitsee sopia siitä;</li>
+<li>kirjoittaa palat, kansioiden tiedostoluettelot ja kirjanpidon erät paikalliseen hakemistotallennuspaikkaan niin, että kirjoitus onnistuu vain jos kohde puuttuu, yksi kirjoittaja polkua kohden, ilman lukituksia;</li>
+<li>yhdistää tiedostoluettelot versiovektoreilla; samanaikaiset muokkaukset säilyttävät molemmat versiot ristiriitakopiona, poisto ei koskaan voita samanaikaista muokkausta, ja poistetut tiedostot menevät paikalliseen roskakoriin;</li>
+<li>tunnistaa vanhasta varmuuskopiosta palautetun laitteen eikä anna sen allekirjoittaa enää;</li>
+<li><code>fsck --verify</code> laskee uudelleen tiivisteen jokaisesta objektista, johon kansio viittaa, ja raportoi väitteet, joita tallennuspaikka ei pysty todistamaan.</li>
+</ul>
+<p>Muoto on kirjoitettu auki tiedostossa <a href="../../docs/alpha-0-format.html">alpha-0-format.md</a>, myös jokainen tunnettu rajoitus.</p>
+<h2 id="mitä-se-ei-tee">Mitä se ei tee</h2>
+<p>Ei jakamista muiden kanssa, ei vertaissiirtoa, ei vielä S3:a eikä rclonea, ei suojausavaimia, ei mobiilisovelluksia, eikä suunnitelman jälkikvanttinen hybridi ole vielä koodissa (jokaisessa objektissa on algoritmitunniste, jotta se voidaan lisätä kirjoittamatta dataa uudelleen). Mitään ei ole auditoitu. Käytä vain testidataa.</p>
+<h2 id="miten-kokeilet">Miten kokeilet</h2>
+<p>Lataa Linux-binääri, macOS-sovellus tai Windows-zip <a href="../../docs/./">lataussivulta</a>, tarkista tarkistussumma ja seuraa pika-aloitusta. Kaksi hakemistoa yhdellä koneella riittää, jotta näet kirjanpidon ja synkronoinnin toimivan; kaksi konetta, joilla on yhteinen USB-levy tai verkkolevy, näyttävät sen oikeasti.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan.</p></div>
+    <div><h2>Tuote</h2><nav aria-label="Tuote"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../fi/downloads/">Lataukset</a></nav></div>
+    <div><h2>Opi</h2><nav aria-label="Opi"><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/compare/">Vertailu</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/blog/" aria-current="page">Blogi</a></nav></div>
+    <div><h2>Yhteisö</h2><nav aria-label="Yhteisö"><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../docs/licence.html">Lisenssi</a> · <a href="../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

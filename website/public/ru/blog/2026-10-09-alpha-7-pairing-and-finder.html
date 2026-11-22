@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.7: сопряжение устройств кодом, действия Finder и настоящий путь через NAT: Varsto</title>
+<meta name="description" content="Устройства теперь сопрягаются из интерфейса одноразовым кодом, Finder может скачать заполнитель или освободить место правым щелчком, приложение macOS ставится из образа диска, устройства достают друг друга через NAT, а съёмные диски могут составить пул.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/ru/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.7: сопряжение устройств кодом, действия Finder и настоящий путь через NAT: Varsto">
+<meta property="og:description" content="Устройства теперь сопрягаются из интерфейса одноразовым кодом, Finder может скачать заполнитель или освободить место правым щелчком, приложение macOS ставится из образа диска, устройства достают друг друга через NAT, а съёмные диски могут составить пул.">
+<meta property="og:url" content="https://varsto.net/ru/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.7: сопряжение устройств кодом, действия Finder и настоящий путь через NAT","description":"Устройства теперь сопрягаются из интерфейса одноразовым кодом, Finder может скачать заполнитель или освободить место правым щелчком, приложение macOS ставится из образа диска, устройства достают друг друга через NAT, а съёмные диски могут составить пул.","datePublished":"2026-10-09","url":"https://varsto.net/ru/blog/2026-10-09-alpha-7-pairing-and-finder.html","inLanguage":"ru","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../ru/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">К содержанию</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Альфа-версия, не для рабочих данных.</strong> Ошибки могут уничтожить данные, формат хранения может измениться без средства переноса, а шифрование ещё не проверяли. Храни собственные резервные копии и убедись, что из них можно восстановиться.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../ru/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Главное меню">
+      <a href="../../ru/features/">Возможности</a>
+      <a href="../../ru/how-it-works/">Как это устроено</a>
+      <a href="../../ru/compare/">Сравнение</a>
+      <a href="../../docs/">Документация (en)</a>
+      <a href="../../ru/blog/" aria-current="page">Блог</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Язык">RU</summary>
+        <nav class="pop-body langs" aria-label="Язык"><a href="../../blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="ru" lang="ru" aria-current="true">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../ru/downloads/">Скачать</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Меню"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Меню"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/compare/">Сравнение</a><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../docs/">Документация (en)</a><a href="../../ru/downloads/">Загрузки</a><a href="../../ru/blog/" aria-current="page">Блог</a><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.7: сопряжение устройств кодом, действия Finder и настоящий путь через NAT</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Alpha.7 в основном вышел из того, что альфу день гоняли на настоящих устройствах: телефон Samsung, Mac и тестовый бакет. Каждый раздел ниже начинался с того, что работало не так, как должно.</p>
+<h2 id="сопряги-устройство-кодом">Сопряги устройство кодом</h2>
+<p>Добавить устройство раньше значило скопировать ключ хранилища из 64 знаков и набрать настройки хранилища данных, до которого достают оба. Теперь устройство, на котором хранилище уже есть, показывает в разделе «Устройства» пункт <strong>«Добавить устройство»</strong>: код из девяти цифр, один раз и на десять минут. На новом устройстве выбираешь <strong>«Сопрячь с другим устройством»</strong>, вводишь код, имя и парольную фразу. Всё.</p>
+<p>Устройства находят друг друга в локальной сети и проводят SPAKE2 с ключом из этого кода (неверную догадку нельзя проверить вне сети, а три неверных кода закрывают предложение), подтверждают ключ в обе стороны, и только потом едет ключ хранилища, вместе с настройками хранилищ данных и их секретами, запечатанный общим ключом. Новое устройство входит через первое хранилище данных, до которого достаёт. Если в сети его не нашли, годится и адрес под кодом. То же самое есть в командной строке: <code>varsto pair offer</code> и <code>varsto pair join</code>.</p>
+<h2 id="finder-знает-о-заполнителях">Finder знает о заполнителях</h2>
+<p>На macOS правый щелчок по файлу даёт <strong>«Скачать через Varsto»</strong> или <strong>«Освободить место через Varsto»</strong>, а двойной щелчок по заполнителю скачивает файл и открывает его. Освободить место нельзя, пока каждый блок не лежит в хранилище данных <em>и</em> файл на диске не та версия, что была синхронизирована. До этого выпуска файл, правленый после последней синхронизации, мог смениться своим заполнителем. Загрузка macOS теперь — образ диска: открой его и перетащи Varsto в Applications.</p>
+<h2 id="устройства-достают-друг-друга-через-nat">Устройства достают друг друга через NAT</h2>
+<p>Передача между узлами раньше шла по локальной сети и через проброшенные порты. Теперь устройства узнают публичный адрес через STUN, пробивают NAT по QUIC с сертификатом, закреплённым за устройством, и если не вышло, ретранслируют через одно из твоих доступных устройств. Проверили между домашней сетью и облачной машиной за её собственным NAT, в обе стороны, и с закрытым UDP, чтобы остался только ретранслятор.</p>
+<h2 id="пулы-съёмных-дисков">Пулы съёмных дисков</h2>
+<p>Хранилищем данных может быть пул съёмных дисков. Varsto заполняет их по свободному месту, оставляя резерв, знает, на каком диске какой блок, просит подключить нужный диск, когда он понадобился, и считает диск не в сети копией на момент последней проверки.</p>
+<h2 id="мелочи">Мелочи</h2>
+<ul>
+<li>Правила хранения всех папок правятся одной таблицей на компьютере, и видны полное правило и его причины.</li>
+<li>На телефоне можно добавить файлы и вложенные папки, открыть файл в другом приложении или отдать его, и держать папку обычными файлами во внутренней памяти, а не в зашифрованном виде.</li>
+<li>В сведениях о файле сказано, есть ли он на этом устройстве и какие хранилища данных его держат.</li>
+<li>Окно подхватывает паузу или синхронизацию, начатую из строки меню.</li>
+<li>Присоединиться можно и 24 словами восстановления, и шестнадцатеричным ключом.</li>
+</ul>
+<h2 id="всё-ещё-альфа">Всё ещё альфа</h2>
+<p>Предупреждение на каждой странице в силе: криптографию не аудировали, формат ещё может измениться, и ошибка может уничтожить данные. Используй тестовые данные и храни свои резервные копии.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Шифрованная синхронизация и резервное копирование файлов на твоём хранилище.</p></div>
+    <div><h2>Продукт</h2><nav aria-label="Продукт"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../ru/downloads/">Загрузки</a></nav></div>
+    <div><h2>Изучить</h2><nav aria-label="Изучить"><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/compare/">Сравнение</a><a href="../../docs/">Документация (en)</a><a href="../../ru/blog/" aria-current="page">Блог</a></nav></div>
+    <div><h2>Сообщество</h2><nav aria-label="Сообщество"><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto — рабочее название. Исходный код: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, по лицензии PolyForm Shield License 1.0.0 (исходный код доступен).</span>
+    <span>Без cookie и без слежения. Веб-сервер хранит обычный журнал доступа не дольше семи дней.</span>
+    <span><a href="../../docs/security-policy.html">Политика безопасности</a> · <a href="../../docs/licence.html">Лицензия</a> · <a href="../../docs/trademark.html">Товарный знак</a> (на английском)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

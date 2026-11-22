@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.17: la bóveda se queda, los fallos silenciosos se van: Varsto</title>
+<meta name="description" content="Ni un formato de almacenamiento nuevo ni palabras nuevas que anotar. Alpha.17 es la versión que impide que una sincronización fallida borre archivos, conserva la última copia de seguridad y avisa a tu teléfono cuando algo va mal de verdad.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.17: la bóveda se queda, los fallos silenciosos se van: Varsto">
+<meta property="og:description" content="Ni un formato de almacenamiento nuevo ni palabras nuevas que anotar. Alpha.17 es la versión que impide que una sincronización fallida borre archivos, conserva la última copia de seguridad y avisa a tu teléfono cuando algo va mal de verdad.">
+<meta property="og:url" content="https://varsto.net/es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="es_ES">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.17: la bóveda se queda, los fallos silenciosos se van","description":"Ni un formato de almacenamiento nuevo ni palabras nuevas que anotar. Alpha.17 es la versión que impide que una sincronización fallida borre archivos, conserva la última copia de seguridad y avisa a tu teléfono cuando algo va mal de verdad.","datePublished":"2026-11-22","url":"https://varsto.net/es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html","inLanguage":"es","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../es/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Software alfa, no para datos de producción.</strong> Los errores pueden destruir datos, el formato de almacenamiento puede cambiar sin una herramienta de migración y el cifrado aún no se ha auditado. Conserva tus propias copias de seguridad y comprueba que puedes restaurar desde ellas.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../es/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menú principal">
+      <a href="../../es/features/">Funciones</a>
+      <a href="../../es/how-it-works/">Cómo funciona</a>
+      <a href="../../es/compare/">Comparación</a>
+      <a href="../../docs/">Documentación (en)</a>
+      <a href="../../es/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Idioma">ES</summary>
+        <nav class="pop-body langs" aria-label="Idioma"><a href="../../blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="es" lang="es" aria-current="true">Español</a><a href="../../ru/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../es/downloads/">Descargar</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menú"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menú"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/compare/">Comparación</a><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/screenshots/">Capturas</a><a href="../../docs/">Documentación (en)</a><a href="../../es/downloads/">Descargas</a><a href="../../es/blog/" aria-current="page">Blog</a><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.17: la bóveda se queda, los fallos silenciosos se van</h1><p class="note"><time datetime="2026-11-22">2026-11-22</time></p>
+<p>Puedes actualizar esta sin ceremonia. Alpha.17 abre una bóveda de alpha.16 tal como está. No hay un formato nuevo, ni un segundo conjunto de palabras, ni nada que crear de nuevo. Lo que cambia es la clase de error que antes ocurría mientras mirabas otra cosa.</p>
+<p>Una descarga que no llegaba a terminar podía publicar igualmente borrados de archivos que este dispositivo no había leído. La instantánea más reciente de una copia de seguridad podía envejecer y llevarse la única copia que se podía restaurar. El primer encuentro con otro dispositivo podía quedarse ahí un cuarto de hora, con aspecto de muerto. Para eso es esta versión. Sigue siendo una alfa, y sigue sin ser para datos que no te puedas permitir perder. La lista larga está en el registro de cambios. Abajo está lo que sí vas a notar.</p>
+<h2 id="tu-teléfono-se-entera">Tu teléfono se entera</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/notify-dark.webp?v=2609e89dc4"><img src="../../assets/img/blog/notify-dark.png?v=1065ff01c5" alt="Un portátil envía al teléfono un aviso de poco espacio sobre la carpeta Documentos. La bóveda en sí se queda en el ordenador." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/notify.webp?v=81bd4bf010"><img loading="lazy" src="../../assets/img/blog/notify.png?v=1f9ce40a85" alt="Un portátil envía al teléfono un aviso de poco espacio sobre la carpeta Documentos. La bóveda en sí se queda en el ordenador." width="640" height="320"></picture>
+</figure>
+
+<p>Un dispositivo puede avisar ahora a tu teléfono, por ntfy, Pushover o Telegram, cuando algo necesita a una persona. Añades un canal en Ajustes o con <code>varsto notify</code>. Cada servicio tiene una guía corta y un mensaje de prueba, y tú eliges qué puede decir. Los nombres de carpeta, de almacenamiento y de dispositivo pueden quedarse fuera del texto.</p>
+<p>Las alertas que importan están activas salvo que las apagues: un almacenamiento en apuros, un disco que se queda sin sitio, menos copias de las que pide una política de conservación, datos dañados, una copia de seguridad que falló o está fuera de plazo, una solicitud que te espera. Las copias de seguridad terminadas, los archivos nuevos y un resumen diario se quedan en silencio hasta que los pidas. Los tokens viven en el dispositivo, en <code>notify.json</code>, y no se sincronizan nunca. El propio mensaje no va cifrado de extremo a extremo al pasar por ntfy, Pushover o Telegram, y conviene saberlo antes de dejar que nombre una carpeta. Un envío que falla espera y se vuelve a intentar, también después de un reinicio. La misma alerta no se repite durante seis horas, y un canal recibe como mucho veinte mensajes por hora. Puedes configurarlo con la bóveda bloqueada.</p>
+<h2 id="una-descarga-que-ya-tiene-los-bytes">Una descarga que ya tiene los bytes</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/reuse-dark.webp?v=fdfe8e1f16"><img src="../../assets/img/blog/reuse-dark.png?v=344383fca7" alt="Los bloques de texto cifrado se quedan en el portátil. Un solo enlace lleva a una nube con candado únicamente los bloques que faltan." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/reuse.webp?v=8fd02a2d30"><img loading="lazy" src="../../assets/img/blog/reuse.png?v=9fbad43f82" alt="Los bloques de texto cifrado se quedan en el portátil. Un solo enlace lleva a una nube con candado únicamente los bloques que faltan." width="640" height="320"></picture>
+</figure>
+
+<p>Casi todo un archivo cambiado ya estaba aquí. Alpha.17 deja de volver a pedir esos bloques. Las partes que no cambiaron de un archivo cambiado salen de la versión anterior que hay en el disco. Un renombrado o un movimiento sale de la ruta antigua, o de la papelera si fue allí. Dos copias del mismo archivo piden cada bloque distinto una sola vez. Lo que se lee en local se comprueba contra el identificador de su fragmento, y un bloque que no coincide se pide al final de todos modos.</p>
+<p>La otra mitad es el dispositivo que acaba de escribir el archivo. Sirve a los demás, al momento, cada archivo que ya ha dejado en su sitio, no solo cuando ha terminado su propia sincronización, y las peticiones se reparten entre los pares que de verdad tienen los bloques.</p>
+<p>La primera vez que este dispositivo se encuentra con otro, antes de que ese otro haya leído este certificado, el camino se muestra como conectando y se vuelve a intentar al momento. Un rechazo posterior espera unos segundos y se muestra como inalcanzable. Un dispositivo que no ha respondido nunca ya no se gasta un minuto, y luego hasta quince, antes del primer intento de verdad. Mientras esa primera sincronización sigue en marcha, una carpeta que aún no tiene archivos se muestra como obteniendo. No es una carpeta vacía que ya haya terminado.</p>
+<p>Un par que respondía y luego falla descansa un segundo, y el descanso se duplica, en lugar de un minuto fijo. Un bloque que no tiene nadie más se le pide a ese par una vez más. Si el par se reinicia, la siguiente sincronización, un registro de par más nuevo o una baliza de la LAN acaban el descanso, en lugar de informar de que todos los archivos no están disponibles. Los dispositivos que simplemente ya no están descansan más tiempo, y se pregunta hasta a ocho a la vez, así que cuestan un tiempo de espera, no ocho.</p>
+<h2 id="lo-que-un-fallo-ya-no-tiene-permitido-hacer">Lo que un fallo ya no tiene permitido hacer</h2>
+<p>Una descarga que falla ya no publica borrados de archivos que este dispositivo no ha leído. Lo que añadiste o editaste aquí se sigue subiendo. La siguiente descarga trae las copias que los otros dispositivos aún tienen, antes de que un archivo que falta se pueda dar por desaparecido.</p>
+<p>Si la versión de otro dispositivo gana un conflicto, el archivo de aquí se aparta solo cuando el ganador ha llegado de verdad. Un ganador que no se podía obtener dejaba la ruta vacía, y la siguiente subida publicaba entonces un borrado. Un archivo que crece o encoge mientras el examen lo está leyendo espera al examen siguiente. No se publica con un tamaño que sus bloques no sostienen, cosa que hacía que todos los demás dispositivos rechazaran la lista entera de la carpeta.</p>
+<p>Los paquetes sin reclamar se borran a las 48 horas, o a las 24 cuando un almacenamiento local está por debajo del 10 % libre. Eran siete días. Una subida, una importación o una copia de seguridad cuyo registro de mapa no llegó a publicarse borra los paquetes que acaba de escribir, y lo mismo hace una reparación cuyo lote no se selló. Si el sello falla después de que el registro de mapa se publicó, los paquetes se quedan, porque la declaración ya está en el libro mayor. <code>varsto gc orphans</code> borra ahora los paquetes sin reclamar, si prefieres no esperar.</p>
+<p>El plazo de conservación de una copia de seguridad ya no se come la instantánea más reciente solo porque sea antigua. Un directorio de origen perdido, o un dispositivo que nunca tomó una más nueva, hacía caducar esa instantánea en su fecha y luego recogía sus bloques, y no quedaba nada que restaurar. Parar la copia de seguridad sigue dejando que caduque la última instantánea. Esa parte no cambia, y es la forma de decir que has terminado con ella.</p>
+<h2 id="relojes-nombres-y-una-clave-que-sobrevivió-al-dispositivo">Relojes, nombres y una clave que sobrevivió al dispositivo</h2>
+<p>Dos procesos en una misma máquina, la línea de comandos y el servicio en segundo plano, ya no pueden reservar el mismo valor de Lamport y entregarlo los dos. La reserva mantiene un bloqueo durante la lectura, el incremento y el reemplazo.</p>
+<p>Dos dispositivos que escriben el mismo número de época de la bóveda o de la carpeta ya no dejan de firmar hasta que una persona elige. El dispositivo que ve los dos registros se queda con el de mayor identificador de emisor. <code>varsto device resolve-epoch</code> y <code>varsto folder resolve-epoch</code> siguen sustituyendo esa elección cuando quieres otra.</p>
+<p>En un disco que ignora las mayúsculas, dos rutas que solo se diferencian en las mayúsculas o en la normalización Unicode reciben nombres locales distintos, llegue cual llegue primero. En un empate gana la grafía NFC. Después, la ruta original menor se queda el nombre llano, y la otra pasa a ser <code> (2)</code>.</p>
+<p>Quitar un dispositivo no cambia, por sí solo, la contraseña en el proveedor de almacenamiento. Lo que hace ahora es negarse a olvidarlo. <code>varsto status</code> y <code>varsto device list</code> nombran cada almacenamiento cuyas credenciales ese dispositivo aún podría usar para borrar texto cifrado. Cuando las hayas sustituido en el proveedor, <code>varsto storage mark-rotated &lt;name&gt;</code> quita el aviso. Varsto no rota el secreto por ti.</p>
+<h2 id="las-palabras-en-papel-y-las-claves-que-antes-estaban-en-un-archivo">Las palabras en papel, y las claves que antes estaban en un archivo</h2>
+<p><code>varsto recovery kit</code> imprime el kit del formato 3: las palabras de la bóveda y las palabras de recuperación. Antes imprimía el texto del formato 2, que te decía que las 24 palabras de la bóveda leían todo lo de la bóveda. En el formato 3 abren los nombres de los dispositivos, los nombres de las carpetas y el libro mayor del almacenamiento. El contenido necesita las palabras de recuperación. Una impresión hecha sin ellas lo dice ahora en mayúsculas, en lugar de parecer completa. <code>--shares</code> parte los dos conjuntos.</p>
+<p>Una solicitud de uso compartido y una solicitud de organización guardaban sus claves privadas en un archivo JSON en claro. Una copia del directorio del dispositivo, tomada mientras la solicitud esperaba, podía leerlas y, una vez que el propietario aprobaba, abrir la carpeta sin ninguna frase de contraseña. Las claves van ahora selladas bajo la frase de contraseña del dispositivo. Mostrar el código de solicitud la pide, y aceptar la solicitud la pide otra vez. Una solicitud que alpha.16 dejó en claro se sella la próxima vez que un comando la lee.</p>
+<p>Los registros reciben el mismo trato en la forma en que la depuración escribe un valor opcional. Una línea como <code>password: Some("…")</code> se cortaba en la comilla y dejaba el secreto en el resto de la línea. La frase de contraseña se registra en el filtro que tapa los secretos en cada camino de desbloqueo, incluido el servicio al volver del llavero. Antes, ese servicio podía estar días en marcha sin nada registrado.</p>
+<h2 id="una-pausa-que-significa-en-pausa">Una pausa que significa en pausa</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/pause-dark.webp?v=cc29350990"><img src="../../assets/img/blog/pause-dark.png?v=2fec0b10cb" alt="Un teléfono en pausa entre un portátil de casa y un NAS de la oficina. Los dos enlaces figuran como apagados." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/pause.webp?v=cbbeebe0b4"><img loading="lazy" src="../../assets/img/blog/pause.png?v=9a1a85134c" alt="Un teléfono en pausa entre un portátil de casa y un NAS de la oficina. Los dos enlaces figuran como apagados." width="640" height="320"></picture>
+</figure>
+
+<p>Pausar el servicio en segundo plano paraba la sincronización y dejaba al resto del dispositivo hablando. El oyente, la baliza de la LAN, el rendezvous, el relé y la asignación de puertos del router se paran ahora con él, y siguen parados hasta que reanudas. Una pausa que pones tú sobrevive a un reinicio, y eso importa en un teléfono que para y arranca el servicio todo el día. La pausa corta que <code>varsto disk</code> o una importación se toman para sí no se guarda. Esa acaba cuando acaba el comando.</p>
+<p>Las miniaturas de la lista de archivos vuelven a verse en los teléfonos. Cuando el motor estaba ocupado, el servicio respondía que no había miniatura, y la página se lo creía. Ahora responde que está ocupado, y la página lo vuelve a intentar.</p>
+<p>La política por defecto ya no da una carpeta por incumplida en una bóveda que no tiene grupo de discos ni almacenamiento de directorio. Hay un solo aviso: que no hay nada en un disco tuyo, y cómo añadir uno. Una política que pusiste a propósito, y que de verdad pide una copia en casa, se sigue exigiendo. La misma distinción vale cuando una importación decide si se puede quitar su origen, así que una carpeta de esa bóveda ya no espera para siempre una copia en un disco que no tienes.</p>
+<p>Un comando y el servicio en segundo plano toman el mismo bloqueo para obtener, liberar, escribir y mover un archivo, así que ya no se deshacen el estado de carpeta el uno al otro. Una descarga o una escritura que falla ya no deja un archivo <code>.varsto-tmp-…</code> o <code>.varsto-upload-…</code> con parte del contenido. Los archivos que llegan de otro dispositivo conservan la hora de modificación que anotó quien los escribió, en lugar de quedar marcados con el momento en que se descargaron. Las herramientas que se fían de la fecha, una compilación, una fototeca, otra copia de seguridad, dejan de ver como nuevo cada archivo descargado.</p>
+<h2 id="un-dispositivo-quitado-sigue-quitado">Un dispositivo quitado sigue quitado</h2>
+<p>Los registros de carpeta, las concesiones y el depósito de un dispositivo quitado cuentan solo hasta el primer número de secuencia que dejó vacío. No puede volver más tarde y llenar ese hueco con un registro antedatado. Un miembro de otra bóveda aplica una retirada que lee en la época de la carpeta. Una carpeta a la que quien quitó el dispositivo no pudo cambiar la clave se vuelve a cifrar con clave nueva en la siguiente sincronización de un propietario que aún tiene la clave. Lo que el dispositivo quitado ya tiene en su propio disco, lo conserva. Eso siempre fue verdad, y lo sigue siendo.</p>
+<p>Unirse lee el manifiesto de la organización y toma las épocas de la bóveda y las revocaciones solo de sus administradores. Una revocación escrita por un miembro ordinario de la lista ya no abre la bóveda para un dispositivo que se está uniendo.</p>
+<p>La línea del registro de actividad que dice que este dispositivo no tiene ninguna clave tiene el mismo botón que la fila de la carpeta, así que un teléfono puede pedir acceso desde esa línea en lugar de buscar la carpeta. El espejo de restic, y las carpetas acopladas debajo, se crean de modo que solo este usuario pueda leerlos.</p>
+<h2 id="el-nombre-del-icono">El nombre del icono</h2>
+<p>Los identificadores de la aplicación son ahora <code>net.varsto.app</code> en Android y en macOS, <code>net.varsto.app.ios</code> en iOS, y <code>net.varsto.app.alpha</code> para la compilación de macOS sin firmar. Una aplicación que ya está instalada conserva su identificador anterior, y su bóveda no se mueve, hasta que la instales de nuevo. Instalar el paquete nuevo al lado del antiguo no lo sustituye.</p>
+<h2 id="si-estás-en-alpha16">Si estás en alpha.16</h2>
+<p>Actualiza cuando quieras. Las dos versiones pueden compartir una bóveda mientras lo haces. Nada en esta publicación te pide que hagas un reset, que imprimas un kit nuevo ni que desinstales una compilación de Android que ya sea la firmada para la publicación de alpha.16. Si una solicitud de uso compartido o una de organización sigue en un archivo en claro de alpha.16, el siguiente comando que la lea la sella. Esto sigue siendo una alfa.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Sincronización y copia de seguridad de archivos cifradas en tu propio almacenamiento.</p></div>
+    <div><h2>Producto</h2><nav aria-label="Producto"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/screenshots/">Capturas</a><a href="../../es/downloads/">Descargas</a></nav></div>
+    <div><h2>Aprender</h2><nav aria-label="Aprender"><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/compare/">Comparación</a><a href="../../docs/">Documentación (en)</a><a href="../../es/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Comunidad</h2><nav aria-label="Comunidad"><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto es un nombre provisional. Código fuente: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, bajo la PolyForm Shield License 1.0.0 (código fuente disponible).</span>
+    <span>Sin cookies, sin seguimiento. El servidor web conserva un registro de acceso ordinario como máximo siete días.</span>
+    <span><a href="../../docs/security-policy.html">Política de seguridad</a> · <a href="../../docs/licence.html">Licencia</a> · <a href="../../docs/trademark.html">Marca</a> (en inglés)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

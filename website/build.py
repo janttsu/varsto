@@ -175,31 +175,32 @@ def version_images(body: str) -> str:
 
 
 # Website languages: English at the root, the others under /<lang>/ with
-# pages translated in website/src/i18n/<lang>/pages/. Docs, blog and forum
-# stay English (internal documentation is English only).
+# pages translated in website/src/i18n/<lang>/pages/. Blog posts are translated
+# in website/src/i18n/<lang>/posts/ (same file names as website/src/posts/).
+# Docs and the forum stay English.
 LANGS = [("en", "English"), ("fi", "Suomi"), ("sv", "Svenska"), ("fr", "Français"),
          ("de", "Deutsch"), ("es", "Español"), ("ru", "Русский")]
 NAV_I18N = {
     "fi": {"Project": "Projekti", "Features": "Ominaisuudet", "Use cases": "Käyttötapaukset", "Compare": "Vertailu",
            "How it works": "Miten se toimii", "Screenshots": "Kuvakaappaukset", "Docs": "Dokumentaatio (en)",
-           "Downloads": "Lataukset", "Blog": "Blogi (en)", "Forum": "Foorumi (en)", "Contribute": "Osallistu", "GitHub": "GitHub"},
+           "Downloads": "Lataukset", "Blog": "Blogi", "Forum": "Foorumi (en)", "Contribute": "Osallistu", "GitHub": "GitHub"},
     "sv": {"Project": "Projekt", "Features": "Funktioner", "Use cases": "Användningsfall", "Compare": "Jämförelse",
            "How it works": "Så fungerar det", "Screenshots": "Skärmbilder", "Docs": "Dokumentation (en)",
-           "Downloads": "Nedladdningar", "Blog": "Blogg (en)", "Forum": "Forum (en)", "Contribute": "Bidra", "GitHub": "GitHub"},
+           "Downloads": "Nedladdningar", "Blog": "Blogg", "Forum": "Forum (en)", "Contribute": "Bidra", "GitHub": "GitHub"},
     "fr": {"Project": "Projet", "Features": "Fonctionnalités", "Use cases": "Cas d'usage", "Compare": "Comparaison",
            "How it works": "Fonctionnement", "Screenshots": "Captures d'écran", "Docs": "Documentation (en)",
-           "Downloads": "Téléchargements", "Blog": "Blog (en)", "Forum": "Forum (en)", "Contribute": "Contribuer", "GitHub": "GitHub"},
+           "Downloads": "Téléchargements", "Blog": "Blog", "Forum": "Forum (en)", "Contribute": "Contribuer", "GitHub": "GitHub"},
     "de": {"Project": "Projekt", "Features": "Funktionen", "Use cases": "Anwendungsfälle", "Compare": "Vergleich",
            "How it works": "So funktioniert es", "Screenshots": "Bildschirmfotos", "Docs": "Dokumentation (en)",
-           "Downloads": "Downloads", "Blog": "Blog (en)", "Forum": "Forum (en)", "Contribute": "Mitwirken", "GitHub": "GitHub"},
+           "Downloads": "Downloads", "Blog": "Blog", "Forum": "Forum (en)", "Contribute": "Mitwirken", "GitHub": "GitHub"},
     "es": {"Project": "Proyecto", "Features": "Funciones", "Use cases": "Casos de uso", "Compare": "Comparación",
            "How it works": "Cómo funciona", "Screenshots": "Capturas", "Docs": "Documentación (en)",
-           "Downloads": "Descargas", "Blog": "Blog (en)", "Forum": "Foro (en)", "Contribute": "Contribuir", "GitHub": "GitHub"},
+           "Downloads": "Descargas", "Blog": "Blog", "Forum": "Foro (en)", "Contribute": "Contribuir", "GitHub": "GitHub"},
     "ru": {"Project": "Проект", "Features": "Возможности", "Use cases": "Сценарии", "Compare": "Сравнение",
            "How it works": "Как это устроено", "Screenshots": "Снимки экрана", "Docs": "Документация (en)",
-           "Downloads": "Загрузки", "Blog": "Блог (en)", "Forum": "Форум (en)", "Contribute": "Участие", "GitHub": "GitHub"},
+           "Downloads": "Загрузки", "Blog": "Блог", "Forum": "Форум (en)", "Contribute": "Участие", "GitHub": "GitHub"},
 }
-ENGLISH_ONLY = ("docs/", "blog/", "forum/")
+ENGLISH_ONLY = ("docs/", "forum/")
 ALPHA_I18N = {
     "fi": "<strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.",
     "sv": "<strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.",
@@ -391,7 +392,7 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
 {robots_meta}<meta name="color-scheme" content="light dark">
 <link rel="icon" href="{p}favicon.svg" type="image/svg+xml">
 {social}{alternates_html}
-{extra_head}<link rel="alternate" type="application/rss+xml" title="{BRAND} blog" href="{p}blog/feed.xml">
+{extra_head}<link rel="alternate" type="application/rss+xml" title="{BRAND} blog" href="{nav_href('blog/feed.xml')}">
 <link rel="stylesheet" href="{p}assets/css/site.css?v={asset_version("assets/css/site.css")}">
 <script src="{p}assets/js/theme.js?v={asset_version("assets/js/theme.js")}"></script>
 </head>
@@ -403,7 +404,7 @@ def page(title: str, description: str, body: str, nav: str, depth: int, lang: st
 <header class="site">
   <div class="wrap">
     <a class="brand" href="{home_href}"><img src="{p}assets/img/logo.svg" alt="" width="26" height="26"><span>{BRAND}</span></a>
-    <a class="ver" href="{p}blog/" title="{RELEASED_VERSION}">{short_version}</a>
+    <a class="ver" href="{nav_href('blog/')}" title="{RELEASED_VERSION}">{short_version}</a>
     <nav class="main" aria-label="{ui["Main"]}">
 {nav_html}
     </nav>
@@ -702,6 +703,11 @@ _TRANSLATED: dict[str, set[str]] = {}
 
 def translated(lang: str, rel: str) -> bool:
     """Whether page `rel` (relative to the language root) has a translation."""
+    if rel.startswith("blog/") and rel.endswith(".html"):
+        posts = SRC / "i18n" / lang / "posts"
+        if rel == "blog/index.html":
+            return any(posts.glob("*.md"))
+        return (posts / (rel.removeprefix("blog/").removesuffix(".html") + ".md")).is_file()
     if lang not in _TRANSLATED:
         outs = set()
         for src in (SRC / "i18n" / lang / "pages").glob("*.html"):
@@ -919,7 +925,7 @@ def daily_blocks(lang: str, depth: int) -> dict[str, str]:
 
 def fill(body: str, depth: int, lang: str = "en") -> str:
     """The placeholders every page body may use."""
-    body = body.replace("{{DOWNLOADS}}", downloads_table(depth, lang)).replace("{{DOWNLOADS_GROUPED}}", downloads_table(depth, lang, grouped=True)).replace("{{POSTS}}", posts_list(depth))
+    body = body.replace("{{DOWNLOADS}}", downloads_table(depth, lang)).replace("{{DOWNLOADS_GROUPED}}", downloads_table(depth, lang, grouped=True)).replace("{{POSTS}}", posts_list(depth, lang))
     if "{{DAILY_" in body:
         for key, value in daily_blocks(lang, depth).items():
             body = body.replace("{{DAILY_" + key + "}}", value)
@@ -986,43 +992,97 @@ def build_docs() -> dict[str, str]:
     return slug_by_name
 
 
-def load_posts() -> list[dict]:
+# Chrome of a translated blog index. The English index is website/src/pages/blog.html.
+BLOG_CHROME = {
+    "fi": {"h1": "Blogi", "lead": "Julkaisutiedot, tietoturvamuistiinpanot ja tekniset kirjoitukset.", "rss": "RSS-syöte",
+           "feed_title": "Varston blogi", "feed_desc": "Julkaisutiedot ja tekniset kirjoitukset"},
+    "sv": {"h1": "Blogg", "lead": "Versionsanteckningar, säkerhetsanteckningar och tekniska artiklar.", "rss": "RSS-flöde",
+           "feed_title": "Varstos blogg", "feed_desc": "Versionsanteckningar och tekniska artiklar"},
+    "fr": {"h1": "Blog", "lead": "Notes de version, notes de sécurité et articles techniques.", "rss": "Flux RSS",
+           "feed_title": "Blog Varsto", "feed_desc": "Notes de version et articles techniques"},
+    "de": {"h1": "Blog", "lead": "Versionshinweise, Sicherheitshinweise und technische Artikel.", "rss": "RSS-Feed",
+           "feed_title": "Varsto-Blog", "feed_desc": "Versionshinweise und technische Artikel"},
+    "es": {"h1": "Blog", "lead": "Notas de versión, notas de seguridad y artículos técnicos.", "rss": "Canal RSS",
+           "feed_title": "Blog de Varsto", "feed_desc": "Notas de versión y artículos técnicos"},
+    "ru": {"h1": "Блог", "lead": "Заметки о выпусках, заметки о безопасности и технические статьи.", "rss": "RSS-лента",
+           "feed_title": "Блог Varsto", "feed_desc": "Заметки о выпусках и технические статьи"},
+}
+
+
+def blog_href(depth: int, lang: str, name: str) -> str:
+    """Address of a blog file from a page at `depth`, inside that language."""
+    up = depth if lang == "en" else max(depth - 1, 0)
+    return "../" * up + "blog/" + name
+
+
+def load_posts(lang: str = "en") -> list[dict]:
+    directory = SRC / "posts" if lang == "en" else SRC / "i18n" / lang / "posts"
+    if not directory.is_dir():
+        return []
     posts = []
-    for src in sorted((SRC / "posts").glob("*.md"), reverse=True):
+    for src in sorted(directory.glob("*.md"), reverse=True):
         meta, body = front_matter(src.read_text())
         posts.append({"slug": src.stem, "title": meta["title"], "date": meta["date"], "summary": meta.get("summary", ""), "body": body})
     return posts
 
 
-def posts_list(depth: int) -> str:
+def posts_list(depth: int, lang: str = "en") -> str:
+    posts = load_posts(lang)
     items = []
-    for post in load_posts():
+    for post in posts:
         items.append(
-            f'<li><time datetime="{post["date"]}">{post["date"]}</time> <a href="{"../" * depth}blog/{post["slug"]}.html">{html.escape(post["title"])}</a><br><span class="note">{html.escape(post["summary"])}</span></li>'
+            f'<li><time datetime="{post["date"]}">{post["date"]}</time> <a href="{blog_href(depth, lang, post["slug"] + ".html")}">{html.escape(post["title"])}</a><br><span class="note">{html.escape(post["summary"])}</span></li>'
         )
     return '<ul class="posts">' + "\n".join(items) + "</ul>" if items else '<p class="note">No posts yet.</p>'
 
 
 def build_blog(slug_by_name: dict[str, str]) -> None:
-    posts = load_posts()
-    (OUT / "blog").mkdir(parents=True, exist_ok=True)
-    for post in posts:
-        body = rewrite_links(pandoc(post["body"]), slug_by_name, "../docs/")
-        body = f'<article class="prose"><h1>{html.escape(post["title"])}</h1><p class="note"><time datetime="{post["date"]}">{post["date"]}</time></p>\n{body}\n</article>'
-        (OUT / "blog" / f'{post["slug"]}.html').write_text(page(post["title"], post["summary"], body, "Blog", 1, rel=f'blog/{post["slug"]}.html',
-                 extra_head=json_ld({"@context": "https://schema.org", "@type": "BlogPosting", "headline": post["title"],
+    for lang, _label in LANGS:
+        posts = load_posts(lang)
+        if not posts:
+            continue
+        depth = 1 if lang == "en" else 2
+        out = OUT / "blog" if lang == "en" else OUT / lang / "blog"
+        out.mkdir(parents=True, exist_ok=True)
+        root = "" if lang == "en" else lang + "/"
+        for post in posts:
+            body = rewrite_links(pandoc(post["body"]), slug_by_name, "../" * depth + "docs/")
+            if depth != 1:
+                body = body.replace("../assets/", "../" * depth + "assets/")
+            if lang != "en":
+                body = body.replace("https://varsto.net/blog/", f"https://varsto.net/{lang}/blog/")
+                body = body.replace("https://varsto.net/downloads/", f"https://varsto.net/{lang}/downloads/")
+            body = f'<article class="prose"><h1>{html.escape(post["title"])}</h1><p class="note"><time datetime="{post["date"]}">{post["date"]}</time></p>\n{body}\n</article>'
+            url = f"{SITE_URL}/{root}blog/{post['slug']}.html"
+            (out / f'{post["slug"]}.html').write_text(page(
+                post["title"], post["summary"], body, "Blog", depth, lang, rel=f'blog/{post["slug"]}.html',
+                extra_head=json_ld({"@context": "https://schema.org", "@type": "BlogPosting", "headline": post["title"],
                                      "description": post["summary"], "datePublished": post["date"],
-                                     "url": f'{SITE_URL}/blog/{post["slug"]}.html', "inLanguage": "en",
+                                     "url": url, "inLanguage": lang,
                                      "author": {"@type": "Organization", "name": f"The {BRAND} Authors"},
                                      "image": f"{SITE_URL}/assets/img/og-card.png"})))
-    items = "\n".join(
-        f"  <item><title>{html.escape(p['title'])}</title><link>{SITE_URL}/blog/{p['slug']}.html</link>"
-        f"<guid>{SITE_URL}/blog/{p['slug']}.html</guid><pubDate>{datetime.strptime(p['date'], '%Y-%m-%d').strftime('%a, %d %b %Y 00:00:00 +0000')}</pubDate>"
-        f"<description>{html.escape(p['summary'])}</description></item>"
-        for p in posts
-    )
-    feed = f'<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel><title>{BRAND} blog</title><link>{SITE_URL}/blog/</link><description>Release notes and technical articles</description>\n{items}\n</channel></rss>\n'
-    (OUT / "blog" / "feed.xml").write_text(feed)
+        if lang != "en":
+            chrome = BLOG_CHROME[lang]
+            index = (
+                f'    <h1>{chrome["h1"]}</h1>\n'
+                f'    <p class="lead">{chrome["lead"]} <a href="feed.xml">{chrome["rss"]}</a>.</p>\n'
+                f'    {posts_list(depth, lang)}'
+            )
+            (out / "index.html").write_text(page(chrome["h1"], chrome["feed_desc"], index, "Blog", depth, lang, rel="blog/index.html"))
+        chrome = BLOG_CHROME.get(lang, {"feed_title": f"{BRAND} blog", "feed_desc": "Release notes and technical articles"})
+        items = "\n".join(
+            f"  <item><title>{html.escape(p['title'])}</title><link>{SITE_URL}/{root}blog/{p['slug']}.html</link>"
+            f"<guid>{SITE_URL}/{root}blog/{p['slug']}.html</guid><pubDate>{datetime.strptime(p['date'], '%Y-%m-%d').strftime('%a, %d %b %Y 00:00:00 +0000')}</pubDate>"
+            f"<description>{html.escape(p['summary'])}</description></item>"
+            for p in posts
+        )
+        feed = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<rss version="2.0"><channel><title>{html.escape(chrome["feed_title"])}</title>'
+            f'<link>{SITE_URL}/{root}blog/</link><language>{lang}</language>'
+            f'<description>{html.escape(chrome["feed_desc"])}</description>\n{items}\n</channel></rss>\n'
+        )
+        (out / "feed.xml").write_text(feed)
 
 
 def build_404() -> None:

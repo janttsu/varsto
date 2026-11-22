@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.9: data där du vill ha den, reparation av sig själv, signerade uppdateringar, och varje plattform byggd öppet: Varsto</title>
+<meta name="description" content="Mappar kan placeras på valda lagringsplatser och flyttas mellan dem, förlorade kopior repareras automatiskt, uppdateringar signeras med en nyckel som är offline, peer-to-peer-nedladdningar hämtar många block samtidigt, och varje paket byggs, testas och fotograferas nu på GitHubs runners.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.9: data där du vill ha den, reparation av sig själv, signerade uppdateringar, och varje plattform byggd öppet: Varsto">
+<meta property="og:description" content="Mappar kan placeras på valda lagringsplatser och flyttas mellan dem, förlorade kopior repareras automatiskt, uppdateringar signeras med en nyckel som är offline, peer-to-peer-nedladdningar hämtar många block samtidigt, och varje paket byggs, testas och fotograferas nu på GitHubs runners.">
+<meta property="og:url" content="https://varsto.net/sv/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.9: data där du vill ha den, reparation av sig själv, signerade uppdateringar, och varje plattform byggd öppet","description":"Mappar kan placeras på valda lagringsplatser och flyttas mellan dem, förlorade kopior repareras automatiskt, uppdateringar signeras med en nyckel som är offline, peer-to-peer-nedladdningar hämtar många block samtidigt, och varje paket byggs, testas och fotograferas nu på GitHubs runners.","datePublished":"2026-10-10","url":"https://varsto.net/sv/blog/2026-10-10-alpha-9-placement-repair-signed.html","inLanguage":"sv","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../sv/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../sv/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Huvudmeny">
+      <a href="../../sv/features/">Funktioner</a>
+      <a href="../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../sv/compare/">Jämförelse</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../sv/blog/" aria-current="page">Blogg</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Språk">SV</summary>
+        <nav class="pop-body langs" aria-label="Språk"><a href="../../blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="sv" lang="sv" aria-current="true">Svenska</a><a href="../../fr/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../sv/downloads/">Ladda ner</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Meny"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Meny"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/compare/">Jämförelse</a><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/downloads/">Nedladdningar</a><a href="../../sv/blog/" aria-current="page">Blogg</a><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.9: data där du vill ha den, reparation av sig själv, signerade uppdateringar, och varje plattform byggd öppet</h1><p class="note"><time datetime="2026-10-10">2026-10-10</time></p>
+<p>Alpha.9 (ett bygge som aldrig taggades för sig; dess ändringar kom med i alpha.10) handlar om det långa loppet: att bestämma var data ska bo, att få tillbaka den till de kopior din regel kräver utan att bli tillsagd, och att lita på uppdateringen som kommer med nästa version.</p>
+<h2 id="data-där-du-vill-ha-den">Data där du vill ha den</h2>
+<p>Varje mapp kan nu ha en placering: de lagringsplatser dess block ska till. Data kan flyttas från en lagringsplats till en annan (en hel mapp, eller bara filer som varit inaktiva ett antal dagar), block för block, varje block skrivet och läst tillbaka på den nya lagringsplatsen innan den gamla kopian raderas, och en avbruten flytt fortsätter helt enkelt när den körs igen. En pool av flyttbara diskar kan be om kopior på diskar som förvaras på olika platser, till exempel en hemma och en på jobbet, och Varsto fyller varje disk med det dess plats fortfarande saknar.</p>
+<h2 id="reparation-av-sig-själv">Reparation av sig själv</h2>
+<p>När en kopia försvinner, en lagringsplats tas bort eller en verifiering misslyckas lägger enheten som har datan tillbaka blocket dit mappens regel och placering vill ha det, från sina egna filer, cachen med krypterade block, en annan lagringsplats eller en peer. Reparationskön syns i gränssnittet och med <code>varsto repair</code>.</p>
+<h2 id="signerade-uppdateringar">Signerade uppdateringar</h2>
+<p>Varje releases kontrollsummelista signeras nu med projektets releasenyckel, som aldrig lämnar underhållarens maskin, och uppdateraren vägrar en release som inte är signerad med den. Den jämför också kontrollsumman med den som hör till GitHub-releasen, en andra kanal. <code>varsto verify-release</code> kontrollerar en nedladdning för hand, och det gör <code>minisign</code> också. <a href="https://github.com/janttsu/varsto/blob/main/RELEASING.md">RELEASING.md</a> förklarar upplägget.</p>
+<h2 id="snabbare-peer-to-peer">Snabbare peer-to-peer</h2>
+<p>Nedladdningar håller upp till åtta block i gång (då), hämtar små filer i förväg genom en mapp och delar en anslutning per peer; en enhet som serverar block startar inte längre en full synk av sig själv med några sekunders mellanrum. <a href="../../docs/./">Prestandamätningarna</a> jämför Paris, Amsterdam och Warszawa, peer-to-peer mot en S3-bucket.</p>
+<h2 id="byggt-öppet">Byggt öppet</h2>
+<p>Varje plattform byggs och testas nu på GitHubs runners vid varje ändring: Linux- och Windows-paketen (Windows-paketet testat på Windows Server 2025, inklusive menyposterna i Utforskaren), Android-appen i emulatorn, macOS-diskavbildningen och iOS-appen på Apple Silicon. Samma körningar tar <a href="../../docs/./">skärmbilderna</a>, så bilderna på den här webbplatsen följer det nyaste bygget.</p>
+<h2 id="och-mer">Och mer</h2>
+<p>Delning registrerar vem som bad om åtkomst via fingeravtryck, att ta bort en medlem flyttar delningen till nya nycklar, och ett Strongroom kan nycklas om; filer kan laddas ner eller frigöras från filhanteraren på Linux (Nautilus, Dolphin, Nemo) och Windows (Utforskaren); mapprader behåller sina två huvudknappar och lägger resten i en meny; macOS-appen och telefonapparna säger när en nyare version väntar på nedladdningssidan i stället för att kalla sig själva uppdaterade; och stora liggarbatcher misslyckas inte längre på S3.</p>
+<h2 id="uppdatera-varje-enhet-innan-du-flyttar-data">Uppdatera varje enhet innan du flyttar data</h2>
+<p>Att flytta data skriver en ny sorts liggarpost som alpha.8 och tidigare inte kan läsa: deras synkar skulle misslyckas från den första flytten. Uppdatera alla dina enheter först. Från den här versionen hoppas okända poster över, så senare tillägg slår inte sönder den. Klienter till och med alpha.8 kontrollerar bara kontrollsumman när de uppdaterar; den här versionen är den första vars uppdaterare kräver signaturen.</p>
+<h2 id="fortfarande-alfa">Fortfarande alfa</h2>
+<p>Kryptografin har inte granskats, formatet kan fortfarande ändras, och en bugg kan förstöra data. Använd testdata och behåll egna säkerhetskopior.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Krypterad filsynkronisering och säkerhetskopiering till din egen lagring.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../sv/downloads/">Nedladdningar</a></nav></div>
+    <div><h2>Lär dig</h2><nav aria-label="Lär dig"><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/compare/">Jämförelse</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/blog/" aria-current="page">Blogg</a></nav></div>
+    <div><h2>Gemenskap</h2><nav aria-label="Gemenskap"><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../docs/licence.html">Licens</a> · <a href="../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

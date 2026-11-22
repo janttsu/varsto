@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.16: Speicherformat 3, Ordnerzugriff nach Genehmigung und ein Rendezvous-Dienst: Varsto</title>
+<meta name="description" content="Ein neues Speicherformat mit einem Hauptbuch auf Paketebene, signierten Datensätzen und Wiederherstellungswörtern, sodass vorhandene Tresore neu angelegt werden müssen; Ordner werden einem Gerät durch die Genehmigung eines Eigentümers geöffnet; Geräte finden einander über einen optionalen Rendezvous-Dienst; Beitritt und Mitgliedschaftsänderungen funktionieren offline; und Importe aus Torrents und YouTube.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.16: Speicherformat 3, Ordnerzugriff nach Genehmigung und ein Rendezvous-Dienst: Varsto">
+<meta property="og:description" content="Ein neues Speicherformat mit einem Hauptbuch auf Paketebene, signierten Datensätzen und Wiederherstellungswörtern, sodass vorhandene Tresore neu angelegt werden müssen; Ordner werden einem Gerät durch die Genehmigung eines Eigentümers geöffnet; Geräte finden einander über einen optionalen Rendezvous-Dienst; Beitritt und Mitgliedschaftsänderungen funktionieren offline; und Importe aus Torrents und YouTube.">
+<meta property="og:url" content="https://varsto.net/de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="de_DE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.16: Speicherformat 3, Ordnerzugriff nach Genehmigung und ein Rendezvous-Dienst","description":"Ein neues Speicherformat mit einem Hauptbuch auf Paketebene, signierten Datensätzen und Wiederherstellungswörtern, sodass vorhandene Tresore neu angelegt werden müssen; Ordner werden einem Gerät durch die Genehmigung eines Eigentümers geöffnet; Geräte finden einander über einen optionalen Rendezvous-Dienst; Beitritt und Mitgliedschaftsänderungen funktionieren offline; und Importe aus Torrents und YouTube.","datePublished":"2026-11-04","url":"https://varsto.net/de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html","inLanguage":"de","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../de/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-Software, nicht für Produktionsdaten.</strong> Fehler können Daten zerstören, das Speicherformat kann sich ohne Migrationswerkzeug ändern, und die Verschlüsselung ist noch nicht geprüft. Behalte eigene Sicherungskopien und prüfe, dass du daraus wiederherstellen kannst.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../de/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Hauptmenü">
+      <a href="../../de/features/">Funktionen</a>
+      <a href="../../de/how-it-works/">So funktioniert es</a>
+      <a href="../../de/compare/">Vergleich</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../de/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Sprache">DE</summary>
+        <nav class="pop-body langs" aria-label="Sprache"><a href="../../blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="de" lang="de" aria-current="true">Deutsch</a><a href="../../es/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../de/downloads/">Herunterladen</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menü"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menü"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/compare/">Vergleich</a><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../docs/">Dokumentation (en)</a><a href="../../de/downloads/">Downloads</a><a href="../../de/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.16: Speicherformat 3, Ordnerzugriff nach Genehmigung und ein Rendezvous-Dienst</h1><p class="note"><time datetime="2026-11-04">2026-11-04</time></p>
+<p>Die aktuelle Version ist <a href="https://varsto.net/de/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. Diese Notiz beschreibt eine ältere Version. Die <a href="https://varsto.net/de/downloads/">Downloads</a> stellen alpha.17 bereit, und der Quelltext liegt auf <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
+<p>Alpha.16 ändert das Speicherformat noch einmal. Das ist die Hauptsache vor dem Aktualisieren: Tresore, die alpha.15 oder früher angelegt hat, lassen sich mit dieser Version nicht öffnen und müssen neu angelegt werden. Der Rest der Version ist eine lange Liste von Änderungen daran, wie Geräte beitreten, einander finden und mit einem schlechten Netz zurechtkommen, eine neue Seite Import, und ein großer Satz Korrekturen und Härtung aus einer Prüfung des neuen Formats.</p>
+<h2 id="einen-tresor-neu-anlegen">Einen Tresor neu anlegen</h2>
+<p>Es gibt keine Migration. Alpha.16 lehnt einen älteren Tresor ab, wenn es ihn öffnet oder wenn ein Gerät über seinen Speicher beitritt, und die Meldung sagt, was zu tun ist. Alpha.15 lehnt einen Tresor im Format 3 genauso ab, sodass die beiden Versionen einen Tresor in keiner Richtung teilen können. Jedes Gerät eines Tresors muss alpha.16 ausführen. Lass deine Dateien, wo sie sind, und dann:</p>
+<ol type="1">
+<li>Behalte die Programmdatei von alpha.15, falls du den alten Tresor noch lesen musst.</li>
+<li><code>varsto reset --yes</code> auf dem Gerät, dann <code>varsto init</code>. Es druckt einen Satz mit zwei Wortgruppen: die Tresorwörter und, neu in Format 3, die Wiederherstellungswörter. Bewahre beide auf.</li>
+<li>Füge die Speicher wieder hinzu, füge die Ordner hinzu (hier werden die Wiederherstellungswörter verlangt) und synchronisiere.</li>
+</ol>
+<h2 id="android-die-alte-apk-zuerst-deinstallieren">Android: die alte APK zuerst deinstallieren</h2>
+<p>Das Android-Paket ist jetzt eine release-signierte APK (<code>varsto-&lt;version&gt;-android.apk</code>), kein Debug-Build, sodass eine spätere Version sich als Aktualisierung darüberlegt. Sie ist mit einem neuen Schlüssel signiert. Eine Installation einer früheren Debug-APK (alpha.15 oder ein älterer täglicher Build) lässt sich nicht darauf aktualisieren: Android lehnt die Aktualisierung ab. Deinstalliere zuerst die alte App und installiere dann die neue. Das Deinstallieren entfernt die Tresorkopie dieses Geräts, also sorge vorher dafür, dass der Tresor ein anderes Gerät oder einen Speicher hat. Der tägliche Android-Download bleibt ein Debug-Build unter dem Namen <code>varsto-daily-android-debug.apk</code>.</p>
+<h2 id="speicherformat-3">Speicherformat 3</h2>
+<p>Format 3 ist in Abschnitt 77 der Spezifikation und im Entwurfsdokument zu Format 3 beschrieben. Was es für dich ändert:</p>
+<ul>
+<li>Das Hauptbuch listet nicht mehr jeden Block. Es behauptet Pakete weniger fester Größen (256 KiB bis 64 MiB, aufgefüllt), sodass ein Speicher Größenklassen sieht und nicht, wie viele Blöcke oder Dateien es gibt.</li>
+<li>Jedes veröffentlichte Objekt außer einem Paket ist ein signierter Datensatz, der den Schlüssel nennt, mit dem er versiegelt ist. Manifeste, Papierkorb-Listen und Schnappschüsse sind eine Basis plus kleine Deltas, und jeder Ordner hält eine signierte Blockkarte je schreibendem Gerät.</li>
+<li>Ein Ordnerschlüssel erreicht ein Gerät nur als Gewährung, die ein Eigentümer genehmigt hat. Ein Gerät, das mit den Tresorwörtern beitritt, sieht Ordnernamen und hält keinen Inhalt; es fragt mit <code>varsto folder request</code>, ein Eigentümer vergleicht sechs Wörter, die auf beiden Geräten stehen, und genehmigt mit <code>varsto folder approve</code> (außerdem <code>requests</code>, <code>deny</code>, <code>members</code>, <code>role</code>). Der Hintergrunddienst genehmigt nie. Die Oberfläche hat auf der Seite Dateien eine Karte Ordnerzugriff.</li>
+<li>Jede Epoche eines Ordnerschlüssels hat eine Wiederherstellungskopie unter den Wiederherstellungswörtern. <code>varsto folder add</code> legt sie an, <code>varsto recovery escrow</code> schreibt eine fehlende später, und <code>varsto status</code> warnt bis dahin. <code>varsto join --recovery-words</code> öffnet jeden Ordner, der eine Wiederherstellungskopie hat.</li>
+<li>Gegenstellen sprechen nur TLS, mit Token, die an die Verbindung gebunden sind, und vergleichen die Spitzen des Hauptbuchs, sodass ein Speicher auffällt, der Stapel zurückhält oder zurücksetzt, und die Seite Hilfe und eine Benachrichtigung sagen es.</li>
+<li>Das Entfernen eines Geräts hält jetzt: ein widerrufenes Gerät bekommt den nächsten Ordnerschlüssel nicht, und seine Datensätze zählen ab der Entfernung nicht mehr.</li>
+</ul>
+<h2 id="einander-finden-der-rendezvous-dienst">Einander finden: der Rendezvous-Dienst</h2>
+<p>Geräte können einander über Netze hinweg durch einen optionalen Rendezvous-Dienst finden, standardmäßig <code>https://varsto.net/rv</code>. Ein Gerät hinterlegt dort seinen versiegelten Gegenstellendatensatz, liest die Datensätze des Tresors, erfährt seine eigene öffentliche Adresse und erreicht, wenn keine Adresse antwortet, eine Gegenstelle durch einen koordinierten Lochschlag oder, als letzten Weg, ein Ende-zu-Ende verschlüsseltes Relais (angezeigt als <code>relayed via rendezvous</code>). Ein Gerät, das beitritt und in seinem Netz nichts findet, kann ein Angebot über den Code oder den Link nachschlagen und sich über das Relais koppeln. Der Dienst sieht Tags, IP-Adressen und Bytezahlen, nie die Identität des Tresors und keinen Inhalt. <code>varsto p2p rendezvous set &lt;url&gt; | on | --off | status</code> oder die Seite Gegenstellen ändert es, und der Server lässt sich selbst betreiben (<code>varsto-rendezvous</code>, eine statische Linux-Programmdatei im täglichen Build; der UDP-Port ist standardmäßig 3334). Alles funktioniert auch ohne ihn.</p>
+<h2 id="ein-schlechtes-netz-und-offline-arbeiten">Ein schlechtes Netz und offline arbeiten</h2>
+<ul>
+<li>Ein Speicher, der nicht erreichbar ist, lässt eine ganze Synchronisierung nicht mehr scheitern. Er gilt für diesen Lauf als ausgefallen und ruht zwischen den Läufen, und die anderen Speicher machen weiter; was er verpasst hat, wird später dorthin kopiert.</li>
+<li>Aufrufe an S3 und rclone haben Zeitlimits, die zur Größe der Übertragung passen, Wiederholungen und fortsetzbare Mehrteil-Uploads, sodass eine langsame Leitung Sekunden kostet, nicht Minuten.</li>
+<li>Der Austausch von Gegenstelle zu Gegenstelle funktioniert ohne jeden Speicher, aus einem gespeicherten Gegenstellenverzeichnis, sodass die Synchronisierung im LAN ohne Internet funktioniert.</li>
+<li>Das Beitreten durch Koppeln braucht keinen Speicher mehr, der antwortet, und Änderungen der Mitgliedschaft (einen Ordner hinzufügen, genehmigen, eine Rolle ändern, freigeben) bleiben zuerst auf dem Gerät und gehen raus, wenn ein Speicher antwortet. <code>varsto status</code> sagt „N Änderungen warten auf den Upload“.</li>
+<li>Lokale Aktionen (Importe, die Seite Papierkorb, Vorschaubilder, Schreibvorgänge an Dateien) werden fertig, während ein Speicher aus ist, und melden „Upload ausstehend“.</li>
+<li>Oberfläche, Infobereich, Kommandozeile und MCP frieren nicht mehr ein, während eine Synchronisierung auf eine tote Verbindung wartet.</li>
+</ul>
+<h2 id="importe">Importe</h2>
+<ul>
+<li>Eine Seite Import für jede Quelle (ein Ordner oder eine Platte, ein git-annex-Repository, ein Cloud-Laufwerk über rclone, ein Torrent, YouTube), mit einer Liste der laufenden Importe.</li>
+<li><code>varsto import torrent</code> importiert Torrents, die größer sind als die Platte, in Stapeln, die eine Reserve an freiem Platz halten; eine Datei verlässt die Download-Platte erst, wenn ihre Blöcke auf einem Speicher liegen und die Regel des Ordners gilt.</li>
+<li><code>varsto import youtube</code> archiviert Kanäle, Wiedergabelisten und Videos mit yt-dlp in Ordner, mit zurückhaltenden Vorgaben und einer Reserve an freiem Platz.</li>
+</ul>
+<h2 id="platten-und-server">Platten und Server</h2>
+<ul>
+<li><code>varsto mailbox</code> legt Blöcke von einer angedockten Platte für eine Pool-Platte oder einen Speicher bereit, der weg ist, in einem dauerhaften, per Hash geprüften Ausgangsfach, sodass ein Block, der nur auf Platte A liegt, Platte B erreicht, wenn B angedockt wird.</li>
+<li><code>varsto service remember</code> funktioniert ohne Desktop-Sitzung (über SSH, auf Servern) durch <code>systemd-creds</code> oder den Kernel-Schlüsselbund; <code>varsto service forget</code> entfernt es.</li>
+<li><code>varsto service stop</code> bleibt jetzt gestoppt, und eine Selbstaktualisierung startet den Dienst trotzdem neu.</li>
+</ul>
+<h2 id="korrekturen-und-härtung">Korrekturen und Härtung</h2>
+<ul>
+<li>Ein Abruf überschreibt keine Datei mehr, die nach dem Scan geändert wurde, und eine schlechte Datei stoppt Abruf oder Hochladen eines Ordners nicht mehr. Eine unlesbare Datei oder ein unlesbares Verzeichnis wird gezählt, statt dass Dateien darunter gelöscht aussehen.</li>
+<li>Mitgliedschaft: das Entfernen eines Geräts gilt für spätere Beitretende und für Ordner, die keinen neuen Schlüssel bekommen haben, und übernommen werden nur Epoche, Widerruf oder Löschauftrag eines Administrators.</li>
+<li>Entleeren, das Entfernen eines Speichers und das Aufräumen nach dem Einlegen einer Platte behalten jedes Paket, das die einzige Kopie sein könnte. Reparatur, Hochladen nach einem fehlenden Stapel und Anhängen nach einem Abhängen sind korrigiert.</li>
+<li>Bereichslesevorgänge bei S3 lassen <code>fsck</code> nicht mehr jedes Paket für zu kurz halten.</li>
+<li>Die Darstellung zeigt einen Hinweis beim Laden oder einen Hinweis auf einen leeren Tresor statt der Beispielszene, und Vorschaubilder erscheinen auf der Seite.</li>
+<li>TLS-Handshakes haben eine Frist, die hält, und eine Adresse kann höchstens 64 unvollendete halten. Ein hängender lokaler Client kann die lokale API nicht mehr einfrieren. Der Rendezvous-Server hat eine Ratenbegrenzung je Anfrageklasse und begrenzten Arbeitsspeicher für das Nachschlagen. Hinweise zu Abhängigkeiten, die <code>cargo audit</code> meldet, sind behoben.</li>
+<li>Die GitHub-Workflows laufen mit Nur-Lese-Rechten, außer dort, wo sie veröffentlichen.</li>
+</ul>
+<h2 id="kompatibilität">Kompatibilität</h2>
+<p>Jedes Gerät eines Tresors muss alpha.16 ausführen. Alpha.15 kann einen Tresor von alpha.16 nicht lesen, und alpha.16 kann einen Tresor von alpha.15 nicht lesen. Aktualisiere alle Geräte zusammen und lege den Tresor neu an, wie oben beschrieben. Das ist weiter eine Alpha: nichts für Produktionsdaten. Die volle Liste steht im Änderungsprotokoll.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Verschlüsselte dateisynchronisierung und sicherung auf deinem eigenen speicher.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../de/downloads/">Downloads</a></nav></div>
+    <div><h2>Lernen</h2><nav aria-label="Lernen"><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/compare/">Vergleich</a><a href="../../docs/">Dokumentation (en)</a><a href="../../de/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Gemeinschaft</h2><nav aria-label="Gemeinschaft"><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto ist ein Arbeitsname. Quellcode: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, unter der PolyForm Shield License 1.0.0 (Quellcode verfügbar).</span>
+    <span>Keine Cookies, kein Tracking. Der Webserver behält ein gewöhnliches Zugriffsprotokoll höchstens sieben Tage.</span>
+    <span><a href="../../docs/security-policy.html">Sicherheitsrichtlinie</a> · <a href="../../docs/licence.html">Lizenz</a> · <a href="../../docs/trademark.html">Marke</a> (auf Englisch)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

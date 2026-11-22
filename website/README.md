@@ -1,6 +1,6 @@
 # Website
 
-Static site for the project: **Project** (front page), **Docs** (rendered from the repository), **Downloads**, **Blog** (with RSS) and **Forum** (GitHub issues and discussions for now; a forum of its own is planned). Every page shows the alpha warning. The pages are in English, Finnish, Swedish, French, German, Spanish and Russian (`website/src/i18n/<lang>/pages/`); docs, blog and forum stay English. French is a website language only. The app interface is English, Finnish, Swedish, German, Spanish and Russian.
+Static site for the project: **Project** (front page), **Docs** (rendered from the repository), **Downloads**, **Blog** (with RSS) and **Forum** (GitHub issues and discussions for now; a forum of its own is planned). Every page shows the alpha warning. The pages are in English, Finnish, Swedish, French, German, Spanish and Russian (`website/src/i18n/<lang>/pages/`). Blog posts are translated the same way (`website/src/i18n/<lang>/posts/`). Docs and the forum stay English. French is a website language only. The app interface is English, Finnish, Swedish, German, Spanish and Russian.
 
 - No inline scripts or styles, no third-party resources, system fonts: the strict Content Security Policy on the server stays valid.
 - Light and dark themes (follows the system, with a manual toggle).
