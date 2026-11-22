@@ -119,16 +119,16 @@ description: Ce que fait Varsto : un registre signé qui compte chaque copie, v
     </section>
 
     <h2 id="next">Nouveau dans la version {{RELEASED}}</h2>
-    <p class="note">Le format de stockage 3 et ce qui l’accompagne. Le <a href="{{P}}docs/alpha-0-format.html">format de stockage</a> décrit chacun de ces éléments en détail. Un coffre créé avec la version 0.0.1-alpha.15 ou une version plus ancienne doit être recréé.</p>
+    <p class="note">Le même format de stockage que 0.0.1-alpha.16. Le <a href="{{P}}docs/alpha-0-format.html">format de stockage</a> (en anglais) ne change pas, et les coffres ne sont pas recréés.</p>
     <ul>
-      <li>Format de stockage 3 : un registre de paquets plutôt que de blocs, des enregistrements signés, des cartes de blocs par dossier et des manifestes de base plus deltas.</li>
-      <li>Accès aux dossiers par approbation : un appareil entré avec les mots du coffre demande un dossier (<code>varsto folder request</code>), un propriétaire compare six mots sur les deux appareils et approuve.</li>
-      <li>Mots de récupération : un second jeu de 24 mots et une copie de récupération de chaque clé de dossier, pour rouvrir un coffre même si tous les appareils sont perdus.</li>
-      <li>Le service de rendez-vous (<code>https://varsto.net/rv</code> ou le vôtre) : les appareils se trouvent d’un réseau à l’autre, les liens d’appairage <code>rv=</code> fonctionnent et un relais chiffré de bout en bout est le dernier recours. Tout fonctionne sans lui.</li>
-      <li>Travailler hors ligne : rejoindre un coffre sans joindre de stockage, changements de membres gardés sur l’appareil jusqu’à ce qu’un stockage réponde, et un stockage injoignable ne fait plus échouer toute une synchronisation.</li>
-      <li>Une seule page Import, l’import de torrents plus gros que le disque (<code>varsto import torrent</code>) et de chaînes YouTube dans des dossiers (<code>varsto import youtube</code>).</li>
-      <li>Une boîte aux lettres qui porte des blocs d’un disque posé vers un disque de pool ou un stockage absent, et <code>varsto service remember</code> sur les serveurs sans session de bureau.</li>
-      <li>Un APK Android signé pour la publication, que les versions suivantes mettent à jour sur place. La clé de signature est nouvelle : désinstallez d’abord une version debug antérieure.</li>
+      <li>Notifications sur le téléphone via ntfy, Pushover ou Telegram (<code>varsto notify</code>, ou Réglages). Les alertes sont activées par défaut ; les sauvegardes terminées, les nouveaux fichiers et un résumé quotidien sont au choix.</li>
+      <li>Une récupération réutilise les blocs que cet appareil possède déjà, et un appareil qui vient d'écrire un fichier le sert aux autres tout de suite.</li>
+      <li>Une récupération qui échoue ne publie plus de suppressions de fichiers que cet appareil n'a pas lus. Le plus récent instantané d'une sauvegarde est conservé quel que soit son âge.</li>
+      <li>La première connexion à un appareil est affichée comme une connexion en cours et retentée tout de suite. Un refus de certificat ultérieur est affiché comme injoignable.</li>
+      <li>Après le retrait d'un appareil, l'état nomme chaque stockage dont cet appareil pourrait encore utiliser les identifiants pour effacer le texte chiffré. <code>varsto storage mark-rotated</code> efface l'avertissement une fois les identifiants remplacés chez le fournisseur.</li>
+      <li>Les demandes de partage et d'organisation gardent leurs clés privées scellées sous la phrase secrète de l'appareil. Le kit de récupération imprime à la fois les mots du coffre et les mots de récupération.</li>
+      <li>Mettre le service en pause arrête aussi le trafic entre pairs. Les vignettes réapparaissent sur le téléphone, et un coffre sans disque à vous n'est plus signalé comme en infraction par la politique par défaut.</li>
+      <li>Les identifiants d'application sont <code>net.varsto.app</code>, <code>net.varsto.app.ios</code> et <code>net.varsto.app.alpha</code>. Une application déjà installée garde son identifiant précédent et son coffre jusqu'à ce que vous l'installiez de nouveau.</li>
     </ul>
     <h2>Aussi dans la conception</h2>
     <ul>

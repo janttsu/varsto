@@ -47,16 +47,16 @@ description: Varsto-sovellus: päästä päähän salattu tiedostojen synkronoin
     <p><a class="button" href="{{L}}contribute/">Näin osallistut</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issuet</a> <a class="button secondary" href="{{P}}docs/contributing.html">Säännöt (en)</a> <a class="button secondary" href="{{P}}docs/alpha-0-format.html">Tallennusmuoto</a></p>
 
     <h2 id="next">Uutta versiossa {{RELEASED}}</h2>
-    <p class="note">Tallennusmuoto 3 ja sen mukana tulevat asiat. Versiolla 0.0.1-alpha.15 tai vanhemmalla tehty holvi on luotava uudelleen:</p>
+    <p class="note">Sama tallennusmuoto kuin 0.0.1-alpha.16:ssä. Holveja ei luoda uudelleen.</p>
     <ul>
-      <li>Tallennusmuoto 3: pakettitason kirjanpito lohkojen sijaan, allekirjoitetut tietueet, kansioiden lohkokartat ja perus- ja delta-manifestit.</li>
-      <li>Kansiot hyväksynnällä: holviin sanoilla liittynyt laite pyytää kansiota (<code>varsto folder request</code>), omistaja vertaa kuutta sanaa molemmilla laitteilla ja hyväksyy.</li>
-      <li>Palautussanat: toinen 24 sanan sarja ja jokaisen kansioavaimen palautuskopio, jotta holvin voi avata uudelleen, vaikka kaikki laitteet olisivat kadonneet.</li>
-      <li>Rendezvous-palvelu (<code>https://varsto.net/rv</code> tai oma): laitteet löytävät toisensa verkkojen yli, <code>rv=</code>-liittämislinkit toimivat ja päästä päähän salattu välitys on viimeinen reitti. Kaikki toimii ilman sitä.</li>
-      <li>Työskentely ilman verkkoa: liittyminen ilman yhteyttä tallennuspaikkaan, jäsenyysmuutokset säilyvät laitteella, kunnes tallennuspaikka vastaa, eikä yksi tavoittamaton tallennuspaikka kaada koko synkronointia.</li>
-      <li>Yksi Tuonti-sivu, torrent-tuonti levyä suuremmille torrenteille (<code>varsto import torrent</code>) ja YouTube-kanavat kansioihin (<code>varsto import youtube</code>).</li>
-      <li>Postilaatikko, joka kuljettaa lohkoja telakoidulta levyltä poissa olevalle levyvaraston levylle tai tallennuspaikalle, sekä <code>varsto service remember</code> palvelimilla ilman työpöytäistuntoa.</li>
-      <li>Julkaisuallekirjoitettu Android-APK, jonka päälle seuraavat versiot päivittyvät. Allekirjoitusavain on uusi: poista aiempi debug-versio ensin.</li>
+      <li>Ilmoitukset puhelimeen ntfy:n, Pushoverin tai Telegramin kautta (<code>varsto notify</code> tai Asetukset). Hälytykset ovat oletuksena päällä; valmiit varmuuskopiot, uudet tiedostot ja päiväyhteenveto ovat valinnaisia.</li>
+      <li>Haku käyttää lohkot, jotka laitteella jo on, ja laite joka juuri kirjoitti tiedoston jakaa sen muille heti.</li>
+      <li>Epäonnistunut haku ei enää julkaise poistoksi tiedostoa, jota tämä laite ei ole lukenut. Varmuuskopion uusin tilannekuva säilyy iästä riippumatta.</li>
+      <li>Ensimmäinen yhteys laitteeseen näkyy yhdistämisenä ja sitä yritetään heti uudelleen. Myöhempi varmenteen hylkäys näkyy tavoittamattomana.</li>
+      <li>Laitteen poiston jälkeen tila nimeää jokaisen tallennuspaikan, jonka tunnuksilla poistettu laite voisi vielä tuhota salatekstiä. <code>varsto storage mark-rotated</code> poistaa varoituksen, kun olet vaihtanut tunnukset palveluntarjoajalla.</li>
+      <li>Jako- ja organisaatiopyynnön yksityiset avaimet pysyvät laitteen salalauseella suljettuina. Palautuspaketti tulostaa sekä holvin sanat että palautussanat.</li>
+      <li>Palvelun keskeytys pysäyttää myös vertaisliikenteen. Puhelimen esikatselukuvat näkyvät taas, eikä holvia ilman omaa levyä enää ilmoiteta oletussäännön rikkovaksi.</li>
+      <li>Sovellustunnukset ovat <code>net.varsto.app</code>, <code>net.varsto.app.ios</code> ja <code>net.varsto.app.alpha</code>. Jo asennettu sovellus säilyttää entisen tunnuksensa ja holvinsa, kunnes asennat sen uudelleen.</li>
     </ul>
 
     <h2 id="status">Rehellinen tilannekuva</h2>

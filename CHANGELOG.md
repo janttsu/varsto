@@ -16,6 +16,10 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+## [0.0.1-alpha.17] - 2026-11-22
+
+The storage format is unchanged from alpha.16. Vaults open as they are and do not have to be recreated. This is still an alpha: not for production data.
+
 ### Added
 
 - Push notifications to your phone through ntfy, Pushover or Telegram ([docs/notifications.md](docs/notifications.md)). Add a channel in Settings (a guide for each service, a test message, a choice of what it receives, an option to leave folder, storage and device names out) or with `varsto notify`. Alerts (storage problems, low space, fewer copies than a policy asks, damaged data, failed or overdue backups, requests waiting for you) are on by default; finished backups, new files and a daily summary are opt-in. The channels are a device-local file with the tokens (`notify.json`, mode 0600, never synced). Messages are not end-to-end encrypted on their way through the service. Failed sends wait in an outbox and are retried, also after a restart; repeats are dropped for six hours and a channel gets at most 20 an hour. The settings work while the vault is locked.
@@ -644,6 +648,7 @@ make the core idea real (spec 1 to 9).
 - `fsck --verify` re-hashes every referenced object and reports claims the
   storage cannot back.
 
+[0.0.1-alpha.17]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.17
 [0.0.1-alpha.16]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.16
 [0.0.1-alpha.15]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.15
 [0.0.1-alpha.14]: https://github.com/janttsu/varsto/releases/tag/v0.0.1-alpha.14
