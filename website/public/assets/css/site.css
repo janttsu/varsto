@@ -154,10 +154,7 @@ section.hero::after { content: ""; position: absolute; z-index: -1; left: 50%; t
 .sec { padding: 1rem 0; }
 .sec > h2 { max-width: 30ch; }
 .eyebrow { font: 500 .78rem var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent-2); margin: 0 0 .7rem; }
-.home .grid { grid-template-columns: repeat(3, 1fr); }
-.home .grid .card:nth-child(1) { grid-column: span 2; }
-.home .grid .card:nth-child(6) { grid-column: 1 / -1; }
-@media (max-width: 62rem) { .home .grid { grid-template-columns: 1fr 1fr; } .home .grid .card:nth-child(1) { grid-column: auto; } }
+.home .grid { grid-template-columns: 1fr 1fr; }
 @media (max-width: 40rem) { .home .grid { grid-template-columns: 1fr; } }
 .home .grid .card::before { content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 55%, transparent), transparent 40%, transparent 70%, color-mix(in srgb, var(--accent-2) 40%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; opacity: 0; transition: opacity .25s; pointer-events: none; }
 .home .grid .card:hover::before { opacity: 1; }

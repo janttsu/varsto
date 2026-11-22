@@ -2,75 +2,27 @@
 title: Projekti
 nav: Project
 output: index.html
-description: Varsto-sovellus: päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla. Alfa, työnimi. Lähdekoodi on GitHubissa.
+description: Varsto pitää salatut kopiot tiedostoistasi tallennuspaikoissa, jotka sinulla jo on, ja kertoo, kun tiedostolla ei ole enää tarpeeksi kopioita.
 ---
     <section class="hero">
       <canvas class="field" id="field" aria-hidden="true"></canvas>
-      <h1>Tuo oma tallennuspaikkasi. Pidä omat avaimesi. Tiedä, missä jokainen lohko on.</h1>
-      <p class="lead">Päästä päähän salattu tiedostojen synkronointi, jakaminen ja varmuuskopiointi tallennuspaikkoihin, jotka sinulla jo on, jälkikvanttisella hybridikryptografialla ja kirjanpidolla, jonka voit itse tarkastaa. Ei palvelinta, ei tiliä, ei palveluntarjoajaa, johon pitäisi luottaa. Miten tämä eroaa <a href="{{L}}compare/syncthing/">Syncthingistä</a> ja <a href="{{L}}compare/resilio-sync/">Resilio Syncistä</a>.</p>
-      <div class="cta"><a class="button" href="{{L}}downloads/">Lataa alfa</a> <a class="button secondary" href="{{P}}docs/quick-start.html">Pika-aloitus</a> <a class="button secondary" href="https://github.com/janttsu/varsto" rel="noopener">Lähdekoodi GitHubissa</a></div>
-      <nav class="platforms" aria-label="Lataukset"><a href="{{L}}downloads/">Linux</a> <a href="{{L}}downloads/">Windows</a> <a href="{{L}}downloads/">macOS</a> <a href="{{L}}downloads/">Android</a> <a href="{{L}}downloads/">iOS</a></nav>
+      <h1>Tiedostojesi pitäisi olla olemassa useammassa kuin yhdessä paikassa. Sinun pitäisi voida nähdä se.</h1>
+      <p class="lead">NAS, ämpäri josta jo maksat, levyt laatikossa. Varsto pitää niissä salatut kopiot ja kertoo, kun tiedostolla ei ole enää tarpeeksi kopioita, ennen kuin huomaat sen tarvitessasi tiedostoa. Ei tiliä, eikä palvelinta, joka pitäisi tiedostot.</p>
+      <div class="cta"><a class="button" href="{{L}}how-it-works/">Miten se toimii</a> <a class="button secondary" href="{{L}}compare/syncthing/">Syncthingiin verrattuna</a></div>
     </section>
     <figure class="stage"><div class="window"><div class="window-bar"><i></i><i></i><i></i><span>varsto</span></div><picture class="theme-dark"><img src="{{P}}assets/img/screenshots/desktop-where-dark.png" alt="Missä datasi on: Varsto seuraa jokaisen kansion niihin tallennuspaikkoihin ja laitteisiin, joilla sen lohkot ovat, ja laskee jokaisen lohkon kopiot." width="976" height="669"></picture><picture class="theme-light"><img src="{{P}}assets/img/screenshots/desktop-where-light.png" alt="Missä datasi on: Varsto seuraa jokaisen kansion niihin tallennuspaikkoihin ja laitteisiin, joilla sen lohkot ovat, ja laskee jokaisen lohkon kopiot." width="976" height="669" loading="lazy"></picture></div></figure>
 
     <div class="home">
 
-    <h2>Miksi Varsto on erilainen</h2>
+    <h2>Miksi sitä haluaisit</h2>
     <div class="grid">
-      <section class="card"><h3>Kirjanpito, jonka voit tarkastaa</h3><p>Jokainen laite pitää allekirjoitettua kirjanpitoa siitä, mitä se tallensi ja tarkisti, joten Varsto tietää, kuinka monta kopiota jokaisesta lohkosta on, missä ne ovat ja milloin toinen laite viimeksi tarkisti ne. Säilytyssääntö kuten ”kaksi kopiota pilvessä ja yksi kotona, tarkistettu 30 päivän sisällä” varoittaa sinua ennen kuin se lakkaa täyttymästä. <a href="{{L}}features/#ledger">Kirjanpito ja säilytyssäännöt</a>.</p></section>
-      <section class="card"><h3>Sinun tallennuspaikkasi, sinun avaimesi, ei palvelinta</h3><p>Hakemistosta, NAS-jaosta, minkä tahansa palveluntarjoajan S3-bucketista tai mistä tahansa rclone-etäkohteesta tulee tallennuspaikka, ja tallennuspaikka näkee aina vain läpinäkymättömiä salattuja objekteja. Varsto-tiliä ei ole eikä palvelinta, joka säilyttäisi tietojasi; ei mitään, mihin luottaa tai minkä voisi menettää. <a href="{{L}}features/#storage">Oma tallennuspaikka</a>.</p></section>
-      <section class="card"><h3>Kvanttiturvallinen hybridikryptografia</h3><p>Jokaisessa kirjanpidon erässä on Ed25519- ja ML-DSA-65-allekirjoitus, ja jokainen kansioavain kulkee sinetöitynä X25519 + ML-KEM-768 -avaimelle. Suunniteltu kvanttitietokoneiden maailmaan; ei vielä auditoitu. <a href="{{L}}features/#pq">Näin allekirjoitukset ja avaimet toimivat</a>.</p></section>
-      <section class="card"><h3>Vanhat levyt laskettuina, tarkistettuina kopioina</h3><p>Kytke levy telakkaan ja lisää se levyvarastoon: se täyttyy datalla, jolla on vähiten kopioita, kertoo, milloin sen voi turvallisesti irrottaa, tunnistetaan, kun se palaa, ja lasketaan mukaan sääntöön ”yksi kopio kotona, yksi muualla”. <a href="{{L}}features/#disks">Levyvarastot</a>.</p></section>
-      <section class="card"><h3>Strongroom</h3><p>Kansiot, joiden avain on kääritty salaisuudella, jonka vain FIDO2-suojausavaimesi tuottaa kosketuksen jälkeen, eikä sitä säilytetä missään. Salalause, varastettu kannettava tai avustaja ei avaa niitä. <a href="{{L}}features/#strongroom">Strongroom</a>.</p></section>
-      <section class="card"><h3>Laitteet, jotka auttavat toisiaan</h3><p>Laitteesi vaihtavat salattuja lohkoja suoraan keskenään, lähiverkossa ja NATin läpi; valinnainen kohtaamispalvelu auttaa niitä löytämään toisensa verkkojen välillä eikä näe sisältöä. USB-tikku voi kuljettaa vain sen, mitä toiselta puolelta puuttuu, ja ystävän NAS voi säilyttää tarkistettuja kopioita, joita se ei pysty lukemaan. <a href="{{L}}features/#p2p">Vertaisyhteys ja siirtolevyt</a>, <a href="{{L}}features/#replicas">luottamuksettomat replikat</a>.</p></section>
+      <section class="card"><h3>Haluat tietää, että kopio on oikeasti olemassa</h3><p>Jokainen laite allekirjoittaa sen, mitä se tallensi ja mitä se tarkisti. Sääntö kuten ”yksi kotona, yksi muualla, tarkistettu tässä kuussa” varoittaa, kun se lakkaa toteutumasta. <a href="{{L}}features/#ledger">Kirjanpito ja säilytyssäännöt</a>.</p></section>
+      <section class="card"><h3>Tallennuspaikka on sinulla jo</h3><p>Kansio tällä koneella, NAS, S3-ämpäri, rclone-etäkohde. Ne näkevät salatekstiä ja kokoja, eivät nimiä eikä sisältöä. Tiliä ei tarvitse luoda. <a href="{{L}}features/#storage">Oma tallennus</a>.</p></section>
+      <section class="card"><h3>Laatikossa olevan levyn pitää laskea kopioksi</h3><p>Telakoi levy, anna sen täyttyä siitä datasta, jolla on vähiten kopioita, ja irrota se, kun se sanoo että se on turvallista. Kun se palaa, se lasketaan yhä kodin kopioksi. <a href="{{L}}features/#disks">Levyvarastot</a>.</p></section>
+      <section class="card"><h3>Kadonnut kannettava ei saa olla loppu</h3><p>Avaimet pysyvät laitteillasi ja palautussanat paperilla. Poistat kadonneen laitteen, ja muut jatkavat. Toisen NAS voi säilyttää kopioita, joita se ei pysty lukemaan. <a href="{{L}}features/#replicas">Kopiot, jotka eivät voi lukea</a>.</p></section>
     </div>
 
-    <h2 id="where">Missä datasi voi olla</h2>
-    <p>Mikä tahansa hakemisto, johon tämä laite ylettyy, NAS tai verkkojako, mikä tahansa S3-yhteensopiva bucket omilla avaimillasi (AWS, Scaleway, Hetzner, Backblaze B2, Cloudflare R2, MinIO ja muut), mikä tahansa rclone-etäkohde (SFTP, WebDAV, Google Drive ja muut), kylmät arkistoluokat, joihin kirjoitetaan mutta joista ei koskaan lueta ilman vahvistustasi, sekä hyllyllä olevista irrotettavista levyistä kootut levyvarastot. Käytä useita yhtä aikaa; jokaisella on sijaintinimiö ja hinta, joten säilytyssääntö voi vaatia yhden kopion kodin ulkopuolelle ja sovellus näyttää, mitä kukin kansio maksaa kuukaudessa. Tiedostot pilkotaan lohkoiksi, pakataan ja salataan laitteellasi, joten tallennuspaikka näkee aina vain läpinäkymättömiä objekteja ja niiden koot, ei koskaan tiedostonimiä, selväkielisten tiedostojen tiivisteitä tai sisältöä.</p>
-    <figure class="hero"><picture class="theme-light"><source type="image/webp" srcset="{{P}}assets/img/hero.webp"><img src="{{P}}assets/img/hero.png" alt="Kaavio: avaimesi keskellä, salatuin yhteyksin kytkettyinä S3-ämpäriin, kylmäarkistoon, hyllyn kiintolevyihin, NAS-laitteeseen, kannettavaan ja puhelimeen; jokaisessa paikassa on vain lukittuja, salattuja lohkoja." width="1200" height="600"></picture><picture class="theme-dark"><source type="image/webp" srcset="{{P}}assets/img/hero-dark.webp"><img src="{{P}}assets/img/hero-dark.png" alt="Kaavio: avaimesi keskellä, salatuin yhteyksin kytkettyinä S3-ämpäriin, kylmäarkistoon, hyllyn kiintolevyihin, NAS-laitteeseen, kannettavaan ja puhelimeen; jokaisessa paikassa on vain lukittuja, salattuja lohkoja." width="1200" height="600" loading="lazy"></picture><figcaption>Kopiot sinne, minne itse päätät: ämpäriin, kylmäarkistoon, hyllyn vanhoille levyille, omille koneillesi. Jokainen kopio on salakirjoitusta; avaimet pysyvät sinulla.</figcaption></figure>
-
-    <h2 id="security">Tietoturva, rehellisesti</h2>
-    <ul>
-      <li>Sisältö salataan XChaCha20-Poly1305:llä avaimilla, jotka johdetaan satunnaisesta holviavaimesta, joka on vain omilla laitteillasi; tallennuspaikka näkee tiivisteellään nimettyjä salattuja objekteja eikä mitään muuta. <a href="{{L}}how-it-works/">Miten se toimii</a>, vaihe vaiheelta.</li>
-      <li>Jokainen tallennettu allekirjoitus on hybridi (Ed25519 + ML-DSA-65, molempien on täsmättävä) ja jokainen sinetöity avain on hybridi (X25519 + ML-KEM-768): jälkikvanttinen hybridikryptografia, jota varten on suunniteltu, mutta jota ei ole auditoitu. Siirtoyhteys (suorat yhteydet kuljettavat vain salattuja lohkoja TLS 1.3:lla ja kiinnitetyillä varmenteilla, TCP:llä tai NATin läpi QUIC:llä) ja julkaisujen allekirjoitus (minisign) käyttävät perinteisiä algoritmeja.</li>
-      <li>Strongroom-kansiot avautuvat vain FIDO2-suojausavaimella; suojaus on kryptografinen, ei pelkkä valintaikkuna.</li>
-      <li>Holviin ei anneta avustajalle pääsyä. MCP-palvelinta ei ole, eikä kielimallilla ole avainta, jolla se lukisi tiedostosi.</li>
-      <li>Kadonnut laite poistetaan allekirjoitetulla oikeuksien perumisella, ja holvi siirtyy uusiin avaimiin; tyhjennysmääräys suoritetaan, kun laite seuraavan kerran tavoittaa tallennuspaikan. Tiliä tai avaimen talletusta ei ole: palautuspaketti, 24 sanaa tai kolme osaa, on sinun säilytettäväsi.</li>
-      <li>Suunnittelua tai koodia ei ole katselmoitu eikä auditoitu. <a href="{{P}}docs/threat-model.html">Uhkamalli</a> ja <a href="{{P}}docs/failure-model.html">vikamalli</a> kertovat, mitä suunnittelulla tavoitellaan, mitä kukin osapuoli näkee ja mihin suojaus päättyy.</li>
-    </ul>
-
-    <h2 id="teams">Tiimeille</h2>
-    <p>Organisaatio lisää holvin päälle kerroksen, jota yritys tarvitsee: ylläpitäjät hyväksyvät laitteita nimetyille henkilöille verrattuaan heidän kanssaan kuuden sanan sormenjälkeä, poistavat henkilön kaikkine laitteineen yhdellä toimenpiteellä (jäljelle jäävät laitteet saavat uudet avaimet), määrittävät, mitä jäsenet saavat tehdä omin päin, ja pitävät tästä lokia, jonka heidän laitteensa allekirjoittavat ja ketjuttavat. Ylläpitäjät nimittävä juuriavain on 24 sanaa paperilla, ei koskaan laitteella. Holvi ilman organisaatiota ei näe tästä mitään. <a href="{{L}}features/#organizations">Organisaatiot</a>.</p>
-
-    <h2 id="developers">Kehittäjille</h2>
-    <p>Varsto on Rust-työtila <a href="https://github.com/janttsu/varsto" rel="noopener">GitHubissa</a>. <code>varsto-core</code> on moottori ja tallennusmuoto, <code>varsto-cli</code> on komentorivi, palvelu ja verkkokäyttöliittymä, ja <code>varsto-ffi</code> on se, jota Swift- ja Kotlin-kuoret kutsuvat. Tallennusmuoto on kirjoitettu auki, ja virtuaalikoneiden laboratorio ajaa skenaariot. Lisenssi on <a href="{{P}}docs/licence.html">PolyForm Shield 1.0.0</a>: lähdekoodi on saatavilla, eikä lisenssi ole OSI-avoimen lähdekoodin lisenssi. Leimat <code>help wanted</code> ja <code>good first issue</code> näyttävät, mistä uusi tekijä voi aloittaa, kun sellaisia on auki. Vikailmoitus tai pieni dokumentaatiokorjaus käy silloinkin, kun lista on tyhjä.</p>
-    <p><a class="button" href="{{L}}contribute/">Näin osallistut</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issuet</a> <a class="button secondary" href="{{P}}docs/contributing.html">Säännöt (en)</a> <a class="button secondary" href="{{P}}docs/alpha-0-format.html">Tallennusmuoto</a></p>
-
-    <h2 id="next">Uutta versiossa {{RELEASED}}</h2>
-    <p class="note">Sama tallennusmuoto kuin 0.0.1-alpha.16:ssä. Holveja ei luoda uudelleen.</p>
-    <ul>
-      <li>Ilmoitukset puhelimeen ntfy:n, Pushoverin tai Telegramin kautta (<code>varsto notify</code> tai Asetukset). Hälytykset ovat oletuksena päällä; valmiit varmuuskopiot, uudet tiedostot ja päiväyhteenveto ovat valinnaisia.</li>
-      <li>Haku käyttää lohkot, jotka laitteella jo on, ja laite joka juuri kirjoitti tiedoston jakaa sen muille heti.</li>
-      <li>Epäonnistunut haku ei enää julkaise poistoksi tiedostoa, jota tämä laite ei ole lukenut. Varmuuskopion uusin tilannekuva säilyy iästä riippumatta.</li>
-      <li>Ensimmäinen yhteys laitteeseen näkyy yhdistämisenä ja sitä yritetään heti uudelleen. Myöhempi varmenteen hylkäys näkyy tavoittamattomana.</li>
-      <li>Laitteen poiston jälkeen tila nimeää jokaisen tallennuspaikan, jonka tunnuksilla poistettu laite voisi vielä tuhota salatekstiä. <code>varsto storage mark-rotated</code> poistaa varoituksen, kun olet vaihtanut tunnukset palveluntarjoajalla.</li>
-      <li>Jako- ja organisaatiopyynnön yksityiset avaimet pysyvät laitteen salalauseella suljettuina. Palautuspaketti tulostaa sekä holvin sanat että palautussanat.</li>
-      <li>Palvelun keskeytys pysäyttää myös vertaisliikenteen. Puhelimen esikatselukuvat näkyvät taas, eikä holvia ilman omaa levyä enää ilmoiteta oletussäännön rikkovaksi.</li>
-      <li>Sovellustunnukset ovat <code>net.varsto.app</code>, <code>net.varsto.app.ios</code> ja <code>net.varsto.app.alpha</code>. Jo asennettu sovellus säilyttää entisen tunnuksensa ja holvinsa, kunnes asennat sen uudelleen.</li>
-    </ul>
-
-    <h2 id="status">Rehellinen tilannekuva</h2>
-    <ul>
-      <li>Julkaistu versio: {{RELEASED}}. Alfa on pystysuora läpileikkaus: ydinkirjasto, komentorivi, taustapalvelu, ilmoitusalueen ja valikkorivin kuoret, Android-kuori, noin {{RUST_LINES}} riviä Rustia, {{TESTS}} automaattista testiä ja {{LAB_SCENARIOS}} skenaarion testilaboratorio koti- ja toimisto-NATin taakse sijoitetuilla virtuaalikoneilla: offline-yhtenäistyminen, ristiriidat, palautetun laitteen eristys, replikat, jakaminen, säilytyssäännöt, vertaiset, Strongroomit, levyvarastot, varmuuskopiot ja muuta. Käytä sitä vain testidatalla.</li>
-      <li>Kryptografista suunnittelua ei ole katselmoitu eikä auditoitu. <a href="{{P}}docs/threat-model.html">Uhkamalli</a> ja <a href="{{P}}docs/failure-model.html">vikamalli</a> kertovat, mitä suunnittelulla tavoitellaan ja mihin se päättyy.</li>
-      <li>Lähdekoodi on julkisesti osoitteessa <a href="https://github.com/janttsu/varsto" rel="noopener">github.com/janttsu/varsto</a> <a href="{{P}}docs/licence.html">PolyForm Shield License 1.0.0</a> -lisenssillä (lähdekoodi saatavilla, ei avointa lähdekoodia); virheet ja kysymykset kuuluvat siellä olevaan vikaseurantaan. Tallennusmuoto on <a href="{{P}}docs/alpha-0-format.html">dokumentoitu</a>, jotta datasi pysyy palautettavissa.</li>
-      <li>Varsto on kirjoitettu Rustilla, ja siinä on Swift- ja Kotlin-kuoret sekä tavallinen web-käyttöliittymä. Apu on tervetullutta tietoturvakatselmoinnissa, alustatyössä, verkko- ja tallennustestauksessa, paketoinnissa ja käännöksissä: <a href="{{L}}contribute/">näin osallistut</a>.</li>
-      <li>Nimi on väliaikainen.</li>
-    </ul>
-
-    <h2>Lataukset <span class="note">(englanniksi)</span></h2>
-    {{DOWNLOADS}}
-    <p class="note">Tarkista lataus: tarkistussummalista on allekirjoitettu Varston julkaisuavaimella (katso ”Verify your download” yllä): <code>varsto verify-release &lt;file&gt; --github</code> tai minisign ja <code>sha256sum -c SHA256SUMS --ignore-missing</code>. <code>varsto update</code> tarkistaa allekirjoituksen ja GitHub-julkaisun itse.</p>
+    <p>Tämä on alfa, eikä suunnitelmaa eikä koodia ole auditoitu. <a href="{{L}}how-it-works/">Miten salaus toimii</a>, <a href="{{P}}docs/threat-model.html">uhkamalli</a> (englanniksi) ja <a href="{{P}}blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">mitä tässä versiossa muuttui</a>. Käännökset ovat <a href="{{L}}downloads/">lataussivulla</a>.</p>
 
     <h2>Uusimmat blogissa</h2>
     {{POSTS}}
