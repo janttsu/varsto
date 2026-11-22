@@ -47,16 +47,16 @@ description: Varsto: end-to-end encrypted file sync, sharing and backup on stora
     <p><a class="button" href="contribute/">How to contribute</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issues</a> <a class="button secondary" href="docs/contributing.html">Contribution rules</a> <a class="button secondary" href="docs/alpha-0-format.html">Storage format</a></p>
 
     <h2 id="next">New in {{RELEASED}}</h2>
-    <p class="note">Storage format 3 and what comes with it. Vaults made by 0.0.1-alpha.15 or earlier must be recreated:</p>
+    <p class="note">The same storage format as 0.0.1-alpha.16. Vaults are not recreated.</p>
     <ul>
-      <li>Storage format 3: a ledger of packs instead of blocks, signed records, folder block maps and base-plus-delta manifests.</li>
-      <li>Folder access by approval: a device that joined with the vault words asks for a folder (<code>varsto folder request</code>), an owner compares six words on both devices and approves it.</li>
-      <li>Recovery words: a second set of 24 words and a recovery copy of every folder key, so a vault can be reopened when every device is lost.</li>
-      <li>The rendezvous service (<code>https://varsto.net/rv</code> or your own): peers find each other across networks, <code>rv=</code> pairing links work, and an end-to-end encrypted relay is the last route. Everything works without it.</li>
-      <li>Working offline: joining by pairing without reaching a storage, membership changes kept on the device until a storage answers, and one unreachable storage no longer fails a whole sync.</li>
-      <li>One Import page, torrent imports for torrents larger than the disk (<code>varsto import torrent</code>) and YouTube channels into folders (<code>varsto import youtube</code>).</li>
-      <li>A mailbox that carries blocks from a docked disk to a pool disk or storage that is away, and <code>varsto service remember</code> on servers without a desktop session.</li>
-      <li>A release-signed Android APK that later releases update in place. It has a new signing key: uninstall an earlier debug build first.</li>
+      <li>Phone notifications through ntfy, Pushover or Telegram (<code>varsto notify</code>, or Settings). Alerts are on by default; finished backups, new files and a daily summary are opt-in.</li>
+      <li>A pull reuses blocks this device already has, and a device that has just written a file serves it to the others at once.</li>
+      <li>A pull that fails no longer publishes deletions of files this device has not read. The newest backup snapshot is kept whatever its age.</li>
+      <li>The first connection to a device is shown as connecting and tried again at once. A later certificate refusal is shown as unreachable.</li>
+      <li>After a device is removed, status names every storage whose credentials that device could still use. <code>varsto storage mark-rotated</code> clears the warning once you have replaced them at the provider.</li>
+      <li>Share and organization requests keep their private keys sealed under the device passphrase. The recovery kit prints both the vault words and the recovery words.</li>
+      <li>Pausing the service stops peer traffic too. Phone thumbnails show again, and a vault with no disk of your own is no longer reported as violated by the default policy.</li>
+      <li>Application ids are <code>net.varsto.app</code>, <code>net.varsto.app.ios</code> and <code>net.varsto.app.alpha</code>. An already installed app keeps its previous id and its vault until you install it again.</li>
     </ul>
 
     <h2 id="status">Honest status</h2>

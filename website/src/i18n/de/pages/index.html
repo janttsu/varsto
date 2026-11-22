@@ -47,16 +47,16 @@ description: Varsto: Ende-zu-Ende verschlüsselte Synchronisierung, Freigabe und
     <p><a class="button" href="{{L}}contribute/">So trägst du bei</a> <a class="button secondary" href="https://github.com/janttsu/varsto/issues" rel="noopener">Issues</a> <a class="button secondary" href="{{P}}docs/contributing.html">Regeln (en)</a> <a class="button secondary" href="{{P}}docs/alpha-0-format.html">Speicherformat</a></p>
 
     <h2 id="next">Neu in {{RELEASED}}</h2>
-    <p class="note">Speicherformat 3 und das, was dazugehört. Tresore, die mit 0.0.1-alpha.15 oder früher erstellt wurden, müssen neu angelegt werden:</p>
+    <p class="note">Dasselbe Speicherformat wie 0.0.1-alpha.16. Tresore werden nicht neu angelegt.</p>
     <ul>
-      <li>Speicherformat 3: ein Hauptbuch der Pakete statt der Blöcke, signierte Datensätze, Blockkarten der Ordner und Manifeste aus Basis plus Delta.</li>
-      <li>Ordnerzugriff per Genehmigung: ein Gerät, das mit den Tresorwörtern beigetreten ist, fordert einen Ordner an (<code>varsto folder request</code>), eine Eigentümerin oder ein Eigentümer vergleicht sechs Wörter auf beiden Geräten und genehmigt.</li>
-      <li>Wiederherstellungswörter: ein zweiter Satz von 24 Wörtern und eine Wiederherstellungskopie jedes Ordnerschlüssels, sodass sich ein Tresor wieder öffnen lässt, wenn jedes Gerät verloren ist.</li>
-      <li>Der Rendezvous-Dienst (<code>https://varsto.net/rv</code> oder dein eigener): Gegenstellen finden einander über Netze hinweg, Kopplungslinks mit <code>rv=</code> funktionieren, und ein Ende-zu-Ende-verschlüsseltes Relais ist der letzte Weg. Alles funktioniert ohne ihn.</li>
-      <li>Arbeiten ohne Netz: Beitreten durch Koppeln, ohne einen Speicher zu erreichen, Änderungen der Mitgliedschaft bleiben auf dem Gerät, bis ein Speicher antwortet, und ein unerreichbarer Speicher lässt nicht mehr die ganze Synchronisierung scheitern.</li>
-      <li>Eine Seite Import, Torrent-Import für Torrents, die größer sind als die Platte (<code>varsto import torrent</code>), und YouTube-Kanäle in Ordner (<code>varsto import youtube</code>).</li>
-      <li>Ein Briefkasten, der Blöcke von einer angedockten Platte zu einer Pool-Platte oder einem Speicher trägt, der nicht da ist, und <code>varsto service remember</code> auf Servern ohne Desktop-Sitzung.</li>
-      <li>Eine release-signierte Android-APK, die spätere Veröffentlichungen an Ort und Stelle aktualisieren. Sie hat einen neuen Signaturschlüssel: deinstalliere zuerst einen früheren Debug-Build.</li>
+      <li>Benachrichtigungen aufs Telefon über ntfy, Pushover oder Telegram (<code>varsto notify</code> oder die Einstellungen). Warnungen sind standardmäßig an; fertige Sicherungen, neue Dateien und eine Tageszusammenfassung sind optional.</li>
+      <li>Ein Abruf verwendet Blöcke wieder, die das Gerät schon hat, und ein Gerät, das eine Datei gerade geschrieben hat, gibt sie den anderen sofort weiter.</li>
+      <li>Ein fehlgeschlagener Abruf veröffentlicht keine Löschungen von Dateien, die dieses Gerät nicht gelesen hat. Der neueste Schnappschuss einer Sicherung bleibt unabhängig vom Alter erhalten.</li>
+      <li>Die erste Verbindung zu einem Gerät wird als verbindend gezeigt und sofort erneut versucht. Eine spätere Zertifikatsablehnung wird als unerreichbar gezeigt.</li>
+      <li>Nach dem Entfernen eines Geräts nennt der Status jeden Speicher, dessen Zugangsdaten dieses Gerät noch zum Löschen von Geheimtext nutzen könnte. <code>varsto storage mark-rotated</code> löscht die Warnung, sobald du die Zugangsdaten beim Anbieter ersetzt hast.</li>
+      <li>Freigabe- und Organisationsanfragen halten ihre privaten Schlüssel unter der Geräte-Passphrase versiegelt. Das Wiederherstellungsblatt druckt sowohl die Tresorwörter als auch die Wiederherstellungswörter.</li>
+      <li>Das Anhalten des Dienstes stoppt auch den Peer-Verkehr. Vorschaubilder auf dem Telefon erscheinen wieder, und ein Tresor ohne eigene Platte gilt bei der Standardrichtlinie nicht mehr als verletzt.</li>
+      <li>Die Anwendungskennungen sind <code>net.varsto.app</code>, <code>net.varsto.app.ios</code> und <code>net.varsto.app.alpha</code>. Eine bereits installierte App behält ihre bisherige Kennung und ihren Tresor, bis du sie neu installierst.</li>
     </ul>
 
     <h2 id="status">Ehrlicher Stand</h2>
