@@ -27,7 +27,7 @@
 <link rel="alternate" hreflang="es" href="https://varsto.net/es/features/">
 <link rel="alternate" hreflang="ru" href="https://varsto.net/ru/features/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=4998b8d831">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -142,7 +142,7 @@
 
     <section class="feature" id="organizations">
       <h2>Organisationer: administratörer, godkännanden och en signerad logg, för företag</h2>
-      <picture class="theme-light"><img src="../../assets/img/screenshots/desktop-organization-light.png?v=15b7b2b466" alt="Sidan Organisation: personer och deras enheter, ett formulär som godkänner en enhet, vad medlemmar får göra, administratörer och den signerade loggen." width="1280" height="860" loading="lazy"></picture><picture class="theme-dark"><img src="../../assets/img/screenshots/desktop-organization-dark.png?v=ac0392c559" alt="Samma sida Organisation i mörkt läge." width="1280" height="860"></picture>
+      <picture class="theme-light"><img src="../../assets/img/screenshots-sv/desktop-organization-light.png?v=939b1065c7" alt="Sidan Organisation: personer och deras enheter, ett formulär som godkänner en enhet, vad medlemmar får göra, administratörer och den signerade loggen." width="1280" height="860" loading="lazy"></picture><picture class="theme-dark"><img src="../../assets/img/screenshots-sv/desktop-organization-dark.png?v=bf46686ac7" alt="Samma sida Organisation i mörkt läge." width="1280" height="860"></picture>
       <div>
         <p><strong>Användningsfall.</strong> En liten firma har sina projektmappar i sin egen bucket. Kontorschefen är administratör: en nyanställd installerar Varsto och skickar en begärandekod, och chefen jämför sex ord med personen i telefon och godkänner den bärbara datorn. När någon slutar tar en enda åtgärd bort personen och alla hens enheter, och de kvarvarande enheterna får nya nycklar.</p>
         <p>Ett valv har enheter, inte personer, och alla fullständiga enheter är likvärdiga. En organisation lägger till det lager som ett företag behöver: administratörer som godkänner enheter för namngivna personer, tar bort en person med alla hens enheter i ett steg (valvet får nya nycklar som bara de kvarvarande enheterna får; med en raderingsorder raderar de borttagna enheterna sina nycklar och mapparnas innehåll), bestämmer vad medlemmar får göra på egen hand (dela utanför valvet, lägga till lagringsplatser, ställa in regler, lägga till enheter) och för en logg över allt detta som signeras av deras enheter och kedjas, så att ingen kan ändra den i efterhand utan att det märks. En enhet ansluter med en begärandekod och ett fingeravtryck på sex ord som administratören jämför med personen; godkännandetoken, förseglad till enhetens nyckel, innehåller valvnyckeln och lagringsinställningarna. En enhet som har anslutit med enbart valvnyckeln ignoreras av de andra tills en administratör lägger till den. Rotnyckeln som utser administratörer är 24 ord på papper, aldrig på en enhet.</p>
@@ -173,16 +173,16 @@
     </section>
 
     <h2 id="next">Nytt i 0.0.1-alpha.16</h2>
-    <p class="note">Lagringsformat 3 och det som följer med. <a href="../../docs/alpha-0-format.html">Lagringsformatet</a> (en) beskriver var och en av dem i sin helhet. Valv som skapats med 0.0.1-alpha.15 eller äldre måste skapas på nytt.</p>
+    <p class="note">Samma lagringsformat som 0.0.1-alpha.16. <a href="../../docs/alpha-0-format.html">Lagringsformatet</a> (på engelska) är oförändrat, och valv skapas inte om.</p>
     <ul>
-      <li>Lagringsformat 3: en liggare över paket i stället för block, signerade poster, blockkartor per mapp och bas- plus deltamanifest.</li>
-      <li>Mappåtkomst genom godkännande: en enhet som anslutit med valvets ord ber om en mapp (<code>varsto folder request</code>), en ägare jämför sex ord på båda enheterna och godkänner.</li>
-      <li>Återställningsord: en andra uppsättning på 24 ord och en återställningskopia av varje mappnyckel, så att ett valv kan öppnas igen även om alla enheter är förlorade.</li>
-      <li>Rendezvous-tjänsten (<code>https://varsto.net/rv</code> eller din egen): enheter hittar varandra över nätverk, parkopplingslänkar med <code>rv=</code> fungerar och ett änd-till-änd-krypterat relä är sista vägen. Allt fungerar utan den.</li>
-      <li>Arbete utan nät: anslutning utan kontakt med någon lagringsplats, medlemsändringar som ligger kvar på enheten tills en lagringsplats svarar, och en onåbar lagringsplats får inte längre en hel synkronisering att misslyckas.</li>
-      <li>En importsida, torrent-import för torrenter som är större än disken (<code>varsto import torrent</code>) och YouTube-kanaler till mappar (<code>varsto import youtube</code>).</li>
-      <li>En brevlåda som för block från en dockad disk till en disk i en diskpool eller en lagringsplats som är borta, och <code>varsto service remember</code> på servrar utan skrivbordssession.</li>
-      <li>En releasesignerad Android-APK som senare versioner uppdaterar på plats. Signeringsnyckeln är ny: avinstallera en tidigare debug-version först.</li>
+      <li>Aviseringar till telefonen via ntfy, Pushover eller Telegram (<code>varsto notify</code> eller Inställningar). Varningar är på som standard; färdiga säkerhetskopior, nya filer och en daglig sammanfattning är valfria.</li>
+      <li>En hämtning återanvänder block som enheten redan har, och en enhet som just skrev en fil delar den med de andra genast.</li>
+      <li>En hämtning som misslyckas publicerar inte längre raderingar av filer som enheten inte har läst. Den nyaste ögonblicksbilden av en säkerhetskopia behålls oavsett ålder.</li>
+      <li>Den första kontakten med en enhet visas som ansluter och prövas igen genast. Ett senare avvisat certifikat visas som onåbart.</li>
+      <li>När en enhet har tagits bort namnger status varje lagring vars uppgifter den enheten fortfarande kunde använda för att radera chiffertext. <code>varsto storage mark-rotated</code> tar bort varningen när du har bytt uppgifterna hos leverantören.</li>
+      <li>Delnings- och organisationsförfrågningar håller sina privata nycklar förseglade under enhetens lösenfras. Återställningspaketet skriver ut både valvorden och återställningsorden.</li>
+      <li>Att pausa tjänsten stoppar också peer-trafiken. Miniatyrer syns på telefonen igen, och ett valv utan egen disk rapporteras inte längre som brutet av standardprincipen.</li>
+      <li>Program-id är <code>net.varsto.app</code>, <code>net.varsto.app.ios</code> och <code>net.varsto.app.alpha</code>. En redan installerad app behåller sitt tidigare id och sitt valv tills du installerar den på nytt.</li>
     </ul>
     <h2>Också med i designen</h2>
     <ul>

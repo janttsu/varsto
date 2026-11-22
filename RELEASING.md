@@ -128,19 +128,19 @@ when a listed file is missing or differs, and notes files that are not listed.
 
 Every build refreshes all website pictures, for every platform and language,
 with no manual step. CI photographs (`scripts/screenshots`: an invented demo
-vault; the interface in Chromium three times, English, Finnish and Swedish
-(`ui-shots.py --lang`); the full-screen visualization TV scene in 4K, exported
+vault; the interface in Chromium once per language, English, Finnish, Swedish,
+German, Spanish and Russian (`ui-shots.py --lang`); the full-screen visualization TV scene in 4K, exported
 at 1920 px as `viz-tv.png` (`viz-shots.py`, `website/tools/screenshots/viz_tv_scene.py`);
 the Linux and Windows desktops, the Android emulator, the macOS window, the iOS
 Simulator) and the `screenshots` job packs everything (`finalize.py --pack`,
-artifact `screenshots`) as `en/`, `fi/`, `sv/`, `viz/` and `shots.json`
+artifact `screenshots`) as `en/`, `fi/`, `sv/`, `de/`, `es/`, `ru/`, `viz/` and `shots.json`
 (sizes per set, version, commit, date, run). Pushes to `main` and tags publish
 the tarball on the rolling pre-release `screenshots-latest`; the web server
 pulls it every 15 minutes (`ops/site/screenshots-sync.py`), writes `en/` to
-`assets/img/screenshots/`, `fi/` and `sv/` to `screenshots-fi/` and
-`screenshots-sv/`, `viz-tv.png` to `assets/img/`, and patches width, height,
-cache hash and caption into the English, Finnish, Swedish and French
-Screenshots pages. The server's timer and command are unchanged; a flat tarball
+`assets/img/screenshots/`, and `fi/` `sv/` `de/` `es/` `ru/` to `screenshots-fi/`
+and the matching directories, `viz-tv.png` to `assets/img/`, and patches width, height,
+cache hash and caption into the Screenshots pages (French keeps the English pictures).
+The server's timer and command are unchanged; a flat tarball
 from an older build is still read as the English set. The fixture dry run
 `python3 -I ops/site/tests/test_screenshots_sync.py` checks the parsing and
 patching (CI runs it). A set missing from a run (for example the visualization

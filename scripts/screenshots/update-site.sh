@@ -8,8 +8,9 @@
 # width and height on the Screenshots pages of every language, states the
 # version, commit and date they were captured from, and rebuilds the site
 # (deploy separately with website/deploy.sh). The CI package has the
-# subdirectories en/ (-> assets/img/screenshots), fi/ and sv/ (-> screenshots-fi,
-# screenshots-sv) and viz/viz-tv.png (-> assets/img/viz-tv.png) and sizes per
+# subdirectories en/ (-> assets/img/screenshots), fi/ sv/ de/ es/ ru/
+# (-> screenshots-fi and the same for sv, de, es, ru) and viz/viz-tv.png
+# (-> assets/img/viz-tv.png) and sizes per
 # set in shots.json; a flat directory (finalize.py without --pack) is the en set.
 # The web server does the same from the published package
 # (ops/site/screenshots-sync.py); this script is for the repository's copy.
@@ -42,6 +43,9 @@ CAPTION = {
     "fi": ("Kuvattu automaattisesti versiosta {v}{c} {d}{s}.", "GitHub Actions -ajo"),
     "sv": ("Tagna automatiskt från version {v}{c} den {d}{s}.", "GitHub Actions-körning"),
     "fr": ("Capturées automatiquement depuis la version {v}{c} le {d}{s}.", "exécution GitHub Actions"),
+    "de": ("Automatisch aufgenommen von Version {v}{c} am {d}{s}.", "GitHub-Actions-Lauf"),
+    "es": ("Capturadas automáticamente de la versión {v}{c} el {d}{s}.", "ejecución de GitHub Actions"),
+    "ru": ("Снято автоматически с версии {v}{c} {d}{s}.", "запуск GitHub Actions"),
 }
 def stamp(lang, version, commit, date, source, esc=lambda s: s):
     text, run = CAPTION[lang]
@@ -52,7 +56,8 @@ def stamp(lang, version, commit, date, source, esc=lambda s: s):
 sizes = meta["sizes"]
 if sizes and not all(isinstance(v, dict) for v in sizes.values()):
     sizes = {"en": sizes}  # flat package
-DIRS = {"en": "screenshots", "fi": "screenshots-fi", "sv": "screenshots-sv", "viz": ""}
+DIRS = {"en": "screenshots", "fi": "screenshots-fi", "sv": "screenshots-sv",
+        "de": "screenshots-de", "es": "screenshots-es", "ru": "screenshots-ru", "viz": ""}
 img = dest.parent
 for group, table in sizes.items():
     sub = src / group if (src / group).is_dir() else src
@@ -63,7 +68,10 @@ for group, table in sizes.items():
 for lang, page in [("en", pages / "pages/screenshots.html"),
                    ("fi", pages / "i18n/fi/pages/screenshots.html"),
                    ("sv", pages / "i18n/sv/pages/screenshots.html"),
-                   ("fr", pages / "i18n/fr/pages/screenshots.html")]:
+                   ("fr", pages / "i18n/fr/pages/screenshots.html"),
+                   ("de", pages / "i18n/de/pages/screenshots.html"),
+                   ("es", pages / "i18n/es/pages/screenshots.html"),
+                   ("ru", pages / "i18n/ru/pages/screenshots.html")]:
     if not page.exists():
         continue
     html = page.read_text()

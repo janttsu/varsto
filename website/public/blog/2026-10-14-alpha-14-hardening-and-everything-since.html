@@ -22,7 +22,7 @@
 <link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-14-alpha-14-hardening-and-everything-since.html">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.14: a security review, its fixes, and everything merged since alpha.13","description":"A code-level security review of the whole program, the fixes it asked for, a much faster sync, resumable moves to a stack of removable disks, and the twenty-odd features that had been waiting on the main branch since alpha.13.","datePublished":"2026-10-14","url":"https://varsto.net/blog/2026-10-14-alpha-14-hardening-and-everything-since.html","inLanguage":"en","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=4998b8d831">
+<link rel="stylesheet" href="../assets/css/site.css?v=3886a51cdd">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -52,7 +52,7 @@
 <main id="main">
   <div class="wrap">
 <article class="prose"><h1>Alpha.14: a security review, its fixes, and everything merged since alpha.13</h1><p class="note"><time datetime="2026-10-14">2026-10-14</time></p>
-<p>The current release is <a href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">0.0.1-alpha.16</a>. This note describes an older release. <a href="https://varsto.net/downloads/">Downloads</a> serve alpha.16, and the source is on <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
+<p>The current release is <a href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. This note describes an older release. <a href="https://varsto.net/downloads/">Downloads</a> serve alpha.17, and the source is on <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
 <p>Alpha.14 is the largest release so far. It carries two things: the backlog of features that landed on the main branch after alpha.13, and the first round of fixes from a security review that read every line of the program with a hostile storage, a hostile network and a hostile fellow device in mind.</p>
 <h2 id="the-security-review">The security review</h2>
 <p>The review found the cryptographic primitives sound and the authorization around them lacking. Alpha.14 closes the parts that could be closed without changing the storage format:</p>
