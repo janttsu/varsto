@@ -27,7 +27,7 @@
 <link rel="alternate" hreflang="es" href="https://varsto.net/es/features/">
 <link rel="alternate" hreflang="ru" href="https://varsto.net/ru/features/">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../blog/feed.xml">
-<link rel="stylesheet" href="../../assets/css/site.css?v=4998b8d831">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
 <script src="../../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -142,7 +142,7 @@
 
     <section class="feature" id="organizations">
       <h2>Organisationen: Administratoren, Genehmigungen und ein signiertes Protokoll, für den Einsatz im Betrieb</h2>
-      <picture class="theme-light"><img src="../../assets/img/screenshots/desktop-organization-light.png?v=15b7b2b466" alt="Die Seite Organisation: Personen und ihre Geräte, ein Formular, das ein Gerät genehmigt, was Mitglieder tun dürfen, Administratoren und das signierte Protokoll." width="1280" height="860" loading="lazy"></picture><picture class="theme-dark"><img src="../../assets/img/screenshots/desktop-organization-dark.png?v=ac0392c559" alt="Dieselbe Seite Organisation im dunklen Modus." width="1280" height="860"></picture>
+      <picture class="theme-light"><img src="../../assets/img/screenshots-de/desktop-organization-light.png?v=0" alt="Die Seite Organisation: Personen und ihre Geräte, ein Formular, das ein Gerät genehmigt, was Mitglieder tun dürfen, Administratoren und das signierte Protokoll." width="1280" height="860" loading="lazy"></picture><picture class="theme-dark"><img src="../../assets/img/screenshots-de/desktop-organization-dark.png?v=0" alt="Dieselbe Seite Organisation im dunklen Modus." width="1280" height="860"></picture>
       <div>
         <p><strong>Anwendungsfall.</strong> Eine kleine Firma hält ihre Projektordner im eigenen Bucket. Die Büroleitung ist Administratorin oder Administrator: eine neue Person installiert Varsto, schickt einen Anforderungscode, und die Leitung vergleicht mit ihr am Telefon sechs Wörter und genehmigt den Laptop. Wenn jemand geht, entfernt eine Aktion die Person und jedes ihrer Geräte, und die verbleibenden Geräte bekommen neue Schlüssel.</p>
         <p>Ein Tresor hat Geräte, keine Personen, und jedes vollwertige Gerät ist gleichrangig. Eine Organisation legt die Schicht dazu, die eine Firma braucht: Administratoren, die Geräte für benannte Personen genehmigen, eine Person mit jedem ihrer Geräte in einem Schritt entfernen (der Tresor bekommt neue Schlüssel, die nur die verbleibenden Geräte erhalten; mit einem Löschauftrag löschen die entfernten Geräte ihre Schlüssel und Ordnerinhalte), festlegen, was Mitglieder allein tun dürfen (außerhalb des Tresors freigeben, Speicher hinzufügen, Aufbewahrungsregeln setzen, Geräte hinzufügen), und darüber ein Protokoll führen, das ihre Geräte signieren und verketten, sodass es danach niemand unbemerkt ändern kann. Ein Gerät tritt mit einem Anforderungscode und einem Fingerabdruck aus sechs Wörtern bei, den die Administratorin oder der Administrator mit der Person vergleicht; das Genehmigungstoken, versiegelt an den Schlüssel dieses Geräts, trägt den Tresorschlüssel und die Speichereinstellungen. Ein Gerät, das nur mit dem Tresorschlüssel beigetreten ist, ignorieren die anderen, bis eine Administratorin oder ein Administrator es aufnimmt. Der Wurzelschlüssel, der Administratoren einsetzt, sind 24 Wörter auf Papier, nie auf einem Gerät.</p>
@@ -173,16 +173,16 @@
     </section>
 
     <h2 id="next">Neu in 0.0.1-alpha.16</h2>
-    <p class="note">Speicherformat 3 und das, was dazugehört. Das <a href="../../docs/alpha-0-format.html">Speicherformat</a> beschreibt jedes davon vollständig. Tresore, die mit 0.0.1-alpha.15 oder früher erstellt wurden, müssen neu angelegt werden.</p>
+    <p class="note">Dasselbe Speicherformat wie 0.0.1-alpha.16. Das <a href="../../docs/alpha-0-format.html">Speicherformat</a> (auf Englisch) bleibt unverändert, und Tresore werden nicht neu angelegt.</p>
     <ul>
-      <li>Speicherformat 3: ein Hauptbuch der Pakete statt der Blöcke, signierte Datensätze, Blockkarten der Ordner und Manifeste aus Basis plus Delta.</li>
-      <li>Ordnerzugriff per Genehmigung: ein Gerät, das mit den Tresorwörtern beigetreten ist, fordert einen Ordner an (<code>varsto folder request</code>), eine Eigentümerin oder ein Eigentümer vergleicht sechs Wörter auf beiden Geräten und genehmigt.</li>
-      <li>Wiederherstellungswörter: ein zweiter Satz von 24 Wörtern und eine Wiederherstellungskopie jedes Ordnerschlüssels, sodass sich ein Tresor wieder öffnen lässt, wenn jedes Gerät verloren ist.</li>
-      <li>Der Rendezvous-Dienst (<code>https://varsto.net/rv</code> oder dein eigener): Gegenstellen finden einander über Netze hinweg, Kopplungslinks mit <code>rv=</code> funktionieren, und ein Ende-zu-Ende-verschlüsseltes Relais ist der letzte Weg. Alles funktioniert ohne ihn.</li>
-      <li>Arbeiten ohne Netz: Beitreten durch Koppeln, ohne einen Speicher zu erreichen, Änderungen der Mitgliedschaft bleiben auf dem Gerät, bis ein Speicher antwortet, und ein unerreichbarer Speicher lässt nicht mehr die ganze Synchronisierung scheitern.</li>
-      <li>Eine Seite Import, Torrent-Import für Torrents, die größer sind als die Platte (<code>varsto import torrent</code>), und YouTube-Kanäle in Ordner (<code>varsto import youtube</code>).</li>
-      <li>Ein Briefkasten, der Blöcke von einer angedockten Platte zu einer Pool-Platte oder einem Speicher trägt, der nicht da ist, und <code>varsto service remember</code> auf Servern ohne Desktop-Sitzung.</li>
-      <li>Eine release-signierte Android-APK, die spätere Veröffentlichungen an Ort und Stelle aktualisieren. Sie hat einen neuen Signaturschlüssel: deinstalliere zuerst einen früheren Debug-Build.</li>
+      <li>Benachrichtigungen aufs Telefon über ntfy, Pushover oder Telegram (<code>varsto notify</code> oder die Einstellungen). Warnungen sind standardmäßig an; fertige Sicherungen, neue Dateien und eine Tageszusammenfassung sind optional.</li>
+      <li>Ein Abruf verwendet Blöcke wieder, die das Gerät schon hat, und ein Gerät, das eine Datei gerade geschrieben hat, gibt sie den anderen sofort weiter.</li>
+      <li>Ein fehlgeschlagener Abruf veröffentlicht keine Löschungen von Dateien, die dieses Gerät nicht gelesen hat. Der neueste Schnappschuss einer Sicherung bleibt unabhängig vom Alter erhalten.</li>
+      <li>Die erste Verbindung zu einem Gerät wird als verbindend gezeigt und sofort erneut versucht. Eine spätere Zertifikatsablehnung wird als unerreichbar gezeigt.</li>
+      <li>Nach dem Entfernen eines Geräts nennt der Status jeden Speicher, dessen Zugangsdaten dieses Gerät noch zum Löschen von Geheimtext nutzen könnte. <code>varsto storage mark-rotated</code> löscht die Warnung, sobald du die Zugangsdaten beim Anbieter ersetzt hast.</li>
+      <li>Freigabe- und Organisationsanfragen halten ihre privaten Schlüssel unter der Geräte-Passphrase versiegelt. Das Wiederherstellungsblatt druckt sowohl die Tresorwörter als auch die Wiederherstellungswörter.</li>
+      <li>Das Anhalten des Dienstes stoppt auch den Peer-Verkehr. Vorschaubilder auf dem Telefon erscheinen wieder, und ein Tresor ohne eigene Platte gilt bei der Standardrichtlinie nicht mehr als verletzt.</li>
+      <li>Die Anwendungskennungen sind <code>net.varsto.app</code>, <code>net.varsto.app.ios</code> und <code>net.varsto.app.alpha</code>. Eine bereits installierte App behält ihre bisherige Kennung und ihren Tresor, bis du sie neu installierst.</li>
     </ul>
     <h2>Auch im Entwurf</h2>
     <ul>

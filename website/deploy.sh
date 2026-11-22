@@ -25,12 +25,13 @@ if [ -n "$stubs" ] && [ "${ALLOW_DOWNLOAD_STUB:-}" != 1 ]; then
 fi
 # Without a local download set (a fresh checkout deploying a page or a
 # screenshot), leave the server's downloads alone instead of deleting them.
-# The server's screenshots (English, Finnish and Swedish sets and the
-# visualization picture) come from CI (ops/site/screenshots-sync.py).
+# The server's screenshots (English, Finnish, Swedish, German, Spanish and
+# Russian interface sets, and the visualization picture) come from CI
+# (ops/site/screenshots-sync.py). French pages keep the English set.
 # /testbuilds/ and /daily/ hold large files that are uploaded by hand or by the
 # daily build workflow, outside this repository: never delete them. Only the
 # generated daily page (/daily/index.html) is part of the site.
-keep=(--exclude /assets/img/screenshots/ --exclude /assets/img/screenshots-fi/ --exclude /assets/img/screenshots-sv/ --exclude /assets/img/viz-tv.png
+keep=(--exclude /assets/img/screenshots/ --exclude /assets/img/screenshots-fi/ --exclude /assets/img/screenshots-sv/ --exclude /assets/img/screenshots-de/ --exclude /assets/img/screenshots-es/ --exclude /assets/img/screenshots-ru/ --exclude /assets/img/viz-tv.png
       --exclude /testbuilds/ --include /daily/ --include /daily/index.html --exclude '/daily/*')
 [ -f "$here/public/downloads/manifest.json" ] || { keep+=(--exclude /downloads/); echo "no local download set: the server's downloads stay as they are"; }
 dest="${DEPLOY_HOST}:${DEPLOY_PATH}/"

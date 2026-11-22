@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.17: the vault stays, the quiet mistakes go: Varsto</title>
+<meta name="description" content="No new storage format and no new words to write down. Alpha.17 is the release that stops a failed sync from deleting files, keeps the last backup, and tells your phone when something is actually wrong.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.17: the vault stays, the quiet mistakes go: Varsto">
+<meta property="og:description" content="No new storage format and no new words to write down. Alpha.17 is the release that stops a failed sync from deleting files, keeps the last backup, and tells your phone when something is actually wrong.">
+<meta property="og:url" content="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.17: the vault stays, the quiet mistakes go","description":"No new storage format and no new words to write down. Alpha.17 is the release that stops a failed sync from deleting files, keeps the last backup, and tells your phone when something is actually wrong.","datePublished":"2026-11-22","url":"https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html","inLanguage":"en","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
+<link rel="stylesheet" href="../assets/css/site.css?v=3886a51cdd">
+<script src="../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha software, not for production data.</strong> Bugs can cause data loss, formats may change without migration, and the cryptography has not been independently audited. Keep your own backups and check that you can restore from them.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Main">
+      <a href="../features/">Features</a>
+      <a href="../how-it-works/">How it works</a>
+      <a href="../compare/">Compare</a>
+      <a href="../docs/">Docs</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../downloads/">Download</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menu"><a href="../">Project</a><a href="../features/">Features</a><a href="../use-cases/">Use cases</a><a href="../compare/">Compare</a><a href="../how-it-works/">How it works</a><a href="../screenshots/">Screenshots</a><a href="../docs/">Docs</a><a href="../downloads/">Downloads</a><a href="../blog/" aria-current="page">Blog</a><a href="../forum/">Forum</a><a href="../contribute/">Contribute</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.17: the vault stays, the quiet mistakes go</h1><p class="note"><time datetime="2026-11-22">2026-11-22</time></p>
+<p>You can update this one without a ceremony. Alpha.17 opens an alpha.16 vault as it is. There is no new format, no second set of words, and nothing to recreate. What changes is the sort of mistake that used to happen while you were looking at something else.</p>
+<p>A pull that never finished could still publish deletions of files this device had not read. The newest snapshot of a backup could age out and take the only restorable copy with it. The first meeting with another device could sit there for a quarter of an hour looking dead. Those are the things this release is for. It is still an alpha, and it is still not for data you cannot afford to lose. The long list is in the changelog. The parts you will actually notice are below.</p>
+<h2 id="your-phone-hears-about-it">Your phone hears about it</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../assets/img/blog/notify-dark.webp?v=2609e89dc4"><img src="../assets/img/blog/notify-dark.png?v=1065ff01c5" alt="A laptop sends a low-space alert about the Documents folder to a phone. The vault itself stays on the computer." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../assets/img/blog/notify.webp?v=81bd4bf010"><img loading="lazy" src="../assets/img/blog/notify.png?v=1f9ce40a85" alt="A laptop sends a low-space alert about the Documents folder to a phone. The vault itself stays on the computer." width="640" height="320"></picture>
+</figure>
+
+<p>A device can now tell your phone, through ntfy, Pushover or Telegram, when something wants a person. Add a channel in Settings or with <code>varsto notify</code>. Each service has a short guide and a test message, and you choose what it is allowed to say. Folder names, storage names and device names can stay out of the text.</p>
+<p>The alerts that matter are on unless you turn them off: a storage in trouble, a disk running out of room, fewer copies than a policy asks for, damaged data, a backup that failed or is overdue, a request waiting for you. Finished backups, new files and a daily summary stay quiet until you ask for them. The tokens live on the device, in <code>notify.json</code>, and are never synced. The message itself is not end-to-end encrypted on the way through ntfy, Pushover or Telegram, which is worth knowing before you let it name a folder. A failed send waits and is tried again, including after a restart. The same alert is not repeated for six hours, and a channel gets at most twenty messages an hour. You can set this up while the vault is locked.</p>
+<h2 id="a-pull-that-already-has-the-bytes">A pull that already has the bytes</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../assets/img/blog/reuse-dark.webp?v=fdfe8e1f16"><img src="../assets/img/blog/reuse-dark.png?v=344383fca7" alt="Ciphertext blocks stay on the laptop. A single link carries only the missing blocks to a locked cloud." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../assets/img/blog/reuse.webp?v=8fd02a2d30"><img loading="lazy" src="../assets/img/blog/reuse.png?v=9fbad43f82" alt="Ciphertext blocks stay on the laptop. A single link carries only the missing blocks to a locked cloud." width="640" height="320"></picture>
+</figure>
+
+<p>Most of a changed file was already here. Alpha.17 stops fetching those blocks again. The unchanged pieces of a changed file come from the previous version on disk. A rename or a move comes from the old path, or from the trash if that is where it went. Two copies of the same file fetch each distinct block once. Anything read locally is checked against its chunk id, and a block that does not match is fetched after all.</p>
+<p>The other half of that is the device that just wrote the file. It serves each file it has put in place to the others immediately, not only after its own sync has ended, and the requests are shared among the peers that actually hold the blocks.</p>
+<p>The first time this device meets another one, before that device has read this certificate, the path is shown as connecting and tried again at once. A later refusal waits a few seconds and is shown as unreachable. A device that has never answered no longer spends a minute, and then up to fifteen, before the first real try. While that first sync is still running, a folder with no files yet is shown as fetching. It is not an empty folder that is already done.</p>
+<p>A peer that was answering and then fails rests a second, and the rest doubles, instead of a flat minute. A block nobody else has is asked of that peer once more. If the peer restarts, the next sync, a newer peer record or a LAN beacon ends the rest instead of reporting every file unavailable. Devices that are simply gone rest longer, and up to eight of them are asked together, so they cost one timeout instead of eight.</p>
+<h2 id="what-a-failure-is-no-longer-allowed-to-do">What a failure is no longer allowed to do</h2>
+<p>A pull that fails no longer publishes deletions of files this device has not read. What you added or edited here is still pushed. The next pull fetches the copies the other devices still have before a missing file can be declared gone.</p>
+<p>If another device's version wins a conflict, the file here moves aside only once the winner has actually arrived. A winner that could not be fetched used to leave the path empty, and the next push then published a deletion of it. A file that grows or shrinks while the scan is reading it waits for the next scan. It is not published with a size its blocks do not hold, which used to make every other device refuse the folder's whole list.</p>
+<p>Unclaimed packs are deleted after 48 hours, or after 24 when a local storage is under 10 percent free. It was seven days. A push, an import or a backup whose map record never got published deletes the packs it just wrote, and so does a repair whose batch was not sealed. If the seal fails after the map record was published, the packs stay, because the claim is already in the ledger. <code>varsto gc orphans</code> deletes unclaimed packs now, if you would rather not wait.</p>
+<p>The retention of a backup no longer eats the newest snapshot just because it is old. A lost source directory, or a device that never took a newer one, used to expire that snapshot on schedule and then collect its blocks, and there was nothing left to restore. Stopping the backup still lets the last snapshot expire. That part is unchanged, and it is the way you say you are done with it.</p>
+<h2 id="clocks-names-and-a-key-that-outlived-the-device">Clocks, names, and a key that outlived the device</h2>
+<p>Two processes on one machine, the command line and the background service, can no longer reserve the same Lamport value and then both hand it out. The reservation holds a lock across the read, the raise and the replace.</p>
+<p>Two devices writing the same vault or folder epoch number no longer stop signing until a person chooses. The device that sees both records keeps the one with the greater issuer id. <code>varsto device resolve-epoch</code> and <code>varsto folder resolve-epoch</code> still replace that choice when you want a different one.</p>
+<p>On a disk that ignores case, two paths that differ only in case or in Unicode normalisation get distinct local names whichever one arrives first. The NFC spelling wins a tie. Then the smaller original path keeps the plain name, and the other becomes <code> (2)</code>.</p>
+<p>Removing a device does not, by itself, change the password at the storage provider. What it does now is refuse to forget. <code>varsto status</code> and <code>varsto device list</code> name every storage whose credentials that device could still use to delete ciphertext. When you have replaced them at the provider, <code>varsto storage mark-rotated &lt;name&gt;</code> clears the warning. Varsto does not rotate the secret for you.</p>
+<h2 id="the-words-on-paper-and-the-keys-that-used-to-sit-in-a-file">The words on paper, and the keys that used to sit in a file</h2>
+<p><code>varsto recovery kit</code> prints the format 3 kit: the vault words and the recovery words. It used to print the format 2 text, which told you that the 24 vault words read everything in the vault. In format 3 they open device names, folder names and the storage ledger. Content needs the recovery words. A printout made without them now says so in capitals, instead of looking complete. <code>--shares</code> splits both sets.</p>
+<p>A share request and an organization request used to keep their private keys in a clear JSON file. A copy of the device directory, taken while the request was waiting, could read them, and once the owner approved, open the folder with no passphrase at all. The keys are now sealed under the device passphrase. Showing the request code asks for it, and accepting the request asks again. A request that alpha.16 left in the clear is sealed the next time a command reads it.</p>
+<p>Logs get the same treatment for the way a debug printer writes an optional value. A line like <code>password: Some("…")</code> used to be cut at the quote and leave the secret in the rest of the line. The passphrase is registered with the scrubber on every unlock path, including the service coming back from the keyring. Before, that service could run for days with nothing registered.</p>
+<h2 id="a-pause-that-means-paused">A pause that means paused</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../assets/img/blog/pause-dark.webp?v=cc29350990"><img src="../assets/img/blog/pause-dark.png?v=2fec0b10cb" alt="A paused phone between a home laptop and an office NAS. Both links are marked off." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../assets/img/blog/pause.webp?v=cbbeebe0b4"><img loading="lazy" src="../assets/img/blog/pause.png?v=9a1a85134c" alt="A paused phone between a home laptop and an office NAS. Both links are marked off." width="640" height="320"></picture>
+</figure>
+
+<p>Pausing the background service used to stop syncing and leave the rest of the device talkative. The listener, the LAN beacon, the rendezvous, the relay and the router mapping now stop with it, and they stay stopped until you resume. A pause you set yourself survives a restart, which matters on a phone that stops and starts the service all day. The short pause that <code>varsto disk</code> or an import takes for its own sake is not saved. That one ends when the command ends.</p>
+<p>Thumbnails in the file list show on phones again. When the engine was busy, the service used to answer "no thumbnail", and the page believed it. It now answers "busy", and the page tries again.</p>
+<p>The default policy no longer calls a folder violated in a vault that has no disk pool and no directory storage. There is one warning, that nothing is on a disk of your own and how to add one. A policy you set on purpose, which really does ask for a copy at home, is still held to that. The same distinction applies when an import decides whether its source may be removed, so a folder in that vault no longer waits forever for a copy on a disk you do not have.</p>
+<p>A command and the background service take the same lock for fetching, freeing, writing and moving a file, so they no longer undo each other's folder state. A download or a write that fails no longer leaves a <code>.varsto-tmp-…</code> or <code>.varsto-upload-…</code> file holding part of the content. Files that arrive from another device keep the modification time their writer recorded, instead of being stamped with the moment they were downloaded. Tools that trust the date, a build, a photo library, another backup, stop seeing every pulled file as new.</p>
+<h2 id="a-removed-device-stays-removed">A removed device stays removed</h2>
+<p>A removed device's folder records, grants and escrow count only up to the first sequence number it left empty. It cannot come back later and fill that gap with a backdated record. A member of another vault applies a removal it reads from the folder epoch. A folder the remover could not re-key is re-keyed at the next sync of an owner that still holds the key. What the removed device already has on its own disk, it keeps. That was always true, and it is still true.</p>
+<p>Joining reads the organization's manifest and takes vault epochs and revocations only from its administrators. A revocation written by an ordinary member of the roster no longer opens the vault for a device that is joining.</p>
+<p>The activity log's "holds no key" line has the same button as the folder row, so a phone can ask for access from that line instead of hunting for the folder. The restic mirror, and the folders attached under it, are created so only this user can read them.</p>
+<h2 id="the-name-on-the-icon">The name on the icon</h2>
+<p>The application ids are now <code>net.varsto.app</code> on Android and macOS, <code>net.varsto.app.ios</code> on iOS, and <code>net.varsto.app.alpha</code> for the unsigned macOS build. An app that is already installed keeps its previous id, and its vault is not moved, until you install it again. Installing the new package beside the old one does not replace it.</p>
+<h2 id="if-you-are-on-alpha16">If you are on alpha.16</h2>
+<p>Update whenever you like. The two versions can share a vault while you do. Nothing in this release asks you to reset, to print a new kit, or to uninstall an Android build that is already the release-signed one from alpha.16. If a share request or an organization request is still sitting in a clear file from alpha.16, the next command that reads it seals it. This is still an alpha.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Encrypted file sync and backup on your own storage.</p></div>
+    <div><h2>Product</h2><nav aria-label="Product"><a href="../">Project</a><a href="../features/">Features</a><a href="../use-cases/">Use cases</a><a href="../screenshots/">Screenshots</a><a href="../downloads/">Downloads</a></nav></div>
+    <div><h2>Learn</h2><nav aria-label="Learn"><a href="../how-it-works/">How it works</a><a href="../compare/">Compare</a><a href="../docs/">Docs</a><a href="../blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Community</h2><nav aria-label="Community"><a href="../forum/">Forum</a><a href="../contribute/">Contribute</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto is a working name. Source: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under the PolyForm Shield License 1.0.0 (source-available).</span>
+    <span>No cookies, no tracking. The web server keeps a standard access log for at most seven days.</span>
+    <span><a href="../docs/security-policy.html">Security policy</a> · <a href="../docs/licence.html">Licence</a> · <a href="../docs/trademark.html">Trademark</a></span>
+  </div>
+</footer>
+<script src="../assets/js/field.js?v=c342154328" defer></script>
+<script src="../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

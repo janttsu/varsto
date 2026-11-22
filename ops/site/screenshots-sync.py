@@ -11,13 +11,17 @@ and shots.json, and puts them on the site:
     en/<name>.png      -> <site>/assets/img/screenshots/
     fi/<name>.png      -> <site>/assets/img/screenshots-fi/
     sv/<name>.png      -> <site>/assets/img/screenshots-sv/
+    de/<name>.png      -> <site>/assets/img/screenshots-de/
+    es/<name>.png      -> <site>/assets/img/screenshots-es/
+    ru/<name>.png      -> <site>/assets/img/screenshots-ru/
     viz/viz-tv.png     -> <site>/assets/img/viz-tv.png
     shots.json         sizes per set, version, commit, date, source, run
 
 (A flat tarball of plain names, as older builds published, counts as en/.)
+French pages keep the English pictures: the app has no French interface.
 Their sizes and the version, commit and date they come from are written into
-<site>/screenshots/index.html and its Finnish, Swedish and French copies under
-<site>/fi, <site>/sv and <site>/fr, together with a content hash on each
+<site>/screenshots/index.html and the fi, sv, fr, de, es and ru copies, together
+with a content hash on each
 picture's address so browsers fetch a changed picture at once. The pages are
 patched on every run, so a site deploy that brings them back from the
 repository is corrected within one period. The server only reads from GitHub;
@@ -48,7 +52,8 @@ MAX_TOTAL = 96 << 20  # all pictures of one tarball
 MAX_FILES = 200
 MAX_DIM = 20000
 # subdirectory of the tarball -> directory under <site>/assets/img ("" is assets/img itself)
-DIRS = {"en": "screenshots", "fi": "screenshots-fi", "sv": "screenshots-sv", "viz": ""}
+DIRS = {"en": "screenshots", "fi": "screenshots-fi", "sv": "screenshots-sv",
+        "de": "screenshots-de", "es": "screenshots-es", "ru": "screenshots-ru", "viz": ""}
 VIZ_ONLY = {"viz-tv.png"}  # the only file accepted from viz/
 
 

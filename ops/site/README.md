@@ -13,9 +13,10 @@
   systemctl --user daemon-reload && systemctl --user enable --now screenshots-sync.timer
   ```
 
-  The package has `en/`, `fi/`, `sv/`, `viz/` and `shots.json`; the script
+  The package has `en/`, `fi/`, `sv/`, `de/`, `es/`, `ru/`, `viz/` and `shots.json`; the script
   writes them to `assets/img/screenshots/`, `screenshots-fi/`,
-  `screenshots-sv/` and `assets/img/viz-tv.png`. Nothing changes in the
+  `screenshots-sv/`, `screenshots-de/`, `screenshots-es/`, `screenshots-ru/`
+  and `assets/img/viz-tv.png`. French pages keep the English set. Nothing changes in the
   installed unit or timer. `website/deploy.sh` leaves those paths on the
   server alone, so a deploy never puts older pictures back. Dry run without
   the server: `python3 -I ops/site/tests/test_screenshots_sync.py`.

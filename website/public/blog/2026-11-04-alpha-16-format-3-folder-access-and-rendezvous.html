@@ -22,7 +22,7 @@
 <link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.16: storage format 3, folder access by approval and a rendezvous service","description":"A new storage format with a pack-level ledger, signed records and recovery words, so existing vaults must be recreated; folders are opened to a device by an owner's approval; devices find each other through an optional rendezvous service; joining and membership changes work offline; and imports from torrents and YouTube.","datePublished":"2026-11-04","url":"https://varsto.net/blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html","inLanguage":"en","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
-<link rel="stylesheet" href="../assets/css/site.css?v=4998b8d831">
+<link rel="stylesheet" href="../assets/css/site.css?v=3886a51cdd">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
 </head>
 <body>
@@ -52,6 +52,7 @@
 <main id="main">
   <div class="wrap">
 <article class="prose"><h1>Alpha.16: storage format 3, folder access by approval and a rendezvous service</h1><p class="note"><time datetime="2026-11-04">2026-11-04</time></p>
+<p>The current release is <a href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">0.0.1-alpha.17</a>. This note describes an older release. <a href="https://varsto.net/downloads/">Downloads</a> serve alpha.17, and the source is on <a href="https://github.com/janttsu/varsto">GitHub</a>.</p>
 <p>Alpha.16 changes the storage format again. That is the main thing to know before updating: vaults made by alpha.15 or earlier cannot be opened by this version and have to be recreated. The rest of the release is a long list of changes in how devices join, find each other and cope with a bad network, a new Import page, and a large set of fixes and hardening from a review of the new format.</p>
 <h2 id="recreating-a-vault">Recreating a vault</h2>
 <p>There is no migration. Alpha.16 refuses an older vault when it opens it or when a device joins through its storage, and the message says what to do. Alpha.15 refuses a format 3 vault in the same way, so the two versions cannot share a vault in either direction. Every device of a vault must run alpha.16. Keep your files where they are, then:</p>

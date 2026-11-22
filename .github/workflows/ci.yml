@@ -103,13 +103,16 @@ jobs:
           python3 -m pip install --quiet --break-system-packages playwright pillow
           python3 -m playwright install --with-deps chromium >/dev/null
           DEMO_HOME=/home/aino scripts/screenshots/demo-vault.sh "$VARSTO_BIN" "$RUNNER_TEMP/demo"
-      - name: Screenshots of the interface (English, Finnish, Swedish)
+      - name: Screenshots of the interface (en, fi, sv, de, es, ru)
         run: |
-          # Three runs against the same demo vault, one directory per language
-          # (the website shows each language's pictures on its own pages).
+          # One run per interface language. French pages keep the English
+          # pictures: the app has no French UI.
           python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots
           python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots-fi --lang fi
           python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots-sv --lang sv
+          python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots-de --lang de
+          python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots-es --lang es
+          python3 scripts/screenshots/ui-shots.py "$RUNNER_TEMP/demo" dist/shots-ru --lang ru
       - name: Screenshot of the full-screen visualization (TV scene, 4K)
         # The invented TV scene in 4K; finalize.py scales it to the website's
         # 1920 px viz-tv.png. A failed render keeps the website's last picture.
@@ -192,6 +195,24 @@ jobs:
         with:
           name: shots-linux-sv
           path: dist/shots-sv
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux-de
+          path: dist/shots-de
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux-es
+          path: dist/shots-es
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux-ru
+          path: dist/shots-ru
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: always()
@@ -595,9 +616,9 @@ jobs:
         run: |
           python3 -m pip install --quiet --break-system-packages pillow
           version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
-          # One package for the website: en/ fi/ sv/ viz/ and shots.json with the
-          # sizes per set (artifact folders shots-linux-fi/-sv/-viz are the
-          # localized and visualization pictures, everything else is en/).
+          # One package for the website: en/ fi/ sv/ de/ es/ ru/ viz/ and shots.json
+          # with the sizes per set (artifact folders shots-linux-fi/-sv/-de/-es/-ru/-viz
+          # are the localized and visualization pictures, everything else is en/).
           # HEAD of the checkout: the commit a called run (daily.yml) built, not
           # the caller's github.sha; a pull request keeps its own head commit.
           commit="${{ github.event.pull_request.head.sha }}"

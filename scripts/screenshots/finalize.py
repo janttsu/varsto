@@ -10,10 +10,10 @@ writes <out dir>/<name>.png plus shots.json (version, commit, date, source
 and the size of every picture). Unknown files are ignored.
 
 With --pack the output is what ops/site/screenshots-sync.py takes: en/ (the
-shared and English pictures), fi/ and sv/ (the localized interface from
+shared and English pictures), fi/ sv/ de/ es/ ru/ (the localized interface from
 ui-shots.py --lang) and viz/viz-tv.png (the 4K TV scene scaled to 1920 px), and
 shots.json holds the sizes per set: {"en": {name: [w, h]}, "fi": ..., "sv": ...,
-"viz": ...}.
+"de": ..., "es": ..., "ru": ..., "viz": ...}.
 """
 import argparse
 import datetime
@@ -48,6 +48,9 @@ SETS = {
     "en": (None, {k: (k, v) for k, v in WIDTHS.items()}),
     "fi": ("shots-linux-fi", {k: (k, v) for k, v in UI_WIDTHS.items()}),
     "sv": ("shots-linux-sv", {k: (k, v) for k, v in UI_WIDTHS.items()}),
+    "de": ("shots-linux-de", {k: (k, v) for k, v in UI_WIDTHS.items()}),
+    "es": ("shots-linux-es", {k: (k, v) for k, v in UI_WIDTHS.items()}),
+    "ru": ("shots-linux-ru", {k: (k, v) for k, v in UI_WIDTHS.items()}),
     # the 4K render of the TV scene (viz-shots.py, viz_tv_scene.py), exported at 1920 px
     "viz": ("shots-linux-viz", {"viz-tv-4k": ("viz-tv", 1920)}),
 }
@@ -60,8 +63,8 @@ ap.add_argument("--commit", default="")
 ap.add_argument("--source", default="")
 ap.add_argument("--run", default="")
 ap.add_argument("--pack", action="store_true",
-                help="write <dst>/en, fi, sv and viz (a CI download directory with the artifact "
-                     "folders shots-linux-fi, -sv and -viz) and one shots.json with sizes per set; "
+                help="write <dst>/en, fi, sv, de, es, ru and viz (a CI download directory with the artifact "
+                     "folders shots-linux-fi, -sv, -de, -es, -ru and -viz) and one shots.json with sizes per set; "
                      "without it everything goes flat into <dst> as before")
 a = ap.parse_args()
 src, dst = pathlib.Path(a.src), pathlib.Path(a.dst)

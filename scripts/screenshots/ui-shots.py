@@ -3,11 +3,11 @@
 """Capture the interface of the demo vault (demo-vault.sh) in Chromium:
 desktop overview and files, and the phone layout, each light and dark.
 
-    python3 scripts/screenshots/ui-shots.py <demo work dir> <out dir> [--lang en|fi|sv]
+    python3 scripts/screenshots/ui-shots.py <demo work dir> <out dir> [--lang en|fi|sv|de|es|ru]
 
 Needs `pip install playwright pillow` and `playwright install chromium`
 (CHROMIUM=/path/to/chromium uses another build). --lang renders the whole
-interface in Finnish or Swedish (default en): the page keeps its language in
+interface in Finnish, Swedish, German, Spanish or Russian (default en): the page keeps its language in
 localStorage ("varsto-lang", see crates/varsto-cli/ui/i18n.js), which is set
 in every browser context before the page loads, and the browser locale is set
 to match. The demo data stays the invented English example. Writes the website names:
@@ -32,7 +32,7 @@ from playwright.sync_api import sync_playwright
 ap = argparse.ArgumentParser()
 ap.add_argument("work")
 ap.add_argument("out")
-ap.add_argument("--lang", choices=("en", "fi", "sv"), default="en")
+ap.add_argument("--lang", choices=("en", "fi", "sv", "de", "es", "ru"), default="en")
 args = ap.parse_args()
 work, out, LANG = args.work, args.out, args.lang
 os.makedirs(out, exist_ok=True)
