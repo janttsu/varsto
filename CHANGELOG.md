@@ -74,6 +74,7 @@ The storage format is unchanged from alpha.16. Vaults open as they are and do no
 - A large pull from a peer no longer stops part-way after one failed request: the peer rested a minute and every block asked for meanwhile was reported unavailable without asking it. A peer that was answering now rests a second, doubling per failure, and a block no other peer has waits for one more try of it (spec 77.8).
 - A sync right after a peer restarted asks it again instead of reporting every file unavailable: a newer peer record, a LAN beacon from it or an explicit sync ends its rest.
 - Devices that are gone (their records stay in the vault) cost less: one that never answered rests a minute, doubling up to 15 minutes, and the head exchange asks up to eight peers at once, so they cost one timeout together instead of one each.
+- `url` 2.5.8 is replaced by 2.5.9 (RUSTSEC-2026-0592, a stack overflow in `Url::origin()` on nested `blob:` URLs).
 
 ## [0.0.1-alpha.16] - 2026-11-04
 
