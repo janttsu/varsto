@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blog: Varsto</title>
+<meta name="description" content="Versionshinweise und technische Artikel">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/de/blog/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Blog: Varsto">
+<meta property="og:description" content="Versionshinweise und technische Artikel">
+<meta property="og:url" content="https://varsto.net/de/blog/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="de_DE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../de/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-Software, nicht für Produktionsdaten.</strong> Fehler können Daten zerstören, das Speicherformat kann sich ohne Migrationswerkzeug ändern, und die Verschlüsselung ist noch nicht geprüft. Behalte eigene Sicherungskopien und prüfe, dass du daraus wiederherstellen kannst.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../de/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Hauptmenü">
+      <a href="../../de/features/">Funktionen</a>
+      <a href="../../de/how-it-works/">So funktioniert es</a>
+      <a href="../../de/compare/">Vergleich</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../de/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Sprache">DE</summary>
+        <nav class="pop-body langs" aria-label="Sprache"><a href="../../blog/" hreflang="en" lang="en">English</a><a href="../../fi/blog/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/" hreflang="de" lang="de" aria-current="true">Deutsch</a><a href="../../es/blog/" hreflang="es" lang="es">Español</a><a href="../../ru/blog/" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../de/downloads/">Herunterladen</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menü"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menü"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/compare/">Vergleich</a><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../docs/">Dokumentation (en)</a><a href="../../de/downloads/">Downloads</a><a href="../../de/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Blog</h1>
+    <p class="lead">Versionshinweise, Sicherheitshinweise und technische Artikel. <a href="feed.xml">RSS-Feed</a>.</p>
+    <ul class="posts"><li><time datetime="2026-11-22">2026-11-22</time> <a href="../blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">Alpha.17: der Tresor bleibt, die stillen Fehler gehen</a><br><span class="note">Kein neues Speicherformat und keine neuen Wörter zum Aufschreiben. Alpha.17 ist die Version, die eine fehlgeschlagene Synchronisierung davon abhält, Dateien zu löschen, die letzte Sicherung behält und deinem Telefon sagt, wenn wirklich etwas nicht stimmt.</span></li>
+<li><time datetime="2026-11-04">2026-11-04</time> <a href="../blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">Alpha.16: Speicherformat 3, Ordnerzugriff nach Genehmigung und ein Rendezvous-Dienst</a><br><span class="note">Ein neues Speicherformat mit einem Hauptbuch auf Paketebene, signierten Datensätzen und Wiederherstellungswörtern, sodass vorhandene Tresore neu angelegt werden müssen; Ordner werden einem Gerät durch die Genehmigung eines Eigentümers geöffnet; Geräte finden einander über einen optionalen Rendezvous-Dienst; Beitritt und Mitgliedschaftsänderungen funktionieren offline; und Importe aus Torrents und YouTube.</span></li>
+<li><time datetime="2026-10-16">2026-10-16</time> <a href="../blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">Alpha.15: Speicherformat 2, ein Windows-Installationsprogramm und ein täglicher Kanal</a><br><span class="note">Ein neues Speicherformat, das zwei Funde der Sicherheitsprüfung behebt, sodass vorhandene Tresore neu angelegt werden müssen; Windows bekommt ein Setup-Programm, ein natives Fenster und automatische Aktualisierungen; und ein signierter Kanal für tägliche Builds.</span></li>
+<li><time datetime="2026-10-14">2026-10-14</time> <a href="../blog/2026-10-14-alpha-14-hardening-and-everything-since.html">Alpha.14: eine Sicherheitsprüfung, ihre Korrekturen, und alles, was seit alpha.13 zusammengeführt wurde</a><br><span class="note">Eine Sicherheitsprüfung des ganzen Programms auf Code-Ebene, die Korrekturen, die sie verlangt hat, eine viel schnellere Synchronisierung, fortsetzbare Verschiebungen auf einen Stapel Wechselplatten, und die rund zwanzig Funktionen, die seit alpha.13 auf dem Hauptzweig gewartet hatten.</span></li>
+<li><time datetime="2026-10-13">2026-10-13</time> <a href="../blog/2026-10-13-alpha-13-backups.html">Alpha.13: Sicherungen, die nichts ändern kann</a><br><span class="note">Wähle einen Ordner auf einem beliebigen Gerät, und Varsto behält verschlüsselte, schreibgeschützte Schnappschüsse davon auf deinen externen Speichern, nie auf deinen Geräten, so viele Tage, wie du wählst (standardmäßig 90). Wiederherstellungen gehen in ein Verzeichnis, das du nennst, aus der App oder von der Kommandozeile.</span></li>
+<li><time datetime="2026-10-12">2026-10-12</time> <a href="../blog/2026-10-12-alpha-12-packs-and-languages.html">Alpha.12: kleine Dateien in Paketen, und Varsto auf Finnisch und Schwedisch</a><br><span class="note">Kleine verschlüsselte Blöcke werden jetzt in Paketen geschrieben, sodass ein Ordner mit 20.000 kleinen Dateien auf einem Bucket 79 Objekte wird statt 20.000. Oberfläche, Infobereich, Menüleiste, mobile Hüllen und diese Website gibt es auf Finnisch und Schwedisch wie auf Englisch.</span></li>
+<li><time datetime="2026-10-10">2026-10-10</time> <a href="../blog/2026-10-10-alpha-9-placement-repair-signed.html">Alpha.9: Daten, wo du sie haben willst, Reparatur von selbst, signierte Aktualisierungen, und jede Plattform öffentlich gebaut</a><br><span class="note">Ordner lassen sich auf gewählte Speicher legen und zwischen ihnen verschieben, verlorene Kopien werden von selbst repariert, Aktualisierungen sind mit einem Offline-Schlüssel signiert, Downloads von Gegenstelle zu Gegenstelle holen viele Blöcke auf einmal, und jedes Paket wird jetzt auf den Runnern von GitHub gebaut, getestet und fotografiert.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-8-ledger-and-devices.html">Alpha.8: ein Hauptbuch, das klein bleibt, Geräte, die sich entfernen lassen, und Telefone, die nichts im Klartext behalten</a><br><span class="note">Das Hauptbuch listet jetzt nur, was neu ist, hält eine zwischengespeicherte Sicht und stutzt sich hinter signierten Prüfpunkten; Geräte lassen sich entfernen, mit neuen Schlüsseln für alles, was danach geschrieben wird; Telefone halten verschlüsselte Ordner als verschlüsselte Blöcke; und die Oberfläche zeigt, wo deine Daten sind und wie der Verkehr zwischen Gegenstellen fließt.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-7-pairing-and-finder.html">Alpha.7: Geräte mit einem Code koppeln, Finder-Aktionen und ein echter NAT-Weg</a><br><span class="note">Geräte koppeln sich jetzt aus der Oberfläche mit einem einmaligen Code, der Finder kann einen Platzhalter herunterladen oder mit einem Rechtsklick Platz freigeben, die macOS-App wird aus einem Disk-Image installiert, Geräte erreichen einander durch NAT, und Wechselplatten können einen Pool bilden.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-6-source-on-github.html">Alpha.6: der Quelltext ist öffentlich, und jede Plattform baut in der Cloud</a><br><span class="note">Das Repository ist jetzt öffentlich auf GitHub unter der Lizenz PolyForm Shield, die nativen Apps für macOS und iOS bauen auf GitHub Actions, Linux, Windows und Android bauen auf kurzlebigen Cloud-Rechnern, und die Oberfläche wurde um eine Dateiansicht neu gemacht.</span></li>
+<li><time datetime="2026-10-08">2026-10-08</time> <a href="../blog/2026-10-08-alpha-0.html">Alpha-0: das erste durchgängige Stück</a><br><span class="note">Ein Werkzeug für die Kommandozeile, das einen Ordner verschlüsselt, auf Speicher legt, der dir gehört, und ihn zwischen zwei Geräten synchronisiert, mit einem signierten Hauptbuch, das du prüfen kannst.</span></li></ul>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Verschlüsselte dateisynchronisierung und sicherung auf deinem eigenen speicher.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../de/downloads/">Downloads</a></nav></div>
+    <div><h2>Lernen</h2><nav aria-label="Lernen"><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/compare/">Vergleich</a><a href="../../docs/">Dokumentation (en)</a><a href="../../de/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Gemeinschaft</h2><nav aria-label="Gemeinschaft"><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto ist ein Arbeitsname. Quellcode: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, unter der PolyForm Shield License 1.0.0 (Quellcode verfügbar).</span>
+    <span>Keine Cookies, kein Tracking. Der Webserver behält ein gewöhnliches Zugriffsprotokoll höchstens sieben Tage.</span>
+    <span><a href="../../docs/security-policy.html">Sicherheitsrichtlinie</a> · <a href="../../docs/licence.html">Lizenz</a> · <a href="../../docs/trademark.html">Marke</a> (auf Englisch)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

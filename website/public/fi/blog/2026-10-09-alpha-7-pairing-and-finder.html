@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.7: parita laitteet koodilla, Finder-toiminnot ja oikea NAT-reitti: Varsto</title>
+<meta name="description" content="Laitteet pariutuvat nyt käyttöliittymästä kertakäyttöisellä koodilla, Finder voi ladata paikkamerkin tai vapauttaa tilaa hiiren oikealla painikkeella, macOS-sovellus asentuu levykuvasta, laitteet tavoittavat toisensa NATin läpi, ja irrotettavista levyistä voi tehdä varaston.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fi/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.7: parita laitteet koodilla, Finder-toiminnot ja oikea NAT-reitti: Varsto">
+<meta property="og:description" content="Laitteet pariutuvat nyt käyttöliittymästä kertakäyttöisellä koodilla, Finder voi ladata paikkamerkin tai vapauttaa tilaa hiiren oikealla painikkeella, macOS-sovellus asentuu levykuvasta, laitteet tavoittavat toisensa NATin läpi, ja irrotettavista levyistä voi tehdä varaston.">
+<meta property="og:url" content="https://varsto.net/fi/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fi_FI">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.7: parita laitteet koodilla, Finder-toiminnot ja oikea NAT-reitti","description":"Laitteet pariutuvat nyt käyttöliittymästä kertakäyttöisellä koodilla, Finder voi ladata paikkamerkin tai vapauttaa tilaa hiiren oikealla painikkeella, macOS-sovellus asentuu levykuvasta, laitteet tavoittavat toisensa NATin läpi, ja irrotettavista levyistä voi tehdä varaston.","datePublished":"2026-10-09","url":"https://varsto.net/fi/blog/2026-10-09-alpha-7-pairing-and-finder.html","inLanguage":"fi","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fi/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fi/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Päävalikko">
+      <a href="../../fi/features/">Ominaisuudet</a>
+      <a href="../../fi/how-it-works/">Miten se toimii</a>
+      <a href="../../fi/compare/">Vertailu</a>
+      <a href="../../docs/">Dokumentaatio (en)</a>
+      <a href="../../fi/blog/" aria-current="page">Blogi</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../../blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../../sv/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fi/downloads/">Lataa</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Valikko"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Valikko"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/compare/">Vertailu</a><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/downloads/">Lataukset</a><a href="../../fi/blog/" aria-current="page">Blogi</a><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.7: parita laitteet koodilla, Finder-toiminnot ja oikea NAT-reitti</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Alpha.7 on enimmäkseen tulosta siitä, että alfaa käytettiin oikeilla laitteilla yhden päivän: Samsung-puhelimella, Macilla ja testiämpärillä. Jokainen alla oleva osio alkoi siitä, että jokin ei toiminut niin kuin sen piti.</p>
+<h2 id="parita-laite-koodilla">Parita laite koodilla</h2>
+<p>Laitteen lisääminen tarkoitti ennen 64 merkin holviavaimen kopioimista ja sellaisen tallennuspaikan asetusten kirjoittamista, johon molemmat laitteet yltävät. Nyt laite, jolla holvi jo on, näyttää Laitteet-kohdassa <strong>Lisää laite</strong>: yhdeksän numeron koodi, joka toimii kerran, kymmenen minuuttia. Uudella laitteella valitset <strong>Muodosta pari toisen laitteesi kanssa</strong>, kirjoitat koodin, nimen ja salalauseen. Siinä kaikki.</p>
+<p>Laitteet löytävät toisensa lähiverkosta ja ajavat SPAKE2:n, joka on avainnettu koodilla (väärää arvausta ei voi tarkistaa ilman yhteyttä, ja kolme väärää koodia sulkee tarjouksen), vahvistavat avaimen molempiin suuntiin, ja vasta sitten holviavain kulkee, mukanaan tallennuspaikkojen asetukset ja niiden salaisuudet, sinetöitynä yhteisen avaimen alle. Uusi laite liittyy ensimmäisen tallennuspaikan kautta, johon se yltää. Jos sitä ei löydy verkosta, koodin alla näkyvä osoite toimii myös. Sama kulku on komentorivillä: <code>varsto pair offer</code> ja <code>varsto pair join</code>.</p>
+<h2 id="finder-tuntee-paikkamerkit">Finder tuntee paikkamerkit</h2>
+<p>macOS:ssä tiedostoja voi napsauttaa hiiren oikealla ja valita <strong>Lataa Varstolla</strong> tai <strong>Vapauta tilaa Varstolla</strong>, ja paikkamerkin kaksoisnapsautus lataa tiedoston ja avaa sen. Tilaa ei vapauteta, ellei jokainen lohko ole tallennuspaikassa <em>ja</em> levyllä oleva tiedosto ole se versio, joka synkronoitiin; ennen tätä julkaisua tiedosto, jota oli muokattu viimeisen synkronoinnin jälkeen, olisi voitu korvata paikkamerkillään. macOS-lataus on nyt levykuva: avaa se ja vedä Varsto Applications-kansioon.</p>
+<h2 id="laitteet-tavoittavat-toisensa-natin-läpi">Laitteet tavoittavat toisensa NATin läpi</h2>
+<p>Vertaissiirto toimi ennen lähiverkossa ja edelleenohjattujen porttien kautta. Nyt laitteet saavat julkisen osoitteensa STUNilla, puhkaisevat NATin QUICin yli varmenteella, joka on kiinnitetty laitekohtaisesti, ja turvautuvat tarvittaessa välitykseen jonkin oman tavoitettavan laitteesi kautta. Sitä kokeiltiin kotiverkon ja oman NATinsa takana olevan pilvikoneen välillä, molempiin suuntiin, ja UDP estettynä niin että välitys oli ainoa tie.</p>
+<h2 id="irrotettavien-levyjen-varastot">Irrotettavien levyjen varastot</h2>
+<p>Tallennuspaikka voi olla irrotettavien levyjen varasto: Varsto täyttää ne vapaan tilan mukaan ja jättää varauksen, tietää mikä levy pitää minkäkin lohkon, pyytää sinua liittämään tietyn levyn, kun se tarvitsee sitä, ja laskee offline-levyn kopioksi sellaisena kuin se oli viimeisessä tarkistuksessa.</p>
+<h2 id="pienempiä-asioita">Pienempiä asioita</h2>
+<ul>
+<li>Säilytyssääntöjä muokataan työpöydällä jokaiselle kansiolle samassa taulukossa, ja koko sääntö perusteluineen näkyy.</li>
+<li>Puhelimessa voit lisätä tiedostoja ja alikansioita, avata tiedoston toisessa sovelluksessa tai jakaa sen, ja pitää kansion selväkielisinä tiedostoina sisäisessä tallennustilassa salatun sijaan.</li>
+<li>Tiedoston tiedoissa sanotaan, onko tiedosto tällä laitteella ja mitkä tallennuspaikat pitävät sitä.</li>
+<li>Ikkuna seuraa taukoa tai synkronointia, joka aloitetaan valikkoriviltä.</li>
+<li>Liittyminen hyväksyy 24 palautussanaa samoin kuin heksadesimaaliavaimen.</li>
+</ul>
+<h2 id="yhä-alfa">Yhä alfa</h2>
+<p>Jokaisella sivulla oleva varoitus pätee: salausta ei ole auditoitu, muoto voi vielä muuttua, ja virhe voi hävittää dataa. Käytä testidataa ja pidä omat varmuuskopiosi.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan.</p></div>
+    <div><h2>Tuote</h2><nav aria-label="Tuote"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../fi/downloads/">Lataukset</a></nav></div>
+    <div><h2>Opi</h2><nav aria-label="Opi"><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/compare/">Vertailu</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/blog/" aria-current="page">Blogi</a></nav></div>
+    <div><h2>Yhteisö</h2><nav aria-label="Yhteisö"><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../docs/licence.html">Lisenssi</a> · <a href="../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

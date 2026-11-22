@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.8: en liggare som förblir liten, enheter som kan tas bort, och telefoner som inte sparar något i klartext: Varsto</title>
+<meta name="description" content="Liggaren listar nu bara det som är nytt, håller en cachad vy och rensar sig själv bakom signerade kontrollpunkter; enheter kan tas bort med nya nycklar för allt som skrivs efteråt; telefoner håller krypterade mappar som krypterade block; och gränssnittet visar var dina data finns och hur peer-to-peer-trafiken flyter.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.8: en liggare som förblir liten, enheter som kan tas bort, och telefoner som inte sparar något i klartext: Varsto">
+<meta property="og:description" content="Liggaren listar nu bara det som är nytt, håller en cachad vy och rensar sig själv bakom signerade kontrollpunkter; enheter kan tas bort med nya nycklar för allt som skrivs efteråt; telefoner håller krypterade mappar som krypterade block; och gränssnittet visar var dina data finns och hur peer-to-peer-trafiken flyter.">
+<meta property="og:url" content="https://varsto.net/sv/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.8: en liggare som förblir liten, enheter som kan tas bort, och telefoner som inte sparar något i klartext","description":"Liggaren listar nu bara det som är nytt, håller en cachad vy och rensar sig själv bakom signerade kontrollpunkter; enheter kan tas bort med nya nycklar för allt som skrivs efteråt; telefoner håller krypterade mappar som krypterade block; och gränssnittet visar var dina data finns och hur peer-to-peer-trafiken flyter.","datePublished":"2026-10-09","url":"https://varsto.net/sv/blog/2026-10-09-alpha-8-ledger-and-devices.html","inLanguage":"sv","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../sv/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../sv/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Huvudmeny">
+      <a href="../../sv/features/">Funktioner</a>
+      <a href="../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../sv/compare/">Jämförelse</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../sv/blog/" aria-current="page">Blogg</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Språk">SV</summary>
+        <nav class="pop-body langs" aria-label="Språk"><a href="../../blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="sv" lang="sv" aria-current="true">Svenska</a><a href="../../fr/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../sv/downloads/">Ladda ner</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Meny"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Meny"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/compare/">Jämförelse</a><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/downloads/">Nedladdningar</a><a href="../../sv/blog/" aria-current="page">Blogg</a><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.8: en liggare som förblir liten, enheter som kan tas bort, och telefoner som inte sparar något i klartext</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Alpha.8 kom ur en lång dag med alpha.7 på en Mac, en Linux-dator och en Samsung-telefon, och ur frågan vad som händer med designen efter några års användning.</p>
+<h2 id="en-liggare-som-förblir-liten">En liggare som förblir liten</h2>
+<p>Varje enhet för en signerad, krypterad logg över fakta: vilket block den lagrade var, vilken kopia den verifierade, vilken fillista den publicerade. Hittills blev varje post kvar för alltid, som ett eget objekt på varje lagringsplats, och varje synk listade alla. Nu listar en synk bara det som är nytt, enheten håller en cachad, krypterad vy i stället för att spela upp allt, en synk skriver en batch, och varje enhet skriver då och då en signerad kontrollpunkt. När alla dina enheter har kvitterat en kontrollpunkt raderas batcherna bakom den, och de sista behålls så att en enhet som återställts från en gammal säkerhetskopia fortfarande fångas. I ett testvalv med 20 000 batcher gick en synk utan något nytt från 668 ms till 28 ms (då) och liggaren på lagringen från 171 MB till 5 MB. Sidan <a href="../../docs/./">Så fungerar det</a> förklarar liggaren.</p>
+<h2 id="ta-bort-en-enhet">Ta bort en enhet</h2>
+<p>En borttappad telefon eller en bärbar dator du inte längre använder kan tas bort från vilken annan enhet som helst (Inställningar eller Peers, ”Ta bort…”, eller <code>varsto device revoke</code>). Dess senare poster ignoreras, dina enheter vägrar dess anslutningar, och valvet går över till nya nycklar som bara dina kvarvarande enheter får, så inget som skrivs efteråt öppnas med det den borttagna enheten har. Du kan också beordra den att rensa sig själv nästa gång den når en lagringsplats. Enhetslistan visar varje enhets system, modell, Varsto-version och senaste synk.</p>
+<h2 id="telefoner-håller-krypterade-mappar-krypterade">Telefoner håller krypterade mappar krypterade</h2>
+<p>En mapp som hålls ”krypterad på den här telefonen” innehåller nu bara krypterade block, samma bytes som dina lagringsplatser har. Selektiv synkronisering fungerar som överallt annars; filer visas i appens egen visare, dekrypterade i minnet, och lämnas till en annan app bara när du ber om det, som en tillfällig kopia som tas bort när valvet låses. Android kan ladda upp nya foton och videor till en mapp du väljer.</p>
+<h2 id="se-vad-som-händer">Se vad som händer</h2>
+<ul>
+<li><strong>Var dina data finns</strong>: ett diagram från mappar till lagringsplatser och enheter, med hur många kopior allt har.</li>
+<li><strong>Peer-to-peer-trafik</strong>: vilken enhet som skickar vad till vilken, via vilken väg och i vilken hastighet.</li>
+<li><strong>Automatisk verifiering</strong>: en annan enhet läser om dina block enligt ett schema, så att en regel som ”verifierad inom 30 dagar” håller av sig själv.</li>
+<li>Knappar visar genast att något har startat, och nedladdningar visar hur långt de har kommit.</li>
+</ul>
+<h2 id="och-mer">Och mer</h2>
+<p>Strongroom-mappar kan göras av befintliga och får en reservsäkerhetsnyckel; lagringsplatser kan tas bort efter att deras block har kopierats dit de behövs; mappar kan kopplas loss eller tas bort från valvet, och namn på översta nivån är unika; överföringsdiskar kan ges en målenhet; lagringspriser ger kostnadsuppskattningar och frigör inaktiva filer med ett klick; assistenten (MCP) kan aldrig radera eller skriva över filer; och på Linux installerar första starten Varsto för din användare, med en bakgrundstjänst som fortsätter synka även för den som bara använder kommandoraden.</p>
+<h2 id="fortfarande-alfa">Fortfarande alfa</h2>
+<p>Kryptografin har inte granskats, formatet kan fortfarande ändras, och en bugg kan förstöra data. Använd testdata och behåll egna säkerhetskopior.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Krypterad filsynkronisering och säkerhetskopiering till din egen lagring.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../sv/downloads/">Nedladdningar</a></nav></div>
+    <div><h2>Lär dig</h2><nav aria-label="Lär dig"><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/compare/">Jämförelse</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/blog/" aria-current="page">Blogg</a></nav></div>
+    <div><h2>Gemenskap</h2><nav aria-label="Gemenskap"><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../docs/licence.html">Licens</a> · <a href="../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

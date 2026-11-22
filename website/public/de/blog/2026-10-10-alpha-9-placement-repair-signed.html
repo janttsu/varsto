@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.9: Daten, wo du sie haben willst, Reparatur von selbst, signierte Aktualisierungen, und jede Plattform öffentlich gebaut: Varsto</title>
+<meta name="description" content="Ordner lassen sich auf gewählte Speicher legen und zwischen ihnen verschieben, verlorene Kopien werden von selbst repariert, Aktualisierungen sind mit einem Offline-Schlüssel signiert, Downloads von Gegenstelle zu Gegenstelle holen viele Blöcke auf einmal, und jedes Paket wird jetzt auf den Runnern von GitHub gebaut, getestet und fotografiert.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/de/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.9: Daten, wo du sie haben willst, Reparatur von selbst, signierte Aktualisierungen, und jede Plattform öffentlich gebaut: Varsto">
+<meta property="og:description" content="Ordner lassen sich auf gewählte Speicher legen und zwischen ihnen verschieben, verlorene Kopien werden von selbst repariert, Aktualisierungen sind mit einem Offline-Schlüssel signiert, Downloads von Gegenstelle zu Gegenstelle holen viele Blöcke auf einmal, und jedes Paket wird jetzt auf den Runnern von GitHub gebaut, getestet und fotografiert.">
+<meta property="og:url" content="https://varsto.net/de/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="de_DE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.9: Daten, wo du sie haben willst, Reparatur von selbst, signierte Aktualisierungen, und jede Plattform öffentlich gebaut","description":"Ordner lassen sich auf gewählte Speicher legen und zwischen ihnen verschieben, verlorene Kopien werden von selbst repariert, Aktualisierungen sind mit einem Offline-Schlüssel signiert, Downloads von Gegenstelle zu Gegenstelle holen viele Blöcke auf einmal, und jedes Paket wird jetzt auf den Runnern von GitHub gebaut, getestet und fotografiert.","datePublished":"2026-10-10","url":"https://varsto.net/de/blog/2026-10-10-alpha-9-placement-repair-signed.html","inLanguage":"de","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../de/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-Software, nicht für Produktionsdaten.</strong> Fehler können Daten zerstören, das Speicherformat kann sich ohne Migrationswerkzeug ändern, und die Verschlüsselung ist noch nicht geprüft. Behalte eigene Sicherungskopien und prüfe, dass du daraus wiederherstellen kannst.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../de/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Hauptmenü">
+      <a href="../../de/features/">Funktionen</a>
+      <a href="../../de/how-it-works/">So funktioniert es</a>
+      <a href="../../de/compare/">Vergleich</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../de/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Sprache">DE</summary>
+        <nav class="pop-body langs" aria-label="Sprache"><a href="../../blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="de" lang="de" aria-current="true">Deutsch</a><a href="../../es/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../de/downloads/">Herunterladen</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menü"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menü"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/compare/">Vergleich</a><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../docs/">Dokumentation (en)</a><a href="../../de/downloads/">Downloads</a><a href="../../de/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.9: Daten, wo du sie haben willst, Reparatur von selbst, signierte Aktualisierungen, und jede Plattform öffentlich gebaut</h1><p class="note"><time datetime="2026-10-10">2026-10-10</time></p>
+<p>Alpha.9 (ein Build, der nie für sich markiert wurde; seine Änderungen kamen mit alpha.10) geht um die lange Strecke: zu entscheiden, wo Daten leben, sie ohne Aufforderung auf die Kopien zurückzubringen, die deine Regel verlangt, und der Aktualisierung zu vertrauen, die die nächste Version bringt.</p>
+<h2 id="daten-wo-du-sie-haben-willst">Daten, wo du sie haben willst</h2>
+<p>Jeder Ordner kann jetzt eine Platzierung haben: die Speicher, auf die seine Blöcke gehen. Daten lassen sich von einem Speicher auf einen anderen verschieben (ein ganzer Ordner, oder nur Dateien, die eine Anzahl Tage ungenutzt sind), Block für Block, jeder Block auf dem neuen Speicher geschrieben und zurückgelesen, bevor die alte Kopie gelöscht wird, und eine unterbrochene Verschiebung läuft einfach weiter, wenn du sie erneut startest. Ein Pool aus Wechselplatten kann Kopien auf Platten verlangen, die an verschiedenen Orten liegen, etwa eine zu Hause und eine bei der Arbeit, und Varsto füllt jede Platte mit dem, was ihrem Ort noch fehlt.</p>
+<h2 id="reparatur-von-selbst">Reparatur von selbst</h2>
+<p>Wenn eine Kopie fehlt, ein Speicher entfernt wird oder eine Prüfung scheitert, legt das Gerät, das die Daten hält, den Block dorthin zurück, wo Regel und Platzierung des Ordners ihn haben wollen, aus den eigenen Dateien, dem Zwischenspeicher verschlüsselter Blöcke, einem anderen Speicher oder einer Gegenstelle. Die Reparaturwarteschlange ist in der Oberfläche sichtbar und mit <code>varsto repair</code>.</p>
+<h2 id="signierte-aktualisierungen">Signierte Aktualisierungen</h2>
+<p>Die Prüfsummenliste jeder Veröffentlichung ist jetzt mit dem Veröffentlichungsschlüssel des Projekts signiert, der nie den Rechner des Maintainers verlässt, und die Aktualisierung lehnt eine Veröffentlichung ab, die nicht damit signiert ist. Sie vergleicht die Prüfsumme außerdem mit der, die an der GitHub-Veröffentlichung hängt, ein zweiter Kanal. <code>varsto verify-release</code> prüft einen Download von Hand, und <code>minisign</code> auch. <a href="https://github.com/janttsu/varsto/blob/main/RELEASING.md">RELEASING.md</a> erklärt das Verfahren.</p>
+<h2 id="schneller-von-gegenstelle-zu-gegenstelle">Schneller von Gegenstelle zu Gegenstelle</h2>
+<p>Downloads halten bis zu acht Blöcke gleichzeitig unterwegs (damals), holen kleine Dateien in einem Ordner voraus und teilen sich eine Verbindung je Gegenstelle; ein Gerät, das Blöcke ausliefert, startet nicht mehr alle paar Sekunden eine eigene volle Synchronisierung. Die <a href="../../docs/./">Leistungsmessungen</a> vergleichen Paris, Amsterdam und Warschau, von Gegenstelle zu Gegenstelle gegen einen S3-Bucket.</p>
+<h2 id="offen-gebaut">Offen gebaut</h2>
+<p>Jede Plattform wird jetzt bei jeder Änderung auf den Runnern von GitHub gebaut und getestet: die Pakete für Linux und Windows (das für Windows auf Windows Server 2025 getestet, einschließlich der Menüeinträge im Explorer), die Android-App im Emulator, das macOS-Disk-Image und die iOS-App auf Apple Silicon. Dieselben Läufe machen die <a href="../../docs/./">Bildschirmfotos</a>, sodass die Bilder auf dieser Website dem neuesten Build folgen.</p>
+<h2 id="und-mehr">Und mehr</h2>
+<p>Die Freigabe hält am Fingerabdruck fest, wer Zugriff verlangt hat, das Entfernen eines Mitglieds legt die Freigabe auf neue Schlüssel, und ein Strongroom kann einen neuen Schlüssel bekommen; Dateien lassen sich aus dem Dateimanager unter Linux (Nautilus, Dolphin, Nemo) und Windows (Explorer) herunterladen oder den Platz freigeben; Ordnerzeilen behalten ihre zwei Hauptknöpfe und legen den Rest in ein Menü; die macOS-App und die Telefon-Apps sagen, wenn eine neuere Version auf der Download-Seite wartet, statt sich als aktuell zu bezeichnen; und große Hauptbuch-Stapel scheitern auf S3 nicht mehr.</p>
+<h2 id="aktualisiere-jedes-gerät-bevor-du-daten-verschiebst">Aktualisiere jedes Gerät, bevor du Daten verschiebst</h2>
+<p>Das Verschieben von Daten schreibt eine neue Art Hauptbucheintrag, die alpha.8 und früher nicht lesen können: ihre Synchronisierungen würden ab der ersten Verschiebung scheitern. Aktualisiere zuerst alle deine Geräte. Ab dieser Version werden unbekannte Einträge übersprungen, sodass spätere Ergänzungen sie nicht mehr zerbrechen. Clients bis alpha.8 prüfen beim Aktualisieren nur die Prüfsumme; diese Version ist die erste, deren Aktualisierung auf der Signatur besteht.</p>
+<h2 id="immer-noch-alpha">Immer noch Alpha</h2>
+<p>Die Kryptografie ist nicht auditiert, das Format kann sich noch ändern, und ein Fehler kann Daten zerstören. Nimm Testdaten und behalte eigene Sicherungen.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../de/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Verschlüsselte dateisynchronisierung und sicherung auf deinem eigenen speicher.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../de/">Projekt</a><a href="../../de/features/">Funktionen</a><a href="../../de/use-cases/">Anwendungsfälle</a><a href="../../de/screenshots/">Bildschirmfotos</a><a href="../../de/downloads/">Downloads</a></nav></div>
+    <div><h2>Lernen</h2><nav aria-label="Lernen"><a href="../../de/how-it-works/">So funktioniert es</a><a href="../../de/compare/">Vergleich</a><a href="../../docs/">Dokumentation (en)</a><a href="../../de/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Gemeinschaft</h2><nav aria-label="Gemeinschaft"><a href="../../forum/">Forum (en)</a><a href="../../de/contribute/">Mitwirken</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto ist ein Arbeitsname. Quellcode: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, unter der PolyForm Shield License 1.0.0 (Quellcode verfügbar).</span>
+    <span>Keine Cookies, kein Tracking. Der Webserver behält ein gewöhnliches Zugriffsprotokoll höchstens sieben Tage.</span>
+    <span><a href="../../docs/security-policy.html">Sicherheitsrichtlinie</a> · <a href="../../docs/licence.html">Lizenz</a> · <a href="../../docs/trademark.html">Marke</a> (auf Englisch)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

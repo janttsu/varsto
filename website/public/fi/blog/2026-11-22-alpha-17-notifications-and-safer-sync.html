@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.17: holvi pysyy, hiljaiset virheet lähtevät: Varsto</title>
+<meta name="description" content="Ei uutta tallennusmuotoa eikä uusia sanoja kirjoitettavaksi. Alpha.17 on julkaisu, joka estää epäonnistunutta synkronointia poistamasta tiedostoja, säilyttää viimeisen varmuuskopion ja kertoo puhelimeesi, kun jokin on oikeasti vialla.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.17: holvi pysyy, hiljaiset virheet lähtevät: Varsto">
+<meta property="og:description" content="Ei uutta tallennusmuotoa eikä uusia sanoja kirjoitettavaksi. Alpha.17 on julkaisu, joka estää epäonnistunutta synkronointia poistamasta tiedostoja, säilyttää viimeisen varmuuskopion ja kertoo puhelimeesi, kun jokin on oikeasti vialla.">
+<meta property="og:url" content="https://varsto.net/fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fi_FI">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.17: holvi pysyy, hiljaiset virheet lähtevät","description":"Ei uutta tallennusmuotoa eikä uusia sanoja kirjoitettavaksi. Alpha.17 on julkaisu, joka estää epäonnistunutta synkronointia poistamasta tiedostoja, säilyttää viimeisen varmuuskopion ja kertoo puhelimeesi, kun jokin on oikeasti vialla.","datePublished":"2026-11-22","url":"https://varsto.net/fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html","inLanguage":"fi","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fi/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fi/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Päävalikko">
+      <a href="../../fi/features/">Ominaisuudet</a>
+      <a href="../../fi/how-it-works/">Miten se toimii</a>
+      <a href="../../fi/compare/">Vertailu</a>
+      <a href="../../docs/">Dokumentaatio (en)</a>
+      <a href="../../fi/blog/" aria-current="page">Blogi</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../../blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="fi" lang="fi" aria-current="true">Suomi</a><a href="../../sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fi/downloads/">Lataa</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Valikko"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Valikko"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/compare/">Vertailu</a><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/downloads/">Lataukset</a><a href="../../fi/blog/" aria-current="page">Blogi</a><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.17: holvi pysyy, hiljaiset virheet lähtevät</h1><p class="note"><time datetime="2026-11-22">2026-11-22</time></p>
+<p>Tämän voit päivittää ilman seremoniaa. Alpha.17 avaa alpha.16:n holvin sellaisenaan. Uutta muotoa ei ole, ei toista sanajoukkoa, eikä mitään, mikä pitäisi luoda uudelleen. Mikä muuttuu, on sellainen virhe, joka ennen sattui sillä aikaa, kun katsoit muualle.</p>
+<p>Haku, joka ei koskaan valmistunut, saattoi silti julkaista poistetuiksi tiedostoja, joita tämä laite ei ollut lukenut. Varmuuskopion uusin tilannevedos saattoi vanhentua ja viedä mukanaan ainoan kopion, josta voi palauttaa. Ensimmäinen kohtaaminen toisen laitteen kanssa saattoi seistä paikallaan vartin ja näyttää kuolleelta. Juuri niitä varten tämä julkaisu on. Se on yhä alfa, eikä se ole sellaista dataa varten, jota sinulla ei ole varaa menettää. Pitkä lista on muutoslokissa. Osat, jotka oikeasti huomaat, ovat alla.</p>
+<h2 id="puhelimesi-kuulee-siitä">Puhelimesi kuulee siitä</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/notify-dark.webp?v=2609e89dc4"><img src="../../assets/img/blog/notify-dark.png?v=1065ff01c5" alt="Kannettava lähettää puhelimeen hälytyksen siitä, että Documents-kansiossa tila on loppumassa. Itse holvi pysyy tietokoneella." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/notify.webp?v=81bd4bf010"><img loading="lazy" src="../../assets/img/blog/notify.png?v=1f9ce40a85" alt="Kannettava lähettää puhelimeen hälytyksen siitä, että Documents-kansiossa tila on loppumassa. Itse holvi pysyy tietokoneella." width="640" height="320"></picture>
+</figure>
+
+<p>Laite voi nyt kertoa puhelimeesi ntfy:n, Pushoverin tai Telegramin kautta, kun jokin tarvitsee ihmisen. Lisää kanava Asetuksissa tai komennolla <code>varsto notify</code>. Jokaisella palvelulla on lyhyt opas ja testiviesti, ja sinä valitset, mitä sen saa sanoa. Kansioiden, tallennuspaikkojen ja laitteiden nimet voivat jäädä tekstistä pois.</p>
+<p>Merkittävät hälytykset ovat päällä, ellet sammuta niitä: tallennuspaikka pulassa, levy jolta tila loppuu, vähemmän kopioita kuin sääntö pyytää, vahingoittunut data, varmuuskopio joka epäonnistui tai on myöhässä, pyyntö joka odottaa sinua. Valmiit varmuuskopiot, uudet tiedostot ja päiväyhteenveto pysyvät hiljaa, kunnes pyydät niitä. Tunnukset ovat laitteella, tiedostossa <code>notify.json</code>, eikä niitä synkronoida. Itse viesti ei ole päästä päähän salattu matkallaan ntfy:n, Pushoverin tai Telegramin läpi. Se kannattaa tietää, ennen kuin annat sen nimetä kansion. Epäonnistunut lähetys jää odottamaan ja sitä yritetään uudelleen, myös uudelleenkäynnistyksen jälkeen. Samaa hälytystä ei toisteta kuuteen tuntiin, ja kanava saa enintään kaksikymmentä viestiä tunnissa. Tämän voi tehdä, kun holvi on lukossa.</p>
+<h2 id="haku-jolla-tavut-jo-ovat">Haku, jolla tavut jo ovat</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/reuse-dark.webp?v=fdfe8e1f16"><img src="../../assets/img/blog/reuse-dark.png?v=344383fca7" alt="Salatekstillohkot pysyvät kannettavalla. Yksi yhteys vie lukittuun pilveen vain puuttuvat lohkot." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/reuse.webp?v=8fd02a2d30"><img loading="lazy" src="../../assets/img/blog/reuse.png?v=9fbad43f82" alt="Salatekstillohkot pysyvät kannettavalla. Yksi yhteys vie lukittuun pilveen vain puuttuvat lohkot." width="640" height="320"></picture>
+</figure>
+
+<p>Suurin osa muuttuneesta tiedostosta oli jo täällä. Alpha.17 lakkaa hakemasta niitä lohkoja uudelleen. Muuttuneen tiedoston muuttumattomat osat tulevat levyllä olevasta edellisestä versiosta. Uudelleennimetty tai siirretty tulee vanhasta polusta, tai roskakorista, jos se meni sinne. Saman tiedoston kaksi kopiota hakee kunkin erilaisen lohkon kerran. Paikallisesti luettu tarkistetaan palansa tunnistetta vasten, ja lohko joka ei täsmää haetaan sittenkin.</p>
+<p>Toinen puoli on laite, joka juuri kirjoitti tiedoston. Se tarjoaa jokaisen paikalleen laittamansa tiedoston muille heti, ei vasta kun sen oma synkronointi on päättynyt, ja pyynnöt jaetaan niiden vertaisten kesken, joilla lohkot oikeasti ovat.</p>
+<p>Kun tämä laite tapaa toisen ensimmäisen kerran, ennen kuin tuo laite on lukenut tämän varmenteen, polku näytetään yhdistämisenä ja sitä yritetään heti uudelleen. Myöhempi kieltäytyminen odottaa muutaman sekunnin ja näytetään tavoittamattomana. Laite, joka ei ole koskaan vastannut, ei enää käytä minuuttia ja sitten jopa viittätoista ennen ensimmäistä oikeaa yritystä. Kun ensimmäinen synkronointi on yhä kesken, kansio jossa ei ole vielä tiedostoja näytetään haettavana. Se ei ole tyhjä kansio, joka olisi jo valmis.</p>
+<p>Vertainen, joka vastasi ja sitten pettää, lepää sekunnin, ja lepo kaksinkertaistuu, tasaisen minuutin sijaan. Lohkoa, jota kellään muulla ei ole, kysytään siltä vertaiselta vielä kerran. Jos vertainen käynnistyy uudelleen, seuraava synkronointi, uudempi vertaistietue tai lähiverkon majakka lopettaa levon, eikä jokaista tiedostoa ilmoiteta puuttuvaksi. Laitteet, jotka ovat vain poissa, lepäävät kauemmin, ja niistä kysytään jopa kahdeksaa kerralla, joten ne maksavat yhden aikakatkaisun eikä kahdeksaa.</p>
+<h2 id="mitä-epäonnistuminen-ei-enää-saa-tehdä">Mitä epäonnistuminen ei enää saa tehdä</h2>
+<p>Epäonnistunut haku ei enää julkaise poistetuiksi tiedostoja, joita tämä laite ei ole lukenut. Sen, minkä lisäsit tai muokkasit täällä, tämä laite yhä lähettää. Seuraava haku hakee kopiot, jotka muilla laitteilla yhä on, ennen kuin puuttuva tiedosto voidaan todeta menneeksi.</p>
+<p>Jos toisen laitteen versio voittaa ristiriidan, täällä oleva tiedosto väistyy vasta kun voittaja on oikeasti perillä. Voittaja, jota ei saatu haettua, jätti ennen polun tyhjäksi, ja seuraava työntö julkaisi sitten sen poiston. Tiedosto, joka kasvaa tai pienenee skannauksen lukiessa sitä, odottaa seuraavaa skannausta. Sitä ei julkaista koolla, jota sen lohkot eivät kanna. Ennen se sai jokaisen muun laitteen hylkäämään kansion koko luettelon.</p>
+<p>Paketit, joita kukaan ei ole väittänyt, poistetaan 48 tunnin kuluttua, tai 24 tunnin kuluttua kun paikallisella tallennuspaikalla on vapaana alle 10 prosenttia. Ennen se oli seitsemän päivää. Työntö, tuonti tai varmuuskopio, jonka karttatietue ei koskaan tullut julkaistuksi, poistaa juuri kirjoittamansa paketit. Samoin tekee korjaus, jonka erää ei sinetöity. Jos sinetöinti epäonnistuu sen jälkeen kun karttatietue on julkaistu, paketit jäävät, koska väite on jo kirjanpidossa. <code>varsto gc orphans</code> poistaa ne nyt, jos et halua odottaa.</p>
+<p>Varmuuskopion säilytys ei enää syö uusinta tilannevedosta vain siksi, että se on vanha. Kadonnut lähdehakemisto, tai laite joka ei koskaan ottanut uudempaa, vanhensi ennen tuon tilannevedoksen aikataulun mukaan ja keräsi sitten sen lohkot, eikä jäljelle jäänyt mitään palautettavaa. Varmuuskopion pysäyttäminen antaa yhä viimeisen tilannevedoksen vanhentua. Se osa ei muutu, ja niin sanot, että olet sen kanssa valmis.</p>
+<h2 id="kellot-nimet-ja-avain-joka-eli-laitetta-kauemmin">Kellot, nimet ja avain, joka eli laitetta kauemmin</h2>
+<p>Kaksi prosessia samalla koneella, komentorivi ja taustapalvelu, eivät voi enää varata samaa Lamport-arvoa ja sitten molemmat jakaa sitä eteenpäin. Varaus pitää lukkoa koko ajan, kun arvo luetaan, nostetaan ja kirjoitetaan takaisin.</p>
+<p>Kaksi laitetta, jotka kirjoittavat saman holvin tai kansion kausinumeron, eivät enää lopeta allekirjoittamista, kunnes joku valitsee. Laite, joka näkee molemmat tietueet, pitää sen, jonka myöntäjän tunniste on suurempi. <code>varsto device resolve-epoch</code> ja <code>varsto folder resolve-epoch</code> korvaavat yhä tuon valinnan, kun haluat toisen.</p>
+<p>Levyllä, joka ei erota kirjainkokoja, kaksi polkua jotka eroavat vain kirjainkoon tai Unicoden normalisoinnin osalta saavat eri paikalliset nimet sen mukaan, kumpi ehtii ensin. Tasatilanteessa voittaa NFC-kirjoitusasu. Sitten pienempi alkuperäinen polku pitää pelkän nimen, ja toisesta tulee <code> (2)</code>.</p>
+<p>Laitteen poistaminen ei itsessään vaihda salasanaa tallennuspalvelun tarjoajalla. Nyt se kieltäytyy unohtamasta. <code>varsto status</code> ja <code>varsto device list</code> nimeävät jokaisen tallennuspaikan, jonka tunnuksilla se laite voisi yhä poistaa salatekstiä. Kun olet vaihtanut ne palveluntarjoajalla, <code>varsto storage mark-rotated &lt;name&gt;</code> poistaa varoituksen. Varsto ei vaihda salaisuutta puolestasi.</p>
+<h2 id="paperilla-olevat-sanat-ja-avaimet-jotka-ennen-olivat-tiedostossa">Paperilla olevat sanat ja avaimet, jotka ennen olivat tiedostossa</h2>
+<p><code>varsto recovery kit</code> tulostaa muodon 3 paketin: holvisanat ja palautussanat. Ennen se tulosti muodon 2 tekstin, joka sanoi että 24 holvisanaa lukevat kaiken holvissa. Muodossa 3 ne avaavat laitteiden nimet, kansioiden nimet ja tallennuksen kirjanpidon. Sisältö tarvitsee palautussanat. Tuloste, joka on tehty ilman niitä, sanoo sen nyt suuraakkosin, eikä näytä enää valmiilta. <code>--shares</code> jakaa molemmat joukot.</p>
+<p>Jakopyyntö ja organisaatiopyyntö pitivät ennen yksityiset avaimensa selväkielisessä JSON-tiedostossa. Laitteen hakemistosta otettu kopio, pyynnön vielä odottaessa, saattoi lukea ne, ja kun omistaja oli hyväksynyt pyynnön, avata kansion ilman mitään salalausetta. Avaimet sinetöidään nyt laitteen salalauseen alle. Pyyntökoodin näyttäminen kysyy sitä, ja pyynnön hyväksyminen kysyy uudelleen. Pyyntö, jonka alpha.16 jätti selväkieliseksi, sinetöidään seuraavalla kerralla kun komento lukee sen.</p>
+<p>Lokit saavat saman kohtelun sille, miten vianetsinnän tuloste kirjoittaa valinnaisen arvon. Rivi kuten <code>password: Some("…")</code> katkaistiin lainausmerkin kohdalta, ja salaisuus jäi rivin loppuun. Salalause rekisteröidään puhdistimeen jokaisella avausreitillä, myös kun palvelu palaa avainnipusta. Ennen tuo palvelu saattoi olla käynnissä päiväkausia ilman että mitään oli rekisteröity.</p>
+<h2 id="tauko-joka-tarkoittaa-taukoa">Tauko, joka tarkoittaa taukoa</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/pause-dark.webp?v=cc29350990"><img src="../../assets/img/blog/pause-dark.png?v=2fec0b10cb" alt="Keskeytetty puhelin kodin kannettavan ja toimiston NASin välissä. Molemmat yhteydet on merkitty pois." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/pause.webp?v=cbbeebe0b4"><img loading="lazy" src="../../assets/img/blog/pause.png?v=9a1a85134c" alt="Keskeytetty puhelin kodin kannettavan ja toimiston NASin välissä. Molemmat yhteydet on merkitty pois." width="640" height="320"></picture>
+</figure>
+
+<p>Taustapalvelun keskeytys pysäytti ennen synkronoinnin ja jätti laitteen muun osan puheliaaksi. Kuuntelija, lähiverkon majakka, kohtaamispalvelu, välitys ja reitittimen porttikartoitus pysähtyvät nyt sen mukana, ja ne pysyvät pysähdyksissä kunnes jatkat. Itse asettamasi keskeytys säilyy uudelleenkäynnistyksen yli. Sillä on väliä puhelimessa, joka pysäyttää ja käynnistää palvelun pitkin päivää. Lyhyttä taukoa, jonka <code>varsto disk</code> tai tuonti ottaa omaksi tarpeekseen, ei tallenneta. Se päättyy komennon päättyessä.</p>
+<p>Esikatselukuvat tiedostoluettelossa näkyvät puhelimissa taas. Kun moottori oli kiireinen, palvelu vastasi ennen ettei esikatselukuvaa ole, ja sivu uskoi. Nyt se vastaa että on kiireinen, ja sivu yrittää uudelleen.</p>
+<p>Oletussääntö ei enää merkitse kansiota rikotuksi holvissa, jossa ei ole levyvarastoa eikä hakemistotallennuspaikkaa. Varoitus on yksi: mikään ei ole omalla levylläsi, ja miten sellaisen lisäät. Sääntö, jonka asetit itse ja joka oikeasti vaatii kopion kotona, pidetään yhä voimassa. Sama ero pätee, kun tuonti päättää saako sen lähteen poistaa, joten sellaisen holvin kansio ei enää odota ikuisesti kopiota levyltä, jota sinulla ei ole.</p>
+<p>Komento ja taustapalvelu ottavat saman lukon, kun tiedostoa haetaan, vapautetaan, kirjoitetaan tai siirretään, joten ne eivät enää kumoa toistensa kansion tilaa. Epäonnistunut lataus tai kirjoitus ei enää jätä tiedostoa <code>.varsto-tmp-…</code> tai <code>.varsto-upload-…</code> pitämään osaa sisällöstä. Toiselta laitteelta tulevat tiedostot säilyttävät muokkausajan, jonka kirjoittaja kirjasi, eikä niihin leimata lataushetkeä. Työkalut, jotka luottavat päivämäärään, koonti, kuvakirjasto, toinen varmuuskopio, eivät enää näe jokaista haettua tiedostoa uutena.</p>
+<h2 id="poistettu-laite-pysyy-poistettuna">Poistettu laite pysyy poistettuna</h2>
+<p>Poistetun laitteen kansiotietueet, myönnöt ja palautusvaraus lasketaan vain siihen ensimmäiseen järjestysnumeroon saakka, jonka se jätti tyhjäksi. Se ei voi myöhemmin palata ja täyttää aukkoa jälkikäteen tehdyllä tietueella. Toisen holvin jäsen ottaa käyttöön poiston, jonka se lukee kansion kaudesta. Kansio, jota poistaja ei voinut avaintaa uudelleen, avainnetaan uudelleen seuraavassa synkronoinnissa omistajalla, jolla avain yhä on. Sen, mitä poistetulla laitteella jo on omalla levyllään, se saa pitää. Näin oli aina, ja näin on yhä.</p>
+<p>Liittyminen lukee organisaation manifestin ja ottaa holvin kaudet ja kumoukset vain sen ylläpitäjiltä. Jäsenluettelon tavallisen jäsenen kirjoittama kumous ei enää avaa holvia laitteelle, joka on liittymässä.</p>
+<p>Toimintalokin rivillä ”ei avainta” on sama painike kuin kansion rivillä, joten puhelin voi pyytää käyttöoikeutta siltä riviltä eikä kansiota tarvitse etsiä. Restic-peili ja sen alle liitetyt kansiot luodaan niin, että vain tämä käyttäjä voi lukea ne.</p>
+<h2 id="nimi-kuvakkeessa">Nimi kuvakkeessa</h2>
+<p>Sovellustunnukset ovat nyt <code>net.varsto.app</code> Androidilla ja macOS:llä, <code>net.varsto.app.ios</code> iOS:llä ja <code>net.varsto.app.alpha</code> allekirjoittamattomalle macOS-käännökselle. Jo asennettu sovellus säilyttää entisen tunnuksensa, eikä sen holvia siirretä, ennen kuin asennat sen uudelleen. Uuden paketin asentaminen vanhan viereen ei korvaa sitä.</p>
+<h2 id="jos-olet-versiossa-alpha16">Jos olet versiossa alpha.16</h2>
+<p>Päivitä milloin haluat. Versiot voivat jakaa holvin sillä välin. Mikään tässä julkaisussa ei käske sinua nollaamaan, tulostamaan uutta pakettia tai poistamaan Android-käännöstä, joka on jo alpha.16:n julkaisuallekirjoitettu. Jos jakopyyntö tai organisaatiopyyntö odottaa yhä selväkielisessä tiedostossa alpha.16:sta, seuraava komento joka lukee sen sinetöi sen. Tämä on yhä alfa.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan.</p></div>
+    <div><h2>Tuote</h2><nav aria-label="Tuote"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../fi/downloads/">Lataukset</a></nav></div>
+    <div><h2>Opi</h2><nav aria-label="Opi"><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/compare/">Vertailu</a><a href="../../docs/">Dokumentaatio (en)</a><a href="../../fi/blog/" aria-current="page">Blogi</a></nav></div>
+    <div><h2>Yhteisö</h2><nav aria-label="Yhteisö"><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../docs/licence.html">Lisenssi</a> · <a href="../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

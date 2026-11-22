@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.7: empareja dispositivos con un código, acciones de Finder y un camino de NAT de verdad: Varsto</title>
+<meta name="description" content="Los dispositivos ahora se emparejan desde la interfaz con un código de un solo uso, Finder puede descargar un marcador de posición o liberar espacio con el clic derecho, la aplicación de macOS se instala desde una imagen de disco, los dispositivos se alcanzan a través de NAT y los discos extraíbles pueden formar un grupo.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/es/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.7: empareja dispositivos con un código, acciones de Finder y un camino de NAT de verdad: Varsto">
+<meta property="og:description" content="Los dispositivos ahora se emparejan desde la interfaz con un código de un solo uso, Finder puede descargar un marcador de posición o liberar espacio con el clic derecho, la aplicación de macOS se instala desde una imagen de disco, los dispositivos se alcanzan a través de NAT y los discos extraíbles pueden formar un grupo.">
+<meta property="og:url" content="https://varsto.net/es/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="es_ES">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-09-alpha-7-pairing-and-finder.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.7: empareja dispositivos con un código, acciones de Finder y un camino de NAT de verdad","description":"Los dispositivos ahora se emparejan desde la interfaz con un código de un solo uso, Finder puede descargar un marcador de posición o liberar espacio con el clic derecho, la aplicación de macOS se instala desde una imagen de disco, los dispositivos se alcanzan a través de NAT y los discos extraíbles pueden formar un grupo.","datePublished":"2026-10-09","url":"https://varsto.net/es/blog/2026-10-09-alpha-7-pairing-and-finder.html","inLanguage":"es","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../es/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Software alfa, no para datos de producción.</strong> Los errores pueden destruir datos, el formato de almacenamiento puede cambiar sin una herramienta de migración y el cifrado aún no se ha auditado. Conserva tus propias copias de seguridad y comprueba que puedes restaurar desde ellas.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../es/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menú principal">
+      <a href="../../es/features/">Funciones</a>
+      <a href="../../es/how-it-works/">Cómo funciona</a>
+      <a href="../../es/compare/">Comparación</a>
+      <a href="../../docs/">Documentación (en)</a>
+      <a href="../../es/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Idioma">ES</summary>
+        <nav class="pop-body langs" aria-label="Idioma"><a href="../../blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="es" lang="es" aria-current="true">Español</a><a href="../../ru/blog/2026-10-09-alpha-7-pairing-and-finder.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../es/downloads/">Descargar</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menú"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menú"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/compare/">Comparación</a><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/screenshots/">Capturas</a><a href="../../docs/">Documentación (en)</a><a href="../../es/downloads/">Descargas</a><a href="../../es/blog/" aria-current="page">Blog</a><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.7: empareja dispositivos con un código, acciones de Finder y un camino de NAT de verdad</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Alpha.7 sale sobre todo de usar la alfa un día en dispositivos de verdad: un teléfono Samsung, un Mac y un bucket de prueba. Cada apartado de abajo empezó como algo que no funcionaba como debía.</p>
+<h2 id="empareja-un-dispositivo-con-un-código">Empareja un dispositivo con un código</h2>
+<p>Añadir un dispositivo significaba copiar una clave de bóveda de 64 caracteres y escribir los ajustes de un almacenamiento al que llegaran los dos. Ahora el dispositivo que ya tiene la bóveda muestra <strong>Añadir un dispositivo</strong>, en Dispositivos: un código de nueve cifras que sirve una vez, durante diez minutos. En el dispositivo nuevo eliges <strong>Emparejar con tu otro dispositivo</strong>, escribes el código, un nombre y una frase de contraseña, y eso es todo.</p>
+<p>Los dos dispositivos se encuentran en la red local, ejecutan SPAKE2 con el código como clave (una suposición errónea no se puede comprobar fuera de línea, y tres códigos erróneos cierran la oferta), confirman la clave en los dos sentidos, y solo entonces viaja la clave de la bóveda, con los ajustes de los almacenamientos y sus secretos, sellada bajo la clave compartida. El dispositivo nuevo se une a través del primer almacenamiento al que llega. Si no se encuentra en la red, también sirve la dirección que aparece bajo el código. El mismo recorrido existe en la línea de comandos: <code>varsto pair offer</code> y <code>varsto pair join</code>.</p>
+<h2 id="finder-conoce-los-marcadores-de-posición">Finder conoce los marcadores de posición</h2>
+<p>En macOS, el clic derecho en los archivos ofrece <strong>Descargar con Varsto</strong> o <strong>Liberar espacio con Varsto</strong>, y un doble clic en un marcador de posición descarga el archivo y lo abre. Liberar espacio se rechaza salvo que cada bloque esté en un almacenamiento <em>y</em> el archivo del disco sea la versión que se sincronizó; antes de esta versión, un archivo editado después de la última sincronización podía quedar sustituido por su marcador de posición. La descarga de macOS es ahora una imagen de disco: ábrela y arrastra Varsto a Aplicaciones.</p>
+<h2 id="los-dispositivos-se-alcanzan-a-través-de-nat">Los dispositivos se alcanzan a través de NAT</h2>
+<p>La transferencia de par a par funcionaba en la LAN y a través de puertos reenviados. Ahora los dispositivos aprenden su dirección pública con STUN, perforan el NAT por QUIC con un certificado fijado por dispositivo, y si no, retransmiten a través de uno de tus propios dispositivos alcanzables. Se probó entre una red de casa y una máquina en la nube detrás de su propio NAT, en los dos sentidos, y con el UDP bloqueado para forzar el relé.</p>
+<h2 id="grupos-de-discos-extraíbles">Grupos de discos extraíbles</h2>
+<p>Un almacenamiento puede ser un grupo de discos extraíbles: Varsto los llena según el espacio libre, con una reserva, sabe qué disco guarda qué bloque, te pide que conectes un disco concreto cuando lo necesita, y cuenta un disco desconectado como una copia según su última comprobación.</p>
+<h2 id="cosas-más-pequeñas">Cosas más pequeñas</h2>
+<ul>
+<li>Las políticas de conservación se editan para cada carpeta en una sola tabla en el escritorio, y se ven la regla completa y sus motivos.</li>
+<li>En un teléfono puedes añadir archivos y subcarpetas, abrir un archivo en otra aplicación o compartirlo, y guardar una carpeta como archivos en claro en el almacenamiento interno en lugar de cifrada.</li>
+<li>Los detalles del archivo dicen si este dispositivo lo tiene y qué almacenamientos lo guardan.</li>
+<li>La ventana sigue una pausa o una sincronización iniciada desde la barra de menús.</li>
+<li>Unirse acepta las 24 palabras de recuperación además de la clave hexadecimal.</li>
+</ul>
+<h2 id="sigue-siendo-una-alfa">Sigue siendo una alfa</h2>
+<p>Sigue en pie el aviso de cada página: la criptografía no se ha auditado, el formato aún puede cambiar y un fallo puede destruir datos. Usa datos de prueba y conserva tus propias copias de seguridad.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Sincronización y copia de seguridad de archivos cifradas en tu propio almacenamiento.</p></div>
+    <div><h2>Producto</h2><nav aria-label="Producto"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/screenshots/">Capturas</a><a href="../../es/downloads/">Descargas</a></nav></div>
+    <div><h2>Aprender</h2><nav aria-label="Aprender"><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/compare/">Comparación</a><a href="../../docs/">Documentación (en)</a><a href="../../es/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Comunidad</h2><nav aria-label="Comunidad"><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto es un nombre provisional. Código fuente: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, bajo la PolyForm Shield License 1.0.0 (código fuente disponible).</span>
+    <span>Sin cookies, sin seguimiento. El servidor web conserva un registro de acceso ordinario como máximo siete días.</span>
+    <span><a href="../../docs/security-policy.html">Política de seguridad</a> · <a href="../../docs/licence.html">Licencia</a> · <a href="../../docs/trademark.html">Marca</a> (en inglés)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

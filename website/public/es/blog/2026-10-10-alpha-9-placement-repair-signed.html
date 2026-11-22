@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.9: los datos donde tú quieres, reparación por sí sola, actualizaciones firmadas y cada plataforma compilada a la vista: Varsto</title>
+<meta name="description" content="Las carpetas se pueden colocar en los almacenamientos que elijas y mover entre ellos, las copias perdidas se reparan solas, las actualizaciones se firman con una clave fuera de línea, las descargas de par a par piden muchos bloques a la vez, y cada paquete se compila, se prueba y se fotografía ahora en los runners de GitHub.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/es/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.9: los datos donde tú quieres, reparación por sí sola, actualizaciones firmadas y cada plataforma compilada a la vista: Varsto">
+<meta property="og:description" content="Las carpetas se pueden colocar en los almacenamientos que elijas y mover entre ellos, las copias perdidas se reparan solas, las actualizaciones se firman con una clave fuera de línea, las descargas de par a par piden muchos bloques a la vez, y cada paquete se compila, se prueba y se fotografía ahora en los runners de GitHub.">
+<meta property="og:url" content="https://varsto.net/es/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="es_ES">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-10-alpha-9-placement-repair-signed.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.9: los datos donde tú quieres, reparación por sí sola, actualizaciones firmadas y cada plataforma compilada a la vista","description":"Las carpetas se pueden colocar en los almacenamientos que elijas y mover entre ellos, las copias perdidas se reparan solas, las actualizaciones se firman con una clave fuera de línea, las descargas de par a par piden muchos bloques a la vez, y cada paquete se compila, se prueba y se fotografía ahora en los runners de GitHub.","datePublished":"2026-10-10","url":"https://varsto.net/es/blog/2026-10-10-alpha-9-placement-repair-signed.html","inLanguage":"es","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../es/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Software alfa, no para datos de producción.</strong> Los errores pueden destruir datos, el formato de almacenamiento puede cambiar sin una herramienta de migración y el cifrado aún no se ha auditado. Conserva tus propias copias de seguridad y comprueba que puedes restaurar desde ellas.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../es/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menú principal">
+      <a href="../../es/features/">Funciones</a>
+      <a href="../../es/how-it-works/">Cómo funciona</a>
+      <a href="../../es/compare/">Comparación</a>
+      <a href="../../docs/">Documentación (en)</a>
+      <a href="../../es/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Idioma">ES</summary>
+        <nav class="pop-body langs" aria-label="Idioma"><a href="../../blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="es" lang="es" aria-current="true">Español</a><a href="../../ru/blog/2026-10-10-alpha-9-placement-repair-signed.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../es/downloads/">Descargar</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menú"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menú"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/compare/">Comparación</a><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/screenshots/">Capturas</a><a href="../../docs/">Documentación (en)</a><a href="../../es/downloads/">Descargas</a><a href="../../es/blog/" aria-current="page">Blog</a><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.9: los datos donde tú quieres, reparación por sí sola, actualizaciones firmadas y cada plataforma compilada a la vista</h1><p class="note"><time datetime="2026-10-10">2026-10-10</time></p>
+<p>Alpha.9 (una compilación que nunca se etiquetó por sí sola; sus cambios salieron en alpha.10) mira a largo plazo: decidir dónde viven los datos, devolverlos a las copias que pide tu política sin que tengas que hacerlo tú, y fiarte de la actualización que trae la siguiente versión.</p>
+<h2 id="los-datos-donde-tú-quieres">Los datos donde tú quieres</h2>
+<p>Cada carpeta puede tener ahora una ubicación: los almacenamientos a los que van sus bloques. Los datos se pueden mover de un almacenamiento a otro (una carpeta entera, o solo los archivos inactivos desde hace unos días), bloque a bloque; cada bloque se escribe y se vuelve a leer en el almacenamiento nuevo antes de borrar la copia antigua, y un movimiento interrumpido sigue sin más cuando se vuelve a ejecutar. Un grupo de discos extraíbles puede pedir copias en discos que se guardan en lugares distintos, por ejemplo uno en casa y uno en el trabajo, y Varsto llena cada disco con lo que a su lugar aún le falta.</p>
+<h2 id="reparación-por-sí-sola">Reparación por sí sola</h2>
+<p>Cuando falta una copia, se quita un almacenamiento o falla una verificación, el dispositivo que tiene los datos vuelve a poner el bloque donde lo quieren la política de conservación y la ubicación de la carpeta, desde sus propios archivos, la caché de bloques cifrados, otro almacenamiento o un par. La cola de reparación se ve en la interfaz y con <code>varsto repair</code>.</p>
+<h2 id="actualizaciones-firmadas">Actualizaciones firmadas</h2>
+<p>La lista de sumas de comprobación de cada publicación se firma ahora con la clave de publicación del proyecto, que no sale nunca de la máquina del mantenedor, y el actualizador rechaza una publicación que no lleve esa firma. También compara la suma con la que va adjunta a la publicación de GitHub, un segundo canal. <code>varsto verify-release</code> comprueba una descarga a mano, y <code>minisign</code> también. <a href="https://github.com/janttsu/varsto/blob/main/RELEASING.md">RELEASING.md</a> explica el esquema.</p>
+<h2 id="más-rápido-de-par-a-par">Más rápido de par a par</h2>
+<p>Las descargas mantienen hasta ocho bloques en vuelo (entonces), piden por adelantado los archivos pequeños de una carpeta y comparten una conexión por par; un dispositivo que sirve bloques ya no arranca una sincronización completa propia cada pocos segundos. Las <a href="../../docs/./">mediciones</a> comparan París, Ámsterdam y Varsovia, de par a par frente a un bucket S3.</p>
+<h2 id="compilado-a-la-vista">Compilado a la vista</h2>
+<p>Cada plataforma se compila y se prueba ahora en los runners de GitHub con cada cambio: los paquetes de Linux y de Windows (el de Windows, probado en Windows Server 2025, incluidas las entradas del menú del Explorador), la aplicación de Android en el emulador, la imagen de disco de macOS y la aplicación de iOS en Apple Silicon. Las mismas ejecuciones toman las <a href="../../docs/./">capturas de pantalla</a>, así que las imágenes de este sitio siguen la compilación más reciente.</p>
+<h2 id="y-más">Y más</h2>
+<p>Al compartir se anota quién pidió acceso, por la huella; quitar a un miembro pasa lo compartido a claves nuevas, y a un Strongroom se le puede cambiar la clave; los archivos se pueden descargar o liberar desde el gestor de archivos en Linux (Nautilus, Dolphin, Nemo) y en Windows (Explorador); las filas de carpeta conservan sus dos botones principales y ponen el resto en un menú; la aplicación de macOS y las del teléfono dicen cuándo hay una versión más nueva en la página de descargas, en lugar de darse por al día; y los lotes grandes del libro mayor ya no fallan en S3.</p>
+<h2 id="actualiza-todos-los-dispositivos-antes-de-mover-datos">Actualiza todos los dispositivos antes de mover datos</h2>
+<p>Mover datos escribe un tipo nuevo de entrada del libro mayor que alpha.8 y las anteriores no saben leer: sus sincronizaciones fallarían desde el primer movimiento. Actualiza primero todos tus dispositivos. A partir de esta versión, las entradas desconocidas se saltan, así que lo que se añada después no la romperá. Los clientes hasta alpha.8 comprueban solo la suma de comprobación al actualizarse; esta publicación es la primera cuyo actualizador exige la firma.</p>
+<h2 id="sigue-siendo-una-alfa">Sigue siendo una alfa</h2>
+<p>La criptografía no se ha auditado, el formato aún puede cambiar y un fallo puede destruir datos. Usa datos de prueba y conserva tus propias copias de seguridad.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../es/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Sincronización y copia de seguridad de archivos cifradas en tu propio almacenamiento.</p></div>
+    <div><h2>Producto</h2><nav aria-label="Producto"><a href="../../es/">Proyecto</a><a href="../../es/features/">Funciones</a><a href="../../es/use-cases/">Casos de uso</a><a href="../../es/screenshots/">Capturas</a><a href="../../es/downloads/">Descargas</a></nav></div>
+    <div><h2>Aprender</h2><nav aria-label="Aprender"><a href="../../es/how-it-works/">Cómo funciona</a><a href="../../es/compare/">Comparación</a><a href="../../docs/">Documentación (en)</a><a href="../../es/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Comunidad</h2><nav aria-label="Comunidad"><a href="../../forum/">Foro (en)</a><a href="../../es/contribute/">Contribuir</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto es un nombre provisional. Código fuente: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, bajo la PolyForm Shield License 1.0.0 (código fuente disponible).</span>
+    <span>Sin cookies, sin seguimiento. El servidor web conserva un registro de acceso ordinario como máximo siete días.</span>
+    <span><a href="../../docs/security-policy.html">Política de seguridad</a> · <a href="../../docs/licence.html">Licencia</a> · <a href="../../docs/trademark.html">Marca</a> (en inglés)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

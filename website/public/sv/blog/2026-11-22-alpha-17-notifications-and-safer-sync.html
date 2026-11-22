@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.17: valvet blir kvar, de tysta misstagen försvinner: Varsto</title>
+<meta name="description" content="Inget nytt lagringsformat och inga nya ord att skriva ner. Alpha.17 är versionen som hindrar en misslyckad synk från att radera filer, behåller den senaste säkerhetskopian och talar om för din telefon när något faktiskt är fel.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.17: valvet blir kvar, de tysta misstagen försvinner: Varsto">
+<meta property="og:description" content="Inget nytt lagringsformat och inga nya ord att skriva ner. Alpha.17 är versionen som hindrar en misslyckad synk från att radera filer, behåller den senaste säkerhetskopian och talar om för din telefon när något faktiskt är fel.">
+<meta property="og:url" content="https://varsto.net/sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="sv_SE">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.17: valvet blir kvar, de tysta misstagen försvinner","description":"Inget nytt lagringsformat och inga nya ord att skriva ner. Alpha.17 är versionen som hindrar en misslyckad synk från att radera filer, behåller den senaste säkerhetskopian och talar om för din telefon när något faktiskt är fel.","datePublished":"2026-11-22","url":"https://varsto.net/sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html","inLanguage":"sv","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../sv/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Hoppa till innehållet</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alfaprogramvara, inte för produktionsdata.</strong> Fel kan leda till dataförlust, formatet kan ändras utan migrering och krypteringen har ännu inte granskats av utomstående. Behåll egna säkerhetskopior och kontrollera att du kan återställa från dem.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../sv/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Huvudmeny">
+      <a href="../../sv/features/">Funktioner</a>
+      <a href="../../sv/how-it-works/">Så fungerar det</a>
+      <a href="../../sv/compare/">Jämförelse</a>
+      <a href="../../docs/">Dokumentation (en)</a>
+      <a href="../../sv/blog/" aria-current="page">Blogg</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Språk">SV</summary>
+        <nav class="pop-body langs" aria-label="Språk"><a href="../../blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="sv" lang="sv" aria-current="true">Svenska</a><a href="../../fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../sv/downloads/">Ladda ner</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Meny"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Meny"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/compare/">Jämförelse</a><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/downloads/">Nedladdningar</a><a href="../../sv/blog/" aria-current="page">Blogg</a><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.17: valvet blir kvar, de tysta misstagen försvinner</h1><p class="note"><time datetime="2026-11-22">2026-11-22</time></p>
+<p>Den här kan du uppdatera utan någon ceremoni. Alpha.17 öppnar ett valv från alpha.16 som det är. Det finns inget nytt format, ingen andra uppsättning ord och inget att skapa på nytt. Det som ändras är den sortens misstag som brukade hända medan du tittade på något annat.</p>
+<p>En hämtning som aldrig blev klar kunde ändå publicera raderingar av filer som den här enheten inte hade läst. Den nyaste versionen av en säkerhetskopia kunde bli för gammal och ta den enda återställningsbara kopian med sig. Det första mötet med en annan enhet kunde sitta där en kvart och se dött ut. Det är det den här versionen är till för. Det är fortfarande en alfa, och den är fortfarande inte för data du inte har råd att förlora. Den långa listan finns i ändringsloggen. Det du faktiskt kommer att märka står nedan.</p>
+<h2 id="din-telefon-får-veta">Din telefon får veta</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/notify-dark.webp?v=2609e89dc4"><img src="../../assets/img/blog/notify-dark.png?v=1065ff01c5" alt="En bärbar dator skickar en varning om lågt diskutrymme för mappen Dokument till en telefon. Själva valvet stannar på datorn." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/notify.webp?v=81bd4bf010"><img loading="lazy" src="../../assets/img/blog/notify.png?v=1f9ce40a85" alt="En bärbar dator skickar en varning om lågt diskutrymme för mappen Dokument till en telefon. Själva valvet stannar på datorn." width="640" height="320"></picture>
+</figure>
+
+<p>En enhet kan nu tala om för din telefon, via ntfy, Pushover eller Telegram, när något kräver en person. Lägg till en kanal under Inställningar eller med <code>varsto notify</code>. Varje tjänst har en kort guide och ett testmeddelande, och du väljer vad den får säga. Namn på mappar, lagringsplatser och enheter kan hållas utanför texten.</p>
+<p>De varningar som betyder något är på om du inte stänger av dem: en lagringsplats i trubbel, en disk som får slut på utrymme, färre kopior än en regel kräver, skadade data, en säkerhetskopia som misslyckades eller är försenad, en förfrågan som väntar på dig. Slutförda säkerhetskopior, nya filer och en daglig sammanfattning förblir tysta tills du ber om dem. Token finns på enheten, i <code>notify.json</code>, och synkas aldrig. Själva meddelandet är inte totalsträckskrypterat på vägen genom ntfy, Pushover eller Telegram, vilket är värt att veta innan du låter det namnge en mapp. En sändning som misslyckas väntar och prövas igen, också efter en omstart. Samma varning upprepas inte på sex timmar, och en kanal får högst tjugo meddelanden i timmen. Du kan ställa in det här medan valvet är låst.</p>
+<h2 id="en-hämtning-som-redan-har-bytena">En hämtning som redan har bytena</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/reuse-dark.webp?v=fdfe8e1f16"><img src="../../assets/img/blog/reuse-dark.png?v=344383fca7" alt="Blocken med chiffertext stannar på den bärbara datorn. En enda länk bär bara de block som saknas till ett låst moln." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/reuse.webp?v=8fd02a2d30"><img loading="lazy" src="../../assets/img/blog/reuse.png?v=9fbad43f82" alt="Blocken med chiffertext stannar på den bärbara datorn. En enda länk bär bara de block som saknas till ett låst moln." width="640" height="320"></picture>
+</figure>
+
+<p>Det mesta av en ändrad fil fanns redan här. Alpha.17 slutar hämta de blocken igen. De oförändrade delarna av en ändrad fil kommer från den föregående versionen på disken. Ett namnbyte eller en flytt kommer från den gamla sökvägen, eller från papperskorgen om det var dit den tog vägen. Två kopior av samma fil hämtar varje unikt block en gång. Allt som läses lokalt kontrolleras mot sitt bit-id, och ett block som inte stämmer hämtas ändå.</p>
+<p>Den andra halvan är enheten som just skrev filen. Den serverar varje fil den har lagt på plats till de andra genast, inte först när dess egen synk har tagit slut, och förfrågningarna delas mellan de peers som faktiskt har blocken.</p>
+<p>Första gången den här enheten möter en annan, innan den enheten har läst det här certifikatet, visas vägen som ”ansluter” och prövas igen genast. Ett senare avvisande väntar några sekunder och visas som ”kan inte nås”. En enhet som aldrig har svarat spenderar inte längre en minut, och sedan upp till femton, innan det första riktiga försöket. Medan den första synken fortfarande pågår visas en mapp som ännu inte har några filer som att den hämtas. Det är inte en tom mapp som redan är klar.</p>
+<p>En peer som svarade och sedan misslyckas vilar en sekund, och vilan fördubblas, i stället för en fast minut. Ett block som ingen annan har frågas den peeren om en gång till. Om peeren startar om avslutar nästa synk, en nyare peer-post eller en fyr i det lokala nätverket vilan, i stället för att rapportera varje fil som otillgänglig. Enheter som helt enkelt är borta vilar längre, och upp till åtta av dem frågas tillsammans, så de kostar en timeout i stället för åtta.</p>
+<h2 id="vad-ett-misslyckande-inte-längre-får-göra">Vad ett misslyckande inte längre får göra</h2>
+<p>En hämtning som misslyckas publicerar inte längre raderingar av filer som den här enheten inte har läst. Det du har lagt till eller redigerat här sänds ändå. Nästa hämtning hämtar kopiorna som de andra enheterna fortfarande har innan en saknad fil kan förklaras borta.</p>
+<p>Om en annan enhets version vinner en konflikt flyttas filen här undan först när vinnaren faktiskt har kommit fram. En vinnare som inte kunde hämtas lämnade förr sökvägen tom, och nästa sändning publicerade sedan en radering av den. En fil som växer eller krymper medan avläsningen läser den väntar på nästa avläsning. Den publiceras inte med en storlek som dess block inte rymmer, vilket förr fick varje annan enhet att vägra mappens hela lista.</p>
+<p>Paket som ingen gjort anspråk på raderas efter 48 timmar, eller efter 24 när en lokal lagringsplats har under 10 procent ledigt. Det var sju dagar. En sändning, en import eller en säkerhetskopia vars kartpost aldrig blev publicerad raderar paketen den just skrev, och det gör också en reparation vars batch inte förseglades. Om förseglingen misslyckas efter att kartposten publicerats blir paketen kvar, eftersom påståendet redan finns i liggaren. <code>varsto gc orphans</code> raderar paket utan anspråk nu, om du hellre inte vill vänta.</p>
+<p>Lagringstiden för en säkerhetskopia äter inte längre upp den nyaste versionen bara för att den är gammal. En förlorad källkatalog, eller en enhet som aldrig tog en nyare, brukade låta den versionen gå ut enligt schemat och sedan samla in dess block, och då fanns inget kvar att återställa. Att stoppa säkerhetskopian låter fortfarande den sista versionen gå ut. Den delen är oförändrad, och det är så du säger att du är klar med den.</p>
+<h2 id="klockor-namn-och-en-nyckel-som-överlevde-enheten">Klockor, namn och en nyckel som överlevde enheten</h2>
+<p>Två processer på en maskin, kommandoraden och bakgrundstjänsten, kan inte längre reservera samma Lamport-värde och sedan båda dela ut det. Reservationen håller ett lås över läsningen, höjningen och bytet.</p>
+<p>Två enheter som skriver samma epoknummer för valv eller mapp slutar inte längre signera tills en person väljer. Enheten som ser båda posterna behåller den med det större utfärdar-id:t. <code>varsto device resolve-epoch</code> och <code>varsto folder resolve-epoch</code> ersätter fortfarande det valet när du vill ha ett annat.</p>
+<p>På en disk som inte skiljer på skiftläge får två sökvägar som bara skiljer sig i skiftläge eller i Unicode-normalisering olika lokala namn, oavsett vilken som kommer först. NFC-stavningen vinner vid lika. Sedan behåller den mindre ursprungliga sökvägen det enkla namnet, och den andra blir <code> (2)</code>.</p>
+<p>Att ta bort en enhet ändrar inte, i sig, lösenordet hos lagringsleverantören. Det den gör nu är att vägra glömma. <code>varsto status</code> och <code>varsto device list</code> namnger varje lagringsplats vars uppgifter den enheten fortfarande kunde använda för att radera chiffertext. När du har bytt dem hos leverantören tar <code>varsto storage mark-rotated &lt;name&gt;</code> bort varningen. Varsto roterar inte hemligheten åt dig.</p>
+<h2 id="orden-på-papper-och-nycklarna-som-brukade-ligga-i-en-fil">Orden på papper, och nycklarna som brukade ligga i en fil</h2>
+<p><code>varsto recovery kit</code> skriver ut återställningspaketet för format 3: valvorden och återställningsorden. Förr skrev det ut texten för format 2, som sa att de 24 valvorden läser allt i valvet. I format 3 öppnar de enhetsnamn, mappnamn och lagringsliggaren. Innehåll kräver återställningsorden. En utskrift som gjorts utan dem säger det nu med versaler, i stället för att se komplett ut. <code>--shares</code> delar båda uppsättningarna.</p>
+<p>En delningsbegäran och en organisationsbegäran hade förr sina privata nycklar i en JSON-fil i klartext. En kopia av enhetskatalogen, tagen medan begäran väntade, kunde läsa dem, och när ägaren hade godkänt öppna mappen utan någon lösenfras alls. Nycklarna är nu förseglade under enhetens lösenfras. Att visa begärandekoden frågar efter den, och att godkänna begäran frågar igen. En begäran som alpha.16 lämnade i klartext förseglas nästa gång ett kommando läser den.</p>
+<p>Loggarna får samma behandling för sättet en felsökningsskrivare skriver ett valfritt värde. En rad som <code>password: Some("…")</code> klipptes förr vid citattecknet och lämnade hemligheten i resten av raden. Lösenfrasen registreras hos skrubbaren på varje upplåsningsväg, också när tjänsten kommer tillbaka från nyckelringen. Förut kunde den tjänsten köra i dagar utan att något var registrerat.</p>
+<h2 id="en-paus-som-betyder-pausad">En paus som betyder pausad</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/pause-dark.webp?v=cc29350990"><img src="../../assets/img/blog/pause-dark.png?v=2fec0b10cb" alt="En pausad telefon mellan en bärbar dator hemma och en NAS på kontoret. Båda länkarna är markerade som av." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/pause.webp?v=cbbeebe0b4"><img loading="lazy" src="../../assets/img/blog/pause.png?v=9a1a85134c" alt="En pausad telefon mellan en bärbar dator hemma och en NAS på kontoret. Båda länkarna är markerade som av." width="640" height="320"></picture>
+</figure>
+
+<p>Att pausa bakgrundstjänsten brukade stoppa synken och lämna resten av enheten pratsam. Lyssnaren, fyren i det lokala nätverket, mötestjänsten, reläet och portmappningen i routern stannar nu med den, och de förblir stoppade tills du återupptar. En paus du själv har satt överlever en omstart, vilket spelar roll på en telefon som stoppar och startar tjänsten hela dagen. Den korta paus som <code>varsto disk</code> eller en import tar för sin egen skull sparas inte. Den tar slut när kommandot tar slut.</p>
+<p>Miniatyrer i fillistan syns på telefoner igen. När motorn var upptagen svarade tjänsten förr ”ingen miniatyr”, och sidan trodde på det. Nu svarar den ”upptagen”, och sidan försöker igen.</p>
+<p>Standardregeln kallar inte längre en mapp bruten i ett valv som inte har någon diskpool och ingen katalog som lagringsplats. Det finns en varning, att inget ligger på en disk som är din och hur du lägger till en. En regel du har satt med avsikt, som verkligen kräver en kopia hemma, hålls fortfarande till det. Samma skillnad gäller när en import avgör om dess källa får tas bort, så en mapp i det valvet väntar inte längre i evighet på en kopia på en disk du inte har.</p>
+<p>Ett kommando och bakgrundstjänsten tar samma lås för att hämta, frigöra, skriva och flytta en fil, så de gör inte längre ogjort varandras tillstånd för mappen. En nedladdning eller en skrivning som misslyckas lämnar inte längre en fil <code>.varsto-tmp-…</code> eller <code>.varsto-upload-…</code> som håller en del av innehållet. Filer som kommer från en annan enhet behåller ändringstiden som den som skrev dem antecknade, i stället för att stämplas med ögonblicket de laddades ner. Verktyg som litar på datumet, ett bygge, ett fotobibliotek, en annan säkerhetskopia, slutar se varje hämtad fil som ny.</p>
+<h2 id="en-borttagen-enhet-förblir-borttagen">En borttagen enhet förblir borttagen</h2>
+<p>En borttagen enhets mapposter, beviljanden och återställningsdeposition räknas bara fram till det första löpnummer den lämnade tomt. Den kan inte komma tillbaka senare och fylla luckan med en bakdaterad post. En medlem i ett annat valv tillämpar en borttagning som den läser ur mappepoken. En mapp som den som tog bort inte kunde nyckla om nycklas om vid nästa synk hos en ägare som fortfarande har nyckeln. Det den borttagna enheten redan har på sin egen disk får den behålla. Det var alltid sant, och det är fortfarande sant.</p>
+<p>Anslutning läser organisationens manifest och tar valvepoker och återkallelser bara från dess administratörer. En återkallelse skriven av en vanlig medlem i förteckningen öppnar inte längre valvet för en enhet som ansluter.</p>
+<p>Raden ”har ingen nyckel” i aktivitetsloggen har samma knapp som mappraden, så en telefon kan be om åtkomst från den raden i stället för att leta efter mappen. Restic-spegeln, och mapparna som anslutits under den, skapas så att bara den här användaren kan läsa dem.</p>
+<h2 id="namnet-på-ikonen">Namnet på ikonen</h2>
+<p>App-id:na är nu <code>net.varsto.app</code> på Android och macOS, <code>net.varsto.app.ios</code> på iOS och <code>net.varsto.app.alpha</code> för det osignerade macOS-bygget. En app som redan är installerad behåller sitt tidigare id, och dess valv flyttas inte, tills du installerar den igen. Att installera det nya paketet bredvid det gamla ersätter det inte.</p>
+<h2 id="om-du-kör-alpha16">Om du kör alpha.16</h2>
+<p>Uppdatera när du vill. De två versionerna kan dela ett valv medan du gör det. Inget i den här versionen ber dig nollställa, skriva ut ett nytt återställningspaket eller avinstallera ett Android-bygge som redan är det releasesignerade från alpha.16. Om en delningsbegäran eller en organisationsbegäran fortfarande ligger i en klartextfil från alpha.16 förseglas den av nästa kommando som läser den. Det här är fortfarande en alfa.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../sv/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Krypterad filsynkronisering och säkerhetskopiering till din egen lagring.</p></div>
+    <div><h2>Produkt</h2><nav aria-label="Produkt"><a href="../../sv/">Projekt</a><a href="../../sv/features/">Funktioner</a><a href="../../sv/use-cases/">Användningsfall</a><a href="../../sv/screenshots/">Skärmbilder</a><a href="../../sv/downloads/">Nedladdningar</a></nav></div>
+    <div><h2>Lär dig</h2><nav aria-label="Lär dig"><a href="../../sv/how-it-works/">Så fungerar det</a><a href="../../sv/compare/">Jämförelse</a><a href="../../docs/">Dokumentation (en)</a><a href="../../sv/blog/" aria-current="page">Blogg</a></nav></div>
+    <div><h2>Gemenskap</h2><nav aria-label="Gemenskap"><a href="../../forum/">Forum (en)</a><a href="../../sv/contribute/">Bidra</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto är ett arbetsnamn. Källkod: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, under PolyForm Shield License 1.0.0 (källkoden tillgänglig).</span>
+    <span>Inga kakor, ingen spårning. Webbservern sparar en vanlig åtkomstlogg i högst sju dagar.</span>
+    <span><a href="../../docs/security-policy.html">Säkerhetspolicy</a> · <a href="../../docs/licence.html">Licens</a> · <a href="../../docs/trademark.html">Varumärke</a> (på engelska)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

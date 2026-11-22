@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.8: журнал учёта, который остаётся небольшим, удаление устройств и телефоны, которые не держат ничего открытым текстом: Varsto</title>
+<meta name="description" content="Журнал учёта теперь перечисляет только новое, держит кэшированный вид и подчищает себя за подписанными контрольными точками. Устройства можно удалять, и всё записанное после идёт под новыми ключами. Телефоны держат зашифрованные папки зашифрованными блоками, а интерфейс показывает, где твои данные и как идёт трафик между узлами.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/ru/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.8: журнал учёта, который остаётся небольшим, удаление устройств и телефоны, которые не держат ничего открытым текстом: Varsto">
+<meta property="og:description" content="Журнал учёта теперь перечисляет только новое, держит кэшированный вид и подчищает себя за подписанными контрольными точками. Устройства можно удалять, и всё записанное после идёт под новыми ключами. Телефоны держат зашифрованные папки зашифрованными блоками, а интерфейс показывает, где твои данные и как идёт трафик между узлами.">
+<meta property="og:url" content="https://varsto.net/ru/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-10-09-alpha-8-ledger-and-devices.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.8: журнал учёта, который остаётся небольшим, удаление устройств и телефоны, которые не держат ничего открытым текстом","description":"Журнал учёта теперь перечисляет только новое, держит кэшированный вид и подчищает себя за подписанными контрольными точками. Устройства можно удалять, и всё записанное после идёт под новыми ключами. Телефоны держат зашифрованные папки зашифрованными блоками, а интерфейс показывает, где твои данные и как идёт трафик между узлами.","datePublished":"2026-10-09","url":"https://varsto.net/ru/blog/2026-10-09-alpha-8-ledger-and-devices.html","inLanguage":"ru","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../ru/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">К содержанию</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Альфа-версия, не для рабочих данных.</strong> Ошибки могут уничтожить данные, формат хранения может измениться без средства переноса, а шифрование ещё не проверяли. Храни собственные резервные копии и убедись, что из них можно восстановиться.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../ru/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Главное меню">
+      <a href="../../ru/features/">Возможности</a>
+      <a href="../../ru/how-it-works/">Как это устроено</a>
+      <a href="../../ru/compare/">Сравнение</a>
+      <a href="../../docs/">Документация (en)</a>
+      <a href="../../ru/blog/" aria-current="page">Блог</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Язык">RU</summary>
+        <nav class="pop-body langs" aria-label="Язык"><a href="../../blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="fr" lang="fr">Français</a><a href="../../de/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-10-09-alpha-8-ledger-and-devices.html" hreflang="ru" lang="ru" aria-current="true">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../ru/downloads/">Скачать</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Меню"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Меню"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/compare/">Сравнение</a><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../docs/">Документация (en)</a><a href="../../ru/downloads/">Загрузки</a><a href="../../ru/blog/" aria-current="page">Блог</a><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.8: журнал учёта, который остаётся небольшим, удаление устройств и телефоны, которые не держат ничего открытым текстом</h1><p class="note"><time datetime="2026-10-09">2026-10-09</time></p>
+<p>Alpha.8 вышел из долгого дня, когда alpha.7 гоняли на Mac, настольном Linux и телефоне Samsung, и из вопроса, что будет с замыслом через несколько лет.</p>
+<h2 id="журнал-учёта-который-остаётся-небольшим">Журнал учёта, который остаётся небольшим</h2>
+<p>Каждое устройство ведёт подписанный зашифрованный журнал фактов: какой блок куда оно сохранило, какую копию проверило, какой список файлов опубликовало. До сих пор каждая запись оставалась навсегда, своим объектом в каждом хранилище данных, и каждая синхронизация перечисляла их все. Теперь синхронизация перечисляет только новое, устройство держит зашифрованный вид в кэше, а не проигрывает всё заново, одна синхронизация пишет одну партию, и каждое устройство время от времени пишет подписанную контрольную точку. Когда все твои устройства подтвердили контрольную точку, партии позади неё удаляются. Несколько последних остаются, чтобы устройство, восстановленное из старой резервной копии, всё ещё обнаруживалось. В тестовом хранилище с 20 000 партиями синхронизация, в которой не было ничего нового, упала с 668 ms до 28 ms (на тот момент), а журнал учёта в хранилище данных — со 171 MB до 5 MB. Страница <a href="../../docs/./">Как это работает</a> объясняет журнал учёта.</p>
+<h2 id="удаление-устройства">Удаление устройства</h2>
+<p>Потерянный телефон или ноутбук, которым ты больше не пользуешься, можно удалить с любого другого устройства («Настройки» или «Узлы», «Удалить…» или <code>varsto device revoke</code>). Его поздние записи игнорируются, твои устройства отказывают его соединениям, и хранилище переходит на новые ключи, которые получают только оставшиеся устройства, поэтому ничего записанного после не открывается тем, что есть у удалённого. Можно также приказать ему стереть себя в следующий раз, когда оно доберётся до хранилища данных. Список устройств показывает систему, модель, версию Varsto и последнюю синхронизацию каждого.</p>
+<h2 id="телефоны-держат-зашифрованные-папки-зашифрованными">Телефоны держат зашифрованные папки зашифрованными</h2>
+<p>Папка с пометкой «Зашифровано на этом телефоне» теперь держит только зашифрованные блоки, те же байты, что и твои хранилища данных. Выборочная синхронизация работает как везде. Файлы показываются в собственном просмотрщике приложения, расшифрованными в памяти, и другому приложению отдаются, только когда ты просишь, временной копией, которая удаляется, когда хранилище блокируется. Android умеет отправлять новые фото и видео в выбранную тобой папку.</p>
+<h2 id="видно-что-происходит">Видно, что происходит</h2>
+<ul>
+<li><strong>Где твои данные</strong>: диаграмма от папок к хранилищам данных и устройствам и сколько копий у всего есть.</li>
+<li><strong>Трафик между узлами</strong>: какое устройство что кому шлёт, каким путём и с какой скоростью.</li>
+<li><strong>Автоматическая проверка</strong>: другое устройство перечитывает твои блоки по расписанию, так что правило вроде «проверено за 30 дней» держится само.</li>
+<li>Кнопки сразу показывают, что дело началось, а у скачиваний виден ход.</li>
+</ul>
+<h2 id="и-ещё">И ещё</h2>
+<p>Папки Strongroom можно получить из уже существующих, и к ним добавляется запасной ключ безопасности; хранилище данных можно удалить, когда его блоки скопированы куда нужно; папку можно открепить или удалить из хранилища, а имена на верхнем уровне не повторяются; диску-переносчику можно указать устройство назначения; цены хранилищ данных идут в оценку стоимости и в освобождение неиспользуемых файлов одним щелчком; помощник (MCP) не может ни удалять, ни перезаписывать файлы; в Linux первый запуск ставит Varsto для твоего пользователя, и фоновая служба продолжает синхронизацию также для командной строки.</p>
+<h2 id="всё-ещё-альфа">Всё ещё альфа</h2>
+<p>Предупреждение на каждой странице в силе: криптографию не аудировали, формат ещё может измениться, и ошибка может уничтожить данные. Используй тестовые данные и храни свои резервные копии.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../ru/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Шифрованная синхронизация и резервное копирование файлов на твоём хранилище.</p></div>
+    <div><h2>Продукт</h2><nav aria-label="Продукт"><a href="../../ru/">Проект</a><a href="../../ru/features/">Возможности</a><a href="../../ru/use-cases/">Сценарии</a><a href="../../ru/screenshots/">Снимки экрана</a><a href="../../ru/downloads/">Загрузки</a></nav></div>
+    <div><h2>Изучить</h2><nav aria-label="Изучить"><a href="../../ru/how-it-works/">Как это устроено</a><a href="../../ru/compare/">Сравнение</a><a href="../../docs/">Документация (en)</a><a href="../../ru/blog/" aria-current="page">Блог</a></nav></div>
+    <div><h2>Сообщество</h2><nav aria-label="Сообщество"><a href="../../forum/">Форум (en)</a><a href="../../ru/contribute/">Участие</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto — рабочее название. Исходный код: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, по лицензии PolyForm Shield License 1.0.0 (исходный код доступен).</span>
+    <span>Без cookie и без слежения. Веб-сервер хранит обычный журнал доступа не дольше семи дней.</span>
+    <span><a href="../../docs/security-policy.html">Политика безопасности</a> · <a href="../../docs/licence.html">Лицензия</a> · <a href="../../docs/trademark.html">Товарный знак</a> (на английском)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

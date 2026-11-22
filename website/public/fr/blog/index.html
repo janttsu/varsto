@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blog: Varsto</title>
+<meta name="description" content="Notes de version et articles techniques">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/blog/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Blog: Varsto">
+<meta property="og:description" content="Notes de version et articles techniques">
+<meta property="og:url" content="https://varsto.net/fr/blog/">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fr/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fr/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menu principal">
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Langue">FR</summary>
+        <nav class="pop-body langs" aria-label="Langue"><a href="../../blog/" hreflang="en" lang="en">English</a><a href="../../fi/blog/" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/" hreflang="fr" lang="fr" aria-current="true">Français</a><a href="../../de/blog/" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/" hreflang="es" lang="es">Español</a><a href="../../ru/blog/" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fr/downloads/">Télécharger</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menu"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/compare/">Comparaison</a><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/downloads/">Téléchargements</a><a href="../../fr/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+    <h1>Blog</h1>
+    <p class="lead">Notes de version, notes de sécurité et articles techniques. <a href="feed.xml">Flux RSS</a>.</p>
+    <ul class="posts"><li><time datetime="2026-11-22">2026-11-22</time> <a href="../blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">Alpha.17 : le coffre reste, les erreurs silencieuses s’en vont</a><br><span class="note">Pas de nouveau format de stockage et pas de nouveaux mots à noter. Alpha.17 est la version qui empêche une synchronisation ratée de supprimer des fichiers, conserve la dernière sauvegarde, et prévient votre téléphone quand quelque chose ne va vraiment pas.</span></li>
+<li><time datetime="2026-11-04">2026-11-04</time> <a href="../blog/2026-11-04-alpha-16-format-3-folder-access-and-rendezvous.html">Alpha.16 : format de stockage 3, accès aux dossiers sur approbation, et un service de rendez-vous</a><br><span class="note">Un nouveau format de stockage avec un registre au niveau des paquets, des enregistrements signés et des mots de récupération, de sorte que les coffres existants doivent être recréés ; les dossiers s’ouvrent à un appareil sur l’approbation d’un propriétaire ; les appareils se trouvent par un service de rendez-vous facultatif ; rejoindre et changer les membres fonctionne hors ligne ; et des imports depuis des torrents et YouTube.</span></li>
+<li><time datetime="2026-10-16">2026-10-16</time> <a href="../blog/2026-10-16-alpha-15-format-2-and-the-daily-channel.html">Alpha.15 : format de stockage 2, un programme d’installation Windows et un canal quotidien</a><br><span class="note">Un nouveau format de stockage qui corrige deux constats de la relecture de sécurité, de sorte que les coffres existants doivent être recréés ; Windows reçoit un programme d’installation, une fenêtre native et des mises à jour automatiques ; et un canal de versions quotidiennes signé.</span></li>
+<li><time datetime="2026-10-14">2026-10-14</time> <a href="../blog/2026-10-14-alpha-14-hardening-and-everything-since.html">Alpha.14 : une relecture de sécurité, ses corrections, et tout ce qui a été fusionné depuis alpha.13</a><br><span class="note">Une relecture de sécurité au niveau du code de tout le programme, les corrections qu’elle a demandées, une synchronisation bien plus rapide, des déplacements reprenables vers une pile de disques amovibles, et la vingtaine de fonctionnalités qui attendaient sur la branche principale depuis alpha.13.</span></li>
+<li><time datetime="2026-10-13">2026-10-13</time> <a href="../blog/2026-10-13-alpha-13-backups.html">Alpha.13 : des sauvegardes que rien ne peut changer</a><br><span class="note">Choisissez un dossier sur n’importe quel appareil et Varsto en garde des instantanés chiffrés, en lecture seule, sur vos stockages externes, jamais sur vos appareils, pendant autant de jours que vous voulez (90 par défaut). Les restaurations vont dans un répertoire que vous nommez, depuis l’application ou la ligne de commande.</span></li>
+<li><time datetime="2026-10-12">2026-10-12</time> <a href="../blog/2026-10-12-alpha-12-packs-and-languages.html">Alpha.12 : les petits fichiers dans des paquets, et Varsto en finnois et en suédois</a><br><span class="note">Les petits blocs chiffrés sont maintenant écrits dans des paquets, de sorte qu’un dossier de 20 000 petits fichiers devient 79 objets sur un bucket au lieu de 20 000. L’interface, la zone de notification, la barre de menus, les enveloppes mobiles et ce site sont disponibles en finnois et en suédois aussi bien qu’en anglais.</span></li>
+<li><time datetime="2026-10-10">2026-10-10</time> <a href="../blog/2026-10-10-alpha-9-placement-repair-signed.html">Alpha.9 : les données où vous les voulez, la réparation toute seule, des mises à jour signées, et chaque plateforme construite au grand jour</a><br><span class="note">Les dossiers peuvent être placés sur des stockages choisis et déplacés de l’un à l’autre, les copies perdues sont réparées automatiquement, les mises à jour sont signées avec une clé hors ligne, les téléchargements pair à pair récupèrent plusieurs blocs à la fois, et chaque paquet est maintenant construit, testé et photographié sur les runners de GitHub.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-8-ledger-and-devices.html">Alpha.8 : un registre qui reste petit, le retrait des appareils, et des téléphones qui ne gardent rien en clair</a><br><span class="note">Le registre ne liste plus que ce qui est nouveau, garde une vue en cache et s’élague derrière des points de contrôle signés ; les appareils peuvent être retirés, avec de nouvelles clés pour tout ce qui est écrit ensuite ; les téléphones gardent les dossiers chiffrés sous forme de blocs chiffrés ; et l’interface montre où sont vos données et comment circule le trafic pair à pair.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-7-pairing-and-finder.html">Alpha.7 : appairer les appareils avec un code, actions du Finder, et un vrai chemin à travers le NAT</a><br><span class="note">Les appareils s’appairent maintenant depuis l’interface avec un code à usage unique, le Finder peut télécharger un fichier substitut ou libérer de la place d’un clic droit, l’application macOS s’installe depuis une image disque, les appareils s’atteignent à travers le NAT, et les disques amovibles peuvent former un pool.</span></li>
+<li><time datetime="2026-10-09">2026-10-09</time> <a href="../blog/2026-10-09-alpha-6-source-on-github.html">Alpha.6 : le code source est public, et chaque plateforme est construite dans le cloud</a><br><span class="note">Le dépôt est maintenant public sur GitHub sous la licence PolyForm Shield, les applications natives macOS et iOS se construisent sur GitHub Actions, Linux, Windows et Android se construisent sur des machines cloud de courte durée, et l’interface a été refaite autour d’une vue des fichiers.</span></li>
+<li><time datetime="2026-10-08">2026-10-08</time> <a href="../blog/2026-10-08-alpha-0.html">Alpha-0 : la première version de bout en bout</a><br><span class="note">Un outil en ligne de commande qui chiffre, stocke et synchronise un dossier entre deux appareils à travers un stockage qui vous appartient, avec un registre signé que vous pouvez contrôler.</span></li></ul>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage.</p></div>
+    <div><h2>Produit</h2><nav aria-label="Produit"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../fr/downloads/">Téléchargements</a></nav></div>
+    <div><h2>Découvrir</h2><nav aria-label="Découvrir"><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/compare/">Comparaison</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Communauté</h2><nav aria-label="Communauté"><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>

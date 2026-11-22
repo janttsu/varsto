@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha.17 : le coffre reste, les erreurs silencieuses s’en vont: Varsto</title>
+<meta name="description" content="Pas de nouveau format de stockage et pas de nouveaux mots à noter. Alpha.17 est la version qui empêche une synchronisation ratée de supprimer des fichiers, conserve la dernière sauvegarde, et prévient votre téléphone quand quelque chose ne va vraiment pas.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Alpha.17 : le coffre reste, les erreurs silencieuses s’en vont: Varsto">
+<meta property="og:description" content="Pas de nouveau format de stockage et pas de nouveaux mots à noter. Alpha.17 est la version qui empêche une synchronisation ratée de supprimer des fichiers, conserve la dernière sauvegarde, et prévient votre téléphone quand quelque chose ne va vraiment pas.">
+<meta property="og:url" content="https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="sv" href="https://varsto.net/sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="fr" href="https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="de" href="https://varsto.net/de/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="es" href="https://varsto.net/es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<link rel="alternate" hreflang="ru" href="https://varsto.net/ru/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"Alpha.17 : le coffre reste, les erreurs silencieuses s’en vont","description":"Pas de nouveau format de stockage et pas de nouveaux mots à noter. Alpha.17 est la version qui empêche une synchronisation ratée de supprimer des fichiers, conserve la dernière sauvegarde, et prévient votre téléphone quand quelque chose ne va vraiment pas.","datePublished":"2026-11-22","url":"https://varsto.net/fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html","inLanguage":"fr","author":{"@type":"Organization","name":"The Varsto Authors"},"image":"https://varsto.net/assets/img/og-card.png"}</script>
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fr/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller au contenu</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Logiciel alpha, pas pour des données de production.</strong> Des erreurs peuvent entraîner une perte de données, le format de stockage peut changer sans outil de migration et le chiffrement n'a pas encore été audité. Conservez vos propres sauvegardes et vérifiez que vous pouvez en restaurer.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fr/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Menu principal">
+      <a href="../../fr/features/">Fonctionnalités</a>
+      <a href="../../fr/how-it-works/">Fonctionnement</a>
+      <a href="../../fr/compare/">Comparaison</a>
+      <a href="../../docs/">Documentation (en)</a>
+      <a href="../../fr/blog/" aria-current="page">Blog</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Langue">FR</summary>
+        <nav class="pop-body langs" aria-label="Langue"><a href="../../blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="en" lang="en">English</a><a href="../../fi/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="fi" lang="fi">Suomi</a><a href="../../sv/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="sv" lang="sv">Svenska</a><a href="../../fr/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="fr" lang="fr" aria-current="true">Français</a><a href="../../de/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="de" lang="de">Deutsch</a><a href="../../es/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="es" lang="es">Español</a><a href="../../ru/blog/2026-11-22-alpha-17-notifications-and-safer-sync.html" hreflang="ru" lang="ru">Русский</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fr/downloads/">Télécharger</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Menu"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/compare/">Comparaison</a><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/downloads/">Téléchargements</a><a href="../../fr/blog/" aria-current="page">Blog</a><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose"><h1>Alpha.17 : le coffre reste, les erreurs silencieuses s’en vont</h1><p class="note"><time datetime="2026-11-22">2026-11-22</time></p>
+<p>Vous pouvez mettre à jour celle-ci sans cérémonie. Alpha.17 ouvre un coffre alpha.16 tel quel. Il n’y a pas de nouveau format, pas de second jeu de mots, et rien à recréer. Ce qui change, c’est le genre d’erreur qui arrivait pendant que vous regardiez ailleurs.</p>
+<p>Une récupération qui n’avait jamais fini pouvait encore publier des suppressions de fichiers que cet appareil n’avait pas lus. L’instantané le plus récent d’une sauvegarde pouvait vieillir et emporter avec lui la seule copie restaurable. La première rencontre avec un autre appareil pouvait rester là un quart d’heure, l’air morte. C’est pour cela que cette version existe. C’est encore une alpha, et ce n’est toujours pas pour des données que vous ne pouvez pas vous permettre de perdre. La longue liste est dans le journal des changements. Ce que vous remarquerez vraiment est ci-dessous.</p>
+<h2 id="votre-téléphone-en-est-informé">Votre téléphone en est informé</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/notify-dark.webp?v=2609e89dc4"><img src="../../assets/img/blog/notify-dark.png?v=1065ff01c5" alt="Un portable envoie au téléphone une alerte de manque de place sur le dossier Documents. Le coffre lui-même reste sur l’ordinateur." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/notify.webp?v=81bd4bf010"><img loading="lazy" src="../../assets/img/blog/notify.png?v=1f9ce40a85" alt="Un portable envoie au téléphone une alerte de manque de place sur le dossier Documents. Le coffre lui-même reste sur l’ordinateur." width="640" height="320"></picture>
+</figure>
+
+<p>Un appareil peut maintenant prévenir votre téléphone, via ntfy, Pushover ou Telegram, quand une personne doit intervenir. Ajoutez un canal dans les Réglages ou avec <code>varsto notify</code>. Chaque service a un court guide et un message de test, et vous choisissez ce qu’il a le droit de dire. Les noms de dossiers, de stockages et d’appareils peuvent rester hors du texte.</p>
+<p>Les alertes qui comptent sont activées, sauf si vous les coupez : un stockage en difficulté, un disque qui n’a plus de place, moins de copies que ce que demande une politique, des données endommagées, une sauvegarde qui a échoué ou qui est en retard, une demande qui vous attend. Les sauvegardes terminées, les nouveaux fichiers et un résumé quotidien restent silencieux tant que vous ne les demandez pas. Les jetons restent sur l’appareil, dans <code>notify.json</code>, et ne sont jamais synchronisés. Le message lui-même n’est pas chiffré de bout en bout sur le trajet via ntfy, Pushover ou Telegram, ce qu’il vaut mieux savoir avant de le laisser nommer un dossier. Un envoi raté attend et est retenté, y compris après un redémarrage. La même alerte n’est pas répétée pendant six heures, et un canal reçoit au plus vingt messages par heure. Vous pouvez le configurer pendant que le coffre est verrouillé.</p>
+<h2 id="une-récupération-qui-a-déjà-les-octets">Une récupération qui a déjà les octets</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/reuse-dark.webp?v=fdfe8e1f16"><img src="../../assets/img/blog/reuse-dark.png?v=344383fca7" alt="Les blocs chiffrés restent sur le portable. Une seule liaison n’emporte vers un cloud verrouillé que les blocs qui manquent." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/reuse.webp?v=8fd02a2d30"><img loading="lazy" src="../../assets/img/blog/reuse.png?v=9fbad43f82" alt="Les blocs chiffrés restent sur le portable. Une seule liaison n’emporte vers un cloud verrouillé que les blocs qui manquent." width="640" height="320"></picture>
+</figure>
+
+<p>L’essentiel d’un fichier modifié était déjà là. Alpha.17 cesse de récupérer ces blocs une seconde fois. Les parties inchangées d’un fichier modifié viennent de la version précédente sur le disque. Un renommage ou un déplacement vient de l’ancien chemin, ou de la corbeille si c’est là qu’il est allé. Deux copies du même fichier ne récupèrent chaque bloc distinct qu’une fois. Tout ce qui est lu localement est contrôlé par rapport à son identifiant de morceau, et un bloc qui ne correspond pas est quand même récupéré.</p>
+<p>L’autre moitié, c’est l’appareil qui vient d’écrire le fichier. Il sert aussitôt aux autres chaque fichier qu’il a mis en place, pas seulement une fois sa propre synchronisation terminée, et les demandes sont réparties entre les pairs qui détiennent vraiment les blocs.</p>
+<p>La première fois que cet appareil en rencontre un autre, avant que celui-ci ait lu ce certificat, le chemin est affiché comme en cours de connexion et retenté tout de suite. Un refus ultérieur attend quelques secondes et est affiché comme injoignable. Un appareil qui n’a jamais répondu ne passe plus une minute, puis jusqu’à quinze, avant le premier vrai essai. Tant que cette première synchronisation tourne encore, un dossier qui n’a pas encore de fichiers est affiché comme en cours de récupération. Ce n’est pas un dossier vide déjà terminé.</p>
+<p>Un pair qui répondait puis échoue se repose une seconde, et le repos double, au lieu d’une minute fixe. Un bloc que personne d’autre n’a est redemandé à ce pair une fois de plus. Si le pair redémarre, la synchronisation suivante, un enregistrement de pair plus récent ou une balise du réseau local met fin au repos, au lieu de signaler chaque fichier indisponible. Les appareils qui sont simplement partis se reposent plus longtemps, et jusqu’à huit d’entre eux sont interrogés ensemble, de sorte qu’ils coûtent un délai d’attente au lieu de huit.</p>
+<h2 id="ce-quun-échec-na-plus-le-droit-de-faire">Ce qu’un échec n’a plus le droit de faire</h2>
+<p>Une récupération qui échoue ne publie plus de suppressions de fichiers que cet appareil n’a pas lus. Ce que vous avez ajouté ou modifié ici est quand même envoyé. La récupération suivante va chercher les copies que les autres appareils ont encore avant qu’un fichier manquant puisse être déclaré disparu.</p>
+<p>Si la version d’un autre appareil gagne un conflit, le fichier ici ne s’écarte qu’une fois le gagnant vraiment arrivé. Un gagnant qui n’avait pas pu être récupéré laissait le chemin vide, et l’envoi suivant publiait alors sa suppression. Un fichier qui grandit ou rétrécit pendant que le parcours le lit attend le parcours suivant. Il n’est pas publié avec une taille que ses blocs ne contiennent pas, ce qui faisait refuser à chaque autre appareil la liste entière du dossier.</p>
+<p>Les paquets non revendiqués sont supprimés après 48 heures, ou après 24 lorsqu’un stockage local a moins de 10 % de libre. C’était sept jours. Un envoi, un import ou une sauvegarde dont l’enregistrement de carte n’a jamais été publié supprime les paquets qu’il vient d’écrire, et une réparation dont le lot n’a pas été scellé fait de même. Si le scellement échoue après la publication de l’enregistrement de carte, les paquets restent, parce que la déclaration est déjà dans le registre. <code>varsto gc orphans</code> supprime maintenant les paquets non revendiqués, si vous préférez ne pas attendre.</p>
+<p>La conservation d’une sauvegarde ne mange plus l’instantané le plus récent seulement parce qu’il est ancien. Un répertoire source perdu, ou un appareil qui n’en a jamais pris de plus récent, faisait expirer cet instantané à la date prévue, puis en collectait les blocs, et il ne restait rien à restaurer. Arrêter la sauvegarde laisse toujours expirer le dernier instantané. Cette partie n’a pas changé, et c’est ainsi que vous dites que vous en avez fini.</p>
+<h2 id="horloges-noms-et-une-clé-qui-a-survécu-à-lappareil">Horloges, noms, et une clé qui a survécu à l’appareil</h2>
+<p>Deux processus sur une même machine, la ligne de commande et le service en arrière-plan, ne peuvent plus réserver la même valeur de Lamport puis la distribuer tous les deux. La réservation tient un verrou sur la lecture, l’augmentation et le remplacement.</p>
+<p>Deux appareils qui écrivent le même numéro d’époque de coffre ou de dossier ne cessent plus de signer jusqu’à ce qu’une personne choisisse. L’appareil qui voit les deux enregistrements garde celui dont l’identifiant d’émetteur est le plus grand. <code>varsto device resolve-epoch</code> et <code>varsto folder resolve-epoch</code> remplacent encore ce choix quand vous en voulez un autre.</p>
+<p>Sur un disque qui ignore la casse, deux chemins qui ne diffèrent que par la casse ou par la normalisation Unicode reçoivent des noms locaux distincts, quel que soit celui qui arrive le premier. L’orthographe NFC l’emporte en cas d’égalité. Ensuite le plus petit chemin d’origine garde le nom simple, et l’autre devient <code> (2)</code>.</p>
+<p>Retirer un appareil ne change pas, à lui seul, le mot de passe chez le fournisseur de stockage. Ce qu’il fait maintenant, c’est refuser d’oublier. <code>varsto status</code> et <code>varsto device list</code> nomment chaque stockage dont cet appareil pourrait encore utiliser les identifiants pour supprimer le texte chiffré. Quand vous les avez remplacés chez le fournisseur, <code>varsto storage mark-rotated &lt;name&gt;</code> efface l’avertissement. Varsto ne renouvelle pas le secret à votre place.</p>
+<h2 id="les-mots-sur-le-papier-et-les-clés-qui-restaient-dans-un-fichier">Les mots sur le papier, et les clés qui restaient dans un fichier</h2>
+<p><code>varsto recovery kit</code> imprime le kit du format 3 : les mots du coffre et les mots de récupération. Il imprimait le texte du format 2, qui disait que les 24 mots du coffre lisaient tout dans le coffre. Dans le format 3, ils ouvrent les noms d’appareils, les noms de dossiers et le registre des stockages. Le contenu demande les mots de récupération. Un tirage fait sans eux le dit maintenant en capitales, au lieu d’avoir l’air complet. <code>--shares</code> divise les deux jeux.</p>
+<p>Une demande de partage et une demande d’organisation gardaient leurs clés privées dans un fichier JSON en clair. Une copie du répertoire de l’appareil, prise pendant que la demande attendait, pouvait les lire et, une fois le propriétaire ayant approuvé, ouvrir le dossier sans aucune phrase secrète. Les clés sont maintenant scellées sous la phrase secrète de l’appareil. Afficher le code de demande exige la phrase secrète, et accepter la demande l’exige de nouveau. Une demande qu’alpha.16 a laissée en clair est scellée la prochaine fois qu’une commande la lit.</p>
+<p>Les journaux reçoivent le même traitement pour la façon dont un afficheur de débogage écrit une valeur facultative. Une ligne comme <code>password: Some("…")</code> était coupée au guillemet et laissait le secret dans le reste de la ligne. La phrase secrète est enregistrée dans le filtre qui masque les secrets, sur chaque chemin de déverrouillage, y compris quand le service revient du trousseau. Avant, ce service pouvait tourner des jours sans que rien y soit enregistré.</p>
+<h2 id="une-pause-qui-veut-dire-en-pause">Une pause qui veut dire en pause</h2>
+<figure class="shot">
+<picture class="theme-dark"><source type="image/webp" srcset="../../assets/img/blog/pause-dark.webp?v=cc29350990"><img src="../../assets/img/blog/pause-dark.png?v=2fec0b10cb" alt="Un téléphone en pause entre un portable à la maison et un NAS au bureau. Les deux liaisons sont marquées coupées." width="640" height="320"></picture>
+<picture class="theme-light"><source type="image/webp" srcset="../../assets/img/blog/pause.webp?v=cbbeebe0b4"><img loading="lazy" src="../../assets/img/blog/pause.png?v=9a1a85134c" alt="Un téléphone en pause entre un portable à la maison et un NAS au bureau. Les deux liaisons sont marquées coupées." width="640" height="320"></picture>
+</figure>
+
+<p>Mettre le service en arrière-plan en pause arrêtait la synchronisation et laissait le reste de l’appareil bavard. L’écoute, la balise du réseau local, le rendez-vous, le relais et la redirection du routeur s’arrêtent avec lui, et ils restent arrêtés jusqu’à ce que vous repreniez. Une pause que vous avez vous-même demandée survit à un redémarrage, ce qui compte sur un téléphone qui arrête et relance le service toute la journée. La courte pause que <code>varsto disk</code> ou un import prend pour lui-même n’est pas enregistrée. Celle-là finit quand la commande finit.</p>
+<p>Les vignettes dans la liste des fichiers réapparaissent sur les téléphones. Quand le moteur était occupé, le service répondait « pas de vignette », et la page le croyait. Il répond maintenant « occupé », et la page réessaie.</p>
+<p>La politique par défaut ne traite plus un dossier comme violé dans un coffre qui n’a ni pool de disques ni stockage sur un dossier. Il y a un seul avertissement : rien n’est sur un disque à vous, et comment en ajouter un. Une politique que vous avez réglée exprès, et qui demande vraiment une copie à la maison, y est toujours tenue. La même distinction vaut quand un import décide si sa source peut être retirée, de sorte qu’un dossier de ce coffre n’attend plus indéfiniment une copie sur un disque que vous n’avez pas.</p>
+<p>Une commande et le service en arrière-plan prennent le même verrou pour récupérer, libérer, écrire et déplacer un fichier, de sorte qu’ils ne défont plus l’état de dossier l’un de l’autre. Un téléchargement ou une écriture qui échoue ne laisse plus un fichier <code>.varsto-tmp-…</code> ou <code>.varsto-upload-…</code> qui retiendrait une partie du contenu. Les fichiers qui arrivent d’un autre appareil gardent la date de modification que leur auteur a enregistrée, au lieu d’être datés du moment où ils ont été téléchargés. Les outils qui se fient à la date, une compilation, une photothèque, une autre sauvegarde, cessent de voir chaque fichier récupéré comme nouveau.</p>
+<h2 id="un-appareil-retiré-le-reste">Un appareil retiré le reste</h2>
+<p>Les enregistrements de dossier, les concessions et le séquestre d’un appareil retiré ne comptent que jusqu’au premier numéro de séquence qu’il a laissé vide. Il ne peut pas revenir plus tard et combler ce trou avec un enregistrement antidaté. Un membre d’un autre coffre applique un retrait qu’il lit dans l’époque du dossier. Un dossier que celui qui retire n’a pas pu doter d’une nouvelle clé en reçoit une à la prochaine synchronisation d’un propriétaire qui détient encore la clé. Ce que l’appareil retiré a déjà sur son propre disque, il le garde. C’était déjà vrai, et ça l’est encore.</p>
+<p>Rejoindre lit le manifeste de l’organisation et ne prend les époques de coffre et les révocations que de ses administrateurs. Une révocation écrite par un membre ordinaire de la liste n’ouvre plus le coffre pour un appareil qui rejoint.</p>
+<p>La ligne « ne détient aucune clé » du journal d’activité a le même bouton que la ligne du dossier, de sorte qu’un téléphone peut demander l’accès depuis cette ligne au lieu de chercher le dossier. Le miroir restic, et les dossiers attachés en dessous, sont créés pour que seul cet utilisateur puisse les lire.</p>
+<h2 id="le-nom-sur-licône">Le nom sur l’icône</h2>
+<p>Les identifiants d’application sont maintenant <code>net.varsto.app</code> sur Android et macOS, <code>net.varsto.app.ios</code> sur iOS, et <code>net.varsto.app.alpha</code> pour le build macOS non signé. Une application déjà installée garde son identifiant précédent, et son coffre n’est pas déplacé, jusqu’à ce que vous l’installiez de nouveau. Installer le nouveau paquet d’installation à côté de l’ancien ne le remplace pas.</p>
+<h2 id="si-vous-êtes-sur-alpha16">Si vous êtes sur alpha.16</h2>
+<p>Mettez à jour quand vous voulez. Les deux versions peuvent partager un coffre pendant que vous le faites. Rien dans cette version ne vous demande de réinitialiser, d’imprimer un nouveau kit, ou de désinstaller une version Android qui est déjà celle signée pour la publication depuis alpha.16. Si une demande de partage ou une demande d’organisation est encore dans un fichier en clair datant d’alpha.16, la prochaine commande qui la lit la scelle. C’est encore une alpha.</p>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fr/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Synchronisation et sauvegarde de fichiers chiffrées sur votre propre stockage.</p></div>
+    <div><h2>Produit</h2><nav aria-label="Produit"><a href="../../fr/">Projet</a><a href="../../fr/features/">Fonctionnalités</a><a href="../../fr/use-cases/">Cas d'usage</a><a href="../../fr/screenshots/">Captures d'écran</a><a href="../../fr/downloads/">Téléchargements</a></nav></div>
+    <div><h2>Découvrir</h2><nav aria-label="Découvrir"><a href="../../fr/how-it-works/">Fonctionnement</a><a href="../../fr/compare/">Comparaison</a><a href="../../docs/">Documentation (en)</a><a href="../../fr/blog/" aria-current="page">Blog</a></nav></div>
+    <div><h2>Communauté</h2><nav aria-label="Communauté"><a href="../../forum/">Forum (en)</a><a href="../../fr/contribute/">Contribuer</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto est un nom de travail. Code source : <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, sous licence PolyForm Shield License 1.0.0 (code source disponible).</span>
+    <span>Pas de cookies, pas de suivi. Le serveur web conserve un journal d'accès ordinaire pendant sept jours au plus.</span>
+    <span><a href="../../docs/security-policy.html">Politique de sécurité</a> · <a href="../../docs/licence.html">Licence</a> · <a href="../../docs/trademark.html">Marque</a> (en anglais)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>
