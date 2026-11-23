@@ -565,10 +565,17 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         removalShown = true;
         alertBox("This device was removed from the vault by " + st.removal.by_name + " on " + fmtDate(st.removal.issued_utc) + (st.removal.wipe ? ". As ordered, its keys, sync state and folder contents were deleted." : ". It no longer syncs; reset it under Settings to start over."), "Device removed");
       }
+      appState.unlock_factors = st.unlock_factors || [];
+      var unlockLead = $("unlock-lead");
+      if (unlockLead) {
+        unlockLead.textContent = appState.unlock_factors.length
+          ? "Enter the passphrase, then touch a security key enrolled on this device."
+          : "Enter the passphrase of this device to open the vault.";
+      }
       if (!st.has_vault) { show("setup"); showPreHelp(true); takeLink(); return; }
       if (!st.unlocked) { show("unlock"); showPreHelp(false); return; }
       show("app");
-      if (currentPage === "settings") { loadLogs(); loadNotify(); }
+      if (currentPage === "settings") { loadLogs(); loadNotify(); loadUnlockKeys(); }
       return refreshStatus().then(takeLink);
     }).catch(function (e) { log("error: " + e.message); });
   }
@@ -3955,7 +3962,64 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("dupeout").textContent = g.length ? g.map(function (x) { return fmtBytes(x.size) + ": " + x.paths.join(", "); }).join("\n") : "no duplicates";
     }).catch(function (e) { log("dupes failed: " + e.message); });
   };
-  $("unlockform").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/unlock", formData(ev.target)).then(function () { ev.target.reset(); return refreshState(); }).catch(function (e) { alertBox(e.message); }); };
+  $("unlockform").onsubmit = function (ev) {
+    ev.preventDefault();
+    if (appState.unlock_factors && appState.unlock_factors.length) {
+      var lead = $("unlock-lead");
+      if (lead) { lead.textContent = "Touch your security key to open this device."; }
+    }
+    api("POST", "/api/unlock", formData(ev.target)).then(function () { ev.target.reset(); return refreshState(); }).catch(function (e) { alertBox(e.message); });
+  };
+  function loadUnlockKeys() {
+    var ul = $("unlockkeys");
+    if (!ul) { return; }
+    api("GET", "/api/unlock-keys").then(function (r) {
+      var list = r.factors || [];
+      ul.innerHTML = "";
+      var lead = $("unlockkey-lead");
+      if (!list.length) {
+        if (lead) { lead.textContent = "No security key is enrolled. The passphrase alone opens this device."; }
+        return;
+      }
+      if (lead) { lead.textContent = "Security keys enrolled for opening this device. The passphrase is still required."; }
+      list.forEach(function (f, i) {
+        var li = el("li");
+        var body = el("div", "li-body");
+        body.appendChild(el("div", "li-title", f.short || f.label || ("Key " + (i + 1))));
+        li.appendChild(body);
+        var actions = el("div", "li-actions");
+        var b = el("button", "secondary danger", "Remove this key");
+        b.type = "button";
+        b.onclick = function () {
+          var last = list.length === 1;
+          dialog({
+            title: "Remove this key",
+            text: last
+              ? "Removing the last security key makes the passphrase alone open this device again."
+              : "This device will no longer open with that security key.",
+            ok: "Remove this key",
+            danger: true
+          }).then(function (answer) {
+            if (!answer) { return; }
+            api("POST", "/api/unlock-key/remove", { which: String(i + 1) }).then(loadUnlockKeys).catch(function (e) { alertBox(e.message); });
+          });
+        };
+        actions.appendChild(b);
+        li.appendChild(actions);
+        ul.appendChild(li);
+      });
+    }).catch(function () { /* the vault may still be locking */ });
+  }
+  var unlockKeyAdd = $("unlockkey-add");
+  if (unlockKeyAdd) {
+    unlockKeyAdd.onclick = function () {
+      var label = ($("unlockkey-label").value || "").trim();
+      api("POST", "/api/unlock-key", { label: label }).then(function () {
+        $("unlockkey-label").value = "";
+        loadUnlockKeys();
+      }).catch(function (e) { alertBox(e.message); });
+    };
+  }
   $("init").onsubmit = function (ev) {
     ev.preventDefault();
     api("POST", "/api/init", formData(ev.target)).then(function (r) {

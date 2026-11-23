@@ -35,6 +35,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 pub const RP_ID: &str = "varsto.local";
+/// Relying party of a credential that opens the device, distinct from
+/// [`RP_ID`] so one authenticator can hold both.
+pub const UNLOCK_RP_ID: &str = "varsto.unlock";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -214,6 +217,33 @@ pub trait SecurityKey {
 /// (`VARSTO_FIDO2_DEVICE`) or the first key found is used.
 pub struct Fido2Tools {
     pub device: Option<String>,
+    /// Relying party of the credential. Strongroom uses [`RP_ID`]; daily
+    /// unlock uses [`UNLOCK_RP_ID`].
+    pub rp_id: &'static str,
+    pub make_prompt: &'static str,
+    pub hmac_prompt: &'static str,
+}
+
+impl Default for Fido2Tools {
+    fn default() -> Self {
+        Self {
+            device: None,
+            rp_id: RP_ID,
+            make_prompt: "Touch your security key to create the Strongroom credential.",
+            hmac_prompt: "Touch your security key to open the Strongroom.",
+        }
+    }
+}
+
+/// A security key used to open this device (a different relying party and
+/// different prompts from a Strongroom credential).
+pub fn fido2_for_device_unlock() -> Fido2Tools {
+    Fido2Tools {
+        rp_id: UNLOCK_RP_ID,
+        make_prompt: "Touch your security key to enrol it for opening this device.",
+        hmac_prompt: "Touch your security key to open this device.",
+        ..Fido2Tools::default()
+    }
 }
 
 /// `-t` options of the libfido2 tools: the PIN is always asked for (so the
@@ -265,10 +295,10 @@ impl SecurityKey for Fido2Tools {
         let input = format!(
             "{}\n{}\nvarsto\n{}\n",
             b64(&challenge),
-            RP_ID,
+            self.rp_id,
             b64(&user_id)
         );
-        eprintln!("Touch your security key to create the Strongroom credential.");
+        eprintln!("{}", self.make_prompt);
         let mut child = Command::new("fido2-cred")
             .args(["-M", "-h", "-r"])
             .args(fido2_options())
@@ -314,11 +344,11 @@ impl SecurityKey for Fido2Tools {
         let input = format!(
             "{}\n{}\n{}\n{}\n",
             b64(&challenge),
-            RP_ID,
+            self.rp_id,
             credential,
             b64(salt)
         );
-        eprintln!("Touch your security key to open the Strongroom.");
+        eprintln!("{}", self.hmac_prompt);
         let mut child = Command::new("fido2-assert")
             .args(["-G", "-h"])
             .args(fido2_options())
@@ -406,9 +436,15 @@ fn software_backend(path: std::path::PathBuf) -> Box<dyn SecurityKey> {
 
 pub fn backend(method: &Method, home: &Path) -> Box<dyn SecurityKey> {
     match method {
-        Method::Fido2 => Box::new(Fido2Tools { device: None }),
+        Method::Fido2 => Box::new(Fido2Tools::default()),
         Method::Software => software_backend(home.join("software-security-key")),
     }
+}
+
+/// A software key in `path`. Release binaries refuse it (the file is not a
+/// second factor). Tests and the `software-key` feature accept it.
+pub fn software_key_at(path: std::path::PathBuf) -> Box<dyn SecurityKey> {
+    software_backend(path)
 }
 
 /// The backend that can answer for one enrolled key on this device. A
@@ -416,7 +452,7 @@ pub fn backend(method: &Method, home: &Path) -> Box<dyn SecurityKey> {
 /// works on any device of the vault.
 pub fn backend_for(key: &EnrolledKey, home: &Path) -> Box<dyn SecurityKey> {
     match key.method {
-        Method::Fido2 => Box::new(Fido2Tools { device: None }),
+        Method::Fido2 => Box::new(Fido2Tools::default()),
         Method::Software => {
             let name = Path::new(key.credential.trim_start_matches("software:"))
                 .file_name()

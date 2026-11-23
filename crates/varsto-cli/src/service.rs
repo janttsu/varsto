@@ -9,7 +9,9 @@
 //! app can store it), or whatever `varsto service remember` used on Linux:
 //! the desktop keyring, `systemd-creds` or the kernel keyring (spec section
 //! 72). The desktop page and any command line that
-//! asks for the passphrase unlock it as well.
+//! asks for the passphrase unlock it as well. A device that enrolled a
+//! security key for daily unlock stays locked at startup: the stored
+//! passphrase is not enough, and the service does not wait for a touch.
 
 use crate::desktop::{self, Shared, State};
 use anyhow::{anyhow, Context, Result};

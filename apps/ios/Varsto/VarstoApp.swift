@@ -35,8 +35,7 @@ func vlog(_ level: Int32, _ msg: String) {
 }
 
 /// `en` in the interface language picked in the web UI (`<home>/ui-language`:
-/// "en", "fi", "sv", "de", "es" or "ru"), with `{}` replaced by `arg`.
-/// French is a website language only.
+/// "en", "fi", "sv", "de", "es", "ru" or "fr"), with `{}` replaced by `arg`.
 func tr(_ en: String, _ arg: String = "") -> String {
     let home = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Varsto")
     let lang = (try? String(contentsOf: home.appendingPathComponent("ui-language"), encoding: .utf8))?
@@ -45,15 +44,18 @@ func tr(_ en: String, _ arg: String = "") -> String {
         "Starting Varsto…": [
             "fi": "Varsto käynnistyy…", "sv": "Varsto startar…",
             "de": "Varsto startet…", "es": "Varsto se está iniciando…", "ru": "Varsto запускается…",
+            "fr": "Varsto démarre…",
         ],
         "service failed to start ({})": [
             "fi": "palvelun käynnistys epäonnistui ({})", "sv": "tjänsten kunde inte startas ({})",
             "de": "Dienst konnte nicht gestartet werden ({})", "es": "el servicio no pudo iniciarse ({})",
             "ru": "службу не удалось запустить ({})",
+            "fr": "le service n'a pas pu démarrer ({})",
         ],
         "service did not start": [
             "fi": "palvelu ei käynnistynyt", "sv": "tjänsten startade inte",
             "de": "Dienst ist nicht gestartet", "es": "el servicio no se inició", "ru": "служба не запустилась",
+            "fr": "le service n'a pas démarré",
         ],
     ]
     let t = texts[en]?[lang] ?? en

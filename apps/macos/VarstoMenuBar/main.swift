@@ -11,15 +11,15 @@ import ServiceManagement
 import WebKit
 
 /// The interface language the user picked in Varsto's window (the web UI
-/// writes `<home>/ui-language`): "en", "fi", "sv", "de", "es" or "ru".
-/// French is a website language only. Menus, alerts and the start page
-/// follow it; the app re-reads it on every status refresh.
+/// writes `<home>/ui-language`): "en", "fi", "sv", "de", "es", "ru" or "fr".
+/// Menus, alerts and the start page follow it; the app re-reads it on every
+/// status refresh.
 var uiLang = "en"
 
 func readUILang(_ home: URL) -> String {
     let s = (try? String(contentsOf: home.appendingPathComponent("ui-language"), encoding: .utf8))?
         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    return ["fi", "sv", "de", "es", "ru"].contains(s) ? s : "en"
+    return ["fi", "sv", "de", "es", "ru", "fr"].contains(s) ? s : "en"
 }
 
 /// `en` in the interface language, each `{}` replaced by the next of `args`.
@@ -27,6 +27,8 @@ func tr(_ en: String, _ args: String...) -> String {
     var s = en
     if uiLang == "de" || uiLang == "es" || uiLang == "ru" {
         if let t = translationsDeEsRu[en]?[uiLang] { s = t }
+    } else if uiLang == "fr" {
+        if let t = translationsFr[en] { s = t }
     } else if let t = translations[en] {
         s = uiLang == "fi" ? t.fi : uiLang == "sv" ? t.sv : en
     }
@@ -224,6 +226,79 @@ let translationsDeEsRu: [String: [String: String]] = [
         "es": "Añade Varsto a los ítems de inicio en Ajustes del Sistema.",
         "ru": "Добавь Varsto в объекты входа в Системных настройках.",
     ],
+]
+
+/// French for the same English keys as `translations`.
+let translationsFr: [String: String] = [
+    "Starting the Varsto service…": "Le service Varsto démarre…",
+    "This window fills in a moment.": "Cette fenêtre se remplit dans un instant.",
+    "OK": "OK",
+    "Cancel": "Annuler",
+    "Later": "Plus tard",
+    "Starting…": "Démarrage…",
+    "Service starting…": "Le service démarre…",
+    "Open Varsto": "Ouvrir Varsto",
+    "Pause syncing": "Suspendre la synchronisation",
+    "Install update…": "Installer la mise à jour…",
+    "Install Varsto {}…": "Installer Varsto {}…",
+    "Install command-line tool…": "Installer l’outil en ligne de commande…",
+    "Start at login": "Ouvrir à la connexion",
+    "Quit Varsto": "Quitter Varsto",
+    "About Varsto": "À propos de Varsto",
+    "Hide Varsto": "Masquer Varsto",
+    "Edit": "Édition",
+    "Cut": "Couper",
+    "Copy": "Copier",
+    "Paste": "Coller",
+    "Select All": "Tout sélectionner",
+    "Window": "Fenêtre",
+    "Minimize": "Réduire",
+    "Could not download": "Le téléchargement a échoué",
+    "Could not free up space": "Impossible de libérer de l’espace",
+    "The Varsto service did not answer. Open Varsto and try again.": "Le service Varsto n’a pas répondu. Ouvrez Varsto et réessayez.",
+    "failed": "échec",
+    "Not set up yet: open Varsto": "Pas encore configuré : ouvrez Varsto",
+    "Locked": "Verrouillé",
+    "Paused": "En pause",
+    "Up to date": "À jour",
+    "Problem: {}": "Problème : {}",
+    "{} · last sync {}": "{} · dernière synchronisation {}",
+    "{} s ago": "il y a {} s",
+    "{} min ago": "il y a {} min",
+    "{} h ago": "il y a {} h",
+    "{} · policy {}": "{} · règle de conservation {}",
+    "at risk": "en danger",
+    "violated": "non respectée",
+    "unknown": "inconnu",
+    "Unlock Varsto": "Déverrouiller Varsto",
+    "Enter the passphrase of this device. It can be kept in your login keychain so the background service unlocks itself after login.": "Saisissez la phrase secrète de cet appareil. Elle peut rester dans le trousseau de session pour que le service en arrière-plan se déverrouille après la connexion.",
+    "Remember in Keychain": "Mémoriser dans le Trousseau",
+    "Unlock": "Déverrouiller",
+    "Unlock failed": "Échec du déverrouillage",
+    "Wrong passphrase?": "Phrase secrète incorrecte ?",
+    "Checking…": "Vérification…",
+    "Update check failed": "La recherche de mises à jour a échoué",
+    "Could not check for updates": "Impossible de chercher des mises à jour",
+    "The background service did not answer. Is it running? Try again in a moment.": "Le service en arrière-plan n’a pas répondu. Tourne-t-il ? Réessayez dans un instant.",
+    "Update available: {}": "Mise à jour disponible : {}",
+    "Varsto {} is available": "Varsto {} est disponible",
+    "You have {}. Varsto downloads the new version, checks its signature, replaces Varsto.app and starts again.": "Vous avez {}. Varsto télécharge la nouvelle version, vérifie sa signature, remplace Varsto.app et redémarre.",
+    "Update now": "Mettre à jour",
+    "Updated to {}": "Mis à jour vers {}",
+    "Update failed": "La mise à jour a échoué",
+    "no details": "aucun détail",
+    "You have {}. Download the new disk image and drag Varsto to Applications again; your vault and settings stay as they are.": "Vous avez {}. Téléchargez la nouvelle image disque et faites glisser Varsto dans Applications ; votre coffre et vos réglages restent en place.",
+    "Open download page": "Ouvrir la page de téléchargement",
+    "Up to date ({})": "À jour ({})",
+    "Varsto is up to date": "Varsto est à jour",
+    "Installed: {}. Latest: {}.": "Installé : {}. Dernière : {}.",
+    "Could not install the command-line tool": "Impossible d’installer l’outil en ligne de commande",
+    "Run this in Terminal instead:": "Exécutez plutôt ceci dans Terminal :",
+    "Command-line tool installed": "Outil en ligne de commande installé",
+    "Open Terminal and run: varsto --help\nIt uses the same vault as this app (~/Library/Application Support/Varsto).": "Ouvrez Terminal et exécutez : varsto --help\nIl utilise le même coffre que cette app (~/Library/Application Support/Varsto).",
+    "Could not change the login item": "Impossible de modifier l’élément d’ouverture",
+    "Start at login needs macOS 13 or newer": "L’ouverture à la connexion demande macOS 13 ou plus récent",
+    "Add Varsto to Login Items in System Settings instead.": "Ajoutez plutôt Varsto aux éléments d’ouverture dans Réglages Système.",
 ]
 
 // ----- Debug log -------------------------------------------------------------

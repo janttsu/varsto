@@ -33,6 +33,7 @@ use crate::policy::{Policy, PolicyReport};
 use crate::pool::{self, DiskStatus, PoolDisk, PoolError, PoolIdentity, PoolStorage};
 use crate::replica::{self, ReplicaToken};
 use crate::storage::{Storage, StorageSpec};
+use crate::strongroom::SecurityKey;
 use crate::thumbs;
 use crate::util;
 use crate::vault::SecretStore;
@@ -806,6 +807,9 @@ pub struct Engine {
     home: PathBuf,
     vault: LocalVault,
     keys: Keys,
+    /// Stretched passphrase from the unlock that opened this process. Used
+    /// to enrol or remove a security key without asking again. Never written.
+    device_pass_key: Option<SecretKey>,
     config: Config,
     keyring: Keyring,
     /// The store behind the in-memory location view (`Engine::view`); it
@@ -2090,7 +2094,7 @@ impl Engine {
         passphrase: &str,
         epochs: membership::VaultEpochs,
     ) -> Result<Engine> {
-        keys.save(home, passphrase, &vault.vault_id, &vault.device_id)?;
+        let device_pass_key = Some(keys.save(home, passphrase, &vault.vault_id, &vault.device_id)?);
         util::write_json(&home.join("vault.json"), &vault)?;
         let f3 = ledger3_ops::Core3::open(home, &vault.vault_id)?;
         let home_generation = home_lock::read_generation(home);
@@ -2111,6 +2115,7 @@ impl Engine {
             home: home.to_path_buf(),
             vault,
             keys,
+            device_pass_key,
             config: Config::default(),
             keyring: Keyring::default(),
             ledger: LedgerStore::open(&home.join("state").join("f2-ledger"))?,
@@ -2174,6 +2179,49 @@ impl Engine {
         self.vault.member
     }
 
+    /// Security keys enrolled for opening this device. Empty means the
+    /// passphrase alone opens it.
+    pub fn unlock_factors(&self) -> Result<Vec<crate::vault::UnlockFactorInfo>> {
+        Keys::unlock_factors(&self.home)
+    }
+
+    /// Enrol a security key for daily unlock. Two touches: the credential,
+    /// then the wrap. The passphrase-only copy of the key file is removed.
+    pub fn enrol_unlock_factor(
+        &mut self,
+        label: &str,
+        backend: &dyn SecurityKey,
+        method: crate::strongroom::Method,
+    ) -> Result<crate::vault::UnlockFactorInfo> {
+        let Some(pass_key) = self.device_pass_key.clone() else {
+            bail!("open this device again before enrolling a security key");
+        };
+        self.keys.enrol_unlock_factor(
+            &self.home,
+            &pass_key,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+            backend,
+            method,
+            label,
+        )
+    }
+
+    /// Remove one enrolled security key. Returns whether the passphrase
+    /// alone opens the device again.
+    pub fn remove_unlock_factor(&mut self, which: &str) -> Result<bool> {
+        let Some(pass_key) = self.device_pass_key.clone() else {
+            bail!("open this device again before removing a security key");
+        };
+        self.keys.remove_unlock_factor(
+            &self.home,
+            &pass_key,
+            &self.vault.vault_id,
+            &self.vault.device_id,
+            which,
+        )
+    }
+
     /// Which key opens a batch of the location view's store with this key
     /// id (`Engine::view`; the store holds none in a format-3 vault).
     fn key_for_id(&self, id: &str) -> Option<SecretKey> {
@@ -2186,14 +2234,23 @@ impl Engine {
         }
     }
 
-    /// Unlock an existing device directory.
+    /// Unlock an existing device directory. A device that enrolled a security
+    /// key stays locked: the remembered passphrase is not enough, and this
+    /// does not wait for a touch (the service uses it at startup).
     pub fn open(home: &Path, passphrase: &str) -> Result<Engine> {
         crate::logged_op_plain!("open", home.display(), {
-            Self::open_inner(home, passphrase)
+            Self::open_inner(home, passphrase, false)
         })
     }
 
-    fn open_inner(home: &Path, passphrase: &str) -> Result<Engine> {
+    /// Like [`Engine::open`], and when a security key is enrolled, touch it.
+    pub fn open_touching(home: &Path, passphrase: &str) -> Result<Engine> {
+        crate::logged_op_plain!("open", home.display(), {
+            Self::open_inner(home, passphrase, true)
+        })
+    }
+
+    fn open_inner(home: &Path, passphrase: &str, touch: bool) -> Result<Engine> {
         let vault: LocalVault = util::read_json(&home.join("vault.json"))
             .with_context(|| format!("no vault in {}", home.display()))?;
         if vault.format_version != crate::FORMAT_VERSION {
@@ -2202,7 +2259,8 @@ impl Engine {
         util::private_home(home)?;
         // Read before the state: a writer that comes after is noticed.
         let home_generation = home_lock::read_generation(home);
-        let keys = Keys::load(home, passphrase, &vault.vault_id, &vault.device_id)?;
+        let (keys, pass_key) =
+            Keys::open_keys(home, passphrase, &vault.vault_id, &vault.device_id, touch)?;
         let keyring = Keyring::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let epochs = membership::VaultEpochs::load(home, &keys, &vault.vault_id, &vault.device_id)?;
         let removal = util::read_json(&home.join("removed.json")).ok();
@@ -2233,6 +2291,7 @@ impl Engine {
             home: home.to_path_buf(),
             vault,
             keys,
+            device_pass_key: Some(pass_key),
             keyring,
             pending: Vec::new(),
             forked_self: false,

@@ -439,6 +439,7 @@ mod tests {
             ("de", include_str!("../ui/i18n/de.json")),
             ("es", include_str!("../ui/i18n/es.json")),
             ("ru", include_str!("../ui/i18n/ru.json")),
+            ("fr", include_str!("../ui/i18n/fr.json")),
         ] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let missing: Vec<&String> = found

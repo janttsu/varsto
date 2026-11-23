@@ -16,6 +16,9 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+- Daily unlock can require a security key as well as the passphrase (`varsto unlock-key`, or Daily unlock in Settings). The key file then holds one wrap per enrolled key and no passphrase-only copy. A device with no security key still opens with the passphrase alone. The hardware-bound secret from the operating system keystore is not part of this. Removing the last key restores the passphrase-only wrap. A remembered passphrase does not skip the touch: the background service stays locked until the key is touched.
+- The app interface includes French, with the same screens as the other interface languages.
+
 ## [0.0.1-alpha.17] - 2026-11-22
 
 The storage format is unchanged from alpha.16. Vaults open as they are and do not have to be recreated. This is still an alpha: not for production data.

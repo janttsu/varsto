@@ -14,6 +14,7 @@
 //!   metadata key and per-chunk keys are derived.
 
 use crate::crypto::{self, PassphraseParams, SecretKey, SigningKey, VerifyingKey};
+use crate::strongroom::SecurityKey;
 use crate::ids::{ChunkId, DeviceId, FolderId, VaultId};
 use crate::storage::StorageSpec;
 use crate::util;
@@ -227,6 +228,7 @@ impl ShareRequest {
             &KeyFile {
                 params,
                 blob_hex: hex::encode(blob),
+                factors: Vec::new(),
             },
         )
     }
@@ -495,10 +497,53 @@ impl SignedRecord {
     }
 }
 
+/// What the interface and `varsto unlock-key list` may show. No secret.
+#[derive(Clone, Debug)]
+pub struct UnlockFactorInfo {
+    pub label: String,
+    /// A short name: the label, or the start of the credential.
+    pub short: String,
+    /// `fido2` or `software`.
+    pub method: String,
+    pub added_utc: i64,
+}
+
 #[derive(Serialize, Deserialize)]
 struct KeyFile {
     params: PassphraseParams,
+    /// Passphrase-only wrap of the device keys. Empty once a security key is
+    /// enrolled: the material then exists only inside [`KeyFile::factors`],
+    /// so a copy of the file cannot be attacked with the passphrase alone.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     blob_hex: String,
+    /// One wrap of the same key material per enrolled security key. Absent
+    /// on every file written before daily unlock.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    factors: Vec<UnlockFactor>,
+}
+
+/// One enrolled security key's wrap of the device keys. The passphrase
+/// stretch and the authenticator's hmac-secret are separate inputs of the
+/// wrapping key (`factor_key`).
+#[derive(Clone, Serialize, Deserialize)]
+struct UnlockFactor {
+    method: crate::strongroom::Method,
+    credential: String,
+    /// 32-byte hmac-secret salt (hex).
+    salt_hex: String,
+    /// `KeyMaterial` sealed under `factor_key(passphrase stretch, hmac-secret)`.
+    blob_hex: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    label: String,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    added_utc: i64,
+}
+
+/// Wrapping key for one enrolled security key: the stretched passphrase with
+/// the authenticator output as a labelled input. Neither input alone is the
+/// key.
+fn factor_key(pass_key: &SecretKey, hmac: &[u8; 32]) -> SecretKey {
+    pass_key.derive("device-unlock", &[hmac])
 }
 
 #[derive(Serialize, Deserialize, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
@@ -535,61 +580,220 @@ impl Keys {
         )
     }
 
+    /// Seal the device keys under the passphrase alone and return the
+    /// stretched passphrase, so the caller can enrol a security key in the
+    /// same process without stretching it again.
     pub fn save(
         &self,
         home: &Path,
         passphrase: &str,
         vault: &VaultId,
         device: &DeviceId,
-    ) -> Result<()> {
+    ) -> Result<SecretKey> {
         crypto::check_passphrase(passphrase)?;
         crate::logging::register_secret(passphrase);
         self.register_for_log();
         let params = PassphraseParams::new();
         let wrap = crypto::passphrase_key(passphrase, &params)?;
-        let material = KeyMaterial {
-            master_hex: self.master.to_hex(),
-            signing_hex: hex::encode(self.signer.to_bytes()),
-        };
-        let plain = Zeroizing::new(serde_json::to_vec(&material)?);
+        let plain = self.material_bytes()?;
         let blob = crypto::encrypt(&wrap, &Self::keyfile_aad(vault, device), &plain)?;
         util::write_json(
             &home.join("keys.enc"),
             &KeyFile {
                 params,
                 blob_hex: hex::encode(blob),
+                factors: Vec::new(),
             },
-        )
+        )?;
+        Ok(wrap)
     }
 
     pub fn load(home: &Path, passphrase: &str, vault: &VaultId, device: &DeviceId) -> Result<Self> {
+        Ok(Self::open_keys(home, passphrase, vault, device, false)?.0)
+    }
+
+    /// Open the device keys. `touch` asks an enrolled security key; without
+    /// it a file that has one refuses, so a remembered passphrase cannot
+    /// skip the key (the service stays locked until the user is there).
+    /// The second value is the stretched passphrase, kept only in memory.
+    pub fn open_keys(
+        home: &Path,
+        passphrase: &str,
+        vault: &VaultId,
+        device: &DeviceId,
+        touch: bool,
+    ) -> Result<(Self, SecretKey)> {
         // Every unlock passes here (CLI, service, interface): the passphrase
         // is cut from the log from now on, however it was given.
         crate::logging::register_secret(passphrase);
-        let kf: KeyFile = util::read_json(&home.join("keys.enc"))?;
-        let blob = hex::decode(&kf.blob_hex)?;
+        let path = home.join("keys.enc");
+        let mut kf: KeyFile = util::read_json(&path)?;
         let aad = Self::keyfile_aad(vault, device);
-        let wrap = crypto::passphrase_key(passphrase, &kf.params)?;
-        let opened = crypto::decrypt(&wrap, &aad, &blob).or_else(|e| {
+        if !kf.factors.is_empty() {
+            if !touch {
+                bail!("this device opens with a security key as well as the passphrase: touch the key");
+            }
+            let mut pass_keys = vec![crypto::passphrase_key(passphrase, &kf.params)?];
             // A key file from before alpha.10, written with the passphrase as
             // typed: try it unnormalised when normalisation changed it.
             if crypto::normalize_passphrase(passphrase) != passphrase {
-                let raw = crypto::passphrase_key_raw(passphrase, &kf.params)?;
-                crypto::decrypt(&raw, &aad, &blob)
-            } else {
-                Err(e)
+                pass_keys.push(crypto::passphrase_key_raw(passphrase, &kf.params)?);
             }
-        });
-        let plain =
-            Zeroizing::new(opened.context("unlock failed: wrong passphrase or damaged key file")?);
-        let material: KeyMaterial = serde_json::from_slice(&plain)?;
-        let keys = Keys {
-            master: SecretKey::from_hex(&material.master_hex)?,
-            signer: SigningKey::from_bytes(&hex::decode(&material.signing_hex)?)?,
-        };
+            let mut errors = Vec::new();
+            for (i, factor) in kf.factors.iter().enumerate() {
+                if kf.factors.len() > 1 {
+                    eprintln!(
+                        "Trying security key {} of {} for this device: {}",
+                        i + 1,
+                        kf.factors.len(),
+                        factor.short()
+                    );
+                }
+                match factor.open(&pass_keys, &aad, home) {
+                    Ok((keys, pass_key)) => {
+                        // A passphrase-only copy left beside the factors would
+                        // undo the factor. Drop it.
+                        if !kf.blob_hex.is_empty() {
+                            kf.blob_hex.clear();
+                            util::write_json(&path, &kf)?;
+                        }
+                        keys.register_for_log();
+                        log::debug!("device keys unlocked with a security key");
+                        return Ok((keys, pass_key));
+                    }
+                    Err(e) => errors.push(format!("{}: {e:#}", factor.short())),
+                }
+            }
+            bail!(
+                "unlock failed: wrong passphrase or security key ({})",
+                errors.join("; ")
+            );
+        }
+        if kf.blob_hex.is_empty() {
+            bail!("the key file is damaged: it holds neither a passphrase wrap nor a security key");
+        }
+        let (keys, pass_key) = Self::open_passphrase_blob(&kf, passphrase, &aad)?;
         keys.register_for_log();
         log::debug!("device keys unlocked");
-        Ok(keys)
+        Ok((keys, pass_key))
+    }
+
+    /// Enrolled security keys on this device, if the key file exists. Nothing
+    /// here opens the vault or needs the passphrase.
+    pub fn unlock_factors(home: &Path) -> Result<Vec<UnlockFactorInfo>> {
+        let path = home.join("keys.enc");
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let kf: KeyFile = util::read_json(&path)?;
+        Ok(kf.factors.iter().map(UnlockFactor::info).collect())
+    }
+
+    /// Enrol one more security key. The passphrase-only wrap is removed in
+    /// the same write, so the file no longer opens without a key. `pass_key`
+    /// is the stretch from the unlock that is still in memory.
+    pub fn enrol_unlock_factor(
+        &self,
+        home: &Path,
+        pass_key: &SecretKey,
+        vault: &VaultId,
+        device: &DeviceId,
+        backend: &dyn SecurityKey,
+        method: crate::strongroom::Method,
+        label: &str,
+    ) -> Result<UnlockFactorInfo> {
+        let label = label.trim();
+        crate::names::check_display_name(label)?;
+        let path = home.join("keys.enc");
+        let mut kf: KeyFile = util::read_json(&path)?;
+        if !label.is_empty() && kf.factors.iter().any(|f| f.label == label) {
+            bail!("a security key on this device is already named {label}");
+        }
+        let credential = backend.make_credential()?;
+        if kf.factors.iter().any(|f| f.credential == credential) {
+            bail!("that security key is already enrolled on this device");
+        }
+        let mut salt = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut salt);
+        let mut hmac = backend.hmac_secret(&credential, &salt)?;
+        let wrap = factor_key(pass_key, &hmac);
+        use zeroize::Zeroize;
+        hmac.zeroize();
+        let plain = self.material_bytes()?;
+        let blob = crypto::encrypt(&wrap, &Self::keyfile_aad(vault, device), &plain)?;
+        let factor = UnlockFactor {
+            method,
+            credential,
+            salt_hex: hex::encode(salt),
+            blob_hex: hex::encode(blob),
+            label: label.to_string(),
+            added_utc: crate::util::now_utc(),
+        };
+        let info = factor.info();
+        kf.factors.push(factor);
+        kf.blob_hex.clear();
+        util::write_json(&path, &kf)?;
+        Ok(info)
+    }
+
+    /// Remove one enrolled key. The last one writes the passphrase-only wrap
+    /// back (same stretch, so the passphrase does not change) and returns
+    /// true.
+    pub fn remove_unlock_factor(
+        &self,
+        home: &Path,
+        pass_key: &SecretKey,
+        vault: &VaultId,
+        device: &DeviceId,
+        which: &str,
+    ) -> Result<bool> {
+        let path = home.join("keys.enc");
+        let mut kf: KeyFile = util::read_json(&path)?;
+        let idx = kf.find_factor(which)?;
+        kf.factors.remove(idx);
+        let passphrase_only = kf.factors.is_empty();
+        if passphrase_only {
+            let plain = self.material_bytes()?;
+            let blob = crypto::encrypt(pass_key, &Self::keyfile_aad(vault, device), &plain)?;
+            kf.blob_hex = hex::encode(blob);
+        }
+        util::write_json(&path, &kf)?;
+        Ok(passphrase_only)
+    }
+
+    fn material_bytes(&self) -> Result<Zeroizing<Vec<u8>>> {
+        let material = KeyMaterial {
+            master_hex: self.master.to_hex(),
+            signing_hex: hex::encode(self.signer.to_bytes()),
+        };
+        Ok(Zeroizing::new(serde_json::to_vec(&material)?))
+    }
+
+    fn from_material(plain: &[u8]) -> Result<Self> {
+        let material: KeyMaterial = serde_json::from_slice(plain)?;
+        Ok(Keys {
+            master: SecretKey::from_hex(&material.master_hex)?,
+            signer: SigningKey::from_bytes(&hex::decode(&material.signing_hex)?)?,
+        })
+    }
+
+    fn open_passphrase_blob(
+        kf: &KeyFile,
+        passphrase: &str,
+        aad: &[u8],
+    ) -> Result<(Self, SecretKey)> {
+        let blob = hex::decode(&kf.blob_hex)?;
+        let wrap = crypto::passphrase_key(passphrase, &kf.params)?;
+        if let Ok(plain) = crypto::decrypt(&wrap, aad, &blob) {
+            return Ok((Self::from_material(&plain)?, wrap));
+        }
+        if crypto::normalize_passphrase(passphrase) != passphrase {
+            let raw = crypto::passphrase_key_raw(passphrase, &kf.params)?;
+            if let Ok(plain) = crypto::decrypt(&raw, aad, &blob) {
+                return Ok((Self::from_material(&plain)?, raw));
+            }
+        }
+        bail!("unlock failed: wrong passphrase or damaged key file");
     }
 
     /// Cut the device keys from the log should a hex form ever reach it (by
@@ -602,6 +806,103 @@ impl Keys {
         for part in signing.chunks(32) {
             crate::logging::register_key(part);
         }
+    }
+}
+
+impl KeyFile {
+    /// Index of the factor named by `which`: its number (from 1), its label,
+    /// or its credential (whole, or a prefix of at least 6 characters that
+    /// matches one key only).
+    fn find_factor(&self, which: &str) -> Result<usize> {
+        let which = which.trim();
+        if let Ok(n) = which.parse::<usize>() {
+            if (1..=self.factors.len()).contains(&n) {
+                return Ok(n - 1);
+            }
+        }
+        if let Some(i) = self
+            .factors
+            .iter()
+            .position(|f| f.credential == which || (!f.label.is_empty() && f.label == which))
+        {
+            return Ok(i);
+        }
+        let hits: Vec<usize> = self
+            .factors
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| which.len() >= 6 && f.credential.starts_with(which))
+            .map(|(i, _)| i)
+            .collect();
+        match hits.as_slice() {
+            [i] => Ok(*i),
+            [] => bail!("no enrolled security key matches {which}"),
+            _ => bail!("{which} matches more than one key; give more of the credential"),
+        }
+    }
+}
+
+impl UnlockFactor {
+    fn info(&self) -> UnlockFactorInfo {
+        UnlockFactorInfo {
+            short: self.short(),
+            label: self.label.clone(),
+            method: match self.method {
+                crate::strongroom::Method::Fido2 => "fido2",
+                crate::strongroom::Method::Software => "software",
+            }
+            .to_string(),
+            added_utc: self.added_utc,
+        }
+    }
+
+    fn short(&self) -> String {
+        crate::strongroom::EnrolledKey {
+            method: self.method.clone(),
+            credential: self.credential.clone(),
+            salt_hex: String::new(),
+            wrapped_key_hex: String::new(),
+            label: self.label.clone(),
+            added_utc: 0,
+        }
+        .short()
+    }
+
+    fn backend(&self, home: &Path) -> Box<dyn SecurityKey> {
+        match self.method {
+            crate::strongroom::Method::Fido2 => {
+                Box::new(crate::strongroom::fido2_for_device_unlock())
+            }
+            crate::strongroom::Method::Software => {
+                let name = Path::new(self.credential.trim_start_matches("software:"))
+                    .file_name()
+                    .map(|n| n.to_os_string())
+                    .unwrap_or_else(|| "unlock-key".into());
+                crate::strongroom::software_key_at(home.join(name))
+            }
+        }
+    }
+
+    /// One touch, then every stretched passphrase until one opens the wrap.
+    fn open(&self, pass_keys: &[SecretKey], aad: &[u8], home: &Path) -> Result<(Keys, SecretKey)> {
+        use zeroize::Zeroize;
+        let salt: [u8; 32] = hex::decode(&self.salt_hex)?
+            .try_into()
+            .map_err(|_| anyhow!("a security-key salt must be 32 bytes"))?;
+        let mut hmac = self.backend(home).hmac_secret(&self.credential, &salt)?;
+        let blob = hex::decode(&self.blob_hex)?;
+        let mut opened = None;
+        for pass_key in pass_keys {
+            let wrap = factor_key(pass_key, &hmac);
+            if let Ok(plain) = crypto::decrypt(&wrap, aad, &blob) {
+                opened = Some((Keys::from_material(&plain)?, pass_key.clone()));
+                break;
+            }
+        }
+        hmac.zeroize();
+        opened.ok_or_else(|| {
+            anyhow!("the security key did not open this device (wrong passphrase or wrong key)")
+        })
     }
 }
 
@@ -1575,5 +1876,97 @@ mod tests {
         for s in [&key, &later] {
             assert!(!shown.contains(s.as_str()), "{shown}");
         }
+    }
+
+    #[test]
+    fn a_security_key_is_required_once_it_is_enrolled_for_daily_unlock() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let pass = "correct horse battery staple";
+        let other = "another passphrase here";
+        let vault = VaultId::random();
+        let device = DeviceId::random();
+        let keys = Keys {
+            master: SecretKey::random(),
+            signer: SigningKey::generate(),
+        };
+        let pass_key = keys.save(home, pass, &vault, &device).unwrap();
+        let (opened, _) = Keys::open_keys(home, pass, &vault, &device, false).unwrap();
+        assert_eq!(opened.master.to_hex(), keys.master.to_hex());
+        assert!(Keys::unlock_factors(home).unwrap().is_empty());
+        // A file from before this feature has no factors field.
+        let legacy = std::fs::read_to_string(home.join("keys.enc")).unwrap();
+        assert!(!legacy.contains("factors"), "{legacy}");
+
+        let backend = crate::strongroom::SoftwareKey {
+            path: home.join("unlock-key-a"),
+        };
+        let info = keys
+            .enrol_unlock_factor(
+                home,
+                &pass_key,
+                &vault,
+                &device,
+                &backend,
+                crate::strongroom::Method::Software,
+                "home",
+            )
+            .unwrap();
+        assert_eq!(info.label, "home");
+        assert_eq!(info.method, "software");
+        let on_disk = std::fs::read_to_string(home.join("keys.enc")).unwrap();
+        assert!(!on_disk.contains(&keys.master.to_hex()), "{on_disk}");
+        // The passphrase-only wrap is gone. Factor wraps still say blob_hex.
+        assert!(
+            !on_disk.contains("\"blob_hex\": \"\"") && on_disk.contains("factors"),
+            "{on_disk}"
+        );
+        let err = Keys::load(home, pass, &vault, &device).unwrap_err();
+        assert!(format!("{err:#}").contains("security key"), "{err:#}");
+        let (again, _) = Keys::open_keys(home, pass, &vault, &device, true).unwrap();
+        assert_eq!(again.master.to_hex(), keys.master.to_hex());
+        let err = Keys::open_keys(home, other, &vault, &device, true).unwrap_err();
+        assert!(format!("{err:#}").contains("unlock failed"), "{err:#}");
+
+        let spare = crate::strongroom::SoftwareKey {
+            path: home.join("unlock-key-b"),
+        };
+        keys.enrol_unlock_factor(
+            home,
+            &pass_key,
+            &vault,
+            &device,
+            &spare,
+            crate::strongroom::Method::Software,
+            "spare",
+        )
+        .unwrap();
+        assert_eq!(Keys::unlock_factors(home).unwrap().len(), 2);
+        // The first enrolled key still opens it, and so does the spare: both
+        // are tried.
+        let (with_spare, _) = Keys::open_keys(home, pass, &vault, &device, true).unwrap();
+        assert_eq!(with_spare.master.to_hex(), keys.master.to_hex());
+        assert!(keys
+            .enrol_unlock_factor(
+                home,
+                &pass_key,
+                &vault,
+                &device,
+                &spare,
+                crate::strongroom::Method::Software,
+                "spare",
+            )
+            .is_err());
+
+        assert!(!keys
+            .remove_unlock_factor(home, &pass_key, &vault, &device, "home")
+            .unwrap());
+        assert!(keys
+            .remove_unlock_factor(home, &pass_key, &vault, &device, "1")
+            .unwrap());
+        let restored = Keys::load(home, pass, &vault, &device).unwrap();
+        assert_eq!(restored.master.to_hex(), keys.master.to_hex());
+        assert!(Keys::load(home, other, &vault, &device).is_err());
+        assert!(Keys::unlock_factors(home).unwrap().is_empty());
     }
 }

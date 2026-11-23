@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 /// Menu and status texts in the interface language the user picked in the
 /// web UI (`<home>/ui-language`): English is the key; Finnish, Swedish,
-/// German, Spanish and Russian are the entries. `{}` marks where [`fill`]
-/// puts a value. French is not an interface language.
+/// German, Spanish, Russian and French are the entries. `{}` marks where
+/// [`fill`] puts a value.
 const TR: &[(&str, &[(&str, &str)])] = &[
     (
         "Not set up yet: open Varsto",
@@ -25,6 +25,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Noch nicht eingerichtet: Varsto öffnen"),
             ("es", "Aún no está configurado: abre Varsto"),
             ("ru", "Ещё не настроено: открой Varsto"),
+            ("fr", "Pas encore configuré : ouvrez Varsto"),
         ],
     ),
     (
@@ -35,6 +36,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Gesperrt: Varsto öffnen und entsperren"),
             ("es", "Bloqueado: abre Varsto para desbloquear"),
             ("ru", "Заблокировано: открой Varsto и сними блокировку"),
+            ("fr", "Verrouillé : ouvrez Varsto pour le déverrouiller"),
         ],
     ),
     (
@@ -45,6 +47,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "vor {} s"),
             ("es", "hace {} s"),
             ("ru", "{} с назад"),
+            ("fr", "il y a {} s"),
         ],
     ),
     (
@@ -55,6 +58,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "vor {} min"),
             ("es", "hace {} min"),
             ("ru", "{} мин назад"),
+            ("fr", "il y a {} min"),
         ],
     ),
     (
@@ -65,6 +69,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "vor {} h"),
             ("es", "hace {} h"),
             ("ru", "{} ч назад"),
+            ("fr", "il y a {} h"),
         ],
     ),
     (
@@ -75,6 +80,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Pausiert"),
             ("es", "En pausa"),
             ("ru", "На паузе"),
+            ("fr", "En pause"),
         ],
     ),
     (
@@ -85,6 +91,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Auf dem neuesten Stand"),
             ("es", "Al día"),
             ("ru", "Актуально"),
+            ("fr", "À jour"),
         ],
     ),
     (
@@ -95,6 +102,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Problem: {}"),
             ("es", "Problema: {}"),
             ("ru", "Проблема: {}"),
+            ("fr", "Problème : {}"),
         ],
     ),
     (
@@ -105,6 +113,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "{} · letzte Synchronisierung {}"),
             ("es", "{} · última sincronización {}"),
             ("ru", "{} · последняя синхронизация {}"),
+            ("fr", "{} · dernière synchronisation {}"),
         ],
     ),
     (
@@ -115,6 +124,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "{} · noch nicht synchronisiert"),
             ("es", "{} · aún sin sincronizar"),
             ("ru", "{} · ещё не синхронизировано"),
+            ("fr", "{} · pas encore de synchronisation"),
         ],
     ),
     (
@@ -125,6 +135,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Dienst startet…"),
             ("es", "El servicio se está iniciando…"),
             ("ru", "Служба запускается…"),
+            ("fr", "Le service démarre…"),
         ],
     ),
     (
@@ -135,6 +146,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Startet…"),
             ("es", "Iniciando…"),
             ("ru", "Запуск…"),
+            ("fr", "Démarrage…"),
         ],
     ),
     (
@@ -145,6 +157,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Aktualisierung auf {}…"),
             ("es", "Actualizando a {}…"),
             ("ru", "Обновление до {}…"),
+            ("fr", "Mise à jour vers {}…"),
         ],
     ),
     (
@@ -155,6 +168,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Aktualisierung fehlgeschlagen: {}"),
             ("es", "La actualización falló: {}"),
             ("ru", "Обновление не удалось: {}"),
+            ("fr", "Échec de la mise à jour : {}"),
         ],
     ),
     (
@@ -165,6 +179,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "{} von {} herunterladen"),
             ("es", "Descarga {} desde {}"),
             ("ru", "Скачай {} с {}"),
+            ("fr", "Télécharger {} depuis {}"),
         ],
     ),
     (
@@ -175,6 +190,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Varsto öffnen"),
             ("es", "Abrir Varsto"),
             ("ru", "Открыть Varsto"),
+            ("fr", "Ouvrir Varsto"),
         ],
     ),
     (
@@ -185,6 +201,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Synchronisierung pausieren"),
             ("es", "Pausar la sincronización"),
             ("ru", "Приостановить синхронизацию"),
+            ("fr", "Suspendre la synchronisation"),
         ],
     ),
     (
@@ -195,6 +212,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Aktualisierung installieren"),
             ("es", "Instalar la actualización"),
             ("ru", "Установить обновление"),
+            ("fr", "Installer la mise à jour"),
         ],
     ),
     (
@@ -205,6 +223,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Varsto {} installieren"),
             ("es", "Instalar Varsto {}"),
             ("ru", "Установить Varsto {}"),
+            ("fr", "Installer Varsto {}"),
         ],
     ),
     (
@@ -215,6 +234,7 @@ const TR: &[(&str, &[(&str, &str)])] = &[
             ("de", "Varsto beenden"),
             ("es", "Salir de Varsto"),
             ("ru", "Выйти из Varsto"),
+            ("fr", "Quitter Varsto"),
         ],
     ),
 ];
@@ -822,6 +842,7 @@ mod tests {
         }
         assert_eq!(tr("fi", "Quit Varsto"), "Lopeta Varsto");
         assert_eq!(tr("sv", "Open Varsto"), "Öppna Varsto");
+        assert_eq!(tr("fr", "Quit Varsto"), "Quitter Varsto");
         assert_eq!(tr("en", "Paused"), "Paused");
         assert_eq!(tr("fi", "not in the table"), "not in the table");
         assert_eq!(

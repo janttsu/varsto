@@ -29,16 +29,34 @@ const I18N_SV: &str = include_str!("../ui/i18n/sv.json");
 const I18N_DE: &str = include_str!("../ui/i18n/de.json");
 const I18N_ES: &str = include_str!("../ui/i18n/es.json");
 const I18N_RU: &str = include_str!("../ui/i18n/ru.json");
+const I18N_FR: &str = include_str!("../ui/i18n/fr.json");
 
 /// The interface language chosen in the page, for the tray and the menu bar:
-/// `home/ui-language`. English, Finnish, Swedish, German, Spanish or Russian.
-/// English when unset. French is a website language only.
+/// `home/ui-language`. English, Finnish, Swedish, German, Spanish, Russian or
+/// French. English when unset.
 pub fn ui_language(home: &std::path::Path) -> String {
     std::fs::read_to_string(home.join("ui-language"))
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|l| matches!(l.as_str(), "en" | "fi" | "sv" | "de" | "es" | "ru"))
+        .filter(|l| matches!(l.as_str(), "en" | "fi" | "sv" | "de" | "es" | "ru" | "fr"))
         .unwrap_or_else(|| "en".to_string())
+}
+
+fn unlock_factors_json(home: &std::path::Path) -> Value {
+    match varsto_core::vault::Keys::unlock_factors(home) {
+        Ok(list) => json!(list
+            .iter()
+            .map(|f| json!({
+                "label": f.label,
+                "short": f.short,
+                "method": f.method,
+            }))
+            .collect::<Vec<_>>()),
+        Err(e) => {
+            log::debug!("unlock keys not listed: {e:#}");
+            json!([])
+        }
+    }
 }
 const APP_CSS: &str = include_str!("../ui/app.css");
 const VIZ_JS: &str = include_str!("../ui/viz.js");
@@ -1036,6 +1054,7 @@ fn handle_unlocked(fixed: &Fixed, request: Request) -> Result<Option<Request>> {
         "/i18n/de.json" => request.respond(text(I18N_DE, "application/json; charset=utf-8"))?,
         "/i18n/es.json" => request.respond(text(I18N_ES, "application/json; charset=utf-8"))?,
         "/i18n/ru.json" => request.respond(text(I18N_RU, "application/json; charset=utf-8"))?,
+        "/i18n/fr.json" => request.respond(text(I18N_FR, "application/json; charset=utf-8"))?,
         "/app.css" => request.respond(text(APP_CSS, "text/css; charset=utf-8"))?,
         "/viz.js" => request.respond(text(VIZ_JS, "text/javascript; charset=utf-8"))?,
         "/viz.css" => request.respond(text(VIZ_CSS, "text/css; charset=utf-8"))?,
@@ -1538,6 +1557,7 @@ const STATE_ROUTES: &[&str] = &[
     "/api/service/restart",
     "/api/service/pause",
     "/api/unlock",
+    "/api/unlock-keys",
     "/api/lock",
     "/api/pair/start",
     "/api/pair/status",
@@ -2303,6 +2323,12 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             "service": service_summary(st),
             // Set when another device removed (and maybe wiped) this one.
             "removal": varsto_core::engine::removal_notice(&st.home),
+            // Public: labels only, so the unlock screen can ask for a touch
+            // before the vault is open. Empty means the passphrase alone.
+            "unlock_factors": unlock_factors_json(&st.home),
+        })),
+        (Method::Get, "/api/unlock-keys") => Ok(json!({
+            "factors": unlock_factors_json(&st.home),
         })),
         (Method::Post, "/api/reset") => {
             if opt(input, "confirm").as_deref() != Some("reset") {
@@ -2411,7 +2437,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
         (Method::Get, "/api/providers") => Ok(providers_json(varsto_core::util::now_utc())),
         (Method::Post, "/api/ui-language") => {
             let l = s(input, "language")?;
-            if !matches!(l.as_str(), "en" | "fi" | "sv" | "de" | "es" | "ru") {
+            if !matches!(l.as_str(), "en" | "fi" | "sv" | "de" | "es" | "ru" | "fr") {
                 bail!("unknown language {l}");
             }
             std::fs::create_dir_all(&st.home)?;
@@ -2449,7 +2475,7 @@ fn api(st: &mut State, method: Method, path: &str, query: &str, input: &Value) -
             Ok(service_summary(st))
         }
         (Method::Post, "/api/unlock") => {
-            let mut e = Engine::open(&st.home, &s(input, "passphrase")?)?;
+            let mut e = Engine::open_touching(&st.home, &s(input, "passphrase")?)?;
             // `varsto unlock --with-recovery-key`: the recovery words stay
             // in this process's memory until it stops or is locked.
             if let Some(words) = opt(input, "recovery_words").filter(|w| !w.trim().is_empty()) {
@@ -4432,6 +4458,45 @@ mod f3_api {
                     Ok(json!({ "written": written }))
                 }
                 (Method::Post, "/api/pair/answer") => answer_pair(engine, service, input),
+                (Method::Post, "/api/unlock-key") => {
+                    use varsto_core::strongroom::SecurityKey;
+                    let software = input.get("software").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let method = if software {
+                        if !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN {
+                            bail!("software security keys are not built into this binary; they are for tests only");
+                        }
+                        varsto_core::strongroom::Method::Software
+                    } else {
+                        varsto_core::strongroom::Method::Fido2
+                    };
+                    let backend: Box<dyn SecurityKey> = match method {
+                        varsto_core::strongroom::Method::Fido2 => {
+                            Box::new(varsto_core::strongroom::fido2_for_device_unlock())
+                        }
+                        varsto_core::strongroom::Method::Software => {
+                            let mut tag = [0u8; 4];
+                            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut tag);
+                            varsto_core::strongroom::software_key_at(
+                                engine.home().join(format!("unlock-key-{}", hex::encode(tag))),
+                            )
+                        }
+                    };
+                    let info = engine.enrol_unlock_factor(
+                        opt(input, "label").as_deref().unwrap_or(""),
+                        backend.as_ref(),
+                        method,
+                    )?;
+                    Ok(json!({
+                        "ok": true,
+                        "label": info.label,
+                        "short": info.short,
+                        "method": info.method,
+                    }))
+                }
+                (Method::Post, "/api/unlock-key/remove") => {
+                    let passphrase_only = engine.remove_unlock_factor(&s(input, "which")?)?;
+                    Ok(json!({ "ok": true, "passphrase_only": passphrase_only }))
+                }
                 _ => bail!("unknown route {path}"),
             }
         }
@@ -6006,6 +6071,7 @@ mod tests {
             ("de", I18N_DE),
             ("es", I18N_ES),
             ("ru", I18N_RU),
+            ("fr", I18N_FR),
         ] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let missing: Vec<&String> = found
@@ -6193,6 +6259,7 @@ mod tests {
             ("de", I18N_DE),
             ("es", I18N_ES),
             ("ru", I18N_RU),
+            ("fr", I18N_FR),
         ] {
             let d: Value = serde_json::from_str(dict).unwrap();
             let top: Vec<&String> = d.as_object().unwrap().keys().collect();

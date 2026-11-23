@@ -135,6 +135,12 @@ enum Cmd {
         #[arg(long, value_name = "FILE", requires = "with_recovery_key")]
         recovery_file: Option<PathBuf>,
     },
+    /// A security key for opening this device, together with its passphrase.
+    /// Enrolling one removes the passphrase-only copy of the key file.
+    UnlockKey {
+        #[command(subcommand)]
+        cmd: UnlockKeyCmd,
+    },
     /// Join an existing vault through a storage that holds it.
     Join {
         /// Name of this device (default: the computer's name).
@@ -822,6 +828,24 @@ enum OrgAdminCmd {
         #[arg(long, value_name = "FILE")]
         root_words_file: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum UnlockKeyCmd {
+    /// Enrol a security key. The passphrase alone then no longer opens this device.
+    Add {
+        /// Name shown in the list. Optional.
+        #[arg(long)]
+        label: Option<String>,
+        /// A software key in a file, for tests. A release binary refuses it.
+        #[arg(long, hide = !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN)]
+        software: bool,
+    },
+    /// List the security keys enrolled for opening this device.
+    List,
+    /// Remove one key (its number from 1, its label, or the start of its credential).
+    /// The last one makes the passphrase alone open the device again.
+    Remove { which: String },
 }
 
 #[derive(Subcommand)]
@@ -2169,7 +2193,10 @@ static USED: std::sync::Mutex<Option<zeroize::Zeroizing<String>>> = std::sync::M
 /// damaged local files, a fork), say so on stderr: commands that only read
 /// go on, commands that would sign stop with the same advice.
 pub(crate) fn open_engine(home: &Path) -> Result<Engine> {
-    let e = Engine::open(home, &passphrase()?)?;
+    // A security key enrolled for this device is touched here. Startup of
+    // the background service does not: a remembered passphrase leaves it
+    // locked until the user opens Varsto.
+    let e = Engine::open_touching(home, &passphrase()?)?;
     warn_ledger(&e.ledger_health());
     Ok(e)
 }
@@ -3176,6 +3203,7 @@ fn run(cli: &Cli) -> Result<()> {
                 println!("The background service is unlocked.");
             }
         }
+        Cmd::UnlockKey { cmd } => run_unlock_key(&home, cmd)?,
         Cmd::Init { name } => {
             let (engine, vault_key) = Engine::init(&home, name, &passphrase()?)?;
             // The kit: the vault words and the recovery words, shown once.
@@ -5455,6 +5483,7 @@ fn run(cli: &Cli) -> Result<()> {
                             Method::Fido2,
                             Box::new(strongroom::Fido2Tools {
                                 device: device.clone(),
+                                ..strongroom::Fido2Tools::default()
                             }),
                         )
                     };
@@ -6638,6 +6667,91 @@ fn first_start_install() -> Option<i32> {
 /// folder state), otherwise in this process.
 /// `--software`: refused in a binary built without the feature, and a
 /// warning otherwise.
+fn run_unlock_key(home: &Path, cmd: &UnlockKeyCmd) -> Result<()> {
+    use varsto_core::strongroom::{Method, SecurityKey};
+    match cmd {
+        UnlockKeyCmd::List => {
+            let list = varsto_core::vault::Keys::unlock_factors(home)?;
+            if list.is_empty() {
+                println!("no security key: the passphrase alone opens this device");
+                return Ok(());
+            }
+            for (i, f) in list.iter().enumerate() {
+                println!(
+                    "{}. {} ({})",
+                    i + 1,
+                    f.short,
+                    f.method
+                );
+            }
+            Ok(())
+        }
+        UnlockKeyCmd::Add { label, software } => {
+            let label = label.clone().unwrap_or_default();
+            if let Some((sf, _)) = service::status(home) {
+                eprintln!("Touch your security key to enrol it for opening this device.");
+                let answer = service::http_post(
+                    &format!("http://127.0.0.1:{}/api/unlock-key", sf.port),
+                    &sf.token,
+                    &serde_json::json!({ "label": label, "software": software }).to_string(),
+                )?;
+                let v: serde_json::Value = serde_json::from_str(&answer)?;
+                println!(
+                    "Security key {} enrolled. The passphrase alone no longer opens this device.",
+                    v.get("short").and_then(|s| s.as_str()).unwrap_or(&label)
+                );
+                return Ok(());
+            }
+            let method = if *software {
+                software_key_warning()?;
+                Method::Software
+            } else {
+                Method::Fido2
+            };
+            let mut engine = open_engine(home)?;
+            let backend: Box<dyn SecurityKey> = match method {
+                Method::Fido2 => Box::new(varsto_core::strongroom::fido2_for_device_unlock()),
+                Method::Software => {
+                    let mut tag = [0u8; 4];
+                    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut tag);
+                    varsto_core::strongroom::software_key_at(
+                        home.join(format!("unlock-key-{}", hex::encode(tag))),
+                    )
+                }
+            };
+            let info = engine.enrol_unlock_factor(&label, backend.as_ref(), method)?;
+            println!(
+                "Security key {} enrolled. The passphrase alone no longer opens this device. Enrol a spare and keep it somewhere else.",
+                info.short
+            );
+            Ok(())
+        }
+        UnlockKeyCmd::Remove { which } => {
+            if let Some((sf, _)) = service::status(home) {
+                let answer = service::http_post(
+                    &format!("http://127.0.0.1:{}/api/unlock-key/remove", sf.port),
+                    &sf.token,
+                    &serde_json::json!({ "which": which }).to_string(),
+                )?;
+                let v: serde_json::Value = serde_json::from_str(&answer)?;
+                if v.get("passphrase_only").and_then(|b| b.as_bool()) == Some(true) {
+                    println!("Removed. The passphrase alone opens this device again.");
+                } else {
+                    println!("Removed. This device still opens with a security key and the passphrase.");
+                }
+                return Ok(());
+            }
+            let mut engine = open_engine(home)?;
+            if engine.remove_unlock_factor(which)? {
+                println!("Removed. The passphrase alone opens this device again.");
+            } else {
+                println!("Removed. This device still opens with a security key and the passphrase.");
+            }
+            Ok(())
+        }
+    }
+}
+
 fn software_key_warning() -> Result<()> {
     if !varsto_core::strongroom::SOFTWARE_KEYS_BUILT_IN {
         bail!("software security keys are not built into this binary; they are for tests only (a build with the software-key feature has them)");

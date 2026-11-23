@@ -220,7 +220,7 @@
       <form id="unlockform" class="card unlock-card">
         <div class="unlock-icon"><svg class="icon"><use href="#i-lock"/></svg></div>
         <h2 class="hero-title">Unlock Varsto</h2>
-        <p class="muted">Enter the passphrase of this device to open the vault.</p>
+        <p class="muted" id="unlock-lead">Enter the passphrase of this device to open the vault.</p>
         <label>Passphrase <input name="passphrase" type="password" required autofocus></label>
         <div class="actions"><button type="submit">Unlock</button></div>
       </form>
@@ -954,6 +954,14 @@
         <ul id="settingsdevices" class="list compact-list"></ul>
         <p class="muted small">Remove a device you no longer use, or one that was lost or stolen: it stops syncing and cannot read anything written afterwards. Add one with Add a device under Peers.</p>
       </div>
+      <div class="card" id="unlockkeycard">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-key"/></svg>Daily unlock</h2>
+        <p class="muted small" id="unlockkey-lead">This device opens with the passphrase alone. Enrol a security key to require both: the key file then has no passphrase-only copy, and a spare key is a second wrap of the same keys.</p>
+        <ul id="unlockkeys" class="list compact-list"></ul>
+        <label>Label, such as home <input id="unlockkey-label" maxlength="64" placeholder="home" autocomplete="off"></label>
+        <p class="muted small">Touch the key when it blinks. A spare, kept somewhere else, still opens this device if this one is lost.</p>
+        <div class="actions"><button id="unlockkey-add" type="button" class="secondary">Add a security key</button></div>
+      </div>
       <div class="card">
         <h2 class="card-title"><svg class="icon accent"><use href="#i-key"/></svg>Recovery package</h2>
         <p class="muted small">If all your devices were lost at once, what would you need to restore every file? The recovery package checklist is made for this vault: the recovery words, storage keys, disks and security keys, and the restore steps.</p>
@@ -978,7 +986,7 @@
           <p class="muted small mobile-only">The interface starts in your system's theme; the switch keeps your choice.</p>
           <div class="actions"><button id="themetoggle2" type="button" class="secondary mobile-only">Switch light / dark</button></div>
           <label>Language <select class="lang-select"></select></label>
-          <p class="muted small">English, Finnish or Swedish. The command line is always in English.</p>
+          <p class="muted small">English, Finnish, Swedish, German, Spanish, Russian or French. The command line is always in English.</p>
         </div>
         <div class="card hidden" id="allfilescard">
           <h2 class="card-title">Plain files on this phone</h2>
