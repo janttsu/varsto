@@ -328,6 +328,10 @@ pub struct DeviceInfo {
     /// System, model and Varsto version the device last published.
     #[serde(default)]
     pub details: Option<super::devinfo::DeviceDetails>,
+    /// Site the device published (`home`, `office`). Empty: its own
+    /// failure domain.
+    #[serde(default)]
+    pub site: String,
     /// In an organization: the person the device belongs to, and whether
     /// it is an administrator. Absent without an organization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -632,6 +636,7 @@ impl Engine {
             revoked_by: None,
             wipe_ordered: false,
             details: self.devices.details.get(me).cloned(),
+            site: self.devices.details.get(me).map(|d| d.site.clone()).unwrap_or_default(),
             user: self.org.as_ref().and_then(|o| o.user_of(me)),
             role: self.org_role(me),
         }];
@@ -650,6 +655,7 @@ impl Engine {
                 revoked_by: r.map(|r| self.device_name(&r.by)),
                 wipe_ordered: r.is_some_and(|r| r.wipe),
                 details: self.devices.details.get(id).cloned(),
+                site: self.devices.details.get(id).map(|d| d.site.clone()).unwrap_or_default(),
                 user: self.org.as_ref().and_then(|o| o.user_of(id)),
                 role: self.org_role(id),
             });

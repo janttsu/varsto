@@ -2039,7 +2039,12 @@
   "Daily summary": "Daglig sammanfattning",
   "Once a day: Varsto is running, and how many alerts there were. Shows that the device is alive.": "En gång per dygn: Varsto körs, och hur många varningar det var. Visar att enheten lever.",
   "Other messages": "Övriga meddelanden",
-  "Anything else Varsto reports.": "Allt annat som Varsto rapporterar."
+  "Anything else Varsto reports.": "Allt annat som Varsto rapporterar.",
+  "Set site": "Sätt anläggning",
+  "Site of this device": "Den här enhetens anläggning",
+  "Devices that share a site are one failure domain.": "Enheter som delar anläggning är en feldomän.",
+  "devices at this site are one failure domain": "enheter på den här anläggningen är en feldomän",
+  "of that sits in one site, so it counts as one failure domain.": "av det finns på en anläggning, så det räknas som en feldomän."
  },
  "patterns": [
   [

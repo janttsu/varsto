@@ -15,7 +15,7 @@ These are the design commitments. Details become specifications under `docs/spec
 
 - Content-defined chunking, compression before encryption, keyed hashes (no plaintext hashes in storage), packs for efficiency.
 - Selective sync with placeholders; block-level delta transfer; P2P swarm of encrypted chunks.
-- Versions, trash, garbage collection with two-phase deletion; durability policies; sites (geographic failure domains); alerts. (Status 0.0.1-alpha.16: sites are not built; placement per folder, place labels on storages and disk groups exist.)
+- Versions, trash, garbage collection with two-phase deletion; durability policies; sites (geographic failure domains); alerts. (A device publishes its site with `varsto device site`. Devices with the same site are one failure domain for blocks that have no storage copy. Placement per folder and place labels on storages and disk groups are separate.)
 - Strongroom folders: folder keys wrapped by a FIDO2 `hmac-secret`, never plaintext on the device.
 - Local daemon with one control API; the CLI and the UI bindings use that API. (Status 0.0.1-alpha.16: the service has one local API that the interface, the tray and the shells use; the CLI is written with clap. The MCP server was removed and is not part of the program.)
 

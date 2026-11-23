@@ -5,6 +5,7 @@
 //! folder states, for the "Where your data is" chart.
 
 use super::*;
+use std::collections::BTreeSet;
 
 /// One storage: configured on this device, or only seen in other devices'
 /// claims (`configured` false), or a replica device (`kind` "replica").
@@ -38,6 +39,9 @@ pub struct DeviceShare {
     pub name: String,
     pub this_device: bool,
     pub revoked: bool,
+    /// Site the device published. Empty: this device is its own failure domain.
+    #[serde(default)]
+    pub site: String,
     pub bytes: u64,
     pub blocks: u64,
     pub share: f64,
@@ -74,6 +78,19 @@ pub struct CopyStats {
     pub average: f64,
 }
 
+/// Devices that hold blocks with no storage copy, collapsed by site.
+/// Two devices that published the same site are one entry.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct DomainShare {
+    /// Empty when the domain is a single device that published no site.
+    pub site: String,
+    pub devices: Vec<String>,
+    /// Bytes of current files that have no storage copy and whose every
+    /// device copy is in this domain.
+    pub bytes: u64,
+    pub blocks: u64,
+}
+
 /// See `Engine::data_locations`.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct DataLocations {
@@ -86,6 +103,14 @@ pub struct DataLocations {
     /// Largest first.
     pub folders: Vec<FolderShare>,
     pub copies: CopyStats,
+    /// Bytes with no storage copy that also sit in only one failure domain.
+    #[serde(default)]
+    pub single_domain_bytes: u64,
+    #[serde(default)]
+    pub single_domain_blocks: u64,
+    /// Those domains, largest first.
+    #[serde(default)]
+    pub domains: Vec<DomainShare>,
 }
 
 fn kind_label(spec: &StorageSpec) -> &'static str {
@@ -168,11 +193,20 @@ impl Engine {
                 name,
                 this_device: id == &me,
                 revoked: self.is_revoked(id),
+                site: self
+                    .devices
+                    .details
+                    .get(id)
+                    .map(|d| d.site.clone())
+                    .unwrap_or_default(),
                 ..Default::default()
             }
         };
         devices.insert(me.clone(), device_entry(&me));
         let mut copy_sum = 0u128;
+        // Unkept blocks (no storage copy) grouped by the failure domain of
+        // the devices that hold them. Filled while walking the blocks.
+        let mut domain_bytes: BTreeMap<String, (BTreeSet<String>, u64, u64)> = BTreeMap::new();
 
         // Format 3: copies from the block maps and the pack-level view;
         // devices from the `held` flags of their manifests.
@@ -261,6 +295,38 @@ impl Engine {
                 out.copies.bytes[bucket] += size;
                 if kept == 0 {
                     folder.unkept_bytes += size;
+                    let mut doms: BTreeSet<String> = BTreeSet::new();
+                    let mut names: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+                    let note = |doms: &mut BTreeSet<String>,
+                                names: &mut BTreeMap<String, BTreeSet<String>>,
+                                id: &DeviceId| {
+                        let (site, name) = match devices.get(id) {
+                            Some(d) => (d.site.clone(), Some(d.name.clone())),
+                            None => (String::new(), None),
+                        };
+                        let key = crate::sites::domain_key(&id.to_string(), &site);
+                        doms.insert(key.clone());
+                        if let Some(n) = name {
+                            names.entry(key).or_default().insert(n);
+                        }
+                    };
+                    if here.contains(object) {
+                        note(&mut doms, &mut names, &me);
+                    }
+                    for d3 in held.holders(&obj).iter().filter(|d| **d != me3) {
+                        note(&mut doms, &mut names, &DeviceId::from_bytes(d3));
+                    }
+                    if doms.len() == 1 {
+                        out.single_domain_bytes += size;
+                        out.single_domain_blocks += 1;
+                        let key = doms.into_iter().next().expect("one domain");
+                        let e = domain_bytes.entry(key).or_default();
+                        if let Some(n) = names.values().next() {
+                            e.0.extend(n.iter().cloned());
+                        }
+                        e.1 += size;
+                        e.2 += 1;
+                    }
                 }
                 copy_sum += kept as u128 * size as u128;
             }
@@ -305,6 +371,21 @@ impl Engine {
         });
         out.folders
             .sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.name.cmp(&b.name)));
+        out.domains = domain_bytes
+            .into_iter()
+            .map(|(key, (names, bytes, blocks))| {
+                let mut devices: Vec<String> = names.into_iter().collect();
+                devices.sort();
+                DomainShare {
+                    site: crate::sites::site_of_key(&key).to_string(),
+                    devices,
+                    bytes,
+                    blocks,
+                }
+            })
+            .collect();
+        out.domains
+            .sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.site.cmp(&b.site)));
         Ok(out)
     }
 }

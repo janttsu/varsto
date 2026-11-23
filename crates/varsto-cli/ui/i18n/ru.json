@@ -3059,6 +3059,11 @@
     "Daily summary": "Ежедневная сводка",
     "Once a day: Varsto is running, and how many alerts there were. Shows that the device is alive.": "Раз в день: Varsto работает и сколько было оповещений. Так видно, что устройство живо.",
     "Other messages": "Другие сообщения",
-    "Anything else Varsto reports.": "Всё остальное, о чём сообщает Varsto."
+    "Anything else Varsto reports.": "Всё остальное, о чём сообщает Varsto.",
+    "Set site": "Задать площадку",
+    "Site of this device": "Площадка этого устройства",
+    "Devices that share a site are one failure domain.": "Устройства с одной площадкой — один домен отказа.",
+    "devices at this site are one failure domain": "устройства на этой площадке — один домен отказа",
+    "of that sits in one site, so it counts as one failure domain.": "из этого находится на одной площадке и считается одним доменом отказа."
   }
 }

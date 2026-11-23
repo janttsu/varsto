@@ -3059,6 +3059,11 @@
     "Daily summary": "Tagesübersicht",
     "Once a day: Varsto is running, and how many alerts there were. Shows that the device is alive.": "Einmal am Tag: Varsto läuft, und wie viele Warnungen es gab. Zeigt, dass das Gerät noch da ist.",
     "Other messages": "Weitere Nachrichten",
-    "Anything else Varsto reports.": "Alles andere, was Varsto meldet."
+    "Anything else Varsto reports.": "Alles andere, was Varsto meldet.",
+    "Set site": "Standort setzen",
+    "Site of this device": "Standort dieses Geräts",
+    "Devices that share a site are one failure domain.": "Geräte mit demselben Standort sind eine Fehlerdomäne.",
+    "devices at this site are one failure domain": "Geräte an diesem Standort sind eine Fehlerdomäne",
+    "of that sits in one site, so it counts as one failure domain.": "davon liegt an einem Standort und zählt deshalb als eine Fehlerdomäne."
   }
 }

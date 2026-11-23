@@ -2039,7 +2039,12 @@
   "Daily summary": "Päivän yhteenveto",
   "Once a day: Varsto is running, and how many alerts there were. Shows that the device is alive.": "Kerran päivässä: Varsto on käynnissä ja kuinka monta hälytystä oli. Osoittaa, että laite on elossa.",
   "Other messages": "Muut viestit",
-  "Anything else Varsto reports.": "Kaikki muu, mistä Varsto ilmoittaa."
+  "Anything else Varsto reports.": "Kaikki muu, mistä Varsto ilmoittaa.",
+  "Set site": "Aseta toimipaikka",
+  "Site of this device": "Tämän laitteen toimipaikka",
+  "Devices that share a site are one failure domain.": "Saman toimipaikan laitteet ovat yksi vikapaikka.",
+  "devices at this site are one failure domain": "tämän toimipaikan laitteet ovat yksi vikapaikka",
+  "of that sits in one site, so it counts as one failure domain.": "siitä on yhdessä toimipaikassa, joten se lasketaan yhdeksi vikapaikaksi."
  },
  "patterns": [
   [

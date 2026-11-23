@@ -55,6 +55,7 @@ pub mod pair;
 pub mod parverify;
 pub mod placement;
 pub mod policy;
+pub mod sites;
 pub mod pool;
 pub mod price;
 pub mod progress;

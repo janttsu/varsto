@@ -30,6 +30,10 @@ pub struct DeviceDetails {
     /// what an organization's platform policy is checked against.
     #[serde(default)]
     pub platform: String,
+    /// Site this device belongs to (`home`, `office`). Empty: its own
+    /// failure domain. The same name on two devices makes them one domain.
+    #[serde(default)]
+    pub site: String,
 }
 
 impl DeviceDetails {
@@ -48,6 +52,7 @@ impl DeviceDetails {
             updated_utc: d.updated_utc,
             last_sync_utc: d.last_sync_utc,
             platform: d.platform.clone(),
+            site: d.site.clone(),
         }
     }
 
@@ -68,6 +73,7 @@ impl DeviceDetails {
             platform: cut(&self.platform),
             updated_utc: self.updated_utc,
             last_sync_utc: self.last_sync_utc,
+            site: crate::sites::normalize_site(&self.site).unwrap_or_default(),
         }
     }
 }
@@ -142,6 +148,8 @@ impl Engine {
             os = crate::org::platform_name(&platform);
         }
         let now = util::now_utc();
+        let path = self.home.join("devinfo.json");
+        let prev = util::read_json_or_default::<DeviceDetails>(&path).unwrap_or_default();
         let mut details = DeviceDetails {
             device: me.to_string(),
             os,
@@ -152,9 +160,9 @@ impl Engine {
             updated_utc: now,
             last_sync_utc,
             platform,
+            site: prev.site.clone(),
         };
-        let path = self.home.join("devinfo.json");
-        if let Ok(prev) = util::read_json_or_default::<DeviceDetails>(&path) {
+        {
             let same = DeviceDetails {
                 updated_utc: prev.updated_utc,
                 last_sync_utc: prev.last_sync_utc,
@@ -166,7 +174,7 @@ impl Engine {
                 .devices
                 .get(&self.me3())
                 .and_then(|r| r.details.as_ref())
-                .is_some_and(|d| d.updated_utc == prev.updated_utc);
+                .is_some_and(|d| d.updated_utc == prev.updated_utc && d.site == details.site);
             if same && published && now - prev.updated_utc < REFRESH_SECS {
                 return Ok(());
             }
@@ -189,6 +197,22 @@ impl Engine {
         let prev: DeviceDetails =
             util::read_json_or_default(&self.home.join("devinfo.json")).unwrap_or_default();
         self.publish_device_details(prev.last_sync_utc)
+    }
+
+    /// Set this device's site, or clear it with an empty name. The next
+    /// device record carries it, so other devices collapse copies that
+    /// exist only on devices of this site into one failure domain.
+    pub fn set_device_site(&mut self, raw: &str) -> Result<String> {
+        if self.vault.member {
+            anyhow::bail!("a member device is not a full device of this vault and has no site here");
+        }
+        let site = crate::sites::normalize_site(raw)?;
+        let path = self.home.join("devinfo.json");
+        let mut prev: DeviceDetails = util::read_json_or_default(&path).unwrap_or_default();
+        prev.site = site.clone();
+        util::write_json(&path, &prev)?;
+        self.publish_device_details(prev.last_sync_utc)?;
+        Ok(site)
     }
 
     /// Tests: what a holder of the vault key could try, a device record

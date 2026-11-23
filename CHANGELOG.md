@@ -16,6 +16,8 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+- A device can publish a site (`varsto device site home`, or Set site on the Settings device list). Devices that publish the same site are one failure domain: blocks with no storage copy that exist only on those devices count as one place, not one per device. A device with no site stays its own domain.
+
 ## [0.0.1-alpha.17] - 2026-11-22
 
 The storage format is unchanged from alpha.16. Vaults open as they are and do not have to be recreated. This is still an alpha: not for production data.

@@ -2964,6 +2964,11 @@ fn api_unlocked(
             "key_epoch": engine.key_epoch(),
             "removal": engine.removal(),
         })),
+        (Method::Post, "/api/device/site") => {
+            let site = engine.set_device_site(opt(input, "site").as_deref().unwrap_or(""))?;
+            service.request_sync();
+            Ok(json!({ "ok": true, "site": site }))
+        }
         (Method::Post, "/api/device/revoke") => {
             let device = s(input, "device")?;
             let wipe = input.get("wipe").and_then(|v| v.as_bool()).unwrap_or(false);

@@ -574,6 +574,15 @@ enum Cmd {
 enum DeviceCmd {
     /// List the full devices of the vault (removed ones are marked).
     List,
+    /// Set this device's site, or print it. Devices that publish the same
+    /// site are one failure domain: copies that exist only on them count once.
+    Site {
+        /// Site name, such as home or office. Omit to print the current site.
+        site: Option<String>,
+        /// Clear the site. This device is then its own failure domain.
+        #[arg(long)]
+        clear: bool,
+    },
     /// Remove another device: it is cut off from the ledger and from peers, and
     /// the vault gets new keys that it never sees. What it already held stays
     /// readable to it.
@@ -4995,6 +5004,11 @@ fn run(cli: &Cli) -> Result<()> {
                                 (Some(u), None) => format!(", {u}"),
                                 _ => String::new(),
                             },
+                            if d.site.is_empty() {
+                                String::new()
+                            } else {
+                                format!(", site {}", d.site)
+                            },
                             match (&d.revoked_by, d.revoked_utc) {
                                 (Some(by), Some(t)) => format!(
                                     ", removed by {by} on {}{}",
@@ -5018,6 +5032,50 @@ fn run(cli: &Cli) -> Result<()> {
                     }
                     out.trim_end().to_string()
                 })?;
+            }
+            DeviceCmd::Site { site, clear } => {
+                if *clear && site.is_some() {
+                    bail_usage::<()>("pass either a site name or --clear")?;
+                }
+                if !*clear && site.is_none() {
+                    let engine = open_engine(&home)?;
+                    let current = engine
+                        .devices_list()
+                        .into_iter()
+                        .find(|d| d.this_device)
+                        .map(|d| d.site)
+                        .unwrap_or_default();
+                    print(cli, &current, |s| {
+                        if s.is_empty() {
+                            "this device has no site (it is its own failure domain)".to_string()
+                        } else {
+                            format!("site {s}")
+                        }
+                    })?;
+                } else {
+                let raw = if *clear { "" } else { site.as_deref().unwrap_or("") };
+                let set = if let Some((sf, _)) = service::status(&home) {
+                    let body = serde_json::json!({ "site": raw }).to_string();
+                    let answer: serde_json::Value = serde_json::from_str(&service::http_post(
+                        &format!("http://127.0.0.1:{}/api/device/site", sf.port),
+                        &sf.token,
+                        &body,
+                    )?)?;
+                    answer["site"].as_str().unwrap_or("").to_string()
+                } else {
+                    let mut engine = open_engine(&home)?;
+                    engine.set_device_site(raw)?
+                };
+                print(cli, &set, |s| {
+                    if s.is_empty() {
+                        "site cleared: this device is its own failure domain".to_string()
+                    } else {
+                        format!(
+                            "site {s}: devices that publish {s} count as one failure domain"
+                        )
+                    }
+                })?;
+                }
             }
             DeviceCmd::Revoke { device, wipe, yes } => {
                 if !*yes {

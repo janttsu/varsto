@@ -63,6 +63,11 @@ pub struct DeviceDetails {
     pub platform: String,
     pub updated_utc: i64,
     pub last_sync_utc: Option<i64>,
+    /// Geographic failure domain (`home`, `office`). Empty means this device
+    /// is its own domain. Devices that publish the same name count as one:
+    /// copies that exist only on them are not two copies.
+    #[serde(default)]
+    pub site: String,
 }
 
 impl DeviceDetails {
@@ -78,6 +83,12 @@ impl DeviceDetails {
             if f.len() > MAX_DETAIL {
                 return Err(format!("a device detail longer than {MAX_DETAIL} bytes"));
             }
+        }
+        if let Err(e) = crate::sites::normalize_site(&self.site) {
+            return Err(e);
+        }
+        if self.site != self.site.trim() {
+            return Err("a site name has surrounding space".into());
         }
         Ok(())
     }

@@ -585,6 +585,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var li = el("li"); var ic = el("span", "li-icon"); ic.appendChild(icon("device")); li.appendChild(ic);
         var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
         if (d.this_device) { title.appendChild(pill("grey", "This device")); }
+        if (d.site) { title.appendChild(pill("grey", d.site)); }
         if (d.revoked) { title.appendChild(pill("risk", "Removed")); }
         if (d.user) { title.appendChild(pill(d.role === "admin" ? "accent" : "grey", d.user + (d.role === "admin" ? " · admin" : ""))); }
         body.appendChild(title);
@@ -620,6 +621,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     r.devices.forEach(function (d) {
       var li = el("li"); var body = el("div", "li-body"); var title = el("div", "li-title", d.name);
       if (d.this_device) { title.appendChild(pill("grey", "This device")); }
+      if (d.site) { title.appendChild(pill("grey", d.site)); }
       if (d.revoked) { title.appendChild(pill("risk", "Removed")); }
       if (!d.revoked && d.details && mine && d.details.app_version !== mine.app_version) { title.appendChild(pill("grey", "other version")); }
       body.appendChild(title);
@@ -627,6 +629,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       body.appendChild(el("div", "li-sub", d.revoked ? "Removed " + fmtDate(d.revoked_utc) : [deviceSystem(d) || "no details yet (they appear after its next sync with this version)", seen].filter(Boolean).join(" · ")));
       if (d.details) { body.title = d.details.arch + " · " + d.device_id; }
       li.appendChild(body);
+      if (d.this_device && !d.revoked) {
+        var siteRow = el("div", "li-actions");
+        var siteIn = el("input"); siteIn.type = "text"; siteIn.value = d.site || ""; siteIn.maxLength = 64; siteIn.placeholder = "home"; siteIn.setAttribute("aria-label", "Site of this device");
+        var siteBtn = el("button", "secondary", "Set site"); siteBtn.type = "button";
+        siteBtn.title = "Devices that share a site are one failure domain.";
+        siteBtn.onclick = function () { api("POST", "/api/device/site", { site: siteIn.value }).then(function () { loadDevices(lastStatus || {}); }).catch(function (e) { log("error: " + e.message); }); };
+        siteRow.appendChild(siteIn); siteRow.appendChild(siteBtn); li.appendChild(siteRow);
+      }
       if (!d.this_device && !d.revoked) {
         var a = el("div", "li-actions"); var b = el("button", "secondary danger", "Remove…"); b.type = "button";
         b.onclick = function () { removeDevice(d); }; a.appendChild(b); li.appendChild(a);
@@ -5357,8 +5367,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     });
     st.sort(function (a, b) { return WD_ORDER[a.cls] - WD_ORDER[b.cls] || b.bytes - a.bytes || a.name.localeCompare(b.name); });
     var dv = d.devices.filter(function (x) { return x.bytes > 0 || x.this_device; }).map(function (x) {
-      return { key: "d:" + x.device_id, name: x.name, sub: x.this_device ? "this device" : x.revoked ? "removed" : "", cls: "own dev", bytes: x.bytes, share: x.share, group: "Devices",
-        title: x.name + (x.this_device ? " — this device" : "") + (x.revoked ? " (removed from the vault)" : "") + "\nFiles on the device: " + fmtBytes(x.bytes) + " in " + x.blocks + " block" + (x.blocks === 1 ? "" : "s") + " (" + fmtShare(x.share) + " of the data)" };
+      return { key: "d:" + x.device_id, name: x.name, sub: x.site ? x.site : (x.this_device ? "this device" : x.revoked ? "removed" : ""), cls: "own dev", bytes: x.bytes, share: x.share, group: "Devices",
+        title: x.name + (x.this_device ? " — this device" : "") + (x.site ? "\nSite: " + x.site + " (devices at this site are one failure domain)" : "") + (x.revoked ? " (removed from the vault)" : "") + "\nFiles on the device: " + fmtBytes(x.bytes) + " in " + x.blocks + " block" + (x.blocks === 1 ? "" : "s") + " (" + fmtShare(x.share) + " of the data)" };
     });
     return st.concat(dv);
   }
@@ -5400,7 +5410,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (bh) { g.appendChild(svgEl("path", { d: "M" + x + "," + base + " V" + (base - bh + 3) + " q0,-3 3,-3 h" + (bw - 6) + " q3,0 3,3 V" + base + " z" }, "wd-hist-bar")); }
       g.appendChild(svgEl("text", { x: x + bw / 2, y: base - bh - 4, "text-anchor": "middle" }, "wd-hist-val", r[2] > 0 ? fmtShare(share) : ""));
       g.appendChild(svgEl("text", { x: x + bw / 2, y: base + 14, "text-anchor": "middle" }, "wd-hist-lab", r[0] + "×"));
-      svgTitle(g, (r[0] === "1" ? "1 copy" : r[0] + " copies") + " on storages: " + r[1] + " block" + (r[1] === 1 ? "" : "s") + ", " + fmtBytes(r[2]) + " (" + fmtShare(share) + ")" + (r[0] === "0" && r[1] ? "\nThese blocks are only on devices." : ""));
+      svgTitle(g, (r[0] === "1" ? "1 copy" : r[0] + " copies") + " on storages: " + r[1] + " block" + (r[1] === 1 ? "" : "s") + ", " + fmtBytes(r[2]) + " (" + fmtShare(share) + ")" + (r[0] === "0" && r[1] ? "\nThese blocks are only on devices." + (d.single_domain_bytes ? " " + fmtBytes(d.single_domain_bytes) + " of that sits in one site, so it counts as one failure domain." : "") : ""));
       h.appendChild(g);
     });
   }
