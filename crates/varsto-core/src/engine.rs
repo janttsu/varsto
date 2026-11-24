@@ -234,8 +234,8 @@ struct FolderState {
     thumbs_replicated: BTreeSet<String>,
     /// Varsto's own "last accessed" record per path (seconds since the Unix
     /// epoch): updated when a file is fetched, opened or read through Varsto
-    /// (interface and CLI) and from the filesystem access time seen at scan.
-    /// Kept per device; it feeds the cold-storage advice.
+    /// (interface, CLI, MCP) and from the filesystem access time seen at scan.
+    /// Kept per device; it feeds the cold-storage advice (MCP).
     #[serde(default)]
     accessed: BTreeMap<String, i64>,
     /// Remote versions that could not be downloaded yet (no readable copy);
@@ -1444,6 +1444,32 @@ fn canonical(path: &Path) -> std::io::Result<PathBuf> {
 
 /// How long joining waits for the bundled storages to answer, all together.
 const REACHABLE_WITHIN: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Renames `src` to `dst` without ever replacing an existing `dst`. A hard
+/// link fails atomically when `dst` exists; the old name is removed after it.
+/// Where links are not possible (some removable disks) the check and the
+/// rename are two steps, as before.
+fn rename_no_clobber(src: &Path, dst: &Path) -> std::io::Result<()> {
+    match fs::hard_link(src, dst) {
+        Ok(()) => match fs::remove_file(src) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let _ = fs::remove_file(dst);
+                Err(e)
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e),
+        Err(_) => {
+            if dst.exists() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "target exists",
+                ));
+            }
+            fs::rename(src, dst)
+        }
+    }
+}
 
 impl Engine {
     // ----- lifecycle -------------------------------------------------------
@@ -7371,7 +7397,7 @@ impl Engine {
     }
 
     /// Create or overwrite a file inside a folder (relative path), then push.
-    /// Refuses a path that leaves the folder.
+    /// Used by the MCP server for notes and reorganisation; refuses to leave the folder.
     pub fn write_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
         self.write_from_reader_sized(folder, path, bytes, Some(bytes.len() as u64))
     }
@@ -7453,7 +7479,7 @@ impl Engine {
 
     /// Create a new file inside a folder, never replacing one: refused when
     /// the path exists here, as a placeholder, or as a file another device
-    /// published. Callers that must not overwrite use this.
+    /// published. The assistant (MCP) writes only through this.
     pub fn create_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
         self.ensure_path_free(folder, path)?;
         self.write_file(folder, path, bytes)
@@ -7589,7 +7615,7 @@ impl Engine {
                 if let Some(parent) = dst.parent() {
                     fs::create_dir_all(parent)?;
                 }
-                fs::rename(&ph, placeholder_path(&dst))?;
+                rename_no_clobber(&ph, &placeholder_path(&dst))?;
                 return self.push_after_local(folder);
             }
             bail!("unknown file {from}");
@@ -7600,8 +7626,48 @@ impl Engine {
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::rename(&src, &dst).with_context(|| format!("move {from} to {to}"))?;
+        rename_no_clobber(&src, &dst).with_context(|| format!("move {from} to {to}"))?;
         self.push_after_local(folder)
+    }
+
+    /// Remove a folder on this device, only when it holds nothing: no file
+    /// that the vault knows, no placeholder, no hidden file. The folder itself
+    /// and a link are never removed.
+    pub fn remove_empty_dir(&mut self, folder: &str, path: &str) -> Result<()> {
+        crate::logged_op_plain!("rmdir", format!("{folder}/{path}"), {
+            self.remove_empty_dir_inner(folder, path)
+        })
+    }
+
+    fn remove_empty_dir_inner(&mut self, folder: &str, path: &str) -> Result<()> {
+        let (rec, root) = self.resolve_for_write(folder)?;
+        self.ensure_share_writable(&rec)?;
+        block_cache::check_rel_path(path)?;
+        if path.trim_matches('/').is_empty() {
+            bail!("the folder itself is not removed");
+        }
+        if self.mount_is_encrypted(&rec.folder_id) {
+            bail!("{folder} is kept in encrypted form here: folders are removed on the device that holds the files");
+        }
+        // Nothing the vault knows lies below it (a file another device has, or
+        // one not yet fetched, counts as there).
+        let prefix = format!("{}/", path.trim_matches('/'));
+        if self
+            .list_files(folder)?
+            .iter()
+            .any(|f| f.path.starts_with(&prefix))
+        {
+            bail!("{path} holds files: move or remove them first");
+        }
+        let local = self.local_rules(&root).default_local(path).into_owned();
+        let dir = util::safe_join(&root, &local)?;
+        let meta = fs::symlink_metadata(&dir).with_context(|| format!("no folder {path}"))?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            bail!("{path} is not a folder");
+        }
+        // remove_dir only removes an empty directory: anything left in it stays.
+        fs::remove_dir(&dir).with_context(|| format!("{path} is not empty"))?;
+        Ok(())
     }
 
     pub fn list_files(&self, folder: &str) -> Result<Vec<FileEntry>> {
@@ -8577,8 +8643,6 @@ pub fn reset_device(home: &Path) -> Result<Vec<String>> {
         "devices.json",
         "clock.json",
         "mcp-grants.json",
-        "mcp-keys.json",
-        "mcp-keys-used.json",
         "share-request.enc",
         "share-request.json",
         crate::org::LEGACY_REQUEST_FILE,

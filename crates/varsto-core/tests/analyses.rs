@@ -200,7 +200,21 @@ fn analyses_merge_across_devices_newest_first() {
     assert_eq!(got.analysis, "train ticket");
     assert_eq!(got.author, "laptop");
 
-    // B writes a newer one; A takes it.
+    // An analysis is never replaced: B's newer text is refused while A's
+    // stands, and only after A clears it may B record its own.
+    assert!(b
+        .set_analysis(
+            "docs",
+            "trip.txt",
+            "train ticket to Lyon",
+            &[],
+            Some("model-b")
+        )
+        .is_err());
+    assert!(a.clear_analysis("docs", "trip.txt").unwrap());
+    a.exchange_notes().unwrap();
+    b.exchange_notes().unwrap();
+    assert!(b.analysis("docs", "trip.txt").unwrap().is_none());
     b.set_analysis(
         "docs",
         "trip.txt",
@@ -223,7 +237,7 @@ fn analyses_merge_across_devices_newest_first() {
         "train ticket to Lyon"
     );
 
-    // A clears it: cleared everywhere.
+    // A clears it again: cleared everywhere.
     assert!(a.clear_analysis("docs", "trip.txt").unwrap());
     a.exchange_notes().unwrap();
     b.exchange_notes().unwrap();

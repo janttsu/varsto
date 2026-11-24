@@ -14,7 +14,7 @@ pub enum LogCmd {
     Path,
     /// Print the end of a log file; with -f keep printing new lines.
     Tail {
-        /// Component: service, cli, tray, desktop-app, app, …
+        /// Component: service, cli, tray, desktop-app, mcp, app, …
         #[arg(long, default_value = "service")]
         component: String,
         /// Lines to show.
@@ -34,13 +34,15 @@ pub enum LogCmd {
 }
 
 /// Which component a command logs as.
-pub fn component_for(service_run: bool, desktop: bool, tray: bool) -> &'static str {
+pub fn component_for(service_run: bool, desktop: bool, tray: bool, mcp: bool) -> &'static str {
     if service_run {
         "service"
     } else if desktop {
         "desktop-app"
     } else if tray {
         "tray"
+    } else if mcp {
+        "mcp"
     } else {
         "cli"
     }
