@@ -1020,6 +1020,7 @@
     ]
   ],
   "strings": {
+  "Path in folder": "Pfad im Ordner",
     "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and joining needs the same one.": "Gib zuerst die Passphrase für dieses Gerät ein (mindestens 12 Zeichen): die Schlüssel der Anfrage bleiben darunter versiegelt, und zum Beitreten brauchst du dieselbe.",
     "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and accepting needs the same one.": "Gib zuerst die Passphrase für dieses Gerät ein (mindestens 12 Zeichen): die Schlüssel der Anfrage bleiben darunter versiegelt, und zum Annehmen brauchst du dieselbe.",
     "You can give another person one folder, and nothing else of your vault. They send you a request code from their device, you compare a six-word fingerprint with them over a call or in person, and you share the folder with that device. They accept it through a storage you both reach, after comparing the six words of your device.": "Du kannst einer anderen Person einen Ordner geben und sonst nichts aus deinem Tresor. Sie schickt dir einen Anfragecode von ihrem Gerät, du vergleichst mit ihr einen Fingerabdruck aus sechs Wörtern per Anruf oder persönlich und gibst den Ordner für dieses Gerät frei. Sie nimmt ihn über einen Speicher an, den ihr beide erreicht, nachdem sie die sechs Wörter deines Geräts verglichen hat.",

@@ -1235,3 +1235,9 @@ ul.list details.ij-failed li { display: list-item; border-top: 0; padding: 3px 0
 #nt-error { overflow-wrap: anywhere; }
 body[data-mobile="1"] .nt-row button { flex: 1 1 30%; }
 body[data-mobile="1"] .nt-card { max-height: 92vh; }
+
+/* Folder levels in the file list */
+.files-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; font-size: 14px; }
+.files-crumbs .link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.files-crumbs .crumb-here { font-weight: 600; }
+#files .link-btn.file-name { background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; display: inline-flex; align-items: center; gap: 6px; }

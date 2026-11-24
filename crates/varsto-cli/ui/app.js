@@ -3660,6 +3660,8 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // this session are shown as rows (the ledger lists files only) so files can be added into them.
   var uploadPrefix = "";
   var newDirs = {};
+  // The folder level shown per folder ("" is the top); filters show every match.
+  var filesDir = {};
   $("files-upload").onclick = function () { uploadPrefix = ""; $("fileinput").click(); };
   $("fileinput").onchange = function () { var files = Array.prototype.slice.call($("fileinput").files || []); $("fileinput").value = ""; uploadFiles($("filesfolder").value, files, uploadPrefix); };
   // Adding files: a line per file ("Adding 2 of 6: name") and a bar for that
@@ -3761,19 +3763,63 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       filesShown = { folder: folder, raw: rows.__stale ? filesShown.raw : (rows.__raw || null), words: wkey, count: 0, rows: all };
       var filtered = words.length > 0;
       if (filtered) { rows = rows.filter(function (f) { return matchesFilter(f, words); }); }
+      // Without a filter the table shows one folder level: its files and its
+      // subfolders, which open on a click. The filter searches every level.
+      var here = filtered ? "" : (filesDir[folder] || "");
+      if (here && !all.some(function (r) { return r.path.indexOf(here + "/") === 0; }) && !(newDirs[folder] || []).some(function (d) { return d === here || d.indexOf(here + "/") === 0; })) { here = ""; delete filesDir[folder]; }
+      var pre = here ? here + "/" : "";
+      var subs = {}, subOrder = [];
+      function sub(name) { if (!subs[name]) { subs[name] = { name: name, count: 0, bytes: 0 }; subOrder.push(name); } return subs[name]; }
+      if (!filtered) {
+        rows = rows.filter(function (f) {
+          if (f.path.indexOf(pre) !== 0) { return false; }
+          var rest = f.path.slice(pre.length), cut = rest.indexOf("/");
+          if (cut < 0) { return true; }
+          var s = sub(rest.slice(0, cut)); s.count++; s.bytes += f.size || 0;
+          return false;
+        });
+        (newDirs[folder] || []).forEach(function (d) {
+          if (d.indexOf(pre) !== 0 || d.length <= pre.length || all.some(function (r) { return r.path.indexOf(d + "/") === 0; })) { return; }
+          sub(d.slice(pre.length).split("/")[0]);
+        });
+      }
+      var dirs = subOrder.map(function (n) { return subs[n]; });
       var tb = $("files").querySelector("tbody"); tb.innerHTML = "";
-      var dirs = (newDirs[folder] || []).filter(function (d) { return !rows.some(function (r) { return r.path.indexOf(d + "/") === 0; }); });
+      var crumbs = $("files-crumbs"); crumbs.innerHTML = ""; crumbs.classList.toggle("hidden", !here);
+      if (here) {
+        var up = el("button", "secondary", "Up"); up.type = "button";
+        up.onclick = function () { filesDir[folder] = here.indexOf("/") < 0 ? "" : here.slice(0, here.lastIndexOf("/")); refilterFiles(); };
+        crumbs.appendChild(up);
+        var acc = "";
+        var rootBtn = el("button", "link-btn", folder); rootBtn.type = "button";
+        rootBtn.onclick = function () { filesDir[folder] = ""; refilterFiles(); };
+        crumbs.appendChild(rootBtn);
+        here.split("/").forEach(function (part, i, parts) {
+          acc = acc ? acc + "/" + part : part;
+          crumbs.appendChild(el("span", "muted", " / "));
+          var target = acc;
+          if (i === parts.length - 1) { crumbs.appendChild(el("span", "crumb-here", part)); } else {
+            var b = el("button", "link-btn", part); b.type = "button";
+            b.onclick = function () { filesDir[folder] = target; refilterFiles(); };
+            crumbs.appendChild(b);
+          }
+        });
+      }
       var empty = $("files-empty");
       empty.querySelector(".empty-title").textContent = rows.length || dirs.length ? "" : filtered ? "No files match the filter" : "This folder is empty";
       empty.querySelector(".muted").textContent = rows.length || dirs.length || filtered ? "" : "Add files here, or put them in " + folder + " on any device; they appear after a sync.";
       empty.classList.toggle("hidden", rows.length > 0 || dirs.length > 0);
-      dirs.forEach(function (d) {
+      dirs.forEach(function (s) {
+        var full = pre + s.name;
         var tr = document.createElement("tr"); tr.className = "dir-row";
-        var nameCell = document.createElement("td"); var wrap = el("span", "file-name"); var fi = el("span", "file-icon"); fi.appendChild(icon("folders")); wrap.appendChild(fi); wrap.appendChild(document.createTextNode(d + "/")); nameCell.appendChild(wrap); tr.appendChild(nameCell);
-        var sz = document.createElement("td"); sz.className = "num muted"; sz.textContent = "–"; tr.appendChild(sz);
-        var st = document.createElement("td"); st.appendChild(pill("grey", "Empty folder")); tr.appendChild(st);
-        var lu = document.createElement("td"); lu.className = "muted"; lu.textContent = "New"; tr.appendChild(lu);
-        var act = document.createElement("td"); var ab = el("button", "secondary"); ab.type = "button"; ab.appendChild(icon("upload")); ab.appendChild(document.createTextNode("Add files")); ab.onclick = function (ev) { ev.stopPropagation(); uploadPrefix = d; $("fileinput").click(); }; act.appendChild(ab); tr.appendChild(act);
+        var nameCell = document.createElement("td"); var open = el("button", "link-btn file-name"); open.type = "button";
+        var fi = el("span", "file-icon"); fi.appendChild(icon("folders")); open.appendChild(fi); open.appendChild(document.createTextNode(s.name + "/"));
+        open.onclick = function () { filesDir[folder] = full; refilterFiles(); };
+        nameCell.appendChild(open); tr.appendChild(nameCell);
+        var sz = document.createElement("td"); sz.className = "num muted"; sz.textContent = s.count ? fmtBytes(s.bytes) : "–"; tr.appendChild(sz);
+        var st = document.createElement("td"); st.appendChild(s.count ? pill("grey", "Folder") : pill("grey", "Empty folder")); tr.appendChild(st);
+        var lu = document.createElement("td"); lu.className = "muted"; lu.textContent = s.count ? "–" : "New"; tr.appendChild(lu);
+        var act = document.createElement("td"); var ab = el("button", "secondary"); ab.type = "button"; ab.appendChild(icon("upload")); ab.appendChild(document.createTextNode("Add files")); ab.onclick = function (ev) { ev.stopPropagation(); uploadPrefix = full; $("fileinput").click(); }; act.appendChild(ab); tr.appendChild(act);
         tb.appendChild(tr);
       });
       var reselect = null;
