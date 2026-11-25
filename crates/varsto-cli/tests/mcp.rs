@@ -182,8 +182,49 @@ fn mcp_server_answers_with_granted_access_only() {
     );
     assert_eq!(root["result"]["isError"], true, "{root}");
     assert!(docs.exists());
+    // A text file can be replaced: the old version stays in the history, so
+    // the replacement is undone by restoring it.
+    let old_text = fs::read_to_string(docs.join("2026/notes.md")).unwrap();
+    let replaced = call(
+        "tools/call",
+        serde_json::json!({"name": "varsto_write", "arguments": {"folder": "docs", "path": "2026/notes.md", "text": "replaced by the assistant"}}),
+    );
+    assert_ne!(replaced["result"]["isError"], true, "{replaced}");
+    assert_eq!(
+        fs::read_to_string(docs.join("2026/notes.md")).unwrap(),
+        "replaced by the assistant"
+    );
+    // The replaced version is in the history with its old size.
+    let listed: serde_json::Value = serde_json::from_str(&varsto(
+        &home,
+        &["--json", "history", "docs", "2026/notes.md"],
+    ))
+    .unwrap();
+    let versions = listed["versions"].as_array().unwrap();
+    assert_eq!(versions.len(), 1, "{listed}");
+    assert_eq!(versions[0]["size"], old_text.len() as u64, "{listed}");
+    assert_eq!(versions[0]["replaced_by"], "laptop", "{listed}");
+    // With history off nothing is replaced: the write is refused.
+    varsto(&home, &["history", "set", "--off"]);
+    let refused = call(
+        "tools/call",
+        serde_json::json!({"name": "varsto_write", "arguments": {"folder": "docs", "path": "2026/notes.md", "text": "second try"}}),
+    );
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
+    assert_eq!(
+        fs::read_to_string(docs.join("2026/notes.md")).unwrap(),
+        "replaced by the assistant"
+    );
+    varsto(&home, &["history", "set", "--days", "90"]);
+    let made = call(
+        "tools/call",
+        serde_json::json!({"name": "varsto_write", "arguments": {"folder": "docs", "path": "2026/INDEX.md", "text": "index"}}),
+    );
+    assert_ne!(made["result"]["isError"], true, "{made}");
+    assert!(docs.join("2026/INDEX.md").exists());
+
     let tools = call("tools/list", serde_json::json!({}));
-    for gone_tool in ["varsto_write", "varsto_clear_analysis", "delete"] {
+    for gone_tool in ["varsto_clear_analysis", "delete"] {
         assert!(
             !tools.to_string().contains(gone_tool),
             "{gone_tool}: {tools}"
@@ -323,7 +364,6 @@ fn an_analyse_grant_records_analyses_but_moves_nothing() {
         assert!(tools.to_string().contains(t), "{t}");
     }
     assert!(!tools.to_string().contains("varsto_clear_analysis"));
-    assert!(!tools.to_string().contains("varsto_write"));
     let (_, folders) = c.tool("varsto_folders", serde_json::json!({}));
     assert!(folders.contains("\"analyse\""), "{folders}");
 
@@ -352,6 +392,15 @@ fn an_analyse_grant_records_analyses_but_moves_nothing() {
         serde_json::json!({"folder": "docs", "path": "new"}),
     );
     assert!(err);
+    let (err, _) = c.tool(
+        "varsto_write",
+        serde_json::json!({"folder": "docs", "path": "trip.txt", "text": "replaced"}),
+    );
+    assert!(err);
+    assert_eq!(
+        fs::read_to_string(docs.join("trip.txt")).unwrap(),
+        "Train to Lyon on 9 December"
+    );
     assert!(docs.join("trip.txt").exists() && !docs.join("new").exists());
     // An analysis is kept: a second one for the same file is refused.
     let (err, text) = c.tool(

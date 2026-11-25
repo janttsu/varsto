@@ -204,6 +204,18 @@ impl Backend {
             Backend::Direct(e) => Ok(serde_json::to_value(e.move_file(folder, from, to)?)?),
         }
     }
+    fn write(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<Value> {
+        match self {
+            Backend::Http { .. } => self.call_json(
+                "POST",
+                "/api/write",
+                Some(
+                    json!({"folder": folder, "path": path, "text": String::from_utf8_lossy(bytes)}),
+                ),
+            ),
+            Backend::Direct(e) => Ok(serde_json::to_value(e.save_text(folder, path, bytes)?)?),
+        }
+    }
     fn rmdir(&mut self, folder: &str, path: &str) -> Result<()> {
         match self {
             Backend::Http { .. } => {
@@ -308,7 +320,7 @@ fn tools() -> Value {
     json!([
         {"name": "varsto_status", "description": "Vault, devices, storages and folders of this device, with chunk and copy counts.",
          "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "varsto_folders", "description": "Folders the assistant may see, with the access level granted (ro: read only; analyse: read and record file analyses; rw: also move and rename files, create and remove empty folders) and local_path: the folder's directory on this device when its files are kept there as plain files.",
+        {"name": "varsto_folders", "description": "Folders the assistant may see, with the access level granted (ro: read only; analyse: read and record file analyses; rw: also move and rename files, write text (a replaced version stays in the history), create and remove empty folders) and local_path: the folder's directory on this device when its files are kept there as plain files.",
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "varsto_files", "description": "Files of a folder: path, size, state (local, placeholder, missing), modified_utc, last_accessed_utc (Varsto's own record), content hash, and local_path: where the file is on this device's disk when it is synced here as a plain file. Varsto does not hand out file contents: read a file from its local_path with your own file tools. A file without local_path is not on this device (a placeholder, or a folder kept encrypted here). A file that was analysed carries analysis (its first 500 characters; analysis_truncated when longer, varsto_get_analysis has it all), analysis_tags, analysis_utc, analysis_by and analysis_stale (the file changed since: analyse it again). with_analysis: false leaves the analyses out.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "with_analysis": {"type": "boolean", "default": true}}, "required": ["folder"]}},
@@ -322,6 +334,8 @@ fn tools() -> Value {
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "from": {"type": "string"}, "to": {"type": "string"}}, "required": ["folder", "from", "to"]}},
         {"name": "varsto_mkdir", "description": "Create a directory inside a folder (read-write grant).",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
+        {"name": "varsto_write", "description": "Write text to a file inside a folder (read-write grant). A new name creates the file. An existing file is replaced, and its previous version is kept in the folder's version history, so nothing is lost; the change syncs like any other. Only text up to 2 MiB; the file must be a plain local copy on this device when it replaces an existing one.",
+         "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}, "text": {"type": "string"}}, "required": ["folder", "path", "text"]}},
         {"name": "varsto_rmdir", "description": "Remove an empty directory inside a folder (read-write grant). It removes only a folder that holds nothing: no file, no placeholder, nothing the vault knows. A folder with anything in it is refused; move or remove those first. The folder itself is never removed.",
          "inputSchema": {"type": "object", "properties": {"folder": {"type": "string"}, "path": {"type": "string"}}, "required": ["folder", "path"]}},
         {"name": "varsto_sync", "description": "Sync one folder or all granted folders now. With the Varsto service running, the sync is queued and runs in the background (the answer says queued).",
@@ -560,6 +574,21 @@ fn call_tool(backend: &mut Backend, grants: &Grants, name: &str, args: &Value) -
             }
             backend.mkdir(folder, path)?;
             Ok(text_result(format!("created {folder}/{path}")))
+        }
+        "varsto_write" => {
+            let (folder, path, text) =
+                (arg(args, "folder")?, arg(args, "path")?, arg(args, "text")?);
+            if !can_write(folder) {
+                bail!("folder {folder} is read-only for the assistant: the user must run `varsto mcp grant {folder} --write`");
+            }
+            if text.len() > 2 * 1024 * 1024 {
+                bail!("text larger than 2 MiB");
+            }
+            Ok(text_result(serde_json::to_string_pretty(&backend.write(
+                folder,
+                path,
+                text.as_bytes(),
+            )?)?))
         }
         "varsto_rmdir" => {
             let (folder, path) = (arg(args, "folder")?, arg(args, "path")?);

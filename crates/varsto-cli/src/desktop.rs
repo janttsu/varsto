@@ -4056,6 +4056,12 @@ fn api_unlocked(
             engine.mkdir(&s(input, "folder")?, &s(input, "path")?)?;
             Ok(json!({"ok": true}))
         }
+        // Text for a file: created when new, replaced (old version kept) when known.
+        (Method::Post, "/api/write") => Ok(serde_json::to_value(engine.save_text(
+            &s(input, "folder")?,
+            &s(input, "path")?,
+            s(input, "text")?.as_bytes(),
+        )?)?),
         // Removes an empty folder only; the assistant's channel also uses it.
         (Method::Post, "/api/rmdir") => {
             engine.remove_empty_dir(&s(input, "folder")?, &s(input, "path")?)?;

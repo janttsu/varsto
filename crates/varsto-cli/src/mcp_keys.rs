@@ -274,11 +274,12 @@ pub fn route(
             (Need::Read, Some(body_folder?))
         }
         ("POST", "/api/analysis") => (Need::Analyse, Some(body_folder?)),
-        // Moves, renames, new folders and removing empty folders. Nothing else
-        // changes a file: no overwriting, no deleting, no new file content.
-        ("POST", "/api/move") | ("POST", "/api/mkdir") | ("POST", "/api/rmdir") => {
-            (Need::Write, Some(body_folder?))
-        }
+        // Moves, renames, new folders, removing empty folders, and writing text
+        // (a replaced version stays in the history). Nothing deletes content.
+        ("POST", "/api/move")
+        | ("POST", "/api/mkdir")
+        | ("POST", "/api/rmdir")
+        | ("POST", "/api/write") => (Need::Write, Some(body_folder?)),
         _ => return None,
     })
 }
@@ -411,11 +412,13 @@ mod tests {
         assert!(create(home, None, Grants::default(), Some(0)).is_err());
     }
 
-    /// A key never reaches a route that could overwrite or delete content,
-    /// and the clearing of analyses is for the interface only.
+    /// A key never reaches a route that could delete content, and the
+    /// clearing of analyses is for the interface only.
     #[test]
     fn overwrite_and_clear_routes_are_closed_to_keys() {
-        assert!(route("POST", "/api/write", None, Some("docs".into())).is_none());
+        assert!(
+            matches!(route("POST", "/api/write", None, Some("docs".into())), Some((Need::Write, Some(f))) if f == "docs")
+        );
         assert!(route("POST", "/api/analysis/clear", None, Some("docs".into())).is_none());
         assert!(matches!(
             route("POST", "/api/rmdir", None, Some("docs".into())),

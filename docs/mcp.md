@@ -11,10 +11,11 @@ This page is for two readers: **you**, setting up an assistant, and **the assist
 - see the folders you granted and their files, with each file's place on this device's disk (`local_path`);
 - record what a file contains, in words and tags: its **analysis**, kept by Varsto and synced encrypted to all your devices;
 - find files by what they contain without reading them again;
+- write text to a file (a new file, or a replaced version of a file this device holds; the old version stays in the version history);
 - reorganise: create directories, move and rename files, and remove empty directories;
 - sync, and see Varsto's own placement advice.
 
-It never hands out file contents. The assistant reads synced plain files itself, from `local_path`, with its own file tools. Nothing is ever deleted or overwritten: there is no delete or write tool, a move never replaces a file (its target name must be free), and a folder is removed only when it is empty.
+It never hands out file contents. The assistant reads synced plain files itself, from `local_path`, with its own file tools. Nothing is ever deleted: there is no delete tool, and a folder is removed only when it is empty. A replaced file keeps its previous version in the version history (`varsto history`), so the replacement can be undone. A move never replaces a file: its target name must be free.
 
 ## Starting it
 
@@ -38,7 +39,7 @@ Nothing is visible until you grant it. There are three levels per folder:
 |---|---|---|
 | `ro` | `varsto mcp grant docs` | list files, read synced files from `local_path`, read and search analyses, sync |
 | `an` (analyse) | `varsto mcp grant docs --analyse` | the above, and record analyses; no moves, no folders |
-| `rw` | `varsto mcp grant docs --write` | analyses, moves and renames, new folders, and removing empty folders |
+| `rw` | `varsto mcp grant docs --write` | analyses, writing text, moves and renames, new folders, and removing empty folders |
 
 ```sh
 varsto mcp grant all            # every folder, read-only (never a Strongroom: those need a grant by name)
@@ -61,7 +62,7 @@ varsto mcp key list                                # name, id, scope, created, e
 varsto mcp key revoke qwen                         # by name or id; refused at once
 ```
 
-The key (`vmk_` and 64 hex characters) is printed once. Varsto keeps only its BLAKE3 hash in `mcp-keys.json` (readable by your user only). The service answers a key only on the routes the MCP tools use (status, folders, files, analyses, move, mkdir, rmdir, sync), only within the key's folders and levels, and shows it only its folders; every other route answers 403, and an unknown, revoked or expired key 401. Keys are never logged.
+The key (`vmk_` and 64 hex characters) is printed once. Varsto keeps only its BLAKE3 hash in `mcp-keys.json` (readable by your user only). The service answers a key only on the routes the MCP tools use (status, folders, files, analyses, write, move, mkdir, rmdir, sync), only within the key's folders and levels, and shows it only its folders; every other route answers 403, and an unknown, revoked or expired key 401. Keys are never logged.
 
 A key limits what an MCP client can do through the service. It is not a sandbox: a program that can read your device directory can also read the service's session token there. Run untrusted assistants as another user or in a container that sees only the synced folders it should read.
 
@@ -157,6 +158,10 @@ Every word of `query` must occur, ignoring case, in the file's analysis, one of 
 
 `{"folder": "docs", "path": "2026/receipts"}`. In a folder kept encrypted on this device a directory exists once a file is in it.
 
+### `varsto_write` (rw)
+
+`{"folder": "docs", "path": "2026/INDEX.md", "text": "..."}`: creates the file, or replaces the text of a file this device holds as a plain copy (at most 2 MiB). The previous version is first saved in the version history, and the replacement is refused when history is off for the folder, when the current version is not yet fully stored, or when there is no local copy. The file's previous version is in `varsto history`.
+
 ### `varsto_rmdir` (rw)
 
 `{"folder": "docs", "path": "2026/old"}`: removes an empty directory. A directory with anything in it is refused, also when the vault knows a file in it that is not on this device yet. The folder itself is never removed.
@@ -175,13 +180,13 @@ Every word of `query` must occur, ignoring case, in the file's analysis, one of 
 2. For each file with a `local_path` and no analysis (or `analysis_stale: true`), read it from `local_path` with your own file tools. For large files read the beginning, or what your context allows; for images and other media use what your tools can see.
 3. Record what it contains with `varsto_set_analysis`: what kind of document it is, its subject, people and organisations, places, dates, amounts, language, and anything that helps to find or file it later. Add a few short, consistent tags. Set `by` to your model name.
 4. Later, answer questions and plan with `varsto_search_analyses` instead of reading the files again.
-5. Reorganise only when the user asks: propose the plan first, then `varsto_mkdir`, `varsto_move` and, for emptied directories, `varsto_rmdir`.
+5. Reorganise only when the user asks: propose the plan first, then `varsto_mkdir`, `varsto_move` and, for emptied directories, `varsto_rmdir`. Index files and summaries can be written with `varsto_write`.
 
 ## Rules for the assistant
 
 - Stay inside the granted folders; paths are relative to the folder.
 - Nothing is deleted or replaced. Choose unique names; if a name is taken, pick another one (for example add a number).
-- Never try to change a file in place: the assistant cannot write file contents at all.
+- Write a file only when the user asked for it. A replaced version can be restored with `varsto history restore`.
 - A file without `local_path` is not on this device as a plain file: it is a placeholder (only its name is here), it is missing, or the folder is kept encrypted on this device. Skip it and tell the user; they can download it in Varsto (or turn selective sync off) and ask again.
 - Re-analyse a file whose analysis is `stale`.
 - Analyses are synced to all of the user's devices. Do not copy secrets (passwords, card numbers, keys) into them unless the user wants them findable.

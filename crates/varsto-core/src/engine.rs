@@ -7630,6 +7630,69 @@ impl Engine {
         self.push_after_local(folder)
     }
 
+    /// Write text to a path: a new file is created, a known file is replaced
+    /// (its old version kept in the history, see `overwrite_file`).
+    pub fn save_text(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
+        let known = {
+            let (rec, _) = self.resolve_folder(folder)?;
+            let state = self.load_state(&rec.folder_id)?;
+            state.files.get(path).is_some_and(|f| !f.deleted)
+        };
+        if known {
+            self.overwrite_file(folder, path, bytes)
+        } else {
+            self.create_file(folder, path, bytes)
+        }
+    }
+
+    /// Replace the content of a file that this device holds as a plain copy.
+    /// The previous version goes into the folder's version history first, so
+    /// nothing is lost; the change syncs like any other edit. Refused when
+    /// history is off for the folder, when the current version is not fully
+    /// stored yet, or when there is no local copy to write.
+    pub fn overwrite_file(&mut self, folder: &str, path: &str, bytes: &[u8]) -> Result<PushReport> {
+        crate::logged_op_plain!("overwrite", format!("{folder}/{path}"), {
+            self.overwrite_file_inner(folder, path, bytes)
+        })
+    }
+
+    fn overwrite_file_inner(
+        &mut self,
+        folder: &str,
+        path: &str,
+        bytes: &[u8],
+    ) -> Result<PushReport> {
+        let (rec, root) = self.resolve_for_write(folder)?;
+        self.ensure_share_writable(&rec)?;
+        util::check_rel_path(path)?;
+        if self.mount_is_encrypted(&rec.folder_id) {
+            bail!(
+                "{folder} is kept encrypted here: files are changed on the device that holds them"
+            );
+        }
+        if self.history_days_for(&rec.folder_id).is_none() {
+            bail!("version history is off for {folder}: an overwrite would lose the old version");
+        }
+        // The old version must be in storage before the local copy changes:
+        // publish what is here now, and insist that everything went out.
+        let before = self.push(folder)?;
+        if !before.storages_unavailable.is_empty() || !before.storages_full.is_empty() {
+            bail!("{folder} is not fully stored yet ({} storage(s) did not take the blocks): try again after the next sync", before.storages_unavailable.len() + before.storages_full.len());
+        }
+        let state = self.load_state(&rec.folder_id)?;
+        if !state.files.get(path).is_some_and(|f| !f.deleted) {
+            bail!("unknown file {path} in {folder}");
+        }
+        let dst = self.disk_of(&root, &state, path);
+        let meta = fs::symlink_metadata(&dst)
+            .with_context(|| format!("{path} has no local copy here: fetch it first"))?;
+        if !meta.is_file() {
+            bail!("{path} is not a plain file here");
+        }
+        util::write_atomic(&dst, bytes)?;
+        self.push_after_local(folder)
+    }
+
     /// Remove a folder on this device, only when it holds nothing: no file
     /// that the vault knows, no placeholder, no hidden file. The folder itself
     /// and a link are never removed.
