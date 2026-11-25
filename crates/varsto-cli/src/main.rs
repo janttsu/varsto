@@ -27,7 +27,6 @@ mod history;
 mod icon;
 mod import;
 mod import_jobs;
-mod import_jobs_cmd;
 mod logcmd;
 mod notifications;
 mod notify_api;
@@ -37,14 +36,12 @@ mod remember;
 mod restic;
 mod service;
 mod sse;
-mod torrent;
 mod trash;
 mod tray;
 mod update;
 mod upkeep;
 mod view;
 mod viz;
-mod youtube;
 
 #[derive(Parser)]
 #[command(
@@ -245,8 +242,8 @@ enum Cmd {
         cmd: backup::BackupCmd,
     },
     /// Import a git-annex repository, a cloud drive (Dropbox, OneDrive, any
-    /// rclone remote), a local directory or a YouTube channel, playlist or
-    /// video into a folder; status, verify, cleanup, jobs.
+    /// rclone remote) or a local directory into a folder; status, verify,
+    /// cleanup, jobs.
     Import {
         #[command(subcommand)]
         cmd: import::ImportCmd,
@@ -4363,9 +4360,6 @@ fn run(cli: &Cli) -> Result<()> {
                         api("/api/state")
                     )
                 );
-                for line in torrent::status_lines(&home) {
-                    println!("{line}");
-                }
             }
             if let Some(mut v) = from_service {
                 if cli.json {
@@ -4377,9 +4371,6 @@ fn run(cli: &Cli) -> Result<()> {
                     for l in placing::status_lines(&home) {
                         println!("{l}");
                     }
-                    for l in youtube::status_lines(&home) {
-                        println!("{l}");
-                    }
                 }
                 return Ok(());
             }
@@ -4389,9 +4380,7 @@ fn run(cli: &Cli) -> Result<()> {
             let move_lines = if cli.json {
                 Vec::new()
             } else {
-                let mut l = placing::status_lines(&home);
-                l.extend(youtube::status_lines(&home));
-                l
+                placing::status_lines(&home)
             };
             print(cli, &s, |s| {
                 let mut out = format!(

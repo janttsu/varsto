@@ -32,7 +32,6 @@ pub mod annex;
 pub mod dir;
 pub mod hashes;
 pub mod rclone;
-pub mod youtube;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

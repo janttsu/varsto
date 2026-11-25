@@ -7,7 +7,6 @@ use varsto_core::crypto::{SecretKey, SigningKey};
 use varsto_core::logging::{self, Options};
 use varsto_core::replica::ReplicaToken;
 use varsto_core::s3::S3Config;
-use varsto_core::transmission::RpcSettings;
 use varsto_core::vault::{Keys, SecretStore};
 
 #[test]
@@ -96,14 +95,7 @@ fn no_secret_reaches_the_log() {
         .insert("bucket-store".into(), s3_secret.into());
     let rclone_token = r#"{"access_token":"ya29.canaryRcloneAccessToken"}"#;
     let restic_password = "canary-restic-pw-991";
-    // The transmission RPC password, and any `Option<String>` secret, as
-    // `Debug` prints it (`Some("…")`).
-    let rpc_password = "canary-rpc-pw-7731";
-    let rpc = RpcSettings {
-        url: "http://127.0.0.1:9091/transmission/rpc".into(),
-        user: Some("canary-user".into()),
-        password: Some(rpc_password.into()),
-    };
+    // Any `Option<String>` secret, as `Debug` prints it (`Some("…")`).
     let opt_password: Option<String> = Some("canary-option-pw-5520".into());
     // Recovery words.
     let words = varsto_core::recovery::words_from_key(&master_hex).unwrap();
@@ -125,7 +117,6 @@ fn no_secret_reaches_the_log() {
         ("s3", s3_secret.to_string()),
         ("rclone", "ya29.canaryRcloneAccessToken".to_string()),
         ("restic", restic_password.to_string()),
-        ("transmission", rpc_password.to_string()),
         ("option password", "canary-option-pw-5520".to_string()),
         // Any five consecutive words of the phrase.
         (
@@ -168,7 +159,7 @@ fn no_secret_reaches_the_log() {
     log::debug!("master hex by mistake {master_hex} and folder key {folder_hex}");
     log::debug!("signer by mistake {signer_hex} and its seed {ed_seed_hex}");
     log::warn!("unlock with {keyring_passphrase:?} failed: {keyring_passphrase}");
-    log::debug!("torrent rpc {rpc:?} settings password: {opt_password:?}");
+    log::debug!("settings password: {opt_password:?}");
     // Fields in every capture form.
     log::debug!(token = service_token.as_str(), passphrase = passphrase, key_hex:% = folder_hex, secret:? = s3_secret; "fields with secret names");
     log::debug!(value:% = share_text, other:? = replica_text, plain = mcp_key, words = words.as_str(); "fields with neutral names");

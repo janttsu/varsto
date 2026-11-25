@@ -1758,12 +1758,6 @@ impl Engine {
                 },
             );
             book.missing_holders.remove(&g.id);
-            if let Some(v) = crate::youtube::video_of_content_id(&g.id) {
-                let paths = book.youtube.entry(v.to_string()).or_default();
-                for &i in &g.paths {
-                    paths.insert(items[i].path.clone());
-                }
-            }
             report.imported_ids += 1;
             report.imported_files += g.paths.len() as u64;
             report.imported_bytes += done.size;
@@ -2450,40 +2444,6 @@ impl Engine {
             self.publish_book(&rec, &b)?;
         }
         Ok(report)
-    }
-
-    /// Let the existing folder `rec` take imports from the local directory
-    /// `dir` as well (a torrent job into a folder that is there already):
-    /// its import book, made when it has none, names the directory as one of
-    /// its sources, so that `import_run` of the directory continues the
-    /// folder. A folder imported from git-annex or a cloud drive is refused.
-    pub(super) fn import_adopt_dir(&mut self, rec: &FolderRecord, dir: &Path) -> Result<()> {
-        if rec.is_backup() {
-            bail!("folder {} is a backup; it takes no imports", rec.name);
-        }
-        let src = import::dir::DirSource::open(dir)?;
-        self.check_source_path(src.root(), true)?;
-        let info = src.info().clone();
-        let _ = self.refresh_books();
-        let mut book = self.load_book(&rec.folder_id).unwrap_or_default();
-        if book.kind.is_empty() {
-            book.kind = import::KIND_DIR.to_string();
-            book.display = info.display.clone();
-        }
-        if book.kind != import::KIND_DIR {
-            bail!(
-                "folder {} was imported from a {} source; give a new folder name, or a folder that holds your own files or local imports",
-                rec.name,
-                book.kind
-            );
-        }
-        if info.identity.iter().all(|i| book.identity.contains(i)) {
-            return Ok(());
-        }
-        book.identity.extend(info.identity.iter().cloned());
-        self.save_book(&rec.folder_id, &book)?;
-        let rec = self.with_key(rec)?;
-        self.publish_book(&rec, &book)
     }
 
     /// What [`Engine::stored_problem`] reads once for many files of a folder.
