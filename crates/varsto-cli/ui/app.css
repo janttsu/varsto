@@ -1241,3 +1241,21 @@ body[data-mobile="1"] .nt-card { max-height: 92vh; }
 .files-crumbs .link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
 .files-crumbs .crumb-here { font-weight: 600; }
 #files .link-btn.file-name { background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; display: inline-flex; align-items: center; gap: 6px; }
+
+/* File browser: the details of the selected file are beside the list at once,
+   without scrolling to the bottom of the page. */
+.files-layout.with-details { grid-template-columns: minmax(0, 1fr) 340px; }
+.files-layout .details { position: sticky; top: 88px; max-height: calc(100vh - 110px); overflow: auto; }
+/* Between tablet and wide widths the details slide over the list instead of
+   pushing it down, so the list keeps its width. */
+@media (max-width: 1100px) and (min-width: 701px) {
+  .files-layout.with-details { grid-template-columns: minmax(0, 1fr); }
+  .files-layout .details { position: fixed; top: 88px; right: 16px; width: 360px; z-index: 30; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2); }
+}
+/* Denser file rows (the compact density is the default). */
+html[data-density="compact"] #files th, html[data-density="compact"] #files td { padding: 3px 8px; }
+html[data-density="compact"] #files td { font-size: 13px; line-height: 1.25; }
+/* Folder access: one short line per folder. */
+.f3-folder { margin-top: 6px; }
+.f3-row { min-height: 28px; padding: 2px 0; font-size: 13px; }
+.f3-head { margin-bottom: 2px; }
