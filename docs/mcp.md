@@ -17,6 +17,10 @@ This page is for two readers: **you**, setting up an assistant, and **the assist
 
 It never hands out file contents. The assistant reads synced plain files itself, from `local_path`, with its own file tools. Nothing is ever deleted: there is no delete tool, and a folder is removed only when it is empty. A replaced file keeps its previous version in the version history (`varsto history`), so the replacement can be undone. A move never replaces a file: its target name must be free.
 
+## Ready-made assistant: sorto
+
+[sorto](https://github.com/janttsu/sorto) sorts files into a Johnny.Decimal structure with a model that runs on your own computer, through this server. Create a key for it (`varsto mcp key create --name sorto --folders <folder> --write`) and give it to sorto as `VARSTO_MCP_KEY`. `sorto varsto check` shows the folders the key may use.
+
 ## Starting it
 
 ```sh
