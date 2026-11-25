@@ -4714,6 +4714,9 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       $("f3recovery-names").textContent = Object.keys(names).join(", ");
     }
     var box = $("f3folders"); box.innerHTML = "";
+    // Collapsed by default: the summary only counts the folders and the owned ones.
+    $("f3sum").textContent = list.length ? list.length + " (" + f3Owned + ")" : "";
+    $("f3box").classList.toggle("hidden", !list.length);
     list.forEach(function (f) {
       var sec = el("div", "f3-folder");
       var head = el("h3", "f3-head"); head.appendChild(f3Name(f.folder));

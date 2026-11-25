@@ -1259,3 +1259,5 @@ html[data-density="compact"] #files td { font-size: 13px; line-height: 1.25; }
 .f3-folder { margin-top: 6px; }
 .f3-row { min-height: 28px; padding: 2px 0; font-size: 13px; }
 .f3-head { margin-bottom: 2px; }
+
+.f3-box > summary { cursor: pointer; padding: 2px 0; }

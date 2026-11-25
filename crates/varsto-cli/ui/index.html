@@ -444,7 +444,9 @@
       <section id="f3card" class="card f3-card hidden" aria-label="Folder access">
         <h2 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Folder access</h2>
         <div id="f3recovery" class="notice warn hidden"><span>Some folders have no recovery copy. Without one, losing every device loses them.</span> <span id="f3recovery-names" data-no-i18n></span> <button id="f3recovery-go" type="button" class="secondary">Write recovery copies…</button></div>
-        <div id="f3folders"></div>
+        <details id="f3box" class="f3-box"><summary class="small"><span id="f3sum" data-no-i18n></span></summary>
+          <div id="f3folders"></div>
+        </details>
       </section>
 
       <section id="foldersettings" class="card folder-settings hidden" aria-label="Folder settings">
