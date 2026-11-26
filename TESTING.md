@@ -136,7 +136,7 @@ Environment variables: `VARSTO_LIBVIRT_URI`, `VARSTO_POOL`, `VARSTO_CACHE_DIR`, 
 
 ### Other test tools
 
-- Interface tests in Chromium (Playwright; `pip install playwright` and `playwright install chromium`, or `CHROMIUM=/path/to/chromium`): `scripts/test/ui-help.py`, `ui-no-reload.py` (the page does not reload when the service restarts), `viz-first-paint.py` (the visualization page never draws invented content) and `qr-scan-browser.py` (QR scanner with a fake camera). Each takes a varsto binary and a work directory; read the header of the script for the exact arguments.
+- Interface tests in Chromium (Playwright; `pip install playwright` and `playwright install chromium`, or `CHROMIUM=/path/to/chromium`): `scripts/test/ui-help.py`, `ui-no-reload.py` (the page does not reload when the service restarts), `ui-busy.py` (a busy service is not shown as a failure: a read is asked again, an action gets one calm line), `viz-first-paint.py` (the visualization page never draws invented content) and `qr-scan-browser.py` (QR scanner with a fake camera). Each takes a varsto binary and a work directory; read the header of the script for the exact arguments.
 - Page rules in plain Node: `node scripts/test/import-ui.test.js` and `node scripts/test/viz-rules.test.js`.
 - `scripts/data/validate-providers.sh [--max-age-days N] [--fail-on-stale]` validates `data/providers/*.json` against its schema and warns about stale prices.
 - Benchmarks and real-NAT tests on rented machines (`scripts/bench`, `scripts/nat-test`): [docs/testing/benchmarks.md](docs/testing/benchmarks.md). They produce numbers, not pass or fail.

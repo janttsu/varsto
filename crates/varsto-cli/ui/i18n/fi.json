@@ -1,5 +1,6 @@
 {
  "strings": {
+  "Varsto is busy with another request; try again in a moment": "Varstolla on toinen pyyntö kesken; yritä hetken kuluttua uudelleen",
   "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and joining needs the same one.": "Anna ensin tämän laitteen salasana (vähintään 12 merkkiä): pyynnön avaimet säilytetään sinetöityinä sen alla, ja liittyminen vaatii saman salasanan.",
   "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and accepting needs the same one.": "Anna ensin tämän laitteen salasana (vähintään 12 merkkiä): pyynnön avaimet säilytetään sinetöityinä sen alla, ja hyväksyminen vaatii saman salasanan.",
   "You can give another person one folder, and nothing else of your vault. They send you a request code from their device, you compare a six-word fingerprint with them over a call or in person, and you share the folder with that device. They accept it through a storage you both reach, after comparing the six words of your device.": "Voit antaa toiselle henkilölle yhden kansion etkä mitään muuta holvistasi. Hän lähettää sinulle pyyntökoodin laitteeltaan, vertaatte kuuden sanan sormenjälkeä puhelussa tai kasvokkain, ja jaat kansion sille laitteelle. Hän hyväksyy sen tallennuspaikan kautta, jonka molemmat tavoitatte, verrattuaan laitteesi kuusi sanaa.",
@@ -2042,6 +2043,10 @@
   "Anything else Varsto reports.": "Kaikki muu, mistä Varsto ilmoittaa."
  },
  "patterns": [
+  [
+   "^Varsto is busy \\((.+)\\); try again in a moment$",
+   "Varstolla on muuta työtä kesken ($1); yritä hetken kuluttua uudelleen"
+  ],
   [
    "^Storage (.+) cannot be reached; it is tried again at (.+)\\.$",
    "Tallennustilaan $1 ei saada yhteyttä; sitä yritetään uudelleen klo $2."

@@ -16,6 +16,10 @@ spec still names them because sections were written as the work was done.
 
 ## Unreleased
 
+### Fixed
+
+- A busy service is no longer shown as a failure in the interface. A read that finds the engine out is asked again by the page itself (the answer carries `Retry-After`) and says nothing in the activity list; the line under the title says the service is busy meanwhile. An action that finds the service busy gets one calm line instead of a red "error", and the address of another request (`/api/...`) is not shown.
+
 ## [0.0.1-alpha.17] - 2026-11-22
 
 The storage format is unchanged from alpha.16. Vaults open as they are and do not have to be recreated. This is still an alpha: not for production data.
