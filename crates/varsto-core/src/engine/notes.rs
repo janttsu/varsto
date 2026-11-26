@@ -329,10 +329,11 @@ impl Engine {
             .filter(|f| !f.deleted)
             .ok_or_else(|| anyhow!("unknown file {path} in {folder}"))?;
         let mut notes = self.load_notes(&rec.folder_id);
-        // An analysis is never replaced: the earlier text would be lost. The
-        // user clears it (interface) and the file is analysed again then.
-        if Self::live(&notes, path).is_some() {
-            bail!("{path} already has an analysis; it is kept (the user can clear it in the interface first)");
+        // An analysis of the file as it is now is never replaced: the text
+        // would be lost. One of an earlier version of the file (stale) is:
+        // it no longer describes the file. The user can clear either one.
+        if Self::live(&notes, path).is_some_and(|old| old.content_hash == file.content_hash) {
+            bail!("{path} already has an analysis of this version; it is kept (the user can clear it in the interface first)");
         }
         let entry = NoteEntry {
             analysis: text,

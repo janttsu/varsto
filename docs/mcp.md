@@ -140,7 +140,7 @@ Every file: `path`, `size`, `state` (`local`, `placeholder`, `missing`), `modifi
  "tags": ["receipt", "hardware", "2026"], "by": "qwen3:8b"}
 ```
 
-Records what the file contains. A file that already has an analysis is refused: an analysis is never replaced, because the earlier text would be lost. `analysis`: plain text, at most 16 KiB. `tags`: at most 32, each at most 64 characters; repeats are dropped. `by`: your model or tool name (at most 128 characters). The answer is the stored analysis. Other devices get it with the next sync.
+Records what the file contains. An analysis of the file as it is now is kept: a second one is refused, because the earlier text would be lost. When the file has changed since (`stale`), the new analysis replaces the old one, which no longer describes the file. `analysis`: plain text, at most 16 KiB. `tags`: at most 32, each at most 64 characters; repeats are dropped. `by`: your model or tool name (at most 128 characters). The answer is the stored analysis. Other devices get it with the next sync.
 
 ### `varsto_get_analysis`
 

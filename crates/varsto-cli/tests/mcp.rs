@@ -408,6 +408,19 @@ fn an_analyse_grant_records_analyses_but_moves_nothing() {
         serde_json::json!({"folder": "docs", "path": "trip.txt", "analysis": "replacement"}),
     );
     assert!(err && text.contains("already has an analysis"), "{text}");
+    // The file changes: its analysis is of an earlier version now, and a new one replaces it.
+    fs::write(
+        docs.join("trip.txt"),
+        "Train to Lyon on 9 December, back on the 12th",
+    )
+    .unwrap();
+    let (err, text) = c.tool("varsto_sync", serde_json::json!({"folder": "docs"}));
+    assert!(!err, "{text}");
+    let (err, text) = c.tool(
+        "varsto_set_analysis",
+        serde_json::json!({"folder": "docs", "path": "trip.txt", "analysis": "Train ticket, Lyon, return on 12 December.", "tags": ["travel"]}),
+    );
+    assert!(!err, "{text}");
     // Too long.
     let (err, text) = c.tool(
         "varsto_set_analysis",
