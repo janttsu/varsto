@@ -141,7 +141,8 @@ with sync_playwright() as p:
                 pg.click(".tabbar .nav-item[data-nav=more]")
                 time.sleep(0.3)
                 pg.click(".more-item[data-nav=import]")
-            pg.wait_for_selector("#importjobs li.ij-row:nth-child(3)", timeout=60000)
+            # Two imports are under way in the example; the finished one is listed apart.
+            pg.wait_for_selector("#importjobs li.ij-row:nth-child(2)", timeout=60000)
             pg.fill("#import-remote", "mydropbox:")
             time.sleep(1)
             pg.screenshot(path=f"{out}/{name}-{scheme}.png", full_page=True)
