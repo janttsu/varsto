@@ -95,6 +95,21 @@ DOCS = [
     ("BUILDING.md", "building", "Building Varsto", "Project"),
 ]
 
+# Translations of repository documents: language -> slug -> (source, title,
+# description). The English document stays the reference; a translation is
+# rendered under <lang>/docs/ and the language switcher of both pages links
+# them. Links inside a translation go to the English documents.
+DOCS_I18N = {
+    "fi": {
+        "threat-model": ("docs/architecture/threat-model.fi.md", "Uhkamalli (suunnitteluvaihe)",
+                         "Mitä Varston suunnitelma on tarkoitettu kestämään, mitä kukin osapuoli voi nähdä ja mihin suunnitelma pysähtyy. Suunnitteluvaiheen muistio."),
+    },
+}
+# The line under the title of a translated document.
+DOC_NOTE_I18N = {
+    "fi": "Käännös tiedostosta <code>{path}</code>, rakennettu {date}. Englanninkielinen alkuperäinen on ensisijainen; se kuvaa main-haaraa, ja julkaistu versio on {version}.",
+}
+
 # Search snippets. The generic "Varsto documentation: <title>" text was what
 # Google showed for these pages. Each description says what the page is.
 # mobile-testing is kept for people who have the link and left out of the
@@ -713,6 +728,7 @@ def translated(lang: str, rel: str) -> bool:
         for src in (SRC / "i18n" / lang / "pages").glob("*.html"):
             meta, _ = front_matter(src.read_text())
             outs.add(meta.get("output", f"{src.stem}.html"))
+        outs |= {f"docs/{slug}.html" for slug in DOCS_I18N.get(lang, {})}
         _TRANSLATED[lang] = outs
     return rel in _TRANSLATED[lang]
 
@@ -970,6 +986,17 @@ def build_docs() -> dict[str, str]:
         robots = "noindex, follow" if slug in NOINDEX_DOCS else ""
         (OUT / "docs" / f"{slug}.html").write_text(page(title, DOC_DESCRIPTIONS.get(slug, title), body, "Docs", 1, rel=f"docs/{slug}.html", robots=robots))
         groups.setdefault(group, []).append((slug, title))
+    for lang, table in DOCS_I18N.items():
+        for slug, (path, title, description) in table.items():
+            lines = (ROOT / path).read_text().splitlines()
+            if lines and lines[0].startswith("# "):
+                lines = lines[1:]
+            body = nosnippet_warnings(rewrite_links(pandoc("\n".join(lines)), slug_by_name, "../../docs/"))
+            english = next(p for p, s, _, _ in DOCS if s == slug)
+            note = DOC_NOTE_I18N[lang].format(path=html.escape(english), date=datetime.now(timezone.utc).date(), version=RELEASED_VERSION)
+            body = f"<article class=\"prose\">\n<h1>{html.escape(title)}</h1>\n<p class=\"note\">{note}</p>\n{body}\n</article>"
+            (OUT / lang / "docs").mkdir(parents=True, exist_ok=True)
+            (OUT / lang / "docs" / f"{slug}.html").write_text(page(title, description, body, "Docs", 2, lang, rel=f"docs/{slug}.html"))
     # Licence page from the plain-text LICENSE.
     licence = (ROOT / "LICENSE").read_text()
     body = f"<article class=\"prose\"><h1>Licence</h1><p class=\"note\">PolyForm Shield License 1.0.0, verbatim from <code>LICENSE</code>.</p><pre class=\"licence\">{html.escape(licence)}</pre></article>"
