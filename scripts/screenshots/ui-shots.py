@@ -12,8 +12,8 @@ localStorage ("varsto-lang", see crates/varsto-cli/ui/i18n.js), which is set
 in every browser context before the page loads, and the browser locale is set
 to match. The demo data stays the invented English example. Writes the website names:
 desktop-overview-*, desktop-files-*, desktop-organization-*, desktop-import-*, mobile-*,
-mobile-import-* (light and dark). The Import page shows imports of every kind in progress
-from example_data.import_jobs() (the demo vault imports nothing), with the YouTube source
+mobile-import-* (light and dark). The Import page shows imports in progress and done
+from example_data.import_jobs() (the demo vault imports nothing), with the cloud source
 chosen.
 """
 import argparse
@@ -123,8 +123,8 @@ with sync_playwright() as p:
         time.sleep(1)
         pg.screenshot(path=f"{out}/desktop-organization-{scheme}.png")
         c.close()
-        # The Import page: imports of every kind in progress (example data),
-        # and the YouTube source chosen with its fields.
+        # The Import page: imports in progress and done (example data), and
+        # the cloud source chosen with its fields.
         for name, (w, h, dev) in {"desktop-import": (1280, 1500, "laptop"), "mobile-import": (412, 2200, "phone")}.items():
             c = ctx(scheme, w, h, 1 if dev == "laptop" else 2)
             pg = c.new_page()
@@ -133,7 +133,7 @@ with sync_playwright() as p:
             pg.route("**/api/events*", lambda r: r.abort())
             pg.goto(url(dev))
             pg.wait_for_selector("#folders tbody tr", timeout=60000)
-            pg.evaluate("() => { try { sessionStorage.setItem('varsto-import-kind', 'youtube'); } catch (e) {} }")
+            pg.evaluate("() => { try { sessionStorage.setItem('varsto-import-kind', 'cloud'); } catch (e) {} }")
             if dev == "laptop":
                 pg.click(".sidebar .nav-item[data-nav=import]")
             else:
@@ -142,8 +142,7 @@ with sync_playwright() as p:
                 time.sleep(0.3)
                 pg.click(".more-item[data-nav=import]")
             pg.wait_for_selector("#importjobs li.ij-row:nth-child(3)", timeout=60000)
-            pg.fill("#import-yt-url", "https://www.youtube.com/@ExampleWorkshop")
-            pg.click("details.ij-failed summary")
+            pg.fill("#import-remote", "mydropbox:")
             time.sleep(1)
             pg.screenshot(path=f"{out}/{name}-{scheme}.png", full_page=True)
             c.close()
