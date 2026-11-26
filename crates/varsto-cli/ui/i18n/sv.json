@@ -15,6 +15,7 @@
   "Paste the recipient's request code or scan its QR code. An editor reads and writes this folder, a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors.": "Klistra in mottagarens begäranskod eller skanna dess QR-kod. En redigerare läser och skriver i den här mappen, en läsare läser bara: inget som en läsare ändrar godtas av dina enheter eller redigerarna.",
   "Reconnecting to the Varsto service…": "Ansluter till Varsto-tjänsten igen…",
   "The service is busy: showing what it last reported": "Tjänsten är upptagen: det som den senast rapporterade visas",
+  "Varsto is busy with another request; try again in a moment": "Varsto är upptaget med en annan begäran; försök igen om en stund",
   "Show more files": "Visa fler filer",
   "At least 12 characters": "Minst 12 tecken",
   "'s request?": "s begäran?",
@@ -2042,6 +2043,10 @@
   "Anything else Varsto reports.": "Allt annat som Varsto rapporterar."
  },
  "patterns": [
+  [
+   "^Varsto is busy \\((.+)\\); try again in a moment$",
+   "Varsto är upptaget ($1); försök igen om en stund"
+  ],
   [
    "^Storage (.+) cannot be reached; it is tried again at (.+)\\.$",
    "Lagringen $1 kan inte nås; den provas igen kl. $2."

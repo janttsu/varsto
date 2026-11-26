@@ -199,6 +199,10 @@
   ],
   "patterns": [
     [
+      "^Varsto is busy \\((.+)\\); try again in a moment$",
+      "Varsto ist beschäftigt ($1); versuche es gleich noch einmal"
+    ],
+    [
       "^Storage (.+) cannot be reached; it is tried again at (.+)\\.$",
       "Speicher $1 ist nicht erreichbar; es wird um $2 erneut versucht."
     ],
@@ -1035,6 +1039,7 @@
     "Paste the recipient's request code or scan its QR code. An editor reads and writes this folder, a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors.": "Füge den Anfragecode des Empfängers ein oder scanne seinen QR-Code. Ein Bearbeiter liest und schreibt diesen Ordner, ein Betrachter liest ihn nur: nichts, was ein Betrachter ändert, nehmen deine Geräte oder die Bearbeiter an.",
     "Reconnecting to the Varsto service…": "Verbindung zum Varsto-Dienst wird wiederhergestellt…",
     "The service is busy: showing what it last reported": "Der Dienst ist beschäftigt: angezeigt wird, was er zuletzt gemeldet hat",
+    "Varsto is busy with another request; try again in a moment": "Varsto ist mit einer anderen Anfrage beschäftigt; versuche es gleich noch einmal",
     "Show more files": "Weitere Dateien anzeigen",
     "At least 12 characters": "Mindestens 12 Zeichen",
     "'s request?": "s Anfrage?",

@@ -15,6 +15,7 @@
   "Paste the recipient's request code or scan its QR code. An editor reads and writes this folder, a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors.": "Liitä vastaanottajan pyyntökoodi tai skannaa sen QR-koodi. Muokkaaja lukee ja kirjoittaa tätä kansiota, katselija vain lukee: laitteesi ja muokkaajat eivät hyväksy mitään, mitä katselija muuttaa.",
   "Reconnecting to the Varsto service…": "Yhdistetään Varsto-palveluun uudelleen…",
   "The service is busy: showing what it last reported": "Palvelu on kiireinen: näytetään sen viimeksi kertomat tiedot",
+  "Varsto is busy with another request; try again in a moment": "Varstolla on toinen pyyntö kesken; yritä hetken kuluttua uudelleen",
   "Show more files": "Näytä lisää tiedostoja",
   "At least 12 characters": "Vähintään 12 merkkiä",
   "'s request?": ":n pyyntö?",
@@ -2042,6 +2043,10 @@
   "Anything else Varsto reports.": "Kaikki muu, mistä Varsto ilmoittaa."
  },
  "patterns": [
+  [
+   "^Varsto is busy \\((.+)\\); try again in a moment$",
+   "Varstolla on muuta työtä kesken ($1); yritä hetken kuluttua uudelleen"
+  ],
   [
    "^Storage (.+) cannot be reached; it is tried again at (.+)\\.$",
    "Tallennustilaan $1 ei saada yhteyttä; sitä yritetään uudelleen klo $2."

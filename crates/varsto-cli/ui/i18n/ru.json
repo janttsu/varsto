@@ -199,6 +199,10 @@
   ],
   "patterns": [
     [
+      "^Varsto is busy \\((.+)\\); try again in a moment$",
+      "Varsto занят ($1); попробуй ещё раз через минуту"
+    ],
+    [
       "^Storage (.+) cannot be reached; it is tried again at (.+)\\.$",
       "Хранилище данных $1 недоступно; следующая попытка в $2."
     ],
@@ -1035,6 +1039,7 @@
     "Paste the recipient's request code or scan its QR code. An editor reads and writes this folder, a viewer only reads it: nothing a viewer changes is accepted by your devices or the editors.": "Вставь код запроса получателя или отсканируй его QR-код. Редактор читает и записывает эту папку, читатель только читает её: то, что меняет читатель, не принимают ни твои устройства, ни редакторы.",
     "Reconnecting to the Varsto service…": "Повторное подключение к службе Varsto…",
     "The service is busy: showing what it last reported": "Служба занята: показано то, что она сообщила в последний раз",
+    "Varsto is busy with another request; try again in a moment": "Varsto занят другим запросом; попробуй ещё раз через минуту",
     "Show more files": "Показать ещё файлы",
     "At least 12 characters": "Не менее 12 символов",
     "'s request?": " — запрос?",
