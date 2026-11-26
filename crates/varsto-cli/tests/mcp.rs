@@ -633,6 +633,39 @@ fn a_scoped_key_reaches_only_its_folders_through_the_service() {
         r#"{"folder":"docs","from":"trip.txt","to":"t.txt"}"#,
     );
     assert_eq!(st, 403, "an analyse key moves nothing");
+    let (st, _) = with_key(
+        port,
+        &key,
+        "POST",
+        "/api/write",
+        r#"{"folder":"docs","path":"n.txt","text":"x"}"#,
+    );
+    assert_eq!(st, 403, "an analyse key writes nothing");
+    // A read-write key writes the text exactly as sent: the indent of the
+    // first line and the line ends at the end stay.
+    let writer: serde_json::Value = serde_json::from_str(&run(&[
+        "--json",
+        "mcp",
+        "key",
+        "create",
+        "--name",
+        "tidy",
+        "--folders",
+        "docs",
+        "--write",
+    ]))
+    .unwrap();
+    let writer = writer["key"].as_str().unwrap().to_string();
+    let text = "  indented first line\nlast line\n\n";
+    let (st, body) = with_key(
+        port,
+        &writer,
+        "POST",
+        "/api/write",
+        &serde_json::json!({"folder": "docs", "path": "INDEX.md", "text": text}).to_string(),
+    );
+    assert_eq!(st, 200, "{body}");
+    assert_eq!(fs::read_to_string(docs.join("INDEX.md")).unwrap(), text);
     let (st, _) = with_key(port, "vmk_0000", "GET", "/api/folders", "");
     assert_eq!(st, 401);
     // The status of a scoped key holds its folders and nothing about the

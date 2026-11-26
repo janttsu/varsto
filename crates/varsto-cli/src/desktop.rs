@@ -4060,11 +4060,19 @@ fn api_unlocked(
             Ok(json!({"ok": true}))
         }
         // Text for a file: created when new, replaced (old version kept) when known.
-        (Method::Post, "/api/write") => Ok(serde_json::to_value(engine.save_text(
-            &s(input, "folder")?,
-            &s(input, "path")?,
-            s(input, "text")?.as_bytes(),
-        )?)?),
+        // The text goes in as it was sent (`s` trims, and would drop the last
+        // line end and the indent of the first line); an empty file is a file.
+        (Method::Post, "/api/write") => {
+            let text = input
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("missing field text"))?;
+            Ok(serde_json::to_value(engine.save_text(
+                &s(input, "folder")?,
+                &s(input, "path")?,
+                text.as_bytes(),
+            )?)?)
+        }
         // Removes an empty folder only; the assistant's channel also uses it.
         (Method::Post, "/api/rmdir") => {
             engine.remove_empty_dir(&s(input, "folder")?, &s(input, "path")?)?;
