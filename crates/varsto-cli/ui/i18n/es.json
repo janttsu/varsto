@@ -1020,6 +1020,7 @@
     ]
   ],
   "strings": {
+  "Path in folder": "Ruta en la carpeta",
     "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and joining needs the same one.": "Introduce primero la frase de contraseña de este dispositivo (al menos 12 caracteres): las claves de la solicitud se guardan selladas bajo ella, y para unirte hace falta la misma.",
     "Give the passphrase for this device first (at least 12 characters): the request's keys are kept sealed under it, and accepting needs the same one.": "Introduce primero la frase de contraseña de este dispositivo (al menos 12 caracteres): las claves de la solicitud se guardan selladas bajo ella, y para aceptar hace falta la misma.",
     "You can give another person one folder, and nothing else of your vault. They send you a request code from their device, you compare a six-word fingerprint with them over a call or in person, and you share the folder with that device. They accept it through a storage you both reach, after comparing the six words of your device.": "Puedes dar a otra persona una carpeta, y nada más de tu bóveda. Te envía un código de solicitud desde su dispositivo, comparas con esa persona una huella de seis palabras en una llamada o en persona, y compartes la carpeta con ese dispositivo. La acepta a través de un almacenamiento al que llegáis los dos, después de comparar las seis palabras de tu dispositivo.",
