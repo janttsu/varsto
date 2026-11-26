@@ -91,7 +91,9 @@
   var logEl = $("log");
   // Activity: newest first, one row per event with its time and a mark for
   // how it went (failed, finished or under way); at most 200 rows are kept.
-  function log(msg) {
+  function log(msg) { logKind(msg, null); }
+  // `given`: "bad", "run" or "ok"; without one the words of the message decide.
+  function logKind(msg, given) {
     msg = String(msg);
     // The same message again (a poll failing while the service restarts):
     // one line with a count and the latest time.
@@ -103,7 +105,7 @@
       var tm = top.querySelector("time"); var d = new Date(); tm.dateTime = d.toISOString(); tm.textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       return;
     }
-    var kind = /\b(error|failed|refused|could not|cannot|FORKED|corrupt)\b/i.test(msg) ? "bad" : /\b(started|checking|installing|restarting|waiting|shutting down)\b/i.test(msg) ? "run" : "ok";
+    var kind = given || (/\b(error|failed|refused|could not|cannot|FORKED|corrupt)\b/i.test(msg) ? "bad" : /\b(started|checking|installing|restarting|waiting|shutting down)\b/i.test(msg) ? "run" : "ok");
     var li = document.createElement("li"); li.className = "activity-item " + kind; li.dataset.msg = msg;
     var dot = document.createElement("span"); dot.className = "activity-dot"; dot.setAttribute("aria-hidden", "true");
     var body = document.createElement("div"); body.className = "activity-body";
@@ -119,6 +121,14 @@
     li.appendChild(dot); li.appendChild(body); li.appendChild(time);
     logEl.insertBefore(li, logEl.firstChild);
     while (logEl.children.length > 200) { logEl.removeChild(logEl.lastChild); }
+  }
+  // A request that did not go through, for the activity list. One that only
+  // found the service busy is not a failure: a background read says nothing
+  // (the line under the title does, and the read is asked again), an action
+  // gets one calm line.
+  function logFail(what, e) {
+    if (e && e.busy) { if (!e.quiet) { logKind(e.message, "run"); } return; }
+    log(what + ": " + e.message);
   }
   // Feedback for every action: the button that started a request shows a
   // spinner until it settles (and "Still working…" after a while), and a
@@ -199,6 +209,13 @@
   var NO_KEY_ENGINE = /this device holds no key of folder (.+?)(?:: ask for it|$)/;
   var NO_KEY_PAGE = /^This device holds no key of folder (.+)$/;
   function noKeyMessage(m) { var x = NO_KEY_ENGINE.exec(m); return x ? "This device holds no key of folder " + x[1] : m; }
+  // How long a busy read waits before each new try (milliseconds).
+  var BUSY_WAITS = [500, 1000, 2000, 3000, 5000, 5000, 5000, 5000];
+  // What the service is busy with is a word ("sync") or the address of the
+  // request that has the engine, which says nothing to the person reading.
+  function busyText(why) {
+    return /^\//.test(why) ? "Varsto is busy with another request; try again in a moment" : "Varsto is busy (" + why + "); try again in a moment";
+  }
   function apiCall(method, path, body, b, loud) {
     if (b) { markBusy(b, true); }
     if (loud) { workBar(true); }
@@ -207,25 +224,39 @@
     // Errors say which request failed: a browser only says "Load failed" or
     // "Failed to fetch" when the service did not answer at all.
     var what = method + " " + path.split("?")[0];
-    return fetch(path, { method: method, headers: { "X-Varsto-Token": token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
-      .then(function (r) {
-        var stale = r.headers.get("X-Varsto-Stale") === "1";
-        return r.text().then(function (t) {
-          var j = null; try { j = t ? JSON.parse(t) : {}; } catch (x) { j = null; }
-          // 503 with "busy": a sync has the engine and nothing was kept for this address.
-          connState(stale || (r.status === 503 && j && j.busy) ? "busy" : "ok");
-          if (!r.ok) { var err = new Error(noKeyMessage((j && j.error) || ("The Varsto service answered " + r.status + " to " + what))); err.body = j; throw err; }
-          if (j === null) { throw new Error("The Varsto service sent an unreadable answer to " + what); }
-          // The answer as sent: a list or summary that did not change is
-          // not drawn again (see loadFiles, refreshStatus).
-          if (j && typeof j === "object") { try { Object.defineProperty(j, "__raw", { value: stale ? null : t }); Object.defineProperty(j, "__stale", { value: stale }); } catch (x) { /* frozen */ } }
-          return j;
+    // A read that finds the service busy was not carried out, and its answer
+    // says when to ask again (Retry-After): the page asks again by itself for
+    // about half a minute instead of showing a failure. A busy answer without
+    // Retry-After came after the service had itself waited for the engine.
+    var tries = 0;
+    function attempt() {
+      return fetch(path, { method: method, headers: { "X-Varsto-Token": token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
+        .then(function (r) {
+          var stale = r.headers.get("X-Varsto-Stale") === "1";
+          return r.text().then(function (t) {
+            var j = null; try { j = t ? JSON.parse(t) : {}; } catch (x) { j = null; }
+            // 503 with "busy": a job has the engine and nothing was kept for this address.
+            var busy = r.status === 503 && j && j.busy;
+            connState(stale || busy ? "busy" : "ok");
+            if (busy) {
+              if (method === "GET" && r.headers.get("Retry-After") !== null && tries < BUSY_WAITS.length) {
+                return new Promise(function (again) { setTimeout(again, BUSY_WAITS[tries++]); }).then(attempt);
+              }
+              var be = new Error(busyText(j.busy)); be.busy = j.busy; be.quiet = !loud; be.body = j; throw be;
+            }
+            if (!r.ok) { var err = new Error(noKeyMessage((j && j.error) || ("The Varsto service answered " + r.status + " to " + what))); err.body = j; throw err; }
+            if (j === null) { throw new Error("The Varsto service sent an unreadable answer to " + what); }
+            // The answer as sent: a list or summary that did not change is
+            // not drawn again (see loadFiles, refreshStatus).
+            if (j && typeof j === "object") { try { Object.defineProperty(j, "__raw", { value: stale ? null : t }); Object.defineProperty(j, "__stale", { value: stale }); } catch (x) { /* frozen */ } }
+            return j;
+          });
+        }, function (e) {
+          connState("down");
+          throw new Error("Could not reach the Varsto service (" + what + "): " + e.message + ". It may be restarting or busy; try again in a moment.");
         });
-      }, function (e) {
-        connState("down");
-        throw new Error("Could not reach the Varsto service (" + what + "): " + e.message + ". It may be restarting or busy; try again in a moment.");
-      })
-      .then(function (j) { done(); return j; }, function (e) { done(); throw e; });
+    }
+    return attempt().then(function (j) { done(); return j; }, function (e) { done(); throw e; });
   }
   // Without a vault (first start, after a reset or a wipe) nothing of the
   // old one may stay on screen: the folder tree in the sidebar, the lists.
@@ -570,7 +601,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       show("app");
       if (currentPage === "settings") { loadLogs(); loadNotify(); }
       return refreshStatus().then(takeLink);
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   }
 
   // Devices on the Peers page, each with "Remove device…" (revocation, optionally with a wipe order).
@@ -600,7 +631,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         ul.appendChild(li);
       });
       if (lastActivity) { renderActivity(lastActivity); }
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   }
   function ago(t) {
     if (!t) { return ""; }
@@ -656,7 +687,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         text += " Print a new recovery kit now.";
         return alertBox(text, "Device removed").then(refreshStatus);
       });
-    }).catch(function (e) { log("error: " + e.message); alertBox(e.message, "Could not remove the device"); });
+    }).catch(function (e) { logFail("error", e); alertBox(e.message, "Could not remove the device"); });
   }
 
   // Policy editor: four minimums; zeros everywhere (or the Clear button) remove the policy.
@@ -1369,7 +1400,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       api("POST", "/api/ledger/rebuild", { from_storage: h.state === "no_ledger" }).then(function (r) {
         renderLedger(r.health); refreshStatus();
       }).catch(function (e) {
-        log("error: " + e.message); btn.disabled = false; refreshStatus();
+        logFail("error", e); btn.disabled = false; refreshStatus();
       });
     };
   }
@@ -1693,7 +1724,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       return api("GET", "/api/service").then(function (sv) { renderService(sv); return api("GET", "/api/ledger"); }).then(function (l) {
         $("ledger").textContent = l.map(function (e) { return e.device.slice(0, 8) + " #" + e.seq + " lamport " + e.lamport + " events " + e.events; }).join("\n") || "(empty)";
       });
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   }
 
   // Phone: the Files tab opens with one card per folder of the vault.
@@ -1781,7 +1812,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         log(r.folder + ": " + r.files_freed + " file" + (r.files_freed === 1 ? "" : "s") + " freed (" + fmtBytes(r.bytes_freed) + ")" + (r.blocks_verified ? ", " + r.blocks_verified + " blocks verified first" : "") + (r.skipped.length ? "; " + r.skipped.length + " kept: " + r.skipped[0][1] : ""));
         busy(false); refreshStatus();
       });
-    }).catch(function (e) { log("error: " + e.message); busy(false); });
+    }).catch(function (e) { logFail("error", e); busy(false); });
   }
 
   // Moving idle files to cold storage: the confirmation states the copies
@@ -1795,7 +1826,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         log(r.folder + ": " + (m.blocks_dropped || 0) + " block" + (m.blocks_dropped === 1 ? "" : "s") + " (" + fmtBytes(m.bytes_dropped || 0) + ") moved from " + m.from + " to " + m.to + (m.blocks_kept ? "; " + m.blocks_kept + " kept: " + m.kept[0][1] : ""));
         busy(false); refreshStatus();
       });
-    }).catch(function (e) { log("error: " + e.message); busy(false); });
+    }).catch(function (e) { logFail("error", e); busy(false); });
   }
 
   // Storage prices: one line per storage with its price and monthly cost, and a dialog to set them.
@@ -1932,7 +1963,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function scheduleLabel(s) { for (var i = 0; i < SCHEDULES.length; i++) { if (SCHEDULES[i][0] === s) { return SCHEDULES[i][1]; } } return s || "–"; }
   function loadBackups() {
     fillBackupStorages();
-    return api("GET", "/api/backups").then(renderBackups).catch(function (e) { log("backups: " + e.message); });
+    return api("GET", "/api/backups").then(renderBackups).catch(function (e) { logFail("backups", e); });
   }
   function fillBackupStorages(fresh) {
     var box = $("backupstorages"); var prev = {};
@@ -2235,7 +2266,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       renderImportJobs(importInfo.jobs || []);
       importAvailability();
       ijSchedule();
-    }).catch(function (e) { log("imports: " + e.message); ijSchedule(); });
+    }).catch(function (e) { logFail("imports", e); ijSchedule(); });
   }
   function renderImportJobs(list) {
     var raw = JSON.stringify(list);
@@ -2279,7 +2310,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   }
   importSelect(importStoredKind());
   function loadImports() {
-    return api("GET", "/api/import/status").then(renderImports).catch(function (e) { log("imports: " + e.message); });
+    return api("GET", "/api/import/status").then(renderImports).catch(function (e) { logFail("imports", e); });
   }
   function renderImports(list) {
     var tb = $("imports").querySelector("tbody"); tb.innerHTML = "";
@@ -2344,7 +2375,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     return Promise.all([api("GET", "/api/trash"), api("GET", "/api/trash/status"), storages]).then(function (r) {
       trashStorages = (r[2].storages || []).filter(function (x) { return !x.carrier; });
       trashItems = r[0]; renderTrashFolders(); renderTrash(); renderTrashStatus(r[1]);
-    }).catch(function (e) { log("trash: " + e.message); });
+    }).catch(function (e) { logFail("trash", e); });
   }
   function renderTrashFolders() {
     var sel = $("trashfolder"); var cur = sel.value; sel.innerHTML = "";
@@ -2523,7 +2554,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         menu.done();
         ul.appendChild(li);
       });
-    }).catch(function (e) { if (versionsFor === key) { box.classList.add("hidden"); } log("versions: " + e.message); });
+    }).catch(function (e) { if (versionsFor === key) { box.classList.add("hidden"); } logFail("versions", e); });
   }
   function restoreVersion(folder, path, v, copy) {
     var when = fmtWhen(v.replaced_utc);
@@ -2550,7 +2581,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   function loadHistorySettings() {
     return Promise.all([api("GET", "/api/history/status"), api("GET", "/api/folders")]).then(function (r) {
       renderHistoryStatus(r[0], r[1]);
-    }).catch(function (e) { log("history: " + e.message); });
+    }).catch(function (e) { logFail("history", e); });
   }
   function historyModeShown() {
     var f = $("historysettings"); var picked = !!f.folder.value; var own = f.mode.value === "days";
@@ -2629,11 +2660,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("POST", "/api/verify/run", {}).then(function (r) {
       var x = r.report; log("verification: " + x.blocks_verified + " blocks verified of " + x.due + " due, " + fmtBytes(x.bytes_downloaded) + " downloaded" + (x.corrupt.length ? ", CORRUPT: " + x.corrupt.join(", ") : "") + (x.missing.length ? ", MISSING: " + x.missing.join(", ") : ""));
       renderAutoVerify(r.status); busy(false); refreshStatus();
-    }).catch(function (e) { log("verification failed: " + e.message); busy(false); });
+    }).catch(function (e) { logFail("verification failed", e); busy(false); });
   };
   $("av-toggle").onclick = function () {
     var on = !(autoVerify && autoVerify.schedule.enabled);
-    api("POST", "/api/verify", { enabled: on }).then(renderAutoVerify).catch(function (e) { log("error: " + e.message); });
+    api("POST", "/api/verify", { enabled: on }).then(renderAutoVerify).catch(function (e) { logFail("error", e); });
   };
   $("av-settings").onclick = function () {
     var s = (autoVerify || {}).schedule || {};
@@ -2645,7 +2676,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (!r) { return; }
       var n = function (x) { var v = parseInt(x, 10); return isNaN(v) ? undefined : v; };
       return api("POST", "/api/verify", { interval_hours: n(r.values.interval_hours), max_mib: n(r.values.max_mib), max_blocks: n(r.values.max_blocks) }).then(renderAutoVerify);
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   };
 
   // Automatic repair (Policies page): "N copies repaired, M could not be repaired: why".
@@ -2675,14 +2706,14 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       x.repaired.forEach(function (c) { log("  " + c.object + " on " + c.storage + ": from " + c.source); });
       x.unrepairable.forEach(function (u) { log("  NOT REPAIRED " + u.object + " on " + u.storage + ": " + u.reason); });
       renderRepair(r.status); busy(false); refreshStatus();
-    }).catch(function (e) { log(what + " failed: " + e.message); busy(false); });
+    }).catch(function (e) { logFail(what + " failed", e); busy(false); });
   }
   $("ar-run").onclick = function () { runRepair({}, "repair"); };
   $("ar-preview").onclick = function () { runRepair({ dry_run: true }, "repair preview"); };
   $("ar-cold").onclick = function () {
     dialog({ title: "Repair from cold storage", text: "Reading a cold storage starts a retrieval, which your provider may bill and which can take hours. Read it to repair the copies that exist only there?", ok: "Read cold storage" }).then(function (r) {
       if (r) { runRepair({ from_cold: true }, "repair from cold storage"); }
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   };
 
   // Bit-rot check (Policies page): status, damaged files, run now, schedule.
@@ -2714,11 +2745,11 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       x.corrupt.forEach(function (c) { log("  CORRUPT " + c); });
       x.missing.forEach(function (c) { log("  MISSING " + c); });
       renderScrub(r.status); loadRepair(); busy(false); refreshStatus();
-    }).catch(function (e) { log("bit-rot check failed: " + e.message); busy(false); });
+    }).catch(function (e) { logFail("bit-rot check failed", e); busy(false); });
   };
   $("sc-toggle").onclick = function () {
     var on = !(scrubStatus && scrubStatus.schedule.enabled);
-    api("POST", "/api/scrub", { enabled: on }).then(renderScrub).catch(function (e) { log("error: " + e.message); });
+    api("POST", "/api/scrub", { enabled: on }).then(renderScrub).catch(function (e) { logFail("error", e); });
   };
   $("sc-settings").onclick = function () {
     var s = (scrubStatus || {}).schedule || {};
@@ -2731,7 +2762,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (!r) { return; }
       var n = function (x) { var v = parseInt(x, 10); return isNaN(v) ? undefined : v; };
       return api("POST", "/api/scrub", { scrub_days: n(r.values.scrub_days), interval_hours: n(r.values.interval_hours), local_mib: n(r.values.local_mib), remote_mib: n(r.values.remote_mib) }).then(renderScrub);
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   };
 
   // Disk pools: one card per pool with its disks (attached or away), from /api/disks.
@@ -2741,7 +2772,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       if (r.message) { log(r.message); }
       else if (r.bytes_checked !== undefined) { log(body.label + ": checked " + fmtBytes(r.bytes_checked) + ", " + r.bad.length + " bad, " + fmtBytes(r.bytes_removed) + " removed, " + fmtBytes(r.bytes_added) + " added" + (r.adopted ? ", " + r.adopted + " objects adopted" : "")); }
       else if (r.retired) { log(body.label + " retired; " + r.objects_only_here + " object" + (r.objects_only_here === 1 ? "" : "s") + " exist only on it"); }
-    }).catch(function (e) { log(verb + " failed: " + e.message); alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
+    }).catch(function (e) { logFail(verb + " failed", e); alertBox(e.message); }).then(function () { busy(false); return refreshStatus(); });
   }
   function renderPools(storages) {
     var pools = storages.filter(function (st) { return st.kind === "pool"; });
@@ -2776,7 +2807,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           if (!isMobile()) { var gb = el("button", "secondary", "Disk group"); gb.type = "button"; gb.onclick = function () { editDiskGroup(g); }; c.appendChild(gb); }
         });
       });
-    }).catch(function (e) { log("disks: " + e.message); });
+    }).catch(function (e) { logFail("disks", e); });
   }
   // The pool's disks as a table; the column clicked sorts it (the choice is
   // kept in this browser). Natural directions: name A-Z, free/used/
@@ -2996,7 +3027,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           lab.appendChild(cbx); lab.appendChild(el("span", "", "Remind me weekly when a disk is overdue for a check")); box.appendChild(lab);
         }
       });
-    }).catch(function (e) { log("disk suggestion: " + e.message); });
+    }).catch(function (e) { logFail("disk suggestion", e); });
   }
   function editDiskGroup(g) {
     dialog({ title: "Disk group of pool " + g.pool, text: "Keep this many copies of every block on disks kept in different places (1: one copy, no rule). Disks of other places get their copies when attached and checked; policies count each disk copy at its disk's place.", fields: [{ name: "copies", label: "Copies in different places", type: "number", value: g.copies }], ok: "Save" }).then(function (r) {
@@ -3098,7 +3129,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
   // (serviceSoon) and a slow poll once a minute stays as a safety net.
   setInterval(function () { if (evsOk && Date.now() - lastServicePoll < 60000) { return; } pollService(); }, 5000);
   window.addEventListener("focus", pollService);
-  $("pause").onclick = function () { api("POST", "/api/service/pause", { paused: $("pause").dataset.paused !== "1" }).then(renderService).catch(function (e) { log("error: " + e.message); }); };
+  $("pause").onclick = function () { api("POST", "/api/service/pause", { paused: $("pause").dataset.paused !== "1" }).then(renderService).catch(function (e) { logFail("error", e); }); };
   // Updates: checked by themselves (at start and every six hours); the
   // button and note appear only when a newer version exists.
   var updateInfo = null;
@@ -3137,15 +3168,15 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
           setTimeout(poll, 1000);
         });
       }).then(function () { busy(false); });
-    }).catch(function (e) { log("update failed: " + e.message); busy(false); });
+    }).catch(function (e) { logFail("update failed", e); busy(false); });
   };
   // Daily check and automatic installation (off: only the button above, when a version is out).
   api("GET", "/api/update/settings").then(function (r) { $("auto-update").checked = !!r.auto; }).catch(function () {});
-  $("auto-update").onchange = function () { api("POST", "/api/update/settings", { auto: $("auto-update").checked }).catch(function (e) { log("error: " + e.message); }); };
+  $("auto-update").onchange = function () { api("POST", "/api/update/settings", { auto: $("auto-update").checked }).catch(function (e) { logFail("error", e); }); };
   $("quit").onclick = function () {
     confirmBox("Folders stop syncing until the service is started again.", { title: "Quit Varsto?", ok: "Quit", danger: true }).then(function (yes) {
       if (!yes) { return; }
-      api("POST", "/api/quit", {}).then(function () { log("the service is shutting down"); $("svc-dot").dataset.state = "stopped"; }).catch(function (e) { log("quit failed: " + e.message); });
+      api("POST", "/api/quit", {}).then(function () { log("the service is shutting down"); $("svc-dot").dataset.state = "stopped"; }).catch(function (e) { logFail("quit failed", e); });
     });
   };
   var busyCount = 0;
@@ -3154,10 +3185,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     busy(true); log("sync " + (folder || "all") + " started");
     return api("POST", "/api/sync", folder ? { folder: folder } : {}).then(function (r) {
       r.forEach(function (x) { log(x.pull.folder + ": pulled " + x.pull.files_updated + " updated, " + x.pull.files_deleted + " deleted, " + x.pull.conflicts + " conflicts; pushed " + x.push.files_changed + " changed, " + x.push.chunks_uploaded + " chunks" + (x.pull.files_unavailable.length ? "; unavailable: " + x.pull.files_unavailable.join(", ") : "") + (x.pull.forked_devices.length ? "; FORKED: " + x.pull.forked_devices.join(", ") : "") + ((x.pull.renamed_locally || []).length ? "; kept under another name here because the disk ignores case: " + x.pull.renamed_locally.join(", ") : "") + ((x.push.read_only || (x.pull.kept_aside || []).length) ? "; read-only: your changes were not published" + (((x.pull.kept_aside || []).length + (x.push.kept_aside || []).length) ? " (kept aside: " + (x.pull.kept_aside || []).concat(x.push.kept_aside || []).join(", ") + ")" : "") : "") + ((x.pull.writes_refused || []).length ? "; not taken from read-only members: " + x.pull.writes_refused.join(", ") : "") + (x.pull.error ? "; not synced: " + x.pull.error : "") + ((x.pull.storages_down || []).length ? "; unreachable: " + x.pull.storages_down.join(", ") : "")); });
-    }).catch(function (e) { log("sync failed: " + e.message); }).then(function () { busy(false); return refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }); });
+    }).catch(function (e) { logFail("sync failed", e); }).then(function () { busy(false); return refreshStatus().then(function () { if (currentPage === "files") { loadFiles(); } }); });
   }
 
-  $("lock").onclick = function () { api("POST", "/api/lock").then(function (r) { if (r.exports_removed) { log("removed " + r.exports_removed + " decrypted cop" + (r.exports_removed === 1 ? "y" : "ies") + " made for other apps"); } return refreshState(); }).catch(function (e) { log("error: " + e.message); }); };
+  $("lock").onclick = function () { api("POST", "/api/lock").then(function (r) { if (r.exports_removed) { log("removed " + r.exports_removed + " decrypted cop" + (r.exports_removed === 1 ? "y" : "ies") + " made for other apps"); } return refreshState(); }).catch(function (e) { logFail("error", e); }); };
   // Files view: folder header, tree selection, rows, details pane and toolbar. On a phone the
   // card has two screens: the folder list and one folder (#filesmain[data-screen]).
   function setScreen(sc) { $("filesmain").dataset.screen = sc; }
@@ -3464,7 +3495,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         log(res.outcome.message);
         if (res.finished) { log("fetched " + path); loadFiles(); return; }
         runDiskPlan(folder, path, res.plan, res.outcome.message);
-      }).catch(function (e) { busy(false); log("fetch failed: " + e.message); });
+      }).catch(function (e) { busy(false); logFail("fetch failed", e); });
     });
     // The text: one sentence per element, so each is translated on its own.
     var tx = $("modal-text"); tx.innerHTML = "";
@@ -3484,7 +3515,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("POST", "/api/fetch/plan/network", {}).then(function (res) {
       (res.files_failed || []).forEach(function (f) { log(f.path + ": " + f.error); });
       if (res.finished) { log("fetched " + path); }
-    }).catch(function (e) { log("fetch failed: " + e.message); }).then(function () { busy(false); loadFiles(); });
+    }).catch(function (e) { logFail("fetch failed", e); }).then(function () { busy(false); loadFiles(); });
   }
   function fetchFile(folder, path) {
     busy(true); $("needsdisk").classList.add("hidden");
@@ -3496,10 +3527,10 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         return;
       }
       log("fetched " + path);
-    }).catch(function (e) { log("fetch failed: " + e.message); }).then(function () { busy(false); loadFiles(); });
+    }).catch(function (e) { logFail("fetch failed", e); }).then(function () { busy(false); loadFiles(); });
   }
-  function freeFile(folder, path) { api("POST", "/api/free", { folder: folder, path: path }).then(function () { log(path + " is now a placeholder"); }).catch(function (e) { log("free failed: " + e.message); }).then(function () { loadFiles(); refreshStatus(); }); }
-  function freeFolder(folder) { busy(true); api("POST", "/api/free", { folder: folder }).then(function (r) { log(folder + ": removed " + r.freed + " local cop" + (r.freed === 1 ? "y" : "ies") + (r.kept ? ", kept " + r.kept + " not yet stored elsewhere" : "")); }).catch(function (e) { log("free failed: " + e.message); }).then(function () { busy(false); loadFiles(); refreshStatus(); }); }
+  function freeFile(folder, path) { api("POST", "/api/free", { folder: folder, path: path }).then(function () { log(path + " is now a placeholder"); }).catch(function (e) { logFail("free failed", e); }).then(function () { loadFiles(); refreshStatus(); }); }
+  function freeFolder(folder) { busy(true); api("POST", "/api/free", { folder: folder }).then(function (r) { log(folder + ": removed " + r.freed + " local cop" + (r.freed === 1 ? "y" : "ies") + (r.kept ? ", kept " + r.kept + " not yet stored elsewhere" : "")); }).catch(function (e) { logFail("free failed", e); }).then(function () { busy(false); loadFiles(); refreshStatus(); }); }
   // Phones: a compact list like Resilio Sync. A tap opens a file; a long
   // press starts selecting, then taps add or remove files, and the bar at
   // the bottom downloads or frees all of them.
@@ -3629,7 +3660,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     api("GET", "/api/files?folder=" + enc(folder)).then(function (rows) {
       if ($("filesfolder").value !== folder) { return; }
       drawFiles(folder, rows, false);
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   }
   // The filter changed: the rows already here, without asking again.
   function refilterFiles() {
@@ -3781,7 +3812,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     })();
   }
   $("filesfolder").onchange = function () { multi.sel = {}; multi.on = false; markTree($("filesfolder").value); updateFilesHead(); clearSelection(); setScreen("folder"); loadFiles(); if (!$("recentchanges").classList.contains("hidden")) { loadRecentChanges(); } };
-  $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { log("error: " + e.message); }); };
+  $("selectivetoggle").onchange = function () { api("POST", "/api/selective", { folder: $("filesfolder").value, on: $("selectivetoggle").checked }).then(function () { log("selective sync " + ($("selectivetoggle").checked ? "on" : "off")); return refreshStatus(); }).catch(function (e) { logFail("error", e); }); };
   // ----- Folder settings: ignore rules and file metadata -----
   // The shared rules are the folder's .varstoignore (synced like any file);
   // the local ones stay in this device's configuration. Testing a path uses
@@ -3833,7 +3864,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
       cannot.forEach(function (c) { capsBox.appendChild(el("span", "", c)); capsBox.appendChild(document.createTextNode(" ")); });
       $("foldersettings").classList.remove("hidden");
       $("foldersettings").scrollIntoView({ block: "nearest" });
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   }
   function closeFolderSettings() { fsEdit = null; $("foldersettings").classList.add("hidden"); }
   $("files-settings").onclick = function () { if (fsEdit && fsEdit.folder === $("filesfolder").value) { closeFolderSettings(); } else { openFolderSettings(); } };
@@ -3880,12 +3911,12 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     }).then(function () {
       log("folder settings saved for " + folder);
       closeFolderSettings(); loadFiles();
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   };
   $("dupes").onclick = function () {
     api("GET", "/api/dupes?folder=" + enc($("dupefolder").value)).then(function (g) {
       $("dupeout").textContent = g.length ? g.map(function (x) { return fmtBytes(x.size) + ": " + x.paths.join(", "); }).join("\n") : "no duplicates";
-    }).catch(function (e) { log("dupes failed: " + e.message); });
+    }).catch(function (e) { logFail("dupes failed", e); });
   };
   $("unlockform").onsubmit = function (ev) { ev.preventDefault(); api("POST", "/api/unlock", formData(ev.target)).then(function () { ev.target.reset(); return refreshState(); }).catch(function (e) { alertBox(e.message); }); };
   $("init").onsubmit = function (ev) {
@@ -4074,7 +4105,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         var li = el("li"); var body = el("div", "li-body"); body.appendChild(el("div", "li-title", e.text)); body.appendChild(el("div", "li-sub", fmtDate(e.utc) + " · " + e.issuer_name + " #" + e.seq)); li.appendChild(body); lg.appendChild(li);
       });
       if (!o.log.length) { lg.appendChild(el("li", "muted small", "nothing yet")); }
-    }).catch(function (e) { log("error: " + e.message); });
+    }).catch(function (e) { logFail("error", e); });
   }
   function removeUser(u) {
     var names = u.devices.filter(function (d) { return !d.revoked; }).map(function (d) { return d.name; });
@@ -4094,7 +4125,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
         text += " Print a new recovery kit now.";
         return alertBox(text, "User removed").then(function () { loadOrg(); return refreshStatus(); });
       });
-    }).catch(function (e) { log("error: " + e.message); alertBox(e.message, "Could not remove the user"); });
+    }).catch(function (e) { logFail("error", e); alertBox(e.message, "Could not remove the user"); });
   }
   $("org-approve").onsubmit = function (ev) {
     ev.preventDefault();
@@ -4780,7 +4811,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     rgCount();
   }
   function loadGuide() {
-    var go = function () { api("GET", "/api/recovery/guide").then(function (g) { (window.varstoLang && window.varstoLang.ready ? window.varstoLang.ready : function (f) { f(); })(function () { renderGuide(g); }); }).catch(function (e) { log("recovery guide: " + e.message); }); };
+    var go = function () { api("GET", "/api/recovery/guide").then(function (g) { (window.varstoLang && window.varstoLang.ready ? window.varstoLang.ready : function (f) { f(); })(function () { renderGuide(g); }); }).catch(function (e) { logFail("recovery guide", e); }); };
     go();
   }
   // Help: where this device stands, where the data is, what needs attention
@@ -4971,7 +5002,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     if (helpLoading) { return helpLoading; }
     helpLoading = api("GET", "/api/help").then(function (h) {
       return new Promise(function (res) { (window.varstoLang && window.varstoLang.ready ? window.varstoLang.ready : function (f) { f(); })(function () { renderHelp(h); res(h); }); });
-    }).catch(function (e) { log("help: " + e.message); }).then(function (h) { helpLoading = null; return h; });
+    }).catch(function (e) { logFail("help", e); }).then(function (h) { helpLoading = null; return h; });
     return helpLoading;
   }
   // Overview: the first step that matters, with its button, until all is done.
@@ -5044,7 +5075,7 @@ function miniMap(f) { var m = el("span", "minimap"); var b = folderBlocks(f); va
     try {
       if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.varstoPrint) { window.webkit.messageHandlers.varstoPrint.postMessage("print"); return; }
       if (droid && droid.printPage) { droid.printPage(); return; }
-    } catch (e) { log("print: " + e.message); }
+    } catch (e) { logFail("print", e); }
     window.print();
   };
   $("rg-reload").onclick = loadGuide;

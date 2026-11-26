@@ -826,9 +826,12 @@ fn serve_read(
         }
         Got::Busy => {
             // Nothing kept for this address and a job has the engine: the
-            // page tries again on its next poll instead of hanging.
+            // page asks again by itself (Retry-After) instead of hanging.
+            // Nothing was carried out, so asking again is safe.
             let why = busy_with(state).unwrap_or_else(|| "another task".into());
-            request.respond(json_response(503, &busy_answer(&why)))?;
+            request.respond(
+                json_response(503, &busy_answer(&why)).with_header(header("Retry-After", "1")),
+            )?;
             Ok("busy")
         }
     }
