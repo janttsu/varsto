@@ -343,11 +343,6 @@
     <div class="page hidden" data-page="files">
       <div id="needsdisk" class="notice warn hidden"></div>
       <!-- Storage format 3: who may open each folder (shown when the build has folder membership). -->
-      <section id="f3card" class="card f3-card hidden" aria-label="Folder access">
-        <h2 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Folder access</h2>
-        <div id="f3recovery" class="notice warn hidden"><span>Some folders have no recovery copy. Without one, losing every device loses them.</span> <span id="f3recovery-names" data-no-i18n></span> <button id="f3recovery-go" type="button" class="secondary">Write recovery copies…</button></div>
-        <div id="f3folders"></div>
-      </section>
       <div class="files-layout">
         <div class="card files-main" id="filesmain" data-screen="list">
           <!-- Phone: the Files tab opens with the vault's folders as cards; one tap opens a folder. -->
@@ -367,6 +362,7 @@
             <div class="files-sub muted small" id="files-sub"></div>
             <div class="files-where small hidden" id="files-where"></div>
           </div>
+          <nav id="files-crumbs" class="files-crumbs hidden" aria-label="Path in folder"></nav>
           <div class="toolbar files-toolbar">
             <button id="files-upload" type="button" class="secondary" title="Add files from this device to the folder"><svg class="icon"><use href="#i-upload"/></svg>Add files</button>
             <button id="files-mkdir" type="button" class="secondary" title="Create a subfolder"><svg class="icon"><use href="#i-newfolder"/></svg>New folder</button>
@@ -445,6 +441,13 @@
           </div>
         </aside>
       </div>
+      <section id="f3card" class="card f3-card hidden" aria-label="Folder access">
+        <h2 class="card-title"><svg class="icon accent"><use href="#i-sharing"/></svg>Folder access</h2>
+        <div id="f3recovery" class="notice warn hidden"><span>Some folders have no recovery copy. Without one, losing every device loses them.</span> <span id="f3recovery-names" data-no-i18n></span> <button id="f3recovery-go" type="button" class="secondary">Write recovery copies…</button></div>
+        <details id="f3box" class="f3-box"><summary class="small"><span id="f3sum" data-no-i18n></span></summary>
+          <div id="f3folders"></div>
+        </details>
+      </section>
 
       <section id="foldersettings" class="card folder-settings hidden" aria-label="Folder settings">
         <div class="details-head"><h2 class="card-title"><svg class="icon accent"><use href="#i-settings"/></svg><span>Folder settings</span> <span id="fs-folder" class="muted" data-no-i18n></span></h2><button type="button" id="fs-close" class="secondary icon-btn" title="Close folder settings"><svg class="icon"><use href="#i-close"/></svg></button></div>
