@@ -395,7 +395,6 @@ impl Engine {
                 free: l.free,
             })
             .collect();
-        inputs.torrents = self.torrent_help_inputs();
         Ok(inputs)
     }
 }
