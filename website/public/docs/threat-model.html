@@ -20,6 +20,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="alternate" hreflang="en" href="https://varsto.net/docs/threat-model.html">
 <link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/threat-model.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/docs/threat-model.html">
 <link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../blog/feed.xml">
 <link rel="stylesheet" href="../assets/css/site.css?v=3886a51cdd">
 <script src="../assets/js/theme.js?v=c66b8308e9"></script>
@@ -41,6 +42,8 @@
       <a href="../blog/">Blog</a>
     </nav>
     <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Language">EN</summary>
+        <nav class="pop-body langs" aria-label="Language"><a href="../docs/threat-model.html" hreflang="en" lang="en" aria-current="true">English</a><a href="../fi/docs/threat-model.html" hreflang="fi" lang="fi">Suomi</a></nav></details>
       <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
       <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
       <a class="button small" href="../downloads/">Download</a>
@@ -52,7 +55,7 @@
   <div class="wrap">
 <article class="prose">
 <h1>Threat model (design stage)</h1>
-<p class="note">From <code>docs/architecture/threat-model.md</code> in the repository, rendered 2026-11-22. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
+<p class="note">From <code>docs/architecture/threat-model.md</code> in the repository, rendered 2026-11-26. These documents describe the main branch; the released version is 0.0.1-alpha.16. Sections marked 'after 0.0.1-alpha.16' are not in a release yet.</p>
 <blockquote>
 <p><strong>Design-stage model, written before the code.</strong> This document describes what the design intends to protect, against whom, and where it deliberately stops. Much of it is now implemented as 0.0.1-alpha.13; the per-row status notes and <a href="alpha-0-format.html">docs/spec/alpha-0-format.md</a> record what is built. Nothing has been audited, so every statement remains a design goal that tests and an independent review must still confirm. Open points are marked <strong>TBD</strong> and point to the open questions in the project plan.</p>
 </blockquote>

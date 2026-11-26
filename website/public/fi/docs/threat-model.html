@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uhkamalli (suunnitteluvaihe): Varsto</title>
+<meta name="description" content="Mitä Varston suunnitelma on tarkoitettu kestämään, mitä kukin osapuoli voi nähdä ja mihin suunnitelma pysähtyy. Suunnitteluvaiheen muistio.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://varsto.net/fi/docs/threat-model.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Varsto">
+<meta property="og:title" content="Uhkamalli (suunnitteluvaihe): Varsto">
+<meta property="og:description" content="Mitä Varston suunnitelma on tarkoitettu kestämään, mitä kukin osapuoli voi nähdä ja mihin suunnitelma pysähtyy. Suunnitteluvaiheen muistio.">
+<meta property="og:url" content="https://varsto.net/fi/docs/threat-model.html">
+<meta property="og:image" content="https://varsto.net/assets/img/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fi_FI">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="https://varsto.net/docs/threat-model.html">
+<link rel="alternate" hreflang="x-default" href="https://varsto.net/docs/threat-model.html">
+<link rel="alternate" hreflang="fi" href="https://varsto.net/fi/docs/threat-model.html">
+<link rel="alternate" type="application/rss+xml" title="Varsto blog" href="../../fi/blog/feed.xml">
+<link rel="stylesheet" href="../../assets/css/site.css?v=3886a51cdd">
+<script src="../../assets/js/theme.js?v=c66b8308e9"></script>
+</head>
+<body>
+<a class="skip" href="#main">Siirry sisältöön</a>
+<div class="alpha" role="note" data-nosnippet>
+  <div class="wrap"><strong>Alpha-ohjelmisto, ei tuotantodatalle.</strong> Virheet voivat hävittää dataa, tallennusmuoto voi muuttua ilman siirtotyökalua, eikä salausta ole vielä auditoitu. Pidä omat varmuuskopiosi ja varmista, että voit palauttaa niistä.</div>
+</div>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a>
+    <a class="ver" href="../../fi/blog/" title="0.0.1-alpha.16">alpha.16</a>
+    <nav class="main" aria-label="Päävalikko">
+      <a href="../../fi/features/">Ominaisuudet</a>
+      <a href="../../fi/how-it-works/">Miten se toimii</a>
+      <a href="../../fi/compare/">Vertailu</a>
+      <a href="../../docs/" aria-current="page">Dokumentaatio (en)</a>
+      <a href="../../fi/blog/">Blogi</a>
+    </nav>
+    <div class="tools">
+      <details class="pop langs-menu"><summary class="iconbtn" aria-label="Kieli">FI</summary>
+        <nav class="pop-body langs" aria-label="Kieli"><a href="../../docs/threat-model.html" hreflang="en" lang="en">English</a><a href="../../fi/docs/threat-model.html" hreflang="fi" lang="fi" aria-current="true">Suomi</a></nav></details>
+      <a class="iconbtn gh" href="https://github.com/janttsu/varsto" rel="noopener" aria-label="GitHub"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="iconbtn theme" id="theme-toggle" type="button" aria-label="Theme"><svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg></button>
+      <a class="button small" href="../../fi/downloads/">Lataa</a>
+      <details class="pop menu"><summary class="iconbtn" aria-label="Valikko"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z"/></svg></summary><nav class="pop-body" aria-label="Valikko"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/compare/">Vertailu</a><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../docs/" aria-current="page">Dokumentaatio (en)</a><a href="../../fi/downloads/">Lataukset</a><a href="../../fi/blog/">Blogi</a><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></details>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <div class="wrap">
+<article class="prose">
+<h1>Uhkamalli (suunnitteluvaihe)</h1>
+<p class="note">Käännös tiedostosta <code>docs/architecture/threat-model.md</code>, rakennettu 2026-11-26. Englanninkielinen alkuperäinen on ensisijainen; se kuvaa main-haaraa, ja julkaistu versio on 0.0.1-alpha.16.</p>
+<blockquote>
+<p><strong>Suunnitteluvaiheen malli, kirjoitettu ennen koodia.</strong> Tämä dokumentti kuvaa, mitä suunnitelma on tarkoitettu suojaamaan, keneltä, ja mihin se tarkoituksella pysähtyy. Suuri osa siitä on nyt toteutettu versiossa 0.0.1-alpha.13; rivikohtaiset tilamerkinnät ja <a href="../../docs/alpha-0-format.html">docs/spec/alpha-0-format.md</a> kertovat, mitä on rakennettu. Mitään ei ole auditoitu, joten jokainen väite on yhä suunnittelutavoite, joka testien ja riippumattoman tarkastuksen pitää vielä vahvistaa. Avoimet kohdat on merkitty <strong>TBD</strong> (päätetään myöhemmin), ja ne viittaavat projektisuunnitelman avoimiin kysymyksiin.</p>
+</blockquote>
+<p>Vaatimustunnisteet (<code>F-</code>, <code>S-</code>, <code>P-</code>, <code>N-</code>, <code>M-</code>) viittaavat projektisuunnitelman vaatimustaulukoihin. "Suunnitelma 6.19" ja vastaavat viittaavat suunnitelman lukuihin; "suunnitelman luku 8" on sen avointen kysymysten luettelo.</p>
+<h2 id="1-suojattavat-kohteet">1. Suojattavat kohteet</h2>
+<table>
+<thead>
+<tr>
+<th>Kohde</th>
+<th>Miksi sillä on merkitystä</th>
+<th>Tärkeimmät vaatimukset</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tiedostojen sisältö</td>
+<td>Itse data; sen pitää pysyä luottamuksellisena vuosikymmeniä (kerää nyt, pura myöhemmin).</td>
+<td>S-001, S-003, S-006</td>
+</tr>
+<tr>
+<td>Tiedostonimet, kansiopuu ja yksittäisten tiedostojen koot</td>
+<td>Usein yhtä arkaluonteisia kuin sisältö (nimet paljastavat ihmisiä, projekteja, terveystietoja).</td>
+<td>S-001, S-006, S-015</td>
+</tr>
+<tr>
+<td>Avaimet: pääavain, kansioavaimet, Strongroom-avaimet, laiteavaimet, palautusavain ja sen osat</td>
+<td>Se, jolla avaimet ovat, hallitsee dataa.</td>
+<td>S-002, S-012, S-014, F-042</td>
+</tr>
+<tr>
+<td>Laitteiden identiteetit ja laiteluettelo</td>
+<td>Ratkaisevat, mitkä laitteet saavat lukea, kirjoittaa, lisätä laitteita ja antaa tyhjennyskäskyjä.</td>
+<td>S-004, F-035</td>
+</tr>
+<tr>
+<td>Tallennuspaikkojen tunnukset (S3-avaimet, rclone-salaisuudet, SFTP-salasanat)</td>
+<td>Niillä voi lukea salatekstiä, poistaa sitä tai kasvattaa käyttäjän tallennuslaskua, myös ilman data-avaimia.</td>
+<td>S-002, S-012, F-006, F-007</td>
+</tr>
+<tr>
+<td>Kirjanpito (missä jokainen lohko on)</td>
+<td>Väärä kirjanpito voi johtaa datan viimeisen kopion poistamiseen.</td>
+<td>F-031, N-007</td>
+</tr>
+<tr>
+<td>Käytön metatiedot</td>
+<td>Objektien koot ja määrät, käyttöajat, laitteiden määrä ja paikallaoloajat, IP-osoitteet.</td>
+<td>S-006, S-015</td>
+</tr>
+<tr>
+<td>Datan saatavuus</td>
+<td>Salaus ei suojaa poistamiselta eikä katoamiselta; sen tekee varmistus usealla kopiolla.</td>
+<td>F-018, F-020, F-021, M-005</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-hyökkääjät">2. Hyökkääjät</h2>
+<p>Jokaisella hyökkääjällä on tunniste, jota muut dokumentit käyttävät (esimerkiksi avainhierarkia viittaa tunnisteeseen "A4").</p>
+<table>
+<thead>
+<tr>
+<th>Tunniste</th>
+<th>Hyökkääjä</th>
+<th>Oletetut kyvyt</th>
+<th>Ei saa saada tietoonsa</th>
+<th>Ei saa pystyä tekemään</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A1</td>
+<td>Tallennuspalvelun tarjoaja tai kuka tahansa, jolla on pääsy säiliöön tai etätallennukseen</td>
+<td>Lukee, kopioi, poistaa, muuttaa, järjestää uudelleen ja palauttaa vanhaan tilaan minkä tahansa objektin; näkee pyyntölokit aikoineen ja asiakkaiden IP-osoitteineen; voi lukita tilin.</td>
+<td>Sisältöä, nimiä, kansiorakennetta, avaimia tai sitä, onko käyttäjällä jokin tunnettu tiedosto (ei selvätekstin tiivisteitä).</td>
+<td>Saada asiakasohjelmaa hyväksymään muutettuja, vaihdettuja tai uudelleen toistettuja objekteja huomaamatta; saada kirjanpitoa väittämään, että dataa on, vaikka sitä ei ole, ilman että väite merkitään epäilyttäväksi. A1 <strong>voi</strong> poistaa dataa ja estää palvelun käytön; vain varmistus usealla kopiolla rajoittaa sitä.</td>
+</tr>
+<tr>
+<td>A2</td>
+<td>Verkkohyökkääjä, passiivinen tai aktiivinen, lähiverkossa tai internetissä</td>
+<td>Tallentaa kaiken liikenteen myöhempää purkua varten, lisää, pudottaa ja toistaa paketteja, asettuu väliin.</td>
+<td>Sisältöä, nimiä, avaimia tai sitä, mihin jaettuun kansioon yhteys kuuluu.</td>
+<td>Esiintyä laitteena, pakottaa kättely pelkkään klassiseen salaukseen, syöttää paloja tai kirjanpidon tapahtumia.</td>
+</tr>
+<tr>
+<td>A3</td>
+<td>Varas, jolla on varastettu <strong>lukittu</strong> laite</td>
+<td>Fyysinen pääsy, rajattomasti aikaa, voi kopioida tallennusvälineen, voi kokeilla salasanoja verkon ulkopuolella, jos data sen sallii, voi palauttaa sovelluksen vanhoja varmuuskopioita.</td>
+<td>Sisältöä ja nimiä (paitsi kansiot, jotka käyttäjä on nimenomaan valinnut synkronoitavaksi salaamattomina, poikkeus S-011), avaimia.</td>
+<td>Kokeilla salalauseita verkon ulkopuolella ilman laitteen laitteistoon sidottua salaisuutta; nollata epäonnistuneiden yritysten laskuria palauttamalla varmuuskopion; lisätä uutta laitetta. (Tila 0.0.1-alpha.13: ei rakennettu. <code>keys.enc</code> on kääritty pelkän salalauseen Argon2id-johdannaisella, ilman laitteistoon sidottua salaisuutta ja ilman epäonnistuneiden yritysten laskuria, joten varastettua <code>keys.enc</code>-tiedostoa vastaan voi arvata salalauseita verkon ulkopuolella; Argon2id:n vähimmäisarvot ovat ainoa kustannus.)</td>
+</tr>
+<tr>
+<td>A4</td>
+<td>Varas, jolla on varastettu <strong>avattu</strong> laite (avoin istunto)</td>
+<td>Kaikki, mihin A3 pystyy, sekä käynnissä olevan sovelluksen, sen käyttöliittymän ja paikallisen ohjausrajapinnan hallinta.</td>
+<td>Strongroom-sisältöä ja -nimiä avoimen avausikkunan ulkopuolella.</td>
+<td>Avata Strongroom-kansioita, lisätä laitteita Strongroomiin, rekisteröidä uusia laitteita ilman toista todennustekijää (TBD, katso luku 4), estää toiselta laitteelta annettua mitätöintiä. A4 <strong>voi</strong> lukea tavallisia kansioita, jotka on jo avattu; tyhjennys ja mitätöinti vain rajoittavat lisävahinkoa.</td>
+</tr>
+<tr>
+<td>A5</td>
+<td>Pahantahtoinen vertainen P2P-parvessa (ei jäsen tai ei enää jäsen)</td>
+<td>Yhdistää, ilmoittaa paloja, tarjoaa väärää dataa, väittää säilyttävänsä dataa, jota sillä ei ole, tulvittaa pyyntöjä.</td>
+<td>Sisältöä, nimiä eikä ulkopuolisena sitä, mihin kansioon parvi kuuluu.</td>
+<td>Saada laitetta hyväksymään vioittunutta palaa; saada kirjanpitoa laskemaan väärennettyä kopiota varmennetuksi; kuluttaa laitteen resursseja rajatta.</td>
+</tr>
+<tr>
+<td>A6</td>
+<td>Jaetun kansion pahantahtoinen jäsen</td>
+<td>Hallitsee kansioavainta oikeutetusti; kirjoittaa, poistaa ja nimeää uudelleen kansion sisällä; säilyttää kopioita; voi yrittää täyttää omistajan tallennustilan.</td>
+<td>Omistajan muita kansioita; sisältöä, joka on lisätty jäsenen poistamisen jälkeen.</td>
+<td>Väärentää toisen jäsenen kirjanpitotapahtumia; poistaa enempää kuin versiohistoria ja roskakori pystyvät palauttamaan; lukea uutta sisältöä poistamisen jälkeen; palata poistamisen jälkeen uutena laitteena. A6 <strong>voi</strong> pitää kaiken, minkä se näki ennen poistamista.</td>
+</tr>
+<tr>
+<td>A7</td>
+<td>Murrettu julkaisuketju (käännösjärjestelmä, allekirjoitusavain, riippuvuus, sovelluskaupan tili)</td>
+<td>Toimittaa käyttäjille muutetun binäärin.</td>
+<td>Ei sovellu: pahantahtoinen asiakasohjelma näkee kaiken, minkä käyttäjä avaa.</td>
+<td>Toimittaa julkaisua, joka poikkeaa julkaistusta lähdekoodista, ilman että poikkeama on havaittavissa (toistettavat käännökset, allekirjoitukset, todistukset). Tavoite on havaitseminen, ei estäminen.</td>
+</tr>
+<tr>
+<td>A8</td>
+<td>Kvanttihyökkääjä (kerää nyt, pura myöhemmin)</td>
+<td>Tallentaa salatekstiä ja kättelyitä tänään; ajaa myöhemmin suurta kvanttitietokonetta.</td>
+<td>Tänään tallennettua sisältöä, nimiä ja avaimia.</td>
+<td>Palauttaa yhtään avainta, jota suojasi vain klassinen julkisen avaimen salaus.</td>
+</tr>
+<tr>
+<td>A9</td>
+<td>Pakottaminen (rajatarkastus, oikeudellinen painostus, fyysinen uhka)</td>
+<td>Pakottaa käyttäjän avaamaan laitteen tai esittämään turva-avaimen.</td>
+<td>Ei yleisesti saavutettavissa.</td>
+<td>Rajauksen ulkopuolella lukuun ottamatta valinnaista pakkotilanteen salalausetta (S-009, "Could"-tason kohta). Katso luku 4.</td>
+</tr>
+<tr>
+<td>A10</td>
+<td>Haittaohjelma, joka toimii työpöydällä saman käyttöjärjestelmän käyttäjän oikeuksin</td>
+<td>Lukee käyttäjän tiedostoja ja prosessimuistia siinä määrin kuin käyttöjärjestelmä sallii, puhuu taustapalvelun ohjausliitännälle, syöttää näppäilyjä, lukee leikepöytää.</td>
+<td>Raakaa avainmateriaalia, joka on käyttöjärjestelmän avainsäilössä tai turva-avaimella (se voi käyttää avaimia, kun ne on avattu, mutta sen ei pitäisi pystyä viemään niitä ulos).</td>
+<td>Käynnistää tason 3 (peruuttamattomia) toimintoja ohjausrajapinnan tai MCP:n kautta ilman vahvistusta kyseisen rajapinnan ulkopuolella; avata Strongroomia ilman turva-avaimen kosketusta. A10 <strong>voi</strong> lukea kaiken, minkä käyttäjä on avannut haittaohjelman ollessa käynnissä.</td>
+</tr>
+<tr>
+<td>A11</td>
+<td>Välityspalvelimen tai DHT-solmun ylläpitäjä</td>
+<td>Näkee IP-osoitteet, ajoituksen, koot ja läpinäkymättömät tietueet; pudottaa, viivästää tai toistaa tietueita; voi ajaa monta solmua (Sybil, eclipse).</td>
+<td>Sisältöä, nimiä, avaimia tai jaetun kansion identiteettiä.</td>
+<td>Ohjata laitetta huijarille: DHT-tietue on vain vihje, ja aitous tarkistetaan hybridikättelyssä.</td>
+</tr>
+<tr>
+<td>A12</td>
+<td>MCP:n kautta käytetty pilvessä toimivan kielimallin tarjoaja</td>
+<td>Saa kaiken, mitä MCP-työkalujen tulokset sisältävät; malli voi noudattaa tiedostojen sisältöön kätkettyjä ohjeita (kehoteinjektio).</td>
+<td>Salaisuuksia (salasanat, avaimet, palautussanat, PIN-koodit, tallennuspaikkojen tunnukset) eikä Strongroom-sisältöä.</td>
+<td>Aiheuttaa peruuttamattomia toimintoja ilman käyttäjän vahvistusta kielimallin kanavan ulkopuolella. Se <strong>saa</strong> tietoonsa kaiken sisällön, jonka käyttäjä antaa työkalujen palauttaa; päästä päähän -salaus ei kata sitä (suunnitelma 6.9).</td>
+</tr>
+<tr>
+<td>A13</td>
+<td>Verkon ulkopuolisen levyvaraston irrotettavan levyn haltija</td>
+<td>Lukee ja muuttaa levyä rauhassa; kloonaa sen tai palauttaa vanhan kopion.</td>
+<td>Sisältöä ja nimiä.</td>
+<td>Saada levyn vanhentunutta tai muutettua dataa hyväksytyksi ajantasaisena. Etätyhjennys ei ulotu verkon ulkopuolisiin levyihin; niitä suojaa vain salaus (suunnitelma 6.35).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-luottamusrajat">3. Luottamusrajat</h2>
+<table>
+<thead>
+<tr>
+<th>Raja</th>
+<th>Luotetaan sisäpuolella</th>
+<th>Ylittää rajan</th>
+<th>Suunnittelun tarkoitus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Käyttäjän laite (käynnissä, avattuna)</td>
+<td>Varsto-prosessi, käyttöjärjestelmän ydin, laitteisto.</td>
+<td>Salateksti ulos tallennuspaikkoihin ja vertaisille; selväteksti vain käyttäjälle ja sovelluksille, joilla käyttäjä avaa tiedoston.</td>
+<td>Selvätekstiä ja purettuja avaimia on vain täällä ja vain avattuna (S-002).</td>
+</tr>
+<tr>
+<td>Käyttöjärjestelmän avainsäilö (Android Keystore ja StrongBox, Applen avainnippu ja sen laitteistoavainsäilö, Windowsin ja Linuxin avainsäilöt)</td>
+<td>Avainten säilytys ilman vientimahdollisuutta, käyttäjän läsnäolon ja biometrian vaatiminen, monotoniset laskurit siellä, missä niitä on.</td>
+<td>Käärimis- ja purkupyynnöt.</td>
+<td>Säilyttää laitteistoon sidotun salaisuuden ja lukitun tilan avainjoukon käärimisavaimet. Työpöydän avainsäilöjen vahvuus vaihtelee; alustakohtainen arvio on <strong>TBD</strong>.</td>
+</tr>
+<tr>
+<td>FIDO2-turva-avain</td>
+<td>Todentimen tunnistetietoon sidottu <code>hmac-secret</code>-salaisuus (WebAuthn PRF).</td>
+<td>Suola sisään; 32 tavun salaisuus ulos kosketuksen ja valinnaisen PIN-koodin jälkeen.</td>
+<td>Salaisuus on symmetrinen, joten A8 ei hyödy tallennetusta liikenteestä. Avaimen omat allekirjoitukset (ES256, EdDSA) ovat klassisia, eikä luottamuksellisuus nojaa niihin (suunnitelma 6.5). Alustatuki vaihtelee; katso FIDO2-alustaselvitys (<code>docs/research/fido2-platform-support.md</code>, erillinen muutos).</td>
+</tr>
+<tr>
+<td>Taustapalvelun ohjausliitäntä (Unix-pistoke, nimetty putki; nykyisin HTTP-rajapinta osoitteessa 127.0.0.1, istuntokohtainen tunniste ja Host-tarkistus, määrittelyn luku 10)</td>
+<td>Vain käyttöjärjestelmän käyttäjäraja.</td>
+<td>Komentorivin ja käyttöliittymän pyynnöt.</td>
+<td>Mikä tahansa saman käyttäjän prosessi tavoittaa sen (A10). Tason 3 toiminnot vaativat vahvistuksen liitännän ulkopuolella (erillinen käyttöliittymäprosessi, käyttöjärjestelmän kehote tai turva-avaimen kosketus). Vastapuolen prosessin tarkistukset ja tunnisteen säilytys ovat <strong>TBD</strong> (suunnitelman luku 8, "paikallisen ohjausrajapinnan luottamusmalli").</td>
+</tr>
+<tr>
+<td>MCP-asiakas ja sen takana oleva kielimalli</td>
+<td>Ei mitään.</td>
+<td>Työkalukutsut sisään, työkalujen tulokset ulos.</td>
+<td>Oletuksena vain luku, rajatut ja mitätöitävät tunnisteet, yhteenvedot nimien sijaan, ei salaisuuksia, Strongroom näkymätön, kuiva-ajo ja ulkoinen vahvistus (F-016, F-038, suunnitelma 6.32). (Tila 0.0.1-alpha.13: oikeudet annetaan kansioittain ja ne ovat oletuksena vain luku, rajatut MCP-avaimet ovat main-haarassa version 0.0.1-alpha.13 jälkeen; työkalujen tulokset sisältävät tiedostonimiä, polkuja ja paikallisia polkuja, eivät yhteenvetoja; kuiva-ajoa ei ole.)</td>
+</tr>
+<tr>
+<td>Tallennus (pilvi, rclone-etätallennus, paikallinen kansio, irrotettava levy)</td>
+<td>Ei mitään (S-006, S-014).</td>
+<td>Salatut, todennetut objektit.</td>
+<td>Luottamuksellisuus ja eheys tulevat asiakaspään todennetusta salauksesta; saatavuus vain usean kopion varmistuksesta ja bittimädän tarkistuksesta.</td>
+</tr>
+<tr>
+<td>Vertaiset (muut laitteet)</td>
+<td>Omat laitteet laiteavaimilla todentamisen jälkeen, kunnes ne mitätöidään; jaetun kansion jäsenet vain oman kansionsa osalta.</td>
+<td>Salatut palat, allekirjoitetut kirjanpitotapahtumat, siirtopyynnöt.</td>
+<td>Jokainen pala tarkistetaan tiivistettään vasten ennen hyväksymistä; väitteet datan säilyttämisestä haastetaan (suunnitelma 6.19). (Tila 0.0.1-alpha.13: tiivistetarkistus on rakennettu; säilytysväitteiden haastamista ei ole rakennettu.)</td>
+</tr>
+<tr>
+<td>Välitys ja DHT</td>
+<td>Ei mitään.</td>
+<td>Läpinäkymätön, salattu liikenne ja tietueet.</td>
+<td>Vain vihjeitä; aitous todetaan päästä päähän hybridikättelyssä (suunnitelma 6.33).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-tavoitteiden-ulkopuolelle-jäävät-asiat-ja-jäännösriskit">4. Tavoitteiden ulkopuolelle jäävät asiat ja jäännösriskit</h2>
+<p>Ne on lueteltu, jotta kukaan, markkinointi mukaan lukien (M-005, M-006), ei väitä enempää kuin suunnitelma tarkoittaa.</p>
+<ul>
+<li><strong>Murrettu, avattu laite.</strong> Haittaohjelma tai hyökkääjä, jolla on avoin istunto (A4, A10), voi lukea kaiken, mikä on avattuna, myös Strongroom-kansion sen avausikkunan aikana. Turva-avaimessa ei ole näyttöä, joten käyttäjä ei näe, minkä toiminnon kosketus hyväksyy (suunnitelma 6.28).</li>
+<li><strong>Pakottaminen (A9).</strong> Suunnitelma ei suojaa käyttäjää, joka pakotetaan avaamaan. Pakkotilanteen salalause on valinnainen "Could"-tason kohta.</li>
+<li><strong>Tarjoajan tekemä poistaminen ja palvelunesto (A1).</strong> Salaus estää lukemisen ja huomaamattoman muuttamisen, ei poistamista, tilin sulkemista eikä palauttamista vanhempaan tilaan. Kopiot usealla tarjoajalla ja omilla laitteilla, bittimädän tarkistus ja hälytykset rajoittavat vaikutusta (F-018, F-020, F-021, F-032).</li>
+<li><strong>Ennen varkautta tai jäsenen poistamista kopioitu data (A3, A4, A6).</strong> Mitätöinti ja avainten kierto suojaavat vain tulevaa dataa.</li>
+<li><strong>Tyhjennys tavoittaa vain laitteet, jotka tulevat verkkoon.</strong> Verkon ulkopuolella pysyvää laitetta suojaavat vain sen lukitus (S-008–S-010) ja mitätöinti (suunnitelma 6.29). Tyhjennys ei ulotu irrotettaviin levyihin (A13).</li>
+<li><strong>Mitätöinnin ja tyhjennyksen tila (0.0.1-alpha.8).</strong> Toteutettu niin kuin <a href="../../docs/alpha-0-format.html">../spec/alpha-0-format.md</a> luvussa 21 kuvataan, seuraavin puuttein tähän malliin nähden: toista todennustekijää ei ole, joten ensin toimiva A4-varas voi mitätöidä omistajan muut laitteet sen sijaan, että se ei pystyisi estämään mitätöintiä; Varsto ei itse kierrätä tallennuspaikkojen tunnuksia, joten mitätöity laite voi yhä poistaa salatekstiä (A1:n kaltainen valta), kunnes käyttäjä vaihtaa tunnukset tarjoajalla. Poistamisen jälkeen <code>varsto status</code> ja <code>varsto device list</code> nimeävät jokaisen tallennuspaikan, jonka tunnukset kyseinen laite on voinut kopioida, ja varoitus pysyy, kunnes ajetaan <code>varsto storage mark-rotated &lt;nimi&gt;</code> (tunnukset pitää ensin vaihtaa tarjoajalla; merkitseminen ei muuta salaisuutta); muiden käyttäjien kanssa jaetut kansiot ja Strongroom-kansiot pitävät avaimensa; tyhjennyskäsky tavoittaa laitteen vain tallennuspaikan kautta, ei vertaisten kautta.</li>
+<li><strong>Jäsenen poistamisen tila (0.0.1-alpha.9, A6).</strong> Toteutettu jakoepookkeina (<a href="../../docs/alpha-0-format.html">../spec/alpha-0-format.md</a> luku 24): uusi sisältö on poistetulle jäsenelle lukukelvotonta, sen myöhemmät kirjanpidon erät ja manifestit ohitetaan, eikä se voi rekisteröidä uutta laitetta pitämillään avaimilla. Puutteet: tallennuspaikka, jonka molemmat käyttäjät tavoittavat, pysyy poistetulle jäsenelle kirjoitettavana, kunnes omistaja muuttaa sen pääsyä, joten se voi yhä poistaa salatekstiä tai varata objektinimiä (palvelunesto, A1:n kaltainen); se pitää epookin 0 avaimellisen tiivisteen avaimen ja tunnistaa tuntemansa sisällön palatunnisteet siitä, minkä se voi yhä avata; ennen kuin jäsen poistetaan, mikä tahansa jäsen voi kirjoittaa sisältöä, väärentää jäsentietueita ja allekirjoittaa oikeuksia, jotka ennen tätä versiota liittynyt jäsen hyväksyisi. Jaon pyytäjä vahvistetaan kuuden sanan sormenjäljellä (66 bittiä), jota molemmat osapuolet vertaavat toisen kanavan kautta; käyttäjä, joka ohittaa vertailun, ei saa siitä mitään suojaa.</li>
+<li><strong>Vain luku -jäsenten tila (A6).</strong> Jäsen voi olla katselija (<a href="../../docs/alpha-0-format.html">../spec/alpha-0-format.md</a> luku 55). Kansioavaimella katselija voi salata siinä missä lukeakin, joten mikään ei estä sitä kirjoittamasta objekteja; omistajan laitteet ja muokkaajat hylkäävät sen julkaisemat tiedot (manifestit, sen tekemät versiot myös välitettyinä, kirjanpidon erät, analyysit ja käyttötietueet), ja sen oma asiakasohjelma pitää paikalliset muutokset sivussa. Katselija voi silti kopioida kaiken, minkä se lukee (mikään avain ei estä sitä), ja sillä säilyvät luvun 24 tallennustason valtuudet (kirjoittaa, poistaa tai varata objekteja tallennuspaikassa, jonka se tavoittaa). Roolit allekirjoittavat omistajan laitteet; jäsen ei voi muuttaa omaansa.</li>
+<li><strong>Organisaatioiden tila (0.0.1-alpha.10).</strong> Toteutettu niin kuin <a href="../../docs/alpha-0-format.html">../spec/alpha-0-format.md</a> luvussa 27 kuvataan: vain ylläpitäjien laitteet poistavat laitteita tai aloittavat avainepookkeja, luettelon ulkopuoliset laitteet ohitetaan ja vertaiset torjuvat ne, ja loki on allekirjoitettu ja ketjutettu. Puutteet: ylläpitäjän toimissa ei ole toista todennustekijää, ja tallennuspaikkojen tunnukset ovat yhteisiä eikä niitä kierrätetä.</li>
+<li><strong>Vertaisyhteydet oletuksena päällä (0.0.1-alpha.11).</strong> Jokainen laite kuuntelee TCP- ja UDP-porttia 17893 ja lähettää lähiverkon majakkaviestejä, ellei ajeta <code>varsto p2p disable</code>. Tämä laajentaa hyökkäyspintaa verkon tarkkailijalle (A2) ja kenelle tahansa lähiverkossa (A5): he saavat tietää, että siellä on Varsto-laite, ja sen holvitunnisteen; pyynnöt vaativat silti holviin kuuluvan laitteen kiinnitetyn varmenteen, ja jokainen lohko on salatekstiä.</li>
+<li><strong>Reitittimen porttiohjaus oletuksena päällä (0.0.1-alpha.14).</strong> Palvelu pyytää kotireititintä (PCP, NAT-PMP, UPnP IGD) ohjaamaan vertaisyhteysportin, TCP:n ja UDP:n, joten portti on tavoitettavissa koko internetistä eikä vain lähiverkosta (A2, A5 mistä tahansa). Vain tämä portti ohjataan, tunnin välein uusittavalla varauksella, joka poistetaan, kun palvelu pysähtyy; pyynnöt vaativat silti holvin avaimen. Lähiverkon hyökkääjä voi vastata SSDP-hakuun tai esiintyä yhdyskäytävänä ja saada tietää portin ja tämän laitteen osoitteen tai väittää olemassa olevaksi ohjausta, jota ei ole (vertaiset siirtyvät silloin muille reiteille). <code>varsto p2p port-mapping off</code> kytkee sen pois (<a href="../../docs/alpha-0-format.html">../spec/alpha-0-format.md</a> luku 52).</li>
+<li><strong>Pilvikielimallille näytetty sisältö (A12).</strong> Kun käyttäjä antaa MCP-työkalun palauttaa sisältöä, kielimallin tarjoajalla on se.</li>
+<li><strong>Selvätekstinä synkronoidut kansiot.</strong> Kansiota, jonka käyttäjä synkronoi salaamattomana (poikkeus S-011 mobiilissa, synkronointikansiot työpöydällä), suojaavat vain laitteen oma lukitus ja levyn salaus.</li>
+<li><strong>Alfavaiheen lokit.</strong> Alfassa lokeista on poistettu arkaluonteiset tiedot, mutta niitä ei ole salattu levyllä; ne paljastavat käyttötapoja (tapahtumatyypit, koot, ajat) myös ilman nimiä (suunnitelma 6.40).</li>
+<li><strong>Toinen todennustekijä päivittäisessä avauksessa.</strong> Se, onko toinen todennustekijä pakollinen avauksessa vai vain laitetta lisättäessä, on <strong>TBD</strong> (suunnitelman luku 8, "2FA"). Kunnes se on päätetty, kestävyys hyökkääjiä A3 ja A4 vastaan on kuvattu vain vahvimmalle kokoonpanolle.</li>
+<li><strong>Lukitun tilan avaimet.</strong> Taustasynkronointi, kameralataus, kirjanpidon kuittaukset ja lokitus tarvitsevat joitakin avaimia sovelluksen ollessa lukittuna. Ne ovat tarkoituksellinen ja dokumentoitu suojan heikennys hyökkääjää A3 vastaan. Tarkka joukko on luonnosteltu tiedostossa <a href="../../docs/key-hierarchy.html">../spec/key-hierarchy.md</a> ja on <strong>TBD</strong>.</li>
+<li><strong>Sivukanavat.</strong> Pakkaus ennen salausta voi vuotaa tietoa sisällöstä kokojen kautta (suunnitelma 6.11). Pakkaus on aina päällä (muotovakio, määrittelyn luku 16); täytekokoluokat ovat <strong>TBD</strong>.</li>
+<li><strong>Toteutusvirheet.</strong> Ohjelmavirheet, kirjastojen väärinkäyttö ja ajoitukseen perustuvat sivukanavat ovat tämän mallin ulkopuolella, mutta ne ovat todennäköisimpiä todellisia vikoja. Riippumaton tarkastus on suunniteltu ennen beetaa (S-007).</li>
+</ul>
+<h2 id="5-metatiedot-jotka-voidaan-saada-selville">5. Metatiedot, jotka voidaan saada selville</h2>
+<p>Salaus kätkee sisällön ja nimet. Se ei kätke sitä, että dataa on, kuinka paljon sitä on tai milloin ja mistä sitä käytetään.</p>
+<table>
+<thead>
+<tr>
+<th>Tarkkailija</th>
+<th>Mitä se voi saada selville</th>
+<th>Lievennys suunnitelmassa</th>
+<th>Tila</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tallennuspalvelun tarjoaja (A1)</td>
+<td>Objektien määrän ja koot; kirjoitusten ja lukujen ajat; kasvuvauhdin; poistot; asiakkaiden IP-osoitteet ja asiakasohjelman tunnisteet käyttölokeissa.</td>
+<td>Pakkaukset ryhmittelevät pienet palat (suunnitelma 6.11); palojen ja pakkausten koot täytetään kokoluokkiin; objektinimet ovat läpinäkymättömiä.</td>
+<td>Täytekokoluokat <strong>TBD</strong> (suunnitelman luku 8, "avaimellinen tiiviste, palat ja täyte").</td>
+</tr>
+<tr>
+<td>Tallennuspalvelun tarjoaja kohtaamistietueen kautta (A1)</td>
+<td>Kuinka monta laitetta käyttäjällä on, milloin kukin on verkossa ja mistä IP-osoitteesta (kotona vai matkalla), salatun läsnäolotietueen luvuista ja kirjoituksista (suunnitelma 6.33).</td>
+<td>Tietueen polku johdetaan yhteisestä salaisuudesta ja aikaepookista; elossaoloviesti yhdistetään tavallisiin synkronointipyyntöihin ja satunnaistetaan; yksityisyystila ilman kohtaamistietuetta.</td>
+<td>Ei suunniteltu yksityiskohtaisesti; <strong>TBD</strong> (suunnitelman luku 8, "kohtaamistietueen metatiedot").</td>
+</tr>
+<tr>
+<td>DHT:n osallistujat (A11)</td>
+<td>Laitteen IP-osoitteen ja sen, että se hakee tai julkaisee tietueen tiettyinä aikoina; Sybil-hyökkääjä voi yhdistää hakuja epookkien yli.</td>
+<td>DHT oletuksena pois tai vain nimenomaisella suostumuksella; tietueen avain johdetaan yhteisestä salaisuudesta ja päiväepookista; tietueet salataan. Tietueessa on vain klassinen allekirjoitus, koska BEP 44 -tietue on liian pieni ML-DSA-allekirjoitukselle, joten sitä pidetään vihjeenä eikä koskaan aitouden todisteena (suunnitelma 6.33).</td>
+<td>Oletus <strong>TBD</strong> (suunnitelman luku 8, "P2P-kirjasto ja löytäminen").</td>
+</tr>
+<tr>
+<td>Välityspalvelimen ylläpitäjä (A11)</td>
+<td>Molempien päiden IP-osoitteet, liikenteen ajoituksen ja määrän.</td>
+<td>Itse ylläpidettävät välityspalvelimet; suorat yhteydet ensisijaisia; välityspalvelimet näkevät vain salattua liikennettä.</td>
+<td>Suunnittelun tarkoitus.</td>
+</tr>
+<tr>
+<td>Verkon tarkkailija (A2)</td>
+<td>Mitkä laitteet puhuvat keskenään, milloin ja kuinka paljon; lähiverkon löytämisilmoitukset.</td>
+<td>Lähiverkon ilmoituksissa on vain johdettu tunniste, ei nimiä; kättely ei paljasta kansion identiteettiä.</td>
+<td>Suunnittelun tarkoitus.</td>
+</tr>
+<tr>
+<td>Vertaiset parvessa (A5)</td>
+<td>Mitä palatunnisteita laitteella on (bittikentät) ja siirtojen rakenteen.</td>
+<td>Vain saman kansion jäsenet liittyvät sen parveen; palatunnisteet ovat avaimellisia tiivisteitä, joten ulkopuoliset eivät voi testata tunnettuja tiedostoja.</td>
+<td>Suunnittelun tarkoitus.</td>
+</tr>
+<tr>
+<td>Jaetun kansion jäsen (A6)</td>
+<td>Kansion koko historian, jäsenten laitetunnisteet ja ajat kirjanpidossa; vanhat palatunnisteet poistamisen jälkeen; jokaisen osallistujan viimeisimmän käyttöajan tiedostoittain (käyttötietueet, alpha-0-muodon luku 13).</td>
+<td>Kirjanpitotapahtumien nimet ovat avaimellisia tiivisteitä; tapahtumien sisällön kryptografinen poistaminen (suunnitelman luku 8, "GDPR ja vain lisättävä kirjanpito"); poistamisen jälkeen käyttötietueet ja kaikki muu ovat avaimella, jota jäsenellä ei ole.</td>
+<td><strong>TBD</strong>.</td>
+</tr>
+<tr>
+<td>Irrotettavan levyn haltija (A13)</td>
+<td>Pakkausten koot ja määrät, viimeisimmän kirjoitusajan, levyn tunnistetiedoston.</td>
+<td>Sama salattu pakkausmuoto ja täyte kuin muussa tallennuksessa.</td>
+<td>Suunnittelun tarkoitus.</td>
+</tr>
+<tr>
+<td>Kuka tahansa, joka voi lukea kirjanpidon objekteja (A1)</td>
+<td>Toiminnan tason ja laitteiden määrän kirjanpidon koosta ja tapahtumatiheydestä.</td>
+<td>Tapahtumat kootaan eriin (<a href="../../docs/ledger-signing-notes.html">../spec/ledger-signing-notes.md</a>).</td>
+<td><strong>TBD</strong>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-vastaavuus-hyökkääjästä-vaatimuksiin-ja-suunnitelman-lukuihin">6. Vastaavuus: hyökkääjästä vaatimuksiin ja suunnitelman lukuihin</h2>
+<table>
+<thead>
+<tr>
+<th>Hyökkääjä</th>
+<th>Vaatimustunnisteet</th>
+<th>Suunnitelman luvut</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A1 Tallennuspalvelun tarjoaja</td>
+<td>S-001, S-003, S-006, S-014, F-018, F-020, F-021, F-031</td>
+<td>6.10, 6.11, 6.19, 6.33</td>
+</tr>
+<tr>
+<td>A2 Verkkohyökkääjä</td>
+<td>S-003, F-011, F-013</td>
+<td>6.5, 6.7</td>
+</tr>
+<tr>
+<td>A3 Varas, lukittu laite</td>
+<td>S-008, S-009, S-010, S-011, S-014, F-035, F-037</td>
+<td>6.15, 6.29, 6.31</td>
+</tr>
+<tr>
+<td>A4 Varas, avattu laite</td>
+<td>S-004, S-012, F-035</td>
+<td>6.28, 6.29</td>
+</tr>
+<tr>
+<td>A5 Pahantahtoinen vertainen</td>
+<td>F-011, F-012, F-031, N-007</td>
+<td>6.7, 6.19, 6.33</td>
+</tr>
+<tr>
+<td>A6 Jaetun kansion pahantahtoinen jäsen</td>
+<td>F-004, S-006, F-025, F-034</td>
+<td>6.11, 6.19; suunnitelman luku 8 "jakaminen"</td>
+</tr>
+<tr>
+<td>A7 Murrettu julkaisuketju</td>
+<td>S-007, N-005</td>
+<td>6.14</td>
+</tr>
+<tr>
+<td>A8 Kvanttihyökkääjä</td>
+<td>S-003, S-014, M-006</td>
+<td>6.5, 6.38</td>
+</tr>
+<tr>
+<td>A9 Pakottaminen</td>
+<td>S-009, S-012</td>
+<td>6.15, 6.28</td>
+</tr>
+<tr>
+<td>A10 Saman käyttäjän haittaohjelma</td>
+<td>S-012, F-016, F-038, P-003</td>
+<td>6.28, 6.32; suunnitelman luku 8 "paikallinen ohjausrajapinta"</td>
+</tr>
+<tr>
+<td>A11 Välityspalvelimen tai DHT:n ylläpitäjä</td>
+<td>F-012, F-013, S-003</td>
+<td>6.7, 6.33</td>
+</tr>
+<tr>
+<td>A12 Pilvikielimalli MCP:n kautta</td>
+<td>F-014, F-015, F-016, F-038, M-001</td>
+<td>6.9, 6.32</td>
+</tr>
+<tr>
+<td>A13 Irrotettavan levyn haltija</td>
+<td>F-040, S-001, S-003, F-035</td>
+<td>6.29, 6.35</td>
+</tr>
+</tbody>
+</table>
+<p>Lokitussäännöt (S-015, N-013, suunnitelma 6.40) koskevat jokaista hyökkääjää, joka voi saada lokeja tai diagnostiikkapaketteja: A3, A4, A10 ja kuka tahansa, jolle käyttäjä lähettää paketin.</p>
+<h2 id="aiheeseen-liittyvät-dokumentit">Aiheeseen liittyvät dokumentit</h2>
+<p>Linkitetyt dokumentit ovat englanniksi.</p>
+<ul>
+<li><a href="../../docs/security-principles.html">security-principles.md</a></li>
+<li><a href="../../docs/logging.html">logging.md</a></li>
+<li><a href="../../docs/failure-model.html">../failure-model.md</a></li>
+<li><a href="../../docs/key-hierarchy.html">../spec/key-hierarchy.md</a> (luonnos)</li>
+<li><a href="../../docs/ledger-signing-notes.html">../spec/ledger-signing-notes.md</a> (suunnittelumuistiinpanot)</li>
+</ul>
+
+</article>
+  </div>
+</main>
+<footer class="site">
+  <div class="wrap foot-grid">
+    <div><a class="brand" href="../../fi/"><img src="../../assets/img/logo.svg" alt="" width="26" height="26"><span>Varsto</span></a><p>Salattu tiedostojen synkronointi ja varmuuskopiointi omaan tallennustilaan.</p></div>
+    <div><h2>Tuote</h2><nav aria-label="Tuote"><a href="../../fi/">Projekti</a><a href="../../fi/features/">Ominaisuudet</a><a href="../../fi/use-cases/">Käyttötapaukset</a><a href="../../fi/screenshots/">Kuvakaappaukset</a><a href="../../fi/downloads/">Lataukset</a></nav></div>
+    <div><h2>Opi</h2><nav aria-label="Opi"><a href="../../fi/how-it-works/">Miten se toimii</a><a href="../../fi/compare/">Vertailu</a><a href="../../docs/" aria-current="page">Dokumentaatio (en)</a><a href="../../fi/blog/">Blogi</a></nav></div>
+    <div><h2>Yhteisö</h2><nav aria-label="Yhteisö"><a href="../../forum/">Foorumi (en)</a><a href="../../fi/contribute/">Osallistu</a><a href="https://github.com/janttsu/varsto" rel="noopener">GitHub</a></nav></div>
+  </div>
+  <div class="wrap foot-lines">
+    <span>Varsto on työnimi. Lähdekoodi: <a href="https://github.com/janttsu/varsto">github.com/janttsu/varsto</a>, PolyForm Shield License 1.0.0 -lisenssillä (lähdekoodi saatavilla).</span>
+    <span>Ei evästeitä, ei seurantaa. Palvelin säilyttää tavallista käyntilokia enintään seitsemän päivää.</span>
+    <span><a href="../../docs/security-policy.html">Tietoturvakäytäntö</a> · <a href="../../docs/licence.html">Lisenssi</a> · <a href="../../docs/trademark.html">Tavaramerkki</a> (englanniksi)</span>
+  </div>
+</footer>
+<script src="../../assets/js/field.js?v=c342154328" defer></script>
+<script src="../../assets/js/motion.js?v=a547492b3b" defer></script>
+</body>
+</html>
