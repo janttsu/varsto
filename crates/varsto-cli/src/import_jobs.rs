@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: PolyForm-Shield-1.0.0
-//! Every import of this device in one list, for `varsto import jobs` and the
-//! Import page (`GET /api/import/jobs`):
+//! Every import of this device in one list, for the Import page
+//! (`GET /api/import/jobs`):
 //!
-//! - torrent jobs (`crate::torrent`, `state/torrents/`) and YouTube jobs
-//!   (`crate::youtube`, `state/youtube/`), named `torrent:<info hash>` and
-//!   `youtube:<job id>` (a bare name is looked up in both kinds);
 //! - imports the page started (a local directory, a git-annex repository,
 //!   a cloud drive through rclone), `run:<n>`, kept in memory while the
 //!   service runs;
@@ -13,18 +10,12 @@
 //!
 //! The page's requests are answered without waiting for the service's state
 //! (a sync or an import may hold it for a long time): the list is read from
-//! the job files and the activity registry, and the work a request asks for
-//! (start an import, pause or remove a job) runs on a thread of its own that
-//! takes the state when it is free. A thread here also steps the running
-//! torrent and YouTube jobs every few seconds between the service's syncs,
-//! and announces every change of the list as the event `import.jobs`.
-//!
-//! The command `varsto import jobs` is in `import_jobs_cmd` (the command
-//! line only; this module is shared with the mobile apps through
-//! varsto-ffi).
+//! the activity registry, and the work a request asks for (start an import)
+//! runs on a thread of its own that takes the state when it is free.
+//! Every change of the list is announced as the event `import.jobs`.
 
 use crate::desktop::Shared;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::Read;
@@ -32,18 +23,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use tiny_http::{Method, Request};
-use varsto_core::engine::{
-    find_job, find_youtube_job, torrent_jobs_at, youtube_jobs_at, FileOutcome, JobState,
-    TorrentAddOptions, TorrentJob, VideoStatus, YoutubeAddOptions, YoutubeJob, YtState,
-    DEFAULT_REFRESH_HOURS,
-};
-use varsto_core::freespace::MinFree;
-use varsto_core::transmission::{self, AddSource, Rpc, RpcSettings};
 use varsto_core::Engine;
 
-/// The running torrent and YouTube jobs are stepped this often (seconds)
-/// besides after every sync.
-const STEP_SECS: u64 = 20;
 /// Finished and failed imports the page started, kept for the list.
 const RUNS_KEPT: usize = 20;
 
@@ -52,178 +33,36 @@ const RUNS_KEPT: usize = 20;
 /// One import in the uniform list.
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
 pub struct JobRow {
-    /// `torrent:<info hash>`, `youtube:<job id>`, `run:<n>` or `activity:<n>`.
+    /// `run:<n>` or `activity:<n>`.
     pub id: String,
-    /// `dir`, `git-annex`, `rclone`, `dropbox`, `onedrive`, `torrent`,
-    /// `youtube`, or `import` (a command of this device).
+    /// `dir`, `git-annex`, `rclone`, `dropbox`, `onedrive`, or `import`
+    /// (a command of this device).
     pub kind: String,
     pub folder: String,
     pub title: String,
-    /// The source as given (a directory, a remote, an address).
+    /// The source as given (a directory or a remote).
     pub source: String,
-    /// `waiting` (for the service), `running`, `failed`, `done`, or the
-    /// job's own state (`downloading`, `waiting_space`, `waiting_policy`,
-    /// `waiting_retry`, `paused`, `metadata`, `listing`, `up_to_date`,
-    /// `complete`, ...).
+    /// `waiting` (for the service), `running`, `failed` or `done`.
     pub state: String,
-    /// What the job does or waits for, in a sentence.
+    /// What the import does or waits for, in a sentence.
     pub text: String,
     pub done: u64,
     pub total: u64,
-    /// What `done` and `total` count: `files` or `videos`.
+    /// What `done` and `total` count: `files`.
     pub unit: &'static str,
     pub bytes_done: u64,
     pub bytes_total: u64,
-    /// The file or video in hand.
+    /// The file in hand.
     pub current: Option<String>,
     /// Bytes per second, when known.
     pub speed: Option<u64>,
     pub last_error: Option<String>,
-    /// When the job tries again after a failure.
-    pub retry_utc: Option<i64>,
-    /// Files or videos the vault had already (not downloaded).
-    pub already_stored: Option<u64>,
-    /// Torrent files that differ from the folder's (left in the download
-    /// directory).
-    pub conflicts: Option<u64>,
-    /// Videos that failed, with the reason.
-    pub failed: Vec<FailedItem>,
-    /// Nothing more to do: complete, finished or failed for good.
+    /// Nothing more to do: finished or failed.
     pub finished: bool,
-    /// An action asked for and not carried out yet (`pause`, `resume`,
-    /// `remove`, `retry`).
-    pub pending: Option<String>,
     pub started_utc: i64,
     pub updated_utc: i64,
     /// What `POST /api/import/jobs/<id>/<action>` accepts for this row.
     pub actions: Vec<&'static str>,
-}
-
-/// A video of a YouTube job that failed.
-#[derive(Clone, Debug, Serialize, PartialEq)]
-pub struct FailedItem {
-    pub id: String,
-    pub title: String,
-    pub reason: String,
-    pub attempts: u32,
-    /// The next try; `None` once given up.
-    pub next_try_utc: Option<i64>,
-    pub gave_up: bool,
-}
-
-pub fn torrent_row(j: &TorrentJob) -> JobRow {
-    let complete = j.state == JobState::Complete;
-    let batch: Vec<&str> = j
-        .batch
-        .iter()
-        .filter_map(|i| j.files.get(*i).map(|f| f.path.as_str()))
-        .collect();
-    let current = match batch.as_slice() {
-        [] => None,
-        [one] => Some(one.to_string()),
-        [first, rest @ ..] => Some(format!("{first} and {} more", rest.len())),
-    };
-    let mut actions = Vec::new();
-    if !complete {
-        actions.push(if j.user_paused { "resume" } else { "pause" });
-    }
-    actions.push("remove");
-    JobRow {
-        id: format!("torrent:{}", j.hash),
-        kind: "torrent".into(),
-        folder: j.folder.clone(),
-        title: j.name.clone(),
-        source: j.magnet.clone().unwrap_or_default(),
-        state: j.state.as_str().to_string(),
-        text: j.text.clone(),
-        done: j.files_done(),
-        total: j.files.len() as u64,
-        unit: "files",
-        bytes_done: j.bytes_stored + j.bytes_deduped,
-        bytes_total: j.total_bytes(),
-        current,
-        speed: None,
-        last_error: j.last_error.clone(),
-        // A torrent stopped by an error is started again after a minute.
-        retry_utc: (!complete && j.last_error.is_some() && j.last_retry_utc > 0)
-            .then_some(j.last_retry_utc + 60),
-        already_stored: Some(j.count(FileOutcome::Present) + j.count(FileOutcome::Identical)),
-        conflicts: Some(j.count(FileOutcome::Conflict)),
-        failed: Vec::new(),
-        finished: complete,
-        pending: None,
-        started_utc: j.created_utc,
-        updated_utc: j.updated_utc,
-        actions,
-    }
-}
-
-pub fn youtube_row(j: &YoutubeJob) -> JobRow {
-    let c = j.counts();
-    let complete = j.state == YtState::Complete;
-    let current = j.running.as_ref().map(|r| match &r.video {
-        Some(v) => j
-            .videos
-            .iter()
-            .find(|x| &x.id == v)
-            .map(|x| {
-                if x.title.is_empty() {
-                    x.id.clone()
-                } else {
-                    x.title.clone()
-                }
-            })
-            .unwrap_or_else(|| v.clone()),
-        None => j.label.clone(),
-    });
-    let failed: Vec<FailedItem> = j
-        .videos
-        .iter()
-        .filter(|v| matches!(v.status, VideoStatus::Failed | VideoStatus::GaveUp))
-        .map(|v| FailedItem {
-            id: v.id.clone(),
-            title: v.title.clone(),
-            reason: v.last_error.clone().unwrap_or_default(),
-            attempts: v.attempts,
-            next_try_utc: (v.status == VideoStatus::Failed && v.next_try_utc > 0)
-                .then_some(v.next_try_utc),
-            gave_up: v.status == VideoStatus::GaveUp,
-        })
-        .collect();
-    let mut actions = Vec::new();
-    if !complete {
-        actions.push(if j.user_paused { "resume" } else { "pause" });
-    }
-    if !failed.is_empty() {
-        actions.push("retry");
-    }
-    actions.push("remove");
-    JobRow {
-        id: format!("youtube:{}", j.id),
-        kind: "youtube".into(),
-        folder: j.folder.clone(),
-        title: j.label.clone(),
-        source: j.url.clone(),
-        state: j.state.as_str().to_string(),
-        text: j.text.clone(),
-        done: c.stored + c.already_stored,
-        total: c.listed,
-        unit: "videos",
-        bytes_done: c.stored_bytes,
-        bytes_total: 0,
-        current,
-        speed: None,
-        last_error: j.last_error.clone(),
-        retry_utc: failed.iter().filter_map(|f| f.next_try_utc).min(),
-        already_stored: Some(c.already_stored),
-        conflicts: None,
-        failed,
-        finished: complete,
-        pending: None,
-        started_utc: j.created_utc,
-        updated_utc: j.updated_utc,
-        actions,
-    }
 }
 
 // ----- imports the page started ---------------------------------------------------
@@ -238,9 +77,6 @@ struct Run {
     /// `waiting`, `running`, `done` or `failed`.
     state: &'static str,
     error: Option<String>,
-    /// An action on a job (`pause`, ...): `target` is the job's id.
-    verb: Option<String>,
-    target: Option<String>,
     started_utc: i64,
     updated_utc: i64,
     /// What the import reported (`ImportReport`), when done.
@@ -261,10 +97,6 @@ fn set_run(n: u64, f: impl FnOnce(&mut Run)) {
     }
 }
 
-fn drop_run(n: u64) {
-    runs().retain(|r| r.n != n);
-}
-
 /// The list changed: open pages load it again.
 fn changed() {
     varsto_core::events::publish("import.jobs", json!({}));
@@ -278,11 +110,6 @@ struct RunInfo {
     title: String,
     source: String,
     folder: String,
-    verb: Option<String>,
-    target: Option<String>,
-    /// Kept in the list once done (a directory, annex or cloud import);
-    /// otherwise the job's own row takes over.
-    keep: bool,
 }
 
 /// Run `work` with the engine on a thread of its own, once the state is
@@ -300,8 +127,6 @@ fn spawn(state: &Shared, info: RunInfo, work: Work) -> String {
             folder: info.folder,
             state: "waiting",
             error: None,
-            verb: info.verb,
-            target: info.target,
             started_utc: now,
             updated_utc: now,
             report: None,
@@ -320,7 +145,6 @@ fn spawn(state: &Shared, info: RunInfo, work: Work) -> String {
         }
     }
     changed();
-    let keep = info.keep;
     let state = state.clone();
     let spawned = std::thread::Builder::new()
         .name("import-run".into())
@@ -343,14 +167,13 @@ fn spawn(state: &Shared, info: RunInfo, work: Work) -> String {
                 }
             };
             match result {
-                Ok(v) if keep => set_run(n, |r| {
+                Ok(v) => set_run(n, |r| {
                     r.state = "done";
                     if let Some(f) = v.get("folder").and_then(Value::as_str) {
                         r.folder = f.to_string();
                     }
                     r.report = Some(v);
                 }),
-                Ok(_) => drop_run(n),
                 Err(e) => {
                     log::warn!("import from the interface failed: {e:#}");
                     set_run(n, |r| {
@@ -382,7 +205,6 @@ fn run_row(r: &Run, task: Option<&varsto_core::activity::TaskView>) -> JobRow {
         unit: "files",
         last_error: r.error.clone(),
         finished,
-        pending: if finished { None } else { r.verb.clone() },
         started_utc: r.started_utc,
         updated_utc: r.updated_utc,
         // A running import cannot be stopped half-way from here; running
@@ -412,16 +234,12 @@ fn run_row(r: &Run, task: Option<&varsto_core::activity::TaskView>) -> JobRow {
 fn apply_task(row: &mut JobRow, t: &varsto_core::activity::TaskView) {
     match t.unit {
         varsto_core::activity::Unit::Bytes => {
-            if row.unit != "videos" {
-                row.bytes_done = t.done;
-                row.bytes_total = t.total;
-            }
+            row.bytes_done = t.done;
+            row.bytes_total = t.total;
         }
         varsto_core::activity::Unit::Items => {
-            if row.unit == "files" && row.kind != "torrent" {
-                row.done = t.done;
-                row.total = t.total;
-            }
+            row.done = t.done;
+            row.total = t.total;
         }
     }
     if t.rate > 0 {
@@ -434,17 +252,9 @@ fn apply_task(row: &mut JobRow, t: &varsto_core::activity::TaskView) {
 
 // ----- the list ---------------------------------------------------------------------
 
-/// The torrent and YouTube jobs of a device directory (read without the
-/// passphrase).
-pub fn job_rows(home: &Path) -> Vec<JobRow> {
-    let mut out: Vec<JobRow> = torrent_jobs_at(home).iter().map(torrent_row).collect();
-    out.extend(youtube_jobs_at(home).iter().map(youtube_row));
-    out
-}
-
-/// Everything: the jobs, the imports the page started, and the imports of
-/// other commands of this device. Unfinished ones first, then by start.
-pub fn rows(home: &Path) -> Vec<JobRow> {
+/// Everything: the imports the page started and the imports of other
+/// commands of this device. Unfinished ones first, then by start.
+pub fn rows() -> Vec<JobRow> {
     let tasks: Vec<varsto_core::activity::TaskView> = varsto_core::activity::tasks()
         .into_iter()
         .filter(|t| t.kind == varsto_core::activity::IMPORT)
@@ -457,33 +267,14 @@ pub fn rows(home: &Path) -> Vec<JobRow> {
         used[i] = true;
         Some(i)
     };
-    let mut out = job_rows(home);
-    let list = runs().clone();
-    // Actions waiting for the state show on their job's row.
-    for r in list.iter().filter(|r| r.target.is_some()) {
-        if matches!(r.state, "waiting" | "running") {
-            if let Some(row) = out.iter_mut().find(|x| Some(&x.id) == r.target.as_ref()) {
-                row.pending = r.verb.clone();
-            }
-        }
-    }
-    for row in out.iter_mut() {
-        if !row.finished {
-            if let Some(i) = claim(&row.folder) {
-                apply_task(row, &tasks[i]);
-            }
-        }
-    }
-    for r in &list {
-        // A pending action is on its job's row; a failed one stays visible.
-        if r.target.is_some() && r.state != "failed" {
-            continue;
-        }
-        let task = (r.state == "running" && r.target.is_none())
+    let mut out = Vec::new();
+    for r in runs().clone() {
+        // A failed import stays visible; a running one shows the task in hand.
+        let task = (r.state == "running")
             .then(|| claim(&r.folder))
             .flatten()
             .map(|i| &tasks[i]);
-        out.push(run_row(r, task));
+        out.push(run_row(&r, task));
     }
     for (i, t) in tasks.iter().enumerate() {
         if used[i] {
@@ -525,31 +316,16 @@ fn on_path(program: &str, env: &str) -> bool {
 }
 
 /// `GET /api/import/jobs`.
-pub fn jobs_json(home: &Path) -> Value {
+pub fn jobs_json() -> Value {
     let mobile = crate::desktop::mobile();
     json!({
-        "jobs": rows(home),
+        "jobs": rows(),
         "platform": {
             "mobile": mobile,
-            "torrents": cfg!(target_os = "linux") && !mobile,
-            "youtube": !mobile && !cfg!(any(target_os = "android", target_os = "ios")),
         },
         "tools": {
-            "yt_dlp": on_path("yt-dlp", "VARSTO_YTDLP"),
-            "transmission": on_path("transmission-daemon", "VARSTO_TRANSMISSION_URL"),
             "rclone": on_path("rclone", "VARSTO_RCLONE"),
             "git": on_path("git", "VARSTO_GIT"),
-        },
-        "defaults": {
-            "free_min": "15%",
-            "youtube_download_dir": default_youtube_download_dir()
-                .map(|d| d.display().to_string())
-                .unwrap_or_default(),
-            "sleep": "25-65",
-            "sleep_requests": 2,
-            "rate": "600K",
-            "concurrent_fragments": 1,
-            "refresh_hours": DEFAULT_REFRESH_HOURS,
         },
     })
 }
@@ -563,10 +339,9 @@ pub fn serve(state: &Shared, home: &Path, mut request: Request) -> Result<()> {
     let path = request.url().split('?').next().unwrap_or("").to_string();
     let method = request.method().clone();
     let (status, v) = if method == Method::Get && path == "/api/import/jobs" {
-        (200, jobs_json(home))
+        (200, jobs_json())
     } else if method == Method::Post {
         let mut body = String::new();
-        // A .torrent file comes in the body (base64).
         request
             .as_reader()
             .take(8 << 20)
@@ -578,7 +353,7 @@ pub fn serve(state: &Shared, home: &Path, mut request: Request) -> Result<()> {
                 Err(e) => (400, json!({"error": format!("{e:#}")})),
             }
         } else if let Some(rest) = path.strip_prefix("/api/import/jobs/") {
-            action(state, home, rest)
+            action(rest)
         } else {
             (404, json!({"error": "not found"}))
         }
@@ -614,27 +389,6 @@ fn or(s: String, default: &str) -> String {
     }
 }
 
-/// `storage`: empty (the folder's usual placement), `cheapest`, or a
-/// storage name; or `storages`, a list.
-fn storages_of(v: &Value) -> Vec<String> {
-    let mut out: Vec<String> = v
-        .get("storages")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-    let one = text(v, "storage");
-    if !one.is_empty() && !out.contains(&one) {
-        out.push(one);
-    }
-    out
-}
-
 /// The target of a directory, annex or cloud import.
 fn import_options(home: &Path, v: &Value) -> varsto_core::engine::ImportOptions {
     let dest = Some(text(v, "dest"))
@@ -653,7 +407,7 @@ fn import_options(home: &Path, v: &Value) -> varsto_core::engine::ImportOptions 
 }
 
 /// `POST /api/import/start`: check what can be checked at once, then start
-/// the import (or register the job) on a thread of its own.
+/// the import on a thread of its own.
 fn start(state: &Shared, home: &Path, input: &Value) -> Result<String> {
     let kind = text(input, "kind");
     let folder = text(input, "folder");
@@ -667,9 +421,6 @@ fn start(state: &Shared, home: &Path, input: &Value) -> Result<String> {
         title: source.to_string(),
         source: source.to_string(),
         folder: folder.clone(),
-        verb: None,
-        target: None,
-        keep: true,
     };
     let id = match kind.as_str() {
         "dir" => {
@@ -744,552 +495,50 @@ fn start(state: &Shared, home: &Path, input: &Value) -> Result<String> {
                 }),
             )
         }
-        "torrent" => {
-            if !cfg!(target_os = "linux") {
-                bail!("torrent imports run on Linux only (they drive a local transmission-daemon)");
-            }
-            let magnet = text(&input, "magnet");
-            let b64 = text(&input, "torrent_base64");
-            let file = text(&input, "torrent_path");
-            let (source, name) = if magnet.starts_with("magnet:") {
-                let (hash, name) = transmission::parse_magnet(&magnet)?;
-                (AddSource::Magnet(magnet.clone()), name.unwrap_or(hash))
-            } else if !b64.is_empty() {
-                use base64::Engine as _;
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(b64.as_bytes())
-                    .context("the .torrent file did not arrive whole")?;
-                let name = transmission::parse_metainfo(&bytes)?.name;
-                (AddSource::Metainfo(bytes), name)
-            } else if !file.is_empty() {
-                let bytes = std::fs::read(&file).with_context(|| format!("read {file}"))?;
-                let name = transmission::parse_metainfo(&bytes)?.name;
-                (AddSource::Metainfo(bytes), name)
-            } else {
-                bail!("give a magnet link or a .torrent file");
-            };
-            let folder = if folder.is_empty() {
-                varsto_core::import::folder_name_from(&name)
-            } else {
-                folder.clone()
-            };
-            let free_min = MinFree::parse(&or(text(&input, "free_min"), "15%"))?;
-            let download_dir = Some(text(&input, "download_dir"))
-                .filter(|d| !d.is_empty())
-                .map(PathBuf::from);
-            let min_copies = (!yes(&input, "keep_policy"))
-                .then(|| num(&input, "min_copies", 1).clamp(1, 16) as u32);
-            let verify_existing = yes(&input, "verify_existing");
-            let storages = storages_of(&input);
-            let settings = RpcSettings::resolve(
-                Some(text(&input, "rpc_url"))
-                    .filter(|u| !u.is_empty())
-                    .as_deref(),
-                None,
-                None,
-            );
-            let ri = RunInfo {
-                kind: "torrent".into(),
-                title: name.clone(),
-                source: if magnet.is_empty() {
-                    file
-                } else {
-                    magnet.clone()
-                },
-                folder: folder.clone(),
-                verb: None,
-                target: None,
-                keep: false,
-            };
-            spawn(
-                state,
-                ri,
-                Box::new(move |e: &mut Engine| {
-                    let rpc = Rpc::new(settings.clone());
-                    let job = e.torrent_add(
-                        &TorrentAddOptions {
-                            source,
-                            folder,
-                            storages,
-                            free_min,
-                            download_dir,
-                            folder_parent: crate::desktop::folder_root(&home),
-                            min_copies,
-                            verify_existing,
-                            rpc: settings,
-                        },
-                        &rpc,
-                    )?;
-                    Ok(serde_json::to_value(&job)?)
-                }),
-            )
-        }
-        "youtube" => {
-            let url = text(&input, "url");
-            let parsed = varsto_core::youtube::parse_source_url(&url)?;
-            let (sleep_min, sleep_max) =
-                varsto_core::youtube::parse_sleep(&or(text(&input, "sleep"), "25-65"))?;
-            let throttle = varsto_core::youtube::Throttle {
-                sleep_min,
-                sleep_max,
-                sleep_requests: num(&input, "sleep_requests", 2).min(3600) as u32,
-                rate: varsto_core::youtube::parse_rate(&or(text(&input, "rate"), "600K"))?,
-                concurrent_fragments: num(&input, "concurrent_fragments", 1).clamp(1, 16) as u32,
-                format: text(&input, "format"),
-                cookies_from_browser: text(&input, "cookies_from_browser"),
-                extra: Vec::new(),
-            };
-            let opts = YoutubeAddOptions {
-                url: url.clone(),
-                folder: Some(folder.clone()).filter(|f| !f.is_empty()),
-                storages: storages_of(&input),
-                free_min: MinFree::parse(&or(text(&input, "free_min"), "15%"))?,
-                download_dir: match text(&input, "download_dir") {
-                    d if d.is_empty() => default_youtube_download_dir()?,
-                    d => PathBuf::from(d),
-                },
-                folder_parent: crate::desktop::folder_root(&home),
-                min_copies: (!yes(&input, "keep_policy"))
-                    .then(|| num(&input, "min_copies", 1).clamp(1, 16) as u32),
-                throttle,
-                thumbnails: yes(&input, "thumbnails"),
-                subtitles: text(&input, "subs"),
-                refresh_hours: num(&input, "refresh_hours", DEFAULT_REFRESH_HOURS as u64)
-                    .min(24 * 365) as u32,
-                ytdlp: None,
-            };
-            let ri = RunInfo {
-                kind: "youtube".into(),
-                title: parsed.label.clone(),
-                source: url,
-                folder: folder.clone(),
-                verb: None,
-                target: None,
-                keep: false,
-            };
-            spawn(
-                state,
-                ri,
-                Box::new(move |e: &mut Engine| {
-                    let job = e.youtube_add(&opts)?;
-                    Ok(serde_json::to_value(&job)?)
-                }),
-            )
-        }
         "" => bail!("choose what to import"),
         other => bail!("unknown import source {other}"),
     };
     Ok(id)
 }
 
-/// `POST /api/import/jobs/<id>/<action>`: queue the action; the answer
-/// comes at once (202), the list follows when it is done.
-fn action(state: &Shared, home: &Path, rest: &str) -> (u16, Value) {
+/// `POST /api/import/jobs/<id>/<action>`: only an import the page started
+/// and that is finished can be taken off the list (`run:<n>`, `remove`).
+fn action(rest: &str) -> (u16, Value) {
     let Some((id, verb)) = rest.rsplit_once('/') else {
         return (404, json!({"error": "not found"}));
     };
     let id = crate::desktop::percent_decode(id);
-    if let Some(n) = id.strip_prefix("run:") {
-        // Only a finished or failed one can be taken off the list.
-        let Ok(n) = n.parse::<u64>() else {
-            return (404, json!({"error": format!("no import {id}")}));
-        };
-        if verb != "remove" {
-            return (
-                400,
-                json!({"error": "an import started here can only be taken off the list"}),
-            );
-        }
-        let mut list = runs();
-        return match list.iter().position(|r| r.n == n) {
-            None => (404, json!({"error": format!("no import {id}")})),
-            Some(i) if !matches!(list[i].state, "done" | "failed") => (
-                409,
-                json!({"error": "this import is running; it cannot be stopped half-way (running it again later carries on)"}),
-            ),
-            Some(i) => {
-                list.remove(i);
-                drop(list);
-                changed();
-                (200, json!({"ok": true}))
-            }
-        };
-    }
-    if !matches!(verb, "pause" | "resume" | "remove" | "retry") {
-        return (404, json!({"error": format!("no action {verb}")}));
-    }
-    // Exact ids only here: the page sends what it was given.
-    let job = match find(home, &id) {
-        Ok(j) if j.id() == id => j,
-        Ok(_) | Err(_) => return (404, json!({"error": format!("no import job {id}")})),
+    let Some(n) = id.strip_prefix("run:") else {
+        return (404, json!({"error": format!("no import job {id}")}));
     };
-    if verb == "retry" && matches!(job, JobRef::Torrent(_)) {
-        return (400, json!({"error": "a torrent job tries again by itself"}));
-    }
-    let (kind, title, folder) = match &job {
-        JobRef::Torrent(j) => ("torrent", j.name.clone(), j.folder.clone()),
-        JobRef::Youtube(j) => ("youtube", j.label.clone(), j.folder.clone()),
+    let Ok(n) = n.parse::<u64>() else {
+        return (404, json!({"error": format!("no import {id}")}));
     };
-    let verb = verb.to_string();
-    let info = RunInfo {
-        kind: kind.into(),
-        title,
-        source: String::new(),
-        folder,
-        verb: Some(verb.clone()),
-        target: Some(id.clone()),
-        keep: false,
-    };
-    let run = spawn(
-        state,
-        info,
-        Box::new(move |e: &mut Engine| apply_action(e, job, &verb, false)),
-    );
-    (202, json!({"ok": true, "queued": run}))
-}
-
-/// Carry out `pause`, `resume`, `remove` or `retry` on a job; the job as it
-/// is afterwards.
-fn apply_action(
-    e: &mut Engine,
-    job: JobRef,
-    verb: &str,
-    keep_in_transmission: bool,
-) -> Result<Value> {
-    match job {
-        JobRef::Torrent(j) => {
-            let rpc = Rpc::new(e.torrent_rpc(&j, &RpcSettings::default()));
-            let after = match verb {
-                "pause" => e.torrent_set_paused(&j.hash, true, &rpc)?,
-                "resume" => e.torrent_set_paused(&j.hash, false, &rpc)?,
-                "remove" => e.torrent_remove(&j.hash, keep_in_transmission, Some(&rpc))?,
-                other => bail!("a torrent job cannot {other}"),
-            };
-            tagged(&after, &format!("torrent:{}", after.hash), "torrent")
-        }
-        JobRef::Youtube(j) => {
-            let after = match verb {
-                "pause" => e.youtube_set_paused(&j.id, true)?,
-                "resume" => e.youtube_set_paused(&j.id, false)?,
-                "remove" => e.youtube_remove(&j.id)?,
-                "retry" => e.youtube_retry_failed(&j.id)?,
-                other => bail!("a YouTube job cannot {other}"),
-            };
-            tagged(&after, &format!("youtube:{}", after.id), "youtube")
-        }
+    if verb != "remove" {
+        return (
+            400,
+            json!({"error": "an import started here can only be taken off the list"}),
+        );
     }
-}
-
-// ----- stepping the jobs between syncs ----------------------------------------------
-
-/// Step the running torrent and YouTube jobs every [`STEP_SECS`] while the
-/// state is free (the service also steps them after every sync), and
-/// announce changes of the list (`import.jobs`), whoever made them.
-pub fn spawn_driver(state: Shared, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) {
-    let spawned = std::thread::Builder::new()
-        .name("import-jobs".into())
-        .spawn(move || {
-            let home = state.lock().unwrap_or_else(|e| e.into_inner()).home.clone();
-            let mut last = fingerprint(&home);
-            let mut waited = 0;
-            while !stop.load(Ordering::Relaxed) {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                waited += 2;
-                if waited >= STEP_SECS {
-                    waited = 0;
-                    step_jobs(&state, &home);
-                }
-                let now = fingerprint(&home);
-                if now != last {
-                    last = now;
-                    changed();
-                }
-            }
-        });
-    if spawned.is_err() {
-        log::warn!("cannot start the import jobs thread");
-    }
-}
-
-/// What the list shows, without the figures that move all the time.
-fn fingerprint(home: &Path) -> String {
-    job_rows(home)
-        .iter()
-        .map(|r| {
-            format!(
-                "{} {} {} {} {} {:?} {:?}",
-                r.id, r.state, r.done, r.total, r.text, r.last_error, r.actions
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn step_jobs(state: &Shared, home: &Path) {
-    let any = torrent_jobs_at(home).iter().any(|j| j.running())
-        || youtube_jobs_at(home).iter().any(|j| j.running());
-    if !any {
-        return;
-    }
-    // A sync or an import holds the state: the jobs wait for the next
-    // round (or the step after that sync).
-    let Ok(mut guard) = state.try_lock() else {
-        return;
-    };
-    let st = &mut *guard;
-    if st.service.paused {
-        return;
-    }
-    if let Some(e) = st.engine.as_mut() {
-        st.service.torrents_if_due(e);
-    }
-    if let Some(e) = st.engine.as_mut() {
-        st.service.youtube_if_due(e);
-    }
-}
-
-/// Where YouTube downloads wait for import unless a job names its own
-/// directory (`~/Downloads/varsto-youtube`).
-pub(crate) fn default_youtube_download_dir() -> Result<PathBuf> {
-    match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-        Some(h) => Ok(PathBuf::from(h).join("Downloads").join("varsto-youtube")),
-        None => bail!("give --download-dir"),
-    }
-}
-
-/// A job of either kind.
-pub enum JobRef {
-    Torrent(TorrentJob),
-    Youtube(YoutubeJob),
-}
-
-impl JobRef {
-    /// `torrent:<info hash>` or `youtube:<job id>`.
-    pub fn id(&self) -> String {
-        match self {
-            JobRef::Torrent(j) => format!("torrent:{}", j.hash),
-            JobRef::Youtube(j) => format!("youtube:{}", j.id),
-        }
-    }
-    pub fn line(&self) -> String {
-        match self {
-            JobRef::Torrent(j) => j.line(),
-            JobRef::Youtube(j) => j.line(),
-        }
-    }
-    pub fn value(&self) -> Result<Value> {
-        match self {
-            JobRef::Torrent(j) => tagged(j, &self.id(), "torrent"),
-            JobRef::Youtube(j) => tagged(j, &self.id(), "youtube"),
-        }
-    }
-}
-
-/// A job's own JSON with `job` (its id in the list) and `job_kind`.
-fn tagged<T: Serialize>(job: &T, id: &str, kind: &str) -> Result<Value> {
-    let mut v = serde_json::to_value(job)?;
-    if let Some(o) = v.as_object_mut() {
-        o.insert("job".into(), json!(id));
-        o.insert("job_kind".into(), json!(kind));
-    }
-    Ok(v)
-}
-
-/// Every job of both kinds, oldest first.
-pub fn all_jobs(home: &Path) -> Vec<JobRef> {
-    let mut out: Vec<(i64, JobRef)> = torrent_jobs_at(home)
-        .into_iter()
-        .map(|j| (j.created_utc, JobRef::Torrent(j)))
-        .collect();
-    out.extend(
-        youtube_jobs_at(home)
-            .into_iter()
-            .map(|j| (j.created_utc, JobRef::Youtube(j))),
-    );
-    out.sort_by_key(|(t, _)| *t);
-    out.into_iter().map(|(_, j)| j).collect()
-}
-
-/// A job by `torrent:<key>`, `youtube:<key>`, or a key of either kind: an
-/// id (or its start), a folder, a name or a YouTube address.
-pub fn find(home: &Path, key: &str) -> Result<JobRef> {
-    let key = key.trim();
-    if let Some(k) = key.strip_prefix("torrent:") {
-        return Ok(JobRef::Torrent(find_job(home, k)?));
-    }
-    if let Some(k) = key.strip_prefix("youtube:") {
-        return Ok(JobRef::Youtube(find_youtube_job(home, k)?));
-    }
-    match (find_job(home, key), find_youtube_job(home, key)) {
-        (Ok(t), Err(_)) => Ok(JobRef::Torrent(t)),
-        (Err(_), Ok(y)) => Ok(JobRef::Youtube(y)),
-        (Ok(_), Ok(_)) => bail!(
-            "{key} names a torrent job and a YouTube job: write torrent:{key} or youtube:{key}"
+    let mut list = runs();
+    match list.iter().position(|r| r.n == n) {
+        None => (404, json!({"error": format!("no import {id}")})),
+        Some(i) if !matches!(list[i].state, "done" | "failed") => (
+            409,
+            json!({"error": "this import is running; it cannot be stopped half-way (running it again later carries on)"}),
         ),
-        (Err(t), Err(y)) => {
-            // Several jobs of one kind: that answer says more.
-            let many = [t, y]
-                .into_iter()
-                .map(|e| format!("{e:#}"))
-                .find(|m| m.contains("more than one"));
-            match many {
-                Some(m) => bail!("{m}"),
-                None => bail!("no import job {key}: `varsto import jobs list` shows them"),
-            }
+        Some(i) => {
+            list.remove(i);
+            drop(list);
+            changed();
+            (200, json!({"ok": true}))
         }
     }
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-
-    fn torrent_json(hash: &str, state: &str, paused: bool) -> Value {
-        json!({
-            "hash": hash,
-            "name": "Example set",
-            "folder": "example-set",
-            "free_min": "15%",
-            "download_dir": format!("/tmp/dl/{hash}"),
-            "folder_parent": "/tmp/folders",
-            "rpc_url": "http://127.0.0.1:9091/transmission/rpc",
-            "created_utc": 1_790_000_000i64,
-            "updated_utc": 1_790_000_100i64,
-            "state": state,
-            "user_paused": paused,
-            "files": [
-                {"index": 0, "path": "Example set/a.bin", "size": 100, "done": true, "outcome": "stored"},
-                {"index": 1, "path": "Example set/b.bin", "size": 300, "done": true, "outcome": "present"},
-                {"index": 2, "path": "Example set/c.bin", "size": 600},
-            ],
-            "batch": [2],
-            "bytes_stored": 100,
-            "bytes_deduped": 300,
-            "last_error": "transmission: no data found",
-            "last_retry_utc": 1_790_000_050i64,
-        })
-    }
-
-    fn youtube_json(id: &str, state: &str) -> Value {
-        json!({
-            "id": id,
-            "url": "https://www.youtube.com/@ExampleChannel/videos",
-            "kind": "channel",
-            "label": "@ExampleChannel",
-            "folder": "example-channel",
-            "free_min": "15%",
-            "spool_dir": format!("/tmp/yt/{id}"),
-            "folder_parent": "/tmp/folders",
-            "throttle": {"sleep_min": 25, "sleep_max": 65, "sleep_requests": 2, "rate": "600K", "concurrent_fragments": 1},
-            "refresh_hours": 24,
-            "created_utc": 1_790_000_200i64,
-            "updated_utc": 1_790_000_300i64,
-            "state": state,
-            "videos": [
-                {"id": "exAAAAAAAA1", "title": "One", "url": "https://www.youtube.com/watch?v=exAAAAAAAA1", "status": "stored", "bytes": 1000},
-                {"id": "exBBBBBBBB2", "title": "Two", "url": "https://www.youtube.com/watch?v=exBBBBBBBB2", "status": "already_stored", "found_in": "folder old"},
-                {"id": "exCCCCCCCC3", "title": "Three", "url": "https://www.youtube.com/watch?v=exCCCCCCCC3", "status": "failed", "attempts": 2, "next_try_utc": 1_790_010_000i64, "last_error": "Private video"},
-                {"id": "exDDDDDDDD4", "title": "Four", "url": "https://www.youtube.com/watch?v=exDDDDDDDD4", "status": "gave_up", "attempts": 6, "last_error": "Video unavailable"},
-                {"id": "exEEEEEEEE5", "title": "Five", "url": "https://www.youtube.com/watch?v=exEEEEEEEE5", "status": "pending"},
-            ],
-            "running": {"kind": "download", "video": "exEEEEEEEE5", "pid": 1, "started_utc": 1_790_000_250i64},
-        })
-    }
-
-    /// Job files as the engine writes them, in `home`.
-    pub(crate) fn write_jobs(home: &Path) -> (String, String) {
-        let hash = "0123456789abcdef0123456789abcdef01234567".to_string();
-        let yid = "fedcba9876543210".to_string();
-        let t = home.join("state").join("torrents");
-        let y = home.join("state").join("youtube");
-        std::fs::create_dir_all(&t).unwrap();
-        std::fs::create_dir_all(&y).unwrap();
-        std::fs::write(
-            t.join(format!("{hash}.json")),
-            torrent_json(&hash, "downloading", false).to_string(),
-        )
-        .unwrap();
-        std::fs::write(
-            y.join(format!("{yid}.json")),
-            youtube_json(&yid, "waiting_retry").to_string(),
-        )
-        .unwrap();
-        (hash, yid)
-    }
-
-    #[test]
-    fn torrent_and_youtube_jobs_are_rows_of_one_list() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (hash, yid) = write_jobs(tmp.path());
-        let rows = job_rows(tmp.path());
-        assert_eq!(rows.len(), 2, "{rows:#?}");
-        let t = rows.iter().find(|r| r.kind == "torrent").unwrap();
-        assert_eq!(t.id, format!("torrent:{hash}"));
-        assert_eq!(t.state, "downloading");
-        assert_eq!((t.done, t.total, t.unit), (2, 3, "files"));
-        assert_eq!((t.bytes_done, t.bytes_total), (400, 1000));
-        assert_eq!(t.current.as_deref(), Some("Example set/c.bin"));
-        assert_eq!(t.already_stored, Some(1));
-        assert_eq!(t.retry_utc, Some(1_790_000_110));
-        assert_eq!(t.actions, vec!["pause", "remove"]);
-        assert!(!t.finished);
-        let y = rows.iter().find(|r| r.kind == "youtube").unwrap();
-        assert_eq!(y.id, format!("youtube:{yid}"));
-        assert_eq!(y.state, "waiting_retry");
-        assert_eq!((y.done, y.total, y.unit), (2, 5, "videos"));
-        assert_eq!(y.already_stored, Some(1));
-        assert_eq!(y.current.as_deref(), Some("Five"));
-        assert_eq!(y.failed.len(), 2);
-        assert_eq!(y.failed[0].reason, "Private video");
-        assert_eq!(y.failed[0].next_try_utc, Some(1_790_010_000));
-        assert!(y.failed[1].gave_up && y.failed[1].next_try_utc.is_none());
-        assert_eq!(y.retry_utc, Some(1_790_010_000));
-        assert_eq!(y.actions, vec!["pause", "retry", "remove"]);
-    }
-
-    #[test]
-    fn paused_and_complete_jobs_offer_what_they_can() {
-        let mut j: TorrentJob =
-            serde_json::from_value(torrent_json(&"ab".repeat(20), "paused", true)).unwrap();
-        assert_eq!(torrent_row(&j).actions, vec!["resume", "remove"]);
-        j.state = JobState::Complete;
-        let r = torrent_row(&j);
-        assert!(r.finished);
-        assert_eq!(r.actions, vec!["remove"]);
-        assert_eq!(r.retry_utc, None);
-    }
-
-    #[test]
-    fn jobs_are_found_by_prefixed_or_bare_names() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (hash, yid) = write_jobs(tmp.path());
-        assert!(matches!(
-            find(tmp.path(), &format!("torrent:{hash}")).unwrap(),
-            JobRef::Torrent(_)
-        ));
-        assert!(matches!(
-            find(tmp.path(), &format!("youtube:{yid}")).unwrap(),
-            JobRef::Youtube(_)
-        ));
-        assert!(matches!(
-            find(tmp.path(), "example-set").unwrap(),
-            JobRef::Torrent(_)
-        ));
-        assert!(matches!(
-            find(tmp.path(), "example-channel").unwrap(),
-            JobRef::Youtube(_)
-        ));
-        assert_eq!(
-            find(tmp.path(), &yid[..8]).unwrap().id(),
-            format!("youtube:{yid}")
-        );
-        let e = find(tmp.path(), "nothing-like-it").err().unwrap();
-        assert!(format!("{e:#}").contains("import jobs list"), "{e:#}");
-        let v = find(tmp.path(), "example-set").unwrap().value().unwrap();
-        assert_eq!(v["job"], format!("torrent:{hash}"));
-        assert_eq!(v["job_kind"], "torrent");
-        assert_eq!(v["hash"], hash.as_str());
-    }
 
     #[test]
     fn a_finished_run_is_a_row_with_its_report() {
@@ -1301,8 +550,6 @@ pub(crate) mod tests {
             folder: "photos".into(),
             state: "done",
             error: None,
-            verb: None,
-            target: None,
             started_utc: 1,
             updated_utc: 2,
             report: Some(
@@ -1314,5 +561,29 @@ pub(crate) mod tests {
         assert!(row.finished);
         assert_eq!((row.done, row.total, row.bytes_done), (5, 6, 4096));
         assert_eq!(row.actions, vec!["remove"]);
+    }
+
+    #[test]
+    fn only_a_finished_run_can_be_taken_off_the_list() {
+        let n = NEXT_RUN.fetch_add(1, Ordering::Relaxed);
+        runs().push(Run {
+            n,
+            kind: "dir".into(),
+            title: "t".into(),
+            source: "t".into(),
+            folder: "t".into(),
+            state: "running",
+            error: None,
+            started_utc: 1,
+            updated_utc: 1,
+            report: None,
+        });
+        let id = format!("run%3A{n}");
+        assert_eq!(action(&format!("{id}/remove")).0, 409);
+        set_run(n, |r| r.state = "failed");
+        assert_eq!(action(&format!("{id}/remove")).0, 200);
+        assert_eq!(action(&format!("{id}/remove")).0, 404);
+        assert_eq!(action("torrent%3A00ff00ff/pause").0, 404);
+        assert_eq!(action("run%3A1/explode").0, 400);
     }
 }
