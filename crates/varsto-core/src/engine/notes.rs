@@ -3,8 +3,11 @@
 //! kept by Varsto and readable on every device of the folder
 //! (`docs/spec/alpha-0-format.md`, section "File analyses").
 //!
-//! The user writes or clears an analysis from the interface or with
-//! `varsto analysis`, and finds files later with `varsto search`.
+//! An assistant (typically a local LLM reading synced plain files from their
+//! `local_path`) records what it saw through MCP (`varsto_set_analysis`);
+//! the user can write or clear one by hand. Later the assistant searches
+//! them (`varsto_search_analyses`) to reorganise files without reading
+//! everything again.
 //!
 //! Storage: every device keeps the merged map of the folder in
 //! `state/notes/<folder>.json` and publishes it as one *notes record* per
@@ -103,7 +106,7 @@ struct NotesState {
     seen: BTreeMap<DeviceId, i64>,
 }
 
-/// A file's analysis as reported to the interface and the command line.
+/// A file's analysis as reported to the interface, the command line and MCP.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileAnalysis {
     pub path: String,
@@ -326,6 +329,12 @@ impl Engine {
             .filter(|f| !f.deleted)
             .ok_or_else(|| anyhow!("unknown file {path} in {folder}"))?;
         let mut notes = self.load_notes(&rec.folder_id);
+        // An analysis of the file as it is now is never replaced: the text
+        // would be lost. One of an earlier version of the file (stale) is:
+        // it no longer describes the file. The user can clear either one.
+        if Self::live(&notes, path).is_some_and(|old| old.content_hash == file.content_hash) {
+            bail!("{path} already has an analysis of this version; it is kept (the user can clear it in the interface first)");
+        }
         let entry = NoteEntry {
             analysis: text,
             tags,
