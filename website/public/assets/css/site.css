@@ -231,6 +231,10 @@ figure.hero figcaption { color: var(--muted); font-size: .95rem; margin-top: .5r
 .shot { margin:1.5rem 0; }
 .shot img { width:100%; height:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); }
 .shot figcaption { font-size:.9rem; color:var(--muted); margin-top:.5rem; }
+.shots-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1.5rem; margin:1.5rem 0; align-items:start; }
+.shots-grid .shot { margin:0; }
+.shots-grid .shot.phone img { max-width:18rem; }
+@media (max-width: 60rem) { .shots-grid { grid-template-columns:1fr; } }
 .shots-row { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; max-width:40rem; }
 .shots-row.three { grid-template-columns:repeat(3, 1fr); max-width:60rem; }
 @media (max-width: 60rem) { .shots-row.three { grid-template-columns:1fr 1fr; } }
